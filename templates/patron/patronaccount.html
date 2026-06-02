@@ -1,0 +1,279 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AYLA Library — My Account</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root{--bg:#0d1a0f;--surface:#111f13;--surface2:#162019;--border:#1e3322;--accent:#4ade80;--accent2:#f59e0b;--text:#e8f5e9;--muted:#6b8f72;--danger:#f87171;}
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;padding-bottom:80px;}
+
+  .navbar{position:sticky;top:0;z-index:100;background:#0d1a0fed;backdrop-filter:blur(20px);border-bottom:1px solid var(--border);padding:14px 20px;display:flex;align-items:center;gap:12px;}
+  .back-btn{width:36px;height:36px;border-radius:10px;border:1px solid var(--border);background:var(--surface2);display:flex;align-items:center;justify-content:center;cursor:pointer;text-decoration:none;color:var(--text);font-size:16px;}
+  .nav-title{font-family:'Syne',sans-serif;font-size:18px;font-weight:800;flex:1;}
+  .edit-btn{padding:8px 14px;border-radius:9px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:12px;cursor:pointer;transition:all 0.2s;}
+  .edit-btn:hover{border-color:var(--accent);color:var(--accent);}
+
+  .page{max-width:600px;margin:0 auto;padding:20px;}
+
+  /* PROFILE HERO */
+  .profile-hero{
+    background:linear-gradient(135deg,#162019,#1a3a1f);
+    border:1px solid #2d6a4f40;border-radius:20px;
+    padding:28px 24px;display:flex;align-items:center;gap:20px;
+    margin-bottom:20px;animation:fadeDown 0.5s ease both;
+    position:relative;overflow:hidden;
+  }
+  .profile-hero::before{content:'';position:absolute;top:-40px;right:-40px;width:150px;height:150px;background:#4ade8010;border-radius:50%;}
+  .avatar{width:72px;height:72px;border-radius:18px;background:linear-gradient(135deg,#2d6a4f,#1a4d2e);display:flex;align-items:center;justify-content:center;font-family:'Syne',sans-serif;font-weight:800;font-size:26px;color:var(--accent);flex-shrink:0;border:2px solid #2d6a4f80;position:relative;z-index:1;}
+  .profile-info{flex:1;position:relative;z-index:1;}
+  .profile-name{font-family:'Syne',sans-serif;font-size:20px;font-weight:800;margin-bottom:4px;}
+  .profile-type{font-size:12px;color:var(--accent);font-weight:600;letter-spacing:0.5px;margin-bottom:4px;}
+  .profile-email{font-size:12px;color:var(--muted);}
+  .patron-id{display:inline-flex;align-items:center;gap:6px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:5px 10px;font-size:11px;color:var(--muted);margin-top:8px;}
+  .patron-id span{color:var(--accent);font-weight:600;}
+
+  /* SECTIONS */
+  .section{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:20px;margin-bottom:16px;animation:fadeUp 0.5s ease both;}
+  .section-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;}
+  .section-title{font-family:'Syne',sans-serif;font-size:14px;font-weight:700;display:flex;align-items:center;gap:8px;}
+  .see-all{font-size:12px;color:var(--accent);cursor:pointer;opacity:0.8;}
+  .see-all:hover{opacity:1;}
+
+  /* ACTIVE LOAN ROW */
+  .loan-row{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--border);}
+  .loan-row:last-child{border-bottom:none;padding-bottom:0;}
+  .loan-cover{width:38px;height:50px;border-radius:6px;background:linear-gradient(135deg,#1e3322,#2d6a4f);display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:var(--accent);text-align:center;padding:3px;flex-shrink:0;font-family:'Syne',sans-serif;}
+  .loan-cover.b{background:linear-gradient(135deg,#1e3a5f,#2563eb);}
+  .loan-cover.c{background:linear-gradient(135deg,#3b1f1f,#b45309);}
+  .loan-info{flex:1;}
+  .loan-title{font-size:12px;font-weight:600;margin-bottom:2px;}
+  .loan-author{font-size:11px;color:var(--muted);margin-bottom:6px;}
+  .loan-due{display:flex;align-items:center;gap:6px;}
+  .due-label{font-size:10px;color:var(--muted);}
+  .due-date{font-size:10px;font-weight:600;}
+  .due-date.green{color:var(--accent);}
+  .due-date.amber{color:var(--accent2);}
+  .due-date.red{color:var(--danger);}
+  .loan-badge{flex-shrink:0;padding:4px 9px;border-radius:5px;font-size:10px;font-weight:700;}
+
+  /* HISTORY */
+  .hist-row{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border);}
+  .hist-row:last-child{border-bottom:none;padding-bottom:0;}
+  .hist-icon{width:32px;height:32px;border-radius:8px;background:var(--surface2);display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;}
+  .hist-info{flex:1;}
+  .hist-title{font-size:12px;font-weight:600;margin-bottom:2px;}
+  .hist-dates{font-size:11px;color:var(--muted);}
+
+  /* FORM */
+  .form-group{margin-bottom:14px;}
+  label{display:block;font-size:11px;color:var(--muted);margin-bottom:6px;letter-spacing:0.5px;text-transform:uppercase;}
+  input{width:100%;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:11px 14px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:13px;outline:none;transition:border-color 0.2s;}
+  input:focus{border-color:var(--accent);}
+  input:disabled{opacity:0.5;cursor:not-allowed;}
+  .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+  .save-changes{width:100%;padding:12px;background:linear-gradient(135deg,#22c55e,#16a34a);border:none;border-radius:10px;color:#0d1a0f;font-family:'Syne',sans-serif;font-size:14px;font-weight:700;cursor:pointer;margin-top:4px;transition:all 0.2s;}
+  .save-changes:hover{transform:translateY(-1px);}
+
+  /* LOGOUT */
+  .logout-btn{width:100%;padding:14px;background:transparent;border:1px solid #f8717140;border-radius:12px;color:var(--danger);font-family:'Syne',sans-serif;font-size:14px;font-weight:700;cursor:pointer;transition:all 0.2s;display:flex;align-items:center;justify-content:center;gap:8px;}
+  .logout-btn:hover{background:#f8717110;border-color:var(--danger);}
+
+  /* QR Section */
+  .qr-section{display:flex;align-items:center;gap:16px;padding:14px;background:var(--bg);border:1px solid var(--border);border-radius:12px;margin-bottom:14px;}
+  .qr-mini{width:56px;height:56px;background:white;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:28px;flex-shrink:0;}
+  .qr-info{flex:1;}
+  .qr-title{font-size:13px;font-weight:600;margin-bottom:3px;}
+  .qr-sub{font-size:11px;color:var(--muted);}
+  .btn-dl{padding:8px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:11px;cursor:pointer;transition:all 0.2s;}
+  .btn-dl:hover{border-color:var(--accent);color:var(--accent);}
+
+  .bottom-nav{position:fixed;bottom:0;left:0;right:0;z-index:100;background:#0d1a0fed;backdrop-filter:blur(20px);border-top:1px solid var(--border);display:flex;padding:10px 0 calc(10px + env(safe-area-inset-bottom));}
+  .nav-item{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;cursor:pointer;color:var(--muted);text-decoration:none;transition:color 0.2s;}
+  .nav-item.active{color:var(--accent);}
+  .nav-item:hover{color:var(--accent);}
+  .nav-icon{font-size:20px;}.nav-label{font-size:10px;font-weight:500;}
+
+  @keyframes fadeDown{from{opacity:0;transform:translateY(-12px);}to{opacity:1;transform:translateY(0);}}
+  @keyframes fadeUp{from{opacity:0;transform:translateY(12px);}to{opacity:1;transform:translateY(0);}}
+</style>
+</head>
+<body>
+<nav class="navbar">
+  <a href="{% url 'patron_dashboard' %}" class="back-btn">←</a>
+  <div class="nav-title">My Account</div>
+  <button class="edit-btn" onclick="toggleEdit()">✏️ Edit</button>
+</nav>
+
+<div class="page">
+  <!-- PROFILE -->
+  <div class="profile-hero">
+    <div class="avatar">MS</div>
+    <div class="profile-info">
+      <div class="profile-name">Maria Santos</div>
+      <div class="profile-type">🎓 Student Patron</div>
+      <div class="profile-email">maria.santos@school.edu</div>
+      <div class="patron-id">Patron ID: <span>LIB-2024-00143</span></div>
+    </div>
+  </div>
+
+  <!-- QR CODE -->
+  <div class="section" style="animation-delay:0.05s">
+    <div class="section-title" style="margin-bottom:14px;">🔐 My Library QR Code</div>
+    <div class="qr-section">
+      <div class="qr-mini">■</div>
+      <div class="qr-info">
+        <div class="qr-title">Maria Santos — LIB-2024-00143</div>
+        <div class="qr-sub">Scan at library entrance or self-checkout</div>
+      </div>
+      <button class="btn-dl">⬇️ Save</button>
+    </div>
+  </div>
+
+  <!-- ACTIVE LOANS -->
+  <div class="section" style="animation-delay:0.1s">
+    <div class="section-header">
+      <div class="section-title">📚 Active Loans</div>
+      <div class="see-all">View all</div>
+    </div>
+    <div class="loan-row">
+      <div class="loan-cover">Data Struct.</div>
+      <div class="loan-info">
+        <div class="loan-title">Data Structures & Algorithms in Python</div>
+        <div class="loan-author">Michael T. Goodrich</div>
+        <div class="loan-due">
+          <span class="due-label">Due:</span>
+          <span class="due-date amber">Dec 12, 2024</span>
+        </div>
+      </div>
+      <div class="loan-badge" style="background:#f59e0b20;color:var(--accent2)">2 days</div>
+    </div>
+    <div class="loan-row">
+      <div class="loan-cover b">Clean Code</div>
+      <div class="loan-info">
+        <div class="loan-title">Clean Code</div>
+        <div class="loan-author">Robert C. Martin</div>
+        <div class="loan-due">
+          <span class="due-label">Due:</span>
+          <span class="due-date green">Dec 20, 2024</span>
+        </div>
+      </div>
+      <div class="loan-badge" style="background:#22c55e20;color:var(--accent)">10 days</div>
+    </div>
+    <div class="loan-row">
+      <div class="loan-cover c">Discrete Math</div>
+      <div class="loan-info">
+        <div class="loan-title">Discrete Mathematics</div>
+        <div class="loan-author">Kenneth Rosen</div>
+        <div class="loan-due">
+          <span class="due-label">Due:</span>
+          <span class="due-date red">Dec 8, 2024</span>
+        </div>
+      </div>
+      <div class="loan-badge" style="background:#f8717120;color:var(--danger)">OVERDUE</div>
+    </div>
+  </div>
+
+  <!-- HISTORY -->
+  <div class="section" style="animation-delay:0.15s">
+    <div class="section-header">
+      <div class="section-title">🕐 Borrowing History</div>
+      <div class="see-all">See all 12</div>
+    </div>
+    <div class="hist-row">
+      <div class="hist-icon">📗</div>
+      <div class="hist-info">
+        <div class="hist-title">Introduction to Algorithms (CLRS)</div>
+        <div class="hist-dates">Borrowed Oct 15 → Returned Nov 15, 2024</div>
+      </div>
+      <div style="font-size:10px;padding:3px 8px;border-radius:5px;background:#22c55e20;color:var(--accent);font-weight:700">Returned</div>
+    </div>
+    <div class="hist-row">
+      <div class="hist-icon">📘</div>
+      <div class="hist-info">
+        <div class="hist-title">The Pragmatic Programmer</div>
+        <div class="hist-dates">Borrowed Sep 30 → Returned Oct 30, 2024</div>
+      </div>
+      <div style="font-size:10px;padding:3px 8px;border-radius:5px;background:#22c55e20;color:var(--accent);font-weight:700">Returned</div>
+    </div>
+    <div class="hist-row">
+      <div class="hist-icon">📕</div>
+      <div class="hist-info">
+        <div class="hist-title">Design Patterns: GoF</div>
+        <div class="hist-dates">Borrowed Sep 12 → Returned Oct 12, 2024</div>
+      </div>
+      <div style="font-size:10px;padding:3px 8px;border-radius:5px;background:#22c55e20;color:var(--accent);font-weight:700">Returned</div>
+    </div>
+  </div>
+
+  <!-- ACCOUNT INFO -->
+  <div class="section" style="animation-delay:0.2s">
+    <div class="section-title" style="margin-bottom:16px">⚙️ Account Information</div>
+    <div class="form-grid">
+      <div class="form-group">
+        <label>First Name</label>
+        <input type="text" value="Maria" id="firstName" disabled>
+      </div>
+      <div class="form-group">
+        <label>Last Name</label>
+        <input type="text" value="Santos" id="lastName" disabled>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Email Address</label>
+      <input type="email" value="maria.santos@school.edu" id="email" disabled>
+    </div>
+    <div class="form-group">
+      <label>Contact Number</label>
+      <input type="tel" value="+63 912 345 6789" id="phone" disabled>
+    </div>
+    <div class="form-group">
+      <label>Address</label>
+      <input type="text" value="123 Rizal St., Quezon City" id="address" disabled>
+    </div>
+    <button class="save-changes" id="saveBtn" style="display:none" onclick="saveChanges()">Save Changes</button>
+  </div>
+
+  <!-- LOGOUT -->
+  <button class="logout-btn" onclick="if(confirm('Log out of AYLA?'))window.location.href='{% url 'patron_login' %}'">
+    🚪 Logout
+  </button>
+</div>
+
+<nav class="bottom-nav">
+  <a href="{% url 'patron_dashboard' %}" class="nav-item"><div class="nav-icon">🏠</div><div class="nav-label">Home</div></a>
+  <a href="{% url 'patron_catalog' %}" class="nav-item"><div class="nav-icon">🔍</div><div class="nav-label">Search</div></a>
+  <a href="{% url 'patron_map' %}" class="nav-item"><div class="nav-icon">🗺️</div><div class="nav-label">Map</div></a>
+  <a href="{% url 'patron_account' %}" class="nav-item active"><div class="nav-icon">👤</div><div class="nav-label">Account</div></a>
+</nav>
+
+<script>
+let editing = false;
+function toggleEdit(){
+  editing = !editing;
+  ['firstName','lastName','email','phone','address'].forEach(id=>{
+    document.getElementById(id).disabled = !editing;
+  });
+  document.querySelector('.edit-btn').textContent = editing ? '✕ Cancel' : '✏️ Edit';
+  document.getElementById('saveBtn').style.display = editing ? 'block' : 'none';
+}
+function saveChanges(){
+  editing = false;
+  ['firstName','lastName','email','phone','address'].forEach(id=>{
+    document.getElementById(id).disabled = true;
+  });
+  document.querySelector('.edit-btn').textContent = '✏️ Edit';
+  document.getElementById('saveBtn').style.display = 'none';
+  // Show a brief success toast
+  const toast = document.createElement('div');
+  toast.textContent = '✅ Changes saved!';
+  toast.style.cssText = 'position:fixed;bottom:90px;left:50%;transform:translateX(-50%);background:#22c55e;color:#0d1a0f;padding:10px 20px;border-radius:10px;font-weight:700;font-size:13px;z-index:999;animation:fadeUp 0.3s ease;';
+  document.body.appendChild(toast);
+  setTimeout(()=>toast.remove(), 2500);
+}
+</script>
+</body>
+</html>

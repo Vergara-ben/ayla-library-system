@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.pyc
+
+# Django
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+media/
+
+# Environment variables
+.env
+*.env
+
+# VS Code
+.vscode/
+
+# Static files collected
+staticfiles/
+
+# PostgreSQL
+*.pgsql
+
+# OS files
+.DS_Store
+Thumbs.db

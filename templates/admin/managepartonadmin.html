@@ -1,0 +1,355 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ayla Admin Panel - Manage Patrons</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@400;700&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --bg-main: #060d13;
+            --bg-sidebar: #0b151e;
+            --bg-card: #0d1b26;
+            --bg-input: #112535;
+            --text-primary: #e2e8f0;
+            --text-muted: #64748b;
+            --border-color: #1e293b;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-main);
+            color: var(--text-primary);
+        }
+
+        .logo-text {
+            font-family: 'Rowdies', sans-serif;
+        }
+
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: var(--bg-main);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: var(--border-color);
+            border-radius: 3px;
+        }
+    </style>
+    <script src="{% static 'js/supabase-config.js' %}"></script>
+</head>
+<body class="flex h-screen overflow-hidden">
+
+    <aside class="w-64 flex-shrink-0 flex flex-col" style="background-color: var(--bg-sidebar); border-right: 1px solid var(--border-color);">
+        <div class="p-6 flex items-center gap-3" style="border-bottom: 1px solid var(--border-color);">
+            <div class="w-10 h-10 rounded-lg flex items-center justify-center text-xl font-bold text-cyan-400 bg-cyan-950/50 border border-cyan-800">
+                A
+            </div>
+            <div>
+                <h1 class="logo-text text-xl tracking-wider text-slate-100 leading-none">AYLA</h1>
+                <span class="text-xs tracking-widest text-slate-500 uppercase font-semibold">Admin Panel</span>
+            </div>
+        </div>
+
+        <nav class="flex-1 px-4 py-6 space-y-7 overflow-y-auto">
+            <div>
+                <p class="px-2 text-xs font-bold tracking-widest text-slate-500 uppercase mb-3">Overview</p>
+                <div class="space-y-1">
+                    <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                        <i class="fa-solid fa-chart-pie w-5 text-sm"></i>
+                        <span class="text-sm font-medium">Dashboard</span>
+                    </a>
+                    <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                        <i class="fa-solid fa-map w-5 text-sm"></i>
+                        <span class="text-sm font-medium">Indoor Map</span>
+                    </a>
+                    <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                        <i class="fa-solid fa-qrcode w-5 text-sm"></i>
+                        <span class="text-sm font-medium">QR Scanner</span>
+                    </a>
+                </div>
+            </div>
+
+            <div>
+                <p class="px-2 text-xs font-bold tracking-widest text-slate-500 uppercase mb-3">Management</p>
+                <div class="space-y-1">
+                    <a href="#" class="flex items-center justify-between px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                        <div class="flex items-center gap-3">
+                            <i class="fa-solid fa-file-invoice w-5 text-sm"></i>
+                            <span class="text-sm font-medium">Transactions</span>
+                        </div>
+                        <span class="bg-rose-500/20 text-rose-400 text-xs px-2 py-0.5 rounded-full font-semibold">12</span>
+                    </a>
+                    <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                        <i class="fa-solid fa-clipboard-list w-5 text-sm"></i>
+                        <span class="text-sm font-medium">Log Management</span>
+                    </a>
+                    <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                        <i class="fa-solid fa-book w-5 text-sm"></i>
+                        <span class="text-sm font-medium">Manage Books</span>
+                    </a>
+                    <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-800/50 text-cyan-400 font-medium border border-slate-700/50">
+                        <i class="fa-solid fa-users w-5 text-sm"></i>
+                        <span class="text-sm">Manage Patrons</span>
+                    </a>
+                </div>
+            </div>
+        </nav>
+    </aside>
+
+    <div class="flex-1 flex flex-col overflow-hidden">
+        
+        <header class="h-16 flex-shrink-0 flex items-center justify-between px-8" style="background-color: var(--bg-main);">
+            <h2 class="logo-text text-lg tracking-wider text-slate-200 uppercase">Manage Patrons</h2>
+            <div class="flex items-center gap-4">
+                <span class="bg-cyan-950 text-cyan-400 text-xs px-2.5 py-1 rounded font-bold border border-cyan-800 tracking-wider">ADMIN</span>
+                <button class="relative text-slate-400 hover:text-slate-200 p-1">
+                    <i class="fa-solid fa-bell text-lg"></i>
+                    <span class="absolute top-1 right-1 w-2 h-2 bg-amber-500 rounded-full"></span>
+                </button>
+                <div class="w-8 h-8 rounded-full bg-cyan-900 border border-cyan-700 flex items-center justify-center text-xs font-bold text-cyan-200">
+                    AD
+                </div>
+            </div>
+        </header>
+
+        <main class="flex-1 overflow-y-auto p-8 space-y-6">
+            
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
+                    <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Total Patrons</p>
+                    <p class="text-3xl font-bold text-slate-300 mt-2">4,872</p>
+                    <p class="text-[10px] text-slate-500 mt-1">Registered users</p>
+                </div>
+                <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
+                    <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Active</p>
+                    <p class="text-3xl font-bold text-cyan-400 mt-2">4,210</p>
+                    <p class="text-[10px] text-slate-500 mt-1">With active account</p>
+                </div>
+                <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
+                    <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">With Borrows</p>
+                    <p class="text-3xl font-bold text-amber-500/90 mt-2">87</p>
+                    <p class="text-[10px] text-slate-500 mt-1">Currently borrowing</p>
+                </div>
+                <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
+                    <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">With Overdue</p>
+                    <p class="text-3xl font-bold text-rose-500/90 mt-2">12</p>
+                    <p class="text-[10px] text-slate-500 mt-1">Past due date</p>
+                </div>
+            </div>
+
+            <div class="rounded-xl border border-slate-800/80 overflow-hidden shadow-2xl flex flex-col" style="background-color: var(--bg-card);">
+                
+                <div class="p-5 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div class="flex items-center gap-2">
+                        <i class="fa-solid fa-address-book text-amber-600 text-xs"></i>
+                        <h4 class="text-sm font-bold text-slate-200 tracking-wide">Patron Directory</h4>
+                    </div>
+                    <div class="flex items-center gap-2 self-end sm:self-auto">
+                        <button class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-amber-500/90 text-[11px] font-semibold px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors">
+                            <i class="fa-solid fa-file-invoice"></i> Generate Report
+                        </button>
+                        <button class="bg-cyan-700/30 text-cyan-400 border border-cyan-800/80 hover:bg-cyan-700/50 text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
+                            <i class="fa-solid fa-plus text-[10px]"></i> Add Patron
+                        </button>
+                    </div>
+                </div>
+
+                <div class="px-5 py-3.5 bg-slate-900/20 border-b border-slate-800/60 flex flex-col lg:flex-row lg:items-center gap-3">
+                    <div class="relative flex-1">
+                        <i class="fa-solid fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-xs"></i>
+                        <input type="text" placeholder="Search by name, student ID, email..." class="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-4 py-2 text-xs text-slate-300 focus:outline-none focus:border-cyan-800 placeholder-slate-600 transition-colors">
+                    </div>
+                    <div class="flex items-center gap-2 self-end lg:self-auto">
+                        <div class="relative">
+                            <select class="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-400 focus:outline-none pr-8 appearance-none min-w-[120px]">
+                                <option>All Types</option>
+                                <option>Student</option>
+                                <option>Faculty</option>
+                                <option>Staff</option>
+                            </select>
+                            <i class="fa-solid fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-slate-600 text-[10px] pointer-events-none"></i>
+                        </div>
+                        <div class="relative">
+                            <select class="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-400 focus:outline-none pr-8 appearance-none min-w-[110px]">
+                                <option>All Status</option>
+                                <option>Active</option>
+                                <option>Overdue</option>
+                                <option>Inactive</option>
+                            </select>
+                            <i class="fa-solid fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-slate-600 text-[10px] pointer-events-none"></i>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="border-b border-slate-800/80 text-[10px] font-bold tracking-wider text-slate-500 uppercase bg-slate-900/5">
+                                <th class="py-3 px-6">Patron</th>
+                                <th class="py-3 px-6 w-32">ID Number</th>
+                                <th class="py-3 px-6 w-24">Type</th>
+                                <th class="py-3 px-6">Course / Dept.</th>
+                                <th class="py-3 px-6">Email</th>
+                                <th class="py-3 px-6 text-center w-24">Borrows</th>
+                                <th class="py-3 px-6 text-center w-24">Status</th>
+                                <th class="py-3 px-6 text-center w-28">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-800/40 text-xs text-slate-300">
+                            <tr class="hover:bg-slate-800/10 transition-colors">
+                                <td class="py-4 px-6 flex items-center gap-3">
+                                    <div class="w-8 h-8 rounded-full bg-cyan-950 text-cyan-400 border border-cyan-800/60 flex items-center justify-center font-bold text-[11px]">MS</div>
+                                    <div>
+                                        <div class="font-bold text-slate-200">Maria Santos</div>
+                                        <div class="text-[9px] text-slate-500 mt-0.5">Joined Sep 2021</div>
+                                    </div>
+                                </td>
+                                <td class="py-4 px-6 font-mono text-slate-400">2021-10234</td>
+                                <td class="py-4 px-6">
+                                    <span class="bg-blue-950/50 text-blue-400 border border-blue-900/40 px-2 py-0.5 rounded text-[10px] font-bold tracking-wide">Student</span>
+                                </td>
+                                <td class="py-4 px-6 text-slate-400">BS Computer Science</td>
+                                <td class="py-4 px-6 font-mono text-slate-500">m.santos@school.edu</td>
+                                <td class="py-4 px-6 text-center font-semibold text-slate-400"><span class="text-slate-200">3</span> / 0</td>
+                                <td class="py-4 px-6 text-center">
+                                    <span class="inline-block bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded text-[10px] font-bold tracking-wide w-16">Active</span>
+                                </td>
+                                <td class="py-4 px-6 text-center">
+                                    <div class="flex items-center justify-center gap-1.5">
+                                        <button class="w-7 h-7 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 transition-colors"><i class="fa-solid fa-pencil text-[10px]"></i></button>
+                                        <button class="w-7 h-7 rounded border border-slate-800 text-rose-500/70 hover:text-rose-400 hover:bg-rose-950/20 transition-colors"><i class="fa-solid fa-trash-can text-[10px]"></i></button>
+                                    </div>
+                                </td>
+                            </tr>
+                            <tr class="hover:bg-slate-800/10 transition-colors">
+                                <td class="py-4 px-6 flex items-center gap-3">
+                                    <div class="w-8 h-8 rounded-full bg-indigo-950 text-indigo-400 border border-indigo-900/40 flex items-center justify-center font-bold text-[11px]">JD</div>
+                                    <div>
+                                        <div class="font-bold text-slate-200">Juan dela Cruz</div>
+                                        <div class="text-[9px] text-slate-500 mt-0.5">Joined Jan 2022</div>
+                                    </div>
+                                </td>
+                                <td class="py-4 px-6 font-mono text-slate-400">2022-00456</td>
+                                <td class="py-4 px-6">
+                                    <span class="bg-blue-950/50 text-blue-400 border border-blue-900/40 px-2 py-0.5 rounded text-[10px] font-bold tracking-wide">Student</span>
+                                </td>
+                                <td class="py-4 px-6 text-slate-400">BS Information Technology</td>
+                                <td class="py-4 px-6 font-mono text-slate-500">j.delacruz@school.edu</td>
+                                <td class="py-4 px-6 text-center font-semibold text-slate-400"><span class="text-slate-200">1</span> / 0</td>
+                                <td class="py-4 px-6 text-center">
+                                    <span class="inline-block bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded text-[10px] font-bold tracking-wide w-16">Active</span>
+                                </td>
+                                <td class="py-4 px-6 text-center">
+                                    <div class="flex items-center justify-center gap-1.5">
+                                        <button class="w-7 h-7 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 transition-colors"><i class="fa-solid fa-pencil text-[10px]"></i></button>
+                                        <button class="w-7 h-7 rounded border border-slate-800 text-rose-500/70 hover:text-rose-400 hover:bg-rose-950/20 transition-colors"><i class="fa-solid fa-trash-can text-[10px]"></i></button>
+                                    </div>
+                                </td>
+                            </tr>
+                            <tr class="hover:bg-slate-800/10 transition-colors">
+                                <td class="py-4 px-6 flex items-center gap-3">
+                                    <div class="w-8 h-8 rounded-full bg-amber-950 text-amber-500 border border-amber-900/40 flex items-center justify-center font-bold text-[11px]">AR</div>
+                                    <div>
+                                        <div class="font-bold text-slate-200">Ana Reyes</div>
+                                        <div class="text-[9px] text-slate-500 mt-0.5">Joined Jun 2023</div>
+                                    </div>
+                                </td>
+                                <td class="py-4 px-6 font-mono text-slate-400">2023-01122</td>
+                                <td class="py-4 px-6">
+                                    <span class="bg-blue-950/50 text-blue-400 border border-blue-900/40 px-2 py-0.5 rounded text-[10px] font-bold tracking-wide">Student</span>
+                                </td>
+                                <td class="py-4 px-6 text-slate-400">BS Computer Engineering</td>
+                                <td class="py-4 px-6 font-mono text-slate-500">a.reyes@school.edu</td>
+                                <td class="py-4 px-6 text-center font-semibold text-slate-400"><span class="text-slate-200">1</span> / <span class="text-rose-400 font-bold">1</span></td>
+                                <td class="py-4 px-6 text-center">
+                                    <span class="inline-block bg-rose-500/10 text-rose-400 border border-rose-500/20 px-2 py-0.5 rounded text-[10px] font-bold tracking-wide w-16">Overdue</span>
+                                </td>
+                                <td class="py-4 px-6 text-center">
+                                    <div class="flex items-center justify-center gap-1.5">
+                                        <button class="w-7 h-7 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 transition-colors"><i class="fa-solid fa-pencil text-[10px]"></i></button>
+                                        <button class="w-7 h-7 rounded border border-slate-800 text-rose-500/70 hover:text-rose-400 hover:bg-rose-950/20 transition-colors"><i class="fa-solid fa-trash-can text-[10px]"></i></button>
+                                    </div>
+                                </td>
+                            </tr>
+                            <tr class="hover:bg-slate-800/10 transition-colors">
+                                <td class="py-4 px-6 flex items-center gap-3">
+                                    <div class="w-8 h-8 rounded-full bg-emerald-950 text-emerald-400 border border-emerald-900/40 flex items-center justify-center font-bold text-[11px]">Dr</div>
+                                    <div>
+                                        <div class="font-bold text-slate-200">Dr. Ramon Flores</div>
+                                        <div class="text-[9px] text-slate-500 mt-0.5">Joined Mar 2018</div>
+                                    </div>
+                                </td>
+                                <td class="py-4 px-6 font-mono text-slate-400">F-2018-0042</td>
+                                <td class="py-4 px-6">
+                                    <span class="bg-amber-950/50 text-amber-400 border border-amber-900/40 px-2 py-0.5 rounded text-[10px] font-bold tracking-wide">Faculty</span>
+                                </td>
+                                <td class="py-4 px-6 text-slate-400">Dept. of Computer Science</td>
+                                <td class="py-4 px-6 font-mono text-slate-500">r.flores@school.edu</td>
+                                <td class="py-4 px-6 text-center font-semibold text-slate-400">0 / 0</td>
+                                <td class="py-4 px-6 text-center">
+                                    <span class="inline-block bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded text-[10px] font-bold tracking-wide w-16">Active</span>
+                                </td>
+                                <td class="py-4 px-6 text-center">
+                                    <div class="flex items-center justify-center gap-1.5">
+                                        <button class="w-7 h-7 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 transition-colors"><i class="fa-solid fa-pencil text-[10px]"></i></button>
+                                        <button class="w-7 h-7 rounded border border-slate-800 text-rose-500/70 hover:text-rose-400 hover:bg-rose-950/20 transition-colors"><i class="fa-solid fa-trash-can text-[10px]"></i></button>
+                                    </div>
+                                </td>
+                            </tr>
+                            <tr class="hover:bg-slate-800/10 transition-colors">
+                                <td class="py-4 px-6 flex items-center gap-3">
+                                    <div class="w-8 h-8 rounded-full bg-slate-800 text-slate-400 border border-slate-700/60 flex items-center justify-center font-bold text-[11px]">LT</div>
+                                    <div>
+                                        <div class="font-bold text-slate-200">Liza Torres</div>
+                                        <div class="text-[9px] text-slate-500 mt-0.5">Joined Aug 2021</div>
+                                    </div>
+                                </td>
+                                <td class="py-4 px-6 font-mono text-slate-400">2021-05567</td>
+                                <td class="py-4 px-6">
+                                    <span class="bg-blue-950/50 text-blue-400 border border-blue-900/40 px-2 py-0.5 rounded text-[10px] font-bold tracking-wide">Student</span>
+                                </td>
+                                <td class="py-4 px-6 text-slate-400">BS Electronics Engineering</td>
+                                <td class="py-4 px-6 font-mono text-slate-500">l.torres@school.edu</td>
+                                <td class="py-4 px-6 text-center font-semibold text-slate-400"><span class="text-slate-200">2</span> / 0</td>
+                                <td class="py-4 px-6 text-center">
+                                    <span class="inline-block bg-slate-800/50 text-slate-500 border border-slate-700/40 px-2 py-0.5 rounded text-[10px] font-bold tracking-wide w-16">Inactive</span>
+                                </td>
+                                <td class="py-4 px-6 text-center">
+                                    <div class="flex items-center justify-center gap-1.5">
+                                        <button class="w-7 h-7 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 transition-colors"><i class="fa-solid fa-pencil text-[10px]"></i></button>
+                                        <button class="w-7 h-7 rounded border border-slate-800 text-rose-500/70 hover:text-rose-400 hover:bg-rose-950/20 transition-colors"><i class="fa-solid fa-trash-can text-[10px]"></i></button>
+                                    </div>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="px-5 py-4 border-t border-slate-800/60 flex items-center justify-between text-xs text-slate-500 bg-slate-900/5">
+                    <span class="font-medium">Showing <span class="text-slate-400">1-5</span> of <span class="text-slate-400">4,872</span> patrons</span>
+                    
+                    <div class="flex items-center gap-1">
+                        <button class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors cursor-not-allowed" disabled>&larr; Prev</button>
+                        <button class="px-3 py-1.5 rounded bg-cyan-700/30 text-cyan-400 font-bold border border-cyan-800/50">1</button>
+                        <button class="px-3 py-1.5 rounded border border-slate-800 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors">2</button>
+                        <button class="px-3 py-1.5 rounded border border-slate-800 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors">3</button>
+                        <button class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors">Next &rarr;</button>
+                    </div>
+                </div>
+
+            </div>
+
+        </main>
+    </div>
+
+</body>
+</html>

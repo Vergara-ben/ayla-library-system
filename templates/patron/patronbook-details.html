@@ -1,0 +1,169 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AYLA Library — Book Details</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root{--bg:#0d1a0f;--surface:#111f13;--surface2:#162019;--border:#1e3322;--accent:#4ade80;--accent2:#f59e0b;--text:#e8f5e9;--muted:#6b8f72;--danger:#f87171;}
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;padding-bottom:100px;}
+
+  .navbar{position:sticky;top:0;z-index:100;background:#0d1a0fed;backdrop-filter:blur(20px);border-bottom:1px solid var(--border);padding:14px 20px;display:flex;align-items:center;gap:12px;}
+  .back-btn{width:36px;height:36px;border-radius:10px;border:1px solid var(--border);background:var(--surface2);display:flex;align-items:center;justify-content:center;cursor:pointer;text-decoration:none;color:var(--text);font-size:16px;}
+  .nav-title{font-family:'Syne',sans-serif;font-size:18px;font-weight:800;flex:1;}
+  .save-btn{width:36px;height:36px;border-radius:10px;border:1px solid var(--border);background:var(--surface2);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:16px;transition:all 0.2s;}
+  .save-btn:hover,.save-btn.saved{border-color:var(--accent2);background:#f59e0b15;}
+
+  /* HERO */
+  .hero{
+    background:linear-gradient(180deg,#1a4d2e40 0%,var(--bg) 100%);
+    padding:40px 20px 30px;
+    display:flex;flex-direction:column;align-items:center;
+    text-align:center;
+    animation:fadeDown 0.5s ease both;
+  }
+  .book-cover-large{
+    width:120px;height:160px;border-radius:12px;
+    background:linear-gradient(135deg,#1e3322,#16a34a);
+    display:flex;align-items:center;justify-content:center;
+    font-family:'Syne',sans-serif;font-size:13px;font-weight:700;
+    color:white;text-align:center;padding:10px;
+    box-shadow:0 20px 40px #00000070;
+    border:1px solid rgba(255,255,255,0.1);
+    margin-bottom:20px;
+  }
+  .book-main-title{font-family:'Syne',sans-serif;font-size:22px;font-weight:800;margin-bottom:8px;line-height:1.3;}
+  .book-main-author{font-size:14px;color:var(--muted);margin-bottom:14px;}
+  .status-badge{display:inline-flex;align-items:center;gap:6px;padding:6px 16px;border-radius:20px;font-size:13px;font-weight:600;}
+  .status-available{background:#22c55e20;color:var(--accent);border:1px solid #22c55e30;}
+  .status-borrowed{background:#f8717120;color:var(--danger);border:1px solid #f8717130;}
+
+  /* DETAILS */
+  .page{max-width:600px;margin:0 auto;padding:0 20px;}
+
+  .detail-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:22px;margin-bottom:16px;animation:fadeUp 0.5s 0.1s ease both;}
+  .detail-section-title{font-family:'Syne',sans-serif;font-size:13px;font-weight:700;color:var(--accent);margin-bottom:14px;letter-spacing:0.5px;text-transform:uppercase;}
+  
+  .detail-row{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;padding:10px 0;border-bottom:1px solid var(--border);}
+  .detail-row:last-child{border-bottom:none;padding-bottom:0;}
+  .detail-key{font-size:12px;color:var(--muted);font-weight:500;flex-shrink:0;}
+  .detail-val{font-size:13px;color:var(--text);text-align:right;font-weight:500;}
+
+  /* SHELF LOCATION */
+  .shelf-path{display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end;}
+  .shelf-step{
+    padding:4px 10px;border-radius:6px;font-size:11px;font-weight:600;
+    background:var(--surface2);border:1px solid var(--border);color:var(--accent);
+  }
+  .shelf-arrow{color:var(--muted);font-size:12px;}
+
+  /* DESCRIPTION */
+  .description{font-size:13px;color:var(--muted);line-height:1.7;}
+  .read-more{color:var(--accent);cursor:pointer;font-size:12px;}
+
+  /* BOTTOM ACTION */
+  .bottom-action{
+    position:fixed;bottom:0;left:0;right:0;
+    background:#0d1a0fed;backdrop-filter:blur(20px);
+    border-top:1px solid var(--border);
+    padding:16px 20px calc(16px + env(safe-area-inset-bottom));
+    display:flex;gap:10px;
+  }
+  .btn-map{
+    flex:1;padding:14px;
+    background:linear-gradient(135deg,#22c55e,#16a34a);
+    border:none;border-radius:12px;
+    color:#0d1a0f;font-family:'Syne',sans-serif;font-size:15px;font-weight:700;
+    cursor:pointer;transition:all 0.2s;box-shadow:0 4px 20px #22c55e30;
+    display:flex;align-items:center;justify-content:center;gap:8px;
+  }
+  .btn-map:hover{transform:translateY(-1px);box-shadow:0 8px 28px #22c55e40;}
+  .btn-reserve{
+    padding:14px 18px;background:var(--surface2);
+    border:1px solid var(--border);border-radius:12px;
+    color:var(--text);font-family:'DM Sans',sans-serif;font-size:14px;
+    cursor:pointer;transition:all 0.2s;
+  }
+  .btn-reserve:hover{border-color:var(--accent);color:var(--accent);}
+
+  @keyframes fadeDown{from{opacity:0;transform:translateY(-12px);}to{opacity:1;transform:translateY(0);}}
+  @keyframes fadeUp{from{opacity:0;transform:translateY(12px);}to{opacity:1;transform:translateY(0);}}
+</style>
+</head>
+<body>
+<nav class="navbar">
+  <a href="{% url 'patron_catalog' %}" class="back-btn">←</a>
+  <div class="nav-title">Book Details</div>
+  <div class="save-btn" id="saveBtn" onclick="toggleSave(this)">🔖</div>
+</nav>
+
+<!-- HERO -->
+<div class="hero">
+  <div class="book-cover-large">Data Structures &amp; Algorithms in Python</div>
+  <div class="book-main-title">Data Structures &amp; Algorithms in Python</div>
+  <div class="book-main-author">Michael T. Goodrich · Roberto Tamassia · Michael H. Goldwasser</div>
+  <div class="status-badge status-borrowed">🔴 Currently Borrowed</div>
+</div>
+
+<div class="page">
+  <!-- Bibliographic Info -->
+  <div class="detail-card">
+    <div class="detail-section-title">📋 Book Information</div>
+    <div class="detail-row"><div class="detail-key">Publisher</div><div class="detail-val">Wiley</div></div>
+    <div class="detail-row"><div class="detail-key">Year</div><div class="detail-val">2013</div></div>
+    <div class="detail-row"><div class="detail-key">ISBN</div><div class="detail-val">978-1-118-29027-9</div></div>
+    <div class="detail-row"><div class="detail-key">Genre</div><div class="detail-val">Computer Science</div></div>
+    <div class="detail-row"><div class="detail-key">Call Number</div><div class="detail-val">QA76.73.P98 G66</div></div>
+    <div class="detail-row"><div class="detail-key">Edition</div><div class="detail-val">1st Edition</div></div>
+    <div class="detail-row"><div class="detail-key">Pages</div><div class="detail-val">748</div></div>
+  </div>
+
+  <!-- Shelf Location -->
+  <div class="detail-card">
+    <div class="detail-section-title">📍 Shelf Location</div>
+    <div class="detail-row">
+      <div class="detail-key">Location</div>
+      <div class="detail-val">
+        <div class="shelf-path">
+          <span class="shelf-step">Shelf C</span>
+          <span class="shelf-arrow">→</span>
+          <span class="shelf-step">Computer Science</span>
+          <span class="shelf-arrow">→</span>
+          <span class="shelf-step">Level 1</span>
+        </div>
+      </div>
+    </div>
+    <div class="detail-row"><div class="detail-key">Row</div><div class="detail-val">Row 3, Position 12</div></div>
+    <div class="detail-row"><div class="detail-key">Copies</div><div class="detail-val">1 Total · 0 Available</div></div>
+  </div>
+
+  <!-- Description -->
+  <div class="detail-card">
+    <div class="detail-section-title">📝 About This Book</div>
+    <div class="description" id="desc">
+      Offers a presentation of the fundamental data structures and algorithms covering both traditional topics such as sorting, searching, and graph algorithms, as well as topics of data organization and representation...
+      <span class="read-more" onclick="expandDesc()">Read more</span>
+    </div>
+  </div>
+</div>
+
+<!-- BOTTOM -->
+<div class="bottom-action">
+  <button class="btn-reserve">💾 Reserve</button>
+  <button class="btn-map" onclick="window.location.href='{% url 'patron_map' %}'">🗺️ View on Map</button>
+</div>
+
+<script>
+function toggleSave(el){
+  el.classList.toggle('saved');
+  el.textContent = el.classList.contains('saved') ? '⭐' : '🔖';
+}
+function expandDesc(){
+  document.getElementById('desc').innerHTML = 'Offers a presentation of the fundamental data structures and algorithms covering both traditional topics such as sorting, searching, and graph algorithms, as well as topics of data organization and representation in such applications as text processing and pattern matching, computer graphics, databases, and operating systems. Designed to be easy to read and understand, although the topics covered are ambitious.';
+}
+</script>
+</body>
+</html>

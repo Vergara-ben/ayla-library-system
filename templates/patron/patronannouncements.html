@@ -1,0 +1,241 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AYLA Library — Announcements</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root{--bg:#0d1a0f;--surface:#111f13;--surface2:#162019;--border:#1e3322;--accent:#4ade80;--accent2:#f59e0b;--text:#e8f5e9;--muted:#6b8f72;--danger:#f87171;}
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;padding-bottom:80px;}
+
+  .navbar{position:sticky;top:0;z-index:100;background:#0d1a0fed;backdrop-filter:blur(20px);border-bottom:1px solid var(--border);padding:14px 20px;display:flex;align-items:center;gap:12px;}
+  .back-btn{width:36px;height:36px;border-radius:10px;border:1px solid var(--border);background:var(--surface2);display:flex;align-items:center;justify-content:center;cursor:pointer;text-decoration:none;color:var(--text);font-size:16px;}
+  .nav-title{font-family:'Syne',sans-serif;font-size:18px;font-weight:800;flex:1;}
+  .mark-all{font-size:12px;color:var(--accent);cursor:pointer;opacity:0.8;}
+  .mark-all:hover{opacity:1;}
+
+  .tabs{display:flex;background:var(--surface);border-bottom:1px solid var(--border);padding:0 20px;}
+  .tab{flex:1;padding:14px;border:none;background:transparent;color:var(--muted);font-family:'Syne',sans-serif;font-size:14px;font-weight:700;cursor:pointer;border-bottom:2px solid transparent;transition:all 0.2s;display:flex;align-items:center;justify-content:center;gap:8px;}
+  .tab.active{color:var(--accent);border-bottom-color:var(--accent);}
+  .tab:hover:not(.active){color:var(--text);}
+  .tab-badge{background:var(--danger);color:white;border-radius:10px;padding:2px 7px;font-size:10px;font-weight:700;}
+
+  .page{max-width:600px;margin:0 auto;padding:20px;}
+
+  .panel{display:none;}
+  .panel.active{display:block;}
+
+  /* ANNOUNCEMENT CARD */
+  .ann-card{
+    background:var(--surface);border:1px solid var(--border);
+    border-radius:14px;padding:18px;margin-bottom:12px;
+    border-left:4px solid var(--border);
+    transition:all 0.2s;cursor:pointer;
+    animation:fadeUp 0.4s ease both;
+  }
+  .ann-card:hover{border-color:#2d6a4f;}
+  .ann-card.unread{border-left-color:var(--accent);}
+  .ann-card.urgent{border-left-color:var(--danger);}
+  .ann-card.info{border-left-color:var(--blue,#60a5fa);}
+  .ann-header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:8px;}
+  .ann-title-row{display:flex;align-items:center;gap:8px;}
+  .ann-icon-badge{font-size:18px;}
+  .ann-title{font-family:'Syne',sans-serif;font-size:14px;font-weight:700;}
+  .ann-date{font-size:11px;color:var(--muted);flex-shrink:0;}
+  .ann-msg{font-size:13px;color:var(--muted);line-height:1.6;margin-bottom:8px;}
+  .ann-tag{display:inline-block;padding:3px 10px;border-radius:5px;font-size:10px;font-weight:700;letter-spacing:0.3px;}
+  .tag-green{background:#22c55e20;color:var(--accent);}
+  .tag-red{background:#f8717120;color:var(--danger);}
+  .tag-amber{background:#f59e0b20;color:var(--accent2);}
+  .tag-blue{background:#60a5fa20;color:#60a5fa;}
+  .unread-dot{width:8px;height:8px;border-radius:50%;background:var(--accent);flex-shrink:0;margin-top:4px;}
+
+  /* NOTIFICATION CARD */
+  .notif-card{
+    background:var(--surface);border:1px solid var(--border);
+    border-radius:14px;padding:16px 18px;margin-bottom:10px;
+    display:flex;align-items:flex-start;gap:14px;
+    border-left:4px solid var(--border);
+    transition:all 0.2s;
+    animation:fadeUp 0.4s ease both;
+  }
+  .notif-card.overdue{border-left-color:var(--danger);}
+  .notif-card.due-soon{border-left-color:var(--accent2);}
+  .notif-card.returned{border-left-color:var(--accent);}
+  .notif-icon{font-size:24px;flex-shrink:0;}
+  .notif-body{flex:1;}
+  .notif-title{font-family:'Syne',sans-serif;font-size:13px;font-weight:700;margin-bottom:3px;}
+  .notif-sub{font-size:12px;color:var(--muted);line-height:1.5;}
+  .notif-time{font-size:10px;color:var(--muted);margin-top:5px;}
+  .notif-action{flex-shrink:0;}
+  .btn-renew{padding:7px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:11px;cursor:pointer;transition:all 0.2s;font-weight:600;}
+  .btn-renew:hover{border-color:var(--accent);color:var(--accent);}
+  .btn-renew.urgent{border-color:var(--danger);color:var(--danger);}
+  .btn-renew.urgent:hover{background:#f8717115;}
+
+  .section-date{font-size:11px;color:var(--muted);font-weight:600;letter-spacing:1px;text-transform:uppercase;margin-bottom:10px;margin-top:20px;}
+  .section-date:first-child{margin-top:0;}
+
+  .empty{text-align:center;padding:48px 20px;color:var(--muted);}
+  .empty-icon{font-size:40px;margin-bottom:10px;}
+
+  .bottom-nav{position:fixed;bottom:0;left:0;right:0;z-index:100;background:#0d1a0fed;backdrop-filter:blur(20px);border-top:1px solid var(--border);display:flex;padding:10px 0 calc(10px + env(safe-area-inset-bottom));}
+  .nav-item{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;cursor:pointer;color:var(--muted);text-decoration:none;transition:color 0.2s;}
+  .nav-item:hover{color:var(--accent);}
+  .nav-icon{font-size:20px;}.nav-label{font-size:10px;font-weight:500;}
+
+  @keyframes fadeUp{from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:translateY(0);}}
+</style>
+</head>
+<body>
+<nav class="navbar">
+  <a href="{% url 'patron_dashboard' %}" class="back-btn">←</a>
+  <div class="nav-title">Updates</div>
+  <div class="mark-all" onclick="markAllRead()">Mark all read</div>
+</nav>
+
+<div class="tabs">
+  <button class="tab active" onclick="switchTab('ann',this)">📢 Announcements</button>
+  <button class="tab" onclick="switchTab('notif',this)">🔔 Notifications <span class="tab-badge">2</span></button>
+</div>
+
+<div class="page">
+  <!-- ANNOUNCEMENTS -->
+  <div class="panel active" id="ann">
+    <div class="section-date">December 2024</div>
+
+    <div class="ann-card unread" onclick="markRead(this)">
+      <div class="ann-header">
+        <div class="ann-title-row">
+          <div class="ann-icon-badge">🎄</div>
+          <div class="ann-title">Christmas Holiday Hours</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <div class="ann-date">Dec 10</div>
+          <div class="unread-dot"></div>
+        </div>
+      </div>
+      <div class="ann-msg">The library will be closed on December 25–26 for Christmas holidays. Plan your book borrowings accordingly. Happy holidays from the AYLA team! 🎁</div>
+      <span class="ann-tag tag-amber">📅 Holiday Notice</span>
+    </div>
+
+    <div class="ann-card urgent" onclick="markRead(this)">
+      <div class="ann-header">
+        <div class="ann-title-row">
+          <div class="ann-icon-badge">⚠️</div>
+          <div class="ann-title">System Maintenance Tonight</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <div class="ann-date">Dec 9</div>
+          <div class="unread-dot"></div>
+        </div>
+      </div>
+      <div class="ann-msg">AYLA system will undergo scheduled maintenance from 11:00 PM to 1:00 AM. The portal and catalog may be temporarily unavailable during this window.</div>
+      <span class="ann-tag tag-red">⚠️ Urgent</span>
+    </div>
+
+    <div class="ann-card info" onclick="markRead(this)">
+      <div class="ann-header">
+        <div class="ann-title-row">
+          <div class="ann-icon-badge">📚</div>
+          <div class="ann-title">New Books Arrival!</div>
+        </div>
+        <div class="ann-date">Dec 5</div>
+      </div>
+      <div class="ann-msg">We've added 45 new titles to our Computer Science and Mathematics sections. Check out the catalog for the latest additions including CLRS 4th Edition and more!</div>
+      <span class="ann-tag tag-blue">📚 New Arrivals</span>
+    </div>
+
+    <div class="ann-card">
+      <div class="ann-header">
+        <div class="ann-title-row">
+          <div class="ann-icon-badge">📖</div>
+          <div class="ann-title">Extended Borrowing Period</div>
+        </div>
+        <div class="ann-date">Nov 30</div>
+      </div>
+      <div class="ann-msg">Students can now borrow books for up to 30 days during the semester break (December 15 – January 5). Visit the library to apply for extensions on current loans.</div>
+      <span class="ann-tag tag-green">✅ Policy Update</span>
+    </div>
+  </div>
+
+  <!-- NOTIFICATIONS -->
+  <div class="panel" id="notif">
+    <div class="section-date">Today</div>
+
+    <div class="notif-card overdue">
+      <div class="notif-icon">🚨</div>
+      <div class="notif-body">
+        <div class="notif-title">Overdue: Discrete Mathematics</div>
+        <div class="notif-sub">Due date was <strong style="color:var(--danger)">December 8</strong> · 2 days overdue<br>Accumulating fine: <strong style="color:var(--danger)">₱10.00</strong> (₱5/day)</div>
+        <div class="notif-time">2 hours ago</div>
+      </div>
+      <div class="notif-action">
+        <button class="btn-renew urgent">Renew</button>
+      </div>
+    </div>
+
+    <div class="notif-card due-soon">
+      <div class="notif-icon">⏰</div>
+      <div class="notif-body">
+        <div class="notif-title">Due Soon: Data Structures & Algorithms</div>
+        <div class="notif-sub">Due in <strong style="color:var(--accent2)">2 days</strong> · December 12<br>Please return or renew before the deadline</div>
+        <div class="notif-time">8 hours ago</div>
+      </div>
+      <div class="notif-action">
+        <button class="btn-renew">Renew</button>
+      </div>
+    </div>
+
+    <div class="section-date" style="margin-top:24px">Earlier</div>
+
+    <div class="notif-card returned">
+      <div class="notif-icon">✅</div>
+      <div class="notif-body">
+        <div class="notif-title">Book Returned Successfully</div>
+        <div class="notif-sub">Introduction to Algorithms · Returned Nov 15<br>No overdue fine incurred.</div>
+        <div class="notif-time">Nov 15</div>
+      </div>
+    </div>
+
+    <div class="notif-card">
+      <div class="notif-icon">🎉</div>
+      <div class="notif-body">
+        <div class="notif-title">Welcome to AYLA!</div>
+        <div class="notif-sub">Your library account has been activated. You can now borrow up to 5 books at a time.</div>
+        <div class="notif-time">Jan 10, 2024</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<nav class="bottom-nav">
+  <a href="{% url 'patron_dashboard' %}" class="nav-item"><div class="nav-icon">🏠</div><div class="nav-label">Home</div></a>
+  <a href="{% url 'patron_catalog' %}" class="nav-item"><div class="nav-icon">🔍</div><div class="nav-label">Search</div></a>
+  <a href="{% url 'patron_map' %}" class="nav-item"><div class="nav-icon">🗺️</div><div class="nav-label">Map</div></a>
+  <a href="{% url 'patron_account' %}" class="nav-item"><div class="nav-icon">👤</div><div class="nav-label">Account</div></a>
+</nav>
+
+<script>
+function switchTab(name, el) {
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById(name).classList.add('active');
+}
+function markRead(card) {
+  card.classList.remove('unread','urgent');
+  const dot = card.querySelector('.unread-dot');
+  if(dot) dot.remove();
+}
+function markAllRead() {
+  document.querySelectorAll('.unread-dot').forEach(d=>d.remove());
+  document.querySelectorAll('.ann-card.unread').forEach(c=>c.classList.remove('unread'));
+  document.querySelector('.tab-badge').style.display='none';
+}
+</script>
+</body>
+</html>

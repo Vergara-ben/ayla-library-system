@@ -1,0 +1,537 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ayla - Library Admin Control Panel</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600&family=Playfair+Display:ital,wght@0,600;1,600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-dark: #070f18;
+            --bg-card: #0c1925;
+            --bg-sidebar: #0a141d;
+            --text-main: #ffffff;
+            --text-muted: #64748b;
+            --accent-blue: #38bdf8;
+            --border-color: #1e293b;
+            --input-bg: #0f1c2a;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            overflow-x: hidden;
+            position: relative;
+        }
+
+        /* Ambient Glow Background Effects */
+        body::before {
+            content: '';
+            position: absolute;
+            width: 400px;
+            height: 400px;
+            background: radial-gradient(circle, rgba(56, 189, 248, 0.08) 0%, rgba(0,0,0,0) 70%);
+            top: -100px;
+            left: -100px;
+            pointer-events: none;
+        }
+
+        body::after {
+            content: '';
+            position: absolute;
+            width: 500px;
+            height: 500px;
+            background: radial-gradient(circle, rgba(56, 189, 248, 0.05) 0%, rgba(0,0,0,0) 70%);
+            bottom: -100px;
+            left: 30%;
+            pointer-events: none;
+        }
+
+        /* --- Main Content Section --- */
+        .main-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            padding: 40px 8%;
+            max-width: calc(100% - 450px);
+        }
+
+        .brand-logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 40px;
+        }
+
+        .logo-icon {
+            width: 36px;
+            height: 36px;
+            background-color: #1a364a;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--accent-blue);
+            font-weight: 700;
+            font-size: 18px;
+            box-shadow: 0 0 15px rgba(56, 189, 248, 0.2);
+        }
+
+        .brand-text {
+            font-size: 16px;
+            font-weight: 600;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+        }
+
+        .brand-text span {
+            display: block;
+            font-size: 10px;
+            color: var(--text-muted);
+            letter-spacing: 1px;
+            margin-top: 2px;
+        }
+
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background-color: rgba(56, 189, 248, 0.1);
+            color: var(--accent-blue);
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            width: fit-content;
+            margin-bottom: 24px;
+            border: 1px solid rgba(56, 189, 248, 0.15);
+        }
+
+        .badge::before {
+            content: '';
+            width: 6px;
+            height: 6px;
+            background-color: var(--accent-blue);
+            border-radius: 50%;
+        }
+
+        .main-title {
+            font-family: 'Playfair Display', serif;
+            font-size: 42px;
+            font-weight: 600;
+            line-height: 1.2;
+            margin-bottom: 16px;
+        }
+
+        .main-title span {
+            display: block;
+            font-family: 'Playfair Display', serif;
+            font-style: italic;
+            color: var(--accent-blue);
+            font-weight: 400;
+        }
+
+        .main-description {
+            color: var(--text-muted);
+            font-size: 14px;
+            line-height: 1.6;
+            max-width: 500px;
+            margin-bottom: 48px;
+        }
+
+        /* Features Grid */
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(220px, 280px));
+            gap: 20px;
+        }
+
+        .feature-card {
+            background-color: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 24px;
+            transition: transform 0.2s ease, border-color 0.2s ease;
+        }
+
+        .feature-card:hover {
+            border-color: rgba(56, 189, 248, 0.3);
+        }
+
+        .feature-icon {
+            font-size: 24px;
+            margin-bottom: 16px;
+            display: block;
+        }
+
+        .feature-title {
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .feature-desc {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+
+        /* --- Sidebar Sign In Section --- */
+        .sidebar {
+            width: 450px;
+            background-color: var(--bg-sidebar);
+            border-left: 1px solid var(--border-color);
+            padding: 60px 45px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            overflow-y: auto;
+        }
+
+        .sidebar-top {
+            width: 100%;
+        }
+
+        .sidebar .brand-logo {
+            margin-bottom: 32px;
+        }
+
+        .signin-title {
+            font-size: 28px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .signin-subtitle {
+            color: var(--text-muted);
+            font-size: 13px;
+            margin-bottom: 36px;
+        }
+
+        /* Form Controls */
+        .form-group {
+            margin-bottom: 24px;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+        }
+
+        .input-wrapper {
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+
+        .input-icon {
+            position: absolute;
+            left: 16px;
+            color: #e2a03f; /* Gold lock / icon coloring */
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+        }
+
+        .form-input {
+            width: 100%;
+            background-color: var(--input-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 14px 16px 14px 44px;
+            color: var(--text-main);
+            font-family: inherit;
+            font-size: 14px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        .form-input:focus {
+            border-color: rgba(56, 189, 248, 0.5);
+        }
+
+        .form-options {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 13px;
+            margin-bottom: 32px;
+        }
+
+        .remember-me {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            color: #94a3b8;
+        }
+
+        .remember-me input {
+            accent-color: var(--accent-blue);
+            width: 16px;
+            height: 16px;
+            cursor: pointer;
+        }
+
+        .forgot-link {
+            color: var(--accent-blue);
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+        .forgot-link:hover {
+            text-decoration: underline;
+        }
+
+        /* Buttons */
+        .btn {
+            width: 100%;
+            padding: 14px;
+            border-radius: 8px;
+            font-family: inherit;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color 0.2s, opacity 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+
+        .btn-primary {
+            background-color: #1e3a53;
+            border: 1px solid rgba(56, 189, 248, 0.2);
+            color: var(--text-main);
+        }
+
+        .btn-primary:hover {
+            background-color: #244767;
+        }
+
+        .btn-secondary {
+            background-color: transparent;
+            border: 1px solid var(--border-color);
+            color: var(--text-main);
+        }
+
+        .btn-secondary:hover {
+            background-color: rgba(255, 255, 255, 0.02);
+        }
+
+        .switch-portal {
+            text-align: center;
+            font-size: 13px;
+            color: var(--text-muted);
+            margin-top: 24px;
+        }
+
+        .switch-portal a {
+            color: var(--accent-blue);
+            text-decoration: none;
+        }
+
+        .switch-portal a:hover {
+            text-decoration: underline;
+        }
+
+        /* Bottom Alert/Notice Box */
+        .notice-box {
+            background-color: rgba(12, 25, 37, 0.5);
+            border: 1px solid rgba(226, 160, 63, 0.2);
+            border-radius: 8px;
+            padding: 16px;
+            display: flex;
+            gap: 12px;
+            margin-top: 40px;
+        }
+
+        .notice-icon {
+            color: #e2a03f;
+            font-size: 16px;
+            margin-top: 2px;
+        }
+
+        .notice-text {
+            font-size: 11px;
+            color: #94a3b8;
+            line-height: 1.5;
+        }
+
+        /* Responsive handling */
+        @media (max-width: 992px) {
+            body {
+                flex-direction: column;
+            }
+            .main-container {
+                max-width: 100%;
+                padding: 60px 40px;
+            }
+            .sidebar {
+                width: 100%;
+                border-left: none;
+                border-top: 1px solid var(--border-color);
+                padding: 60px 40px;
+            }
+        }
+    </style>
+    <script src="{% static 'js/supabase-config.js' %}"></script>
+    <script src="{% static 'js/button-handlers.js' %}"></script>
+</head>
+<body>
+
+    <main class="main-container">
+        <div class="brand-logo">
+            <div class="logo-icon">A</div>
+            <div class="brand-text">
+                Ayla
+                <span>Admin Panel</span>
+            </div>
+        </div>
+
+        <div class="badge">Admin Access Only</div>
+
+        <h1 class="main-title">
+            Library Admin
+            <span>Control Panel</span>
+        </h1>
+
+        <p class="main-description">
+            Manage books, patrons, transactions, and library access logs — all in one place.
+        </p>
+
+        <div class="features-grid">
+            <div class="feature-card">
+                <span class="feature-icon">📚</span>
+                <h3 class="feature-title">Manage Books</h3>
+                <p class="feature-desc">Full inventory control</p>
+            </div>
+            <div class="feature-card">
+                <span class="feature-icon">👥</span>
+                <h3 class="feature-title">Manage Patrons</h3>
+                <p class="feature-desc">User directory & roles</p>
+            </div>
+            <div class="feature-card">
+                <span class="feature-icon">📋</span>
+                <h3 class="feature-title">Transactions</h3>
+                <p class="feature-desc">Borrow & return logs</p>
+            </div>
+            <div class="feature-card">
+                <span class="feature-icon">🚪</span>
+                <h3 class="feature-title">Entry / Exit Logs</h3>
+                <p class="feature-desc">Daily access records</p>
+            </div>
+        </div>
+    </main>
+
+    <aside class="sidebar">
+        <div class="sidebar-top">
+            <div class="brand-logo">
+                <div class="logo-icon">A</div>
+                <div class="brand-text">Ayla - Admin</div>
+            </div>
+
+            <h2 class="signin-title">Admin Sign In</h2>
+            <p class="signin-subtitle">Enter your admin credentials to continue</p>
+
+            <form id="signinForm" onsubmit="event.preventDefault();">
+                <div class="form-group">
+                    <label class="form-label" for="admin-id">Admin ID or Email</label>
+                    <div class="input-wrapper">
+                        <span class="input-wrapper-icon input-icon">
+                            👤
+                        </span>
+                        <input type="email" id="admin-id" class="form-input" placeholder="admin@school.edu.ph" required>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label" for="password">Password</label>
+                    <div class="input-wrapper">
+                        <span class="input-icon">🔒</span>
+                        <input type="password" id="password" class="form-input" placeholder="Enter admin password" required>
+                    </div>
+                </div>
+
+                <div class="form-options">
+                    <label class="remember-me">
+                        <input type="checkbox" id="rememberDevice" checked>
+                        Remember device
+                    </label>
+                    <a href="#" class="forgot-link">Forgot password?</a>
+                </div>
+
+                <button type="submit" class="btn btn-primary">
+                    Sign In to Admin Panel &rarr;
+                </button>
+                
+                <button type="button" class="btn btn-secondary">
+                    Sign In with Institution SSO
+                </button>
+            </form>
+
+            <div id="errorMessage" style="background-color: rgba(220, 38, 38, 0.1); border: 1px solid rgba(220, 38, 38, 0.3); color: #fca5a5; padding: 12px; border-radius: 8px; margin-top: 16px; font-size: 13px; display: none;"></div>
+
+            <p class="switch-portal">Not an admin? <a href="#">Go to patron login &rarr;</a></p>
+        </div>
+
+        <div class="notice-box">
+            <span class="notice-icon">⚠️</span>
+            <p class="notice-text">
+                This portal is restricted to authorized library staff only. Unauthorized access attempts are logged and reported.
+            </p>
+        </div>
+    </aside>
+
+</body>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  const form = document.getElementById('signinForm');
+  const errorMsg = document.getElementById('errorMessage');
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const email = document.getElementById('admin-id').value;
+    const password = document.getElementById('password').value;
+
+    const user = await adminSignIn(email, password);
+    
+    if (user) {
+      showNotification('success', 'Sign in successful!');
+    setTimeout(() => window.location.href = "{% url 'admin_dashboard' %}", 1000);
+    } else {
+      showNotification('error', 'Invalid email or password. Please try again.');
+    }
+  });
+
+  // Check if already signed in
+  getCurrentUser().then(user => {
+        if (user) {
+            window.location.href = "{% url 'admin_dashboard' %}";
+        }
+  });
+});
+</script>
+</html>

@@ -1,0 +1,616 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ayla - Indoor Map & Navigation</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@0,600;1,400&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-darker: #050b11;
+            --bg-dark: #070f18;
+            --bg-sidebar: #060d14;
+            --bg-card: #0c1925;
+            --accent-blue: #38bdf8;
+            --accent-cyan: #06b6d4;
+            --border-color: #162535;
+            --text-main: #ffffff;
+            --text-muted: #64748b;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            display: flex;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        /* --- SIDEBAR --- */
+        .sidebar {
+            width: 260px;
+            background-color: var(--bg-sidebar);
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            padding: 24px 16px;
+            flex-shrink: 0;
+        }
+
+        .brand-logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 40px;
+            padding-left: 8px;
+        }
+
+        .logo-icon {
+            width: 36px;
+            height: 36px;
+            background-color: #1a364a;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--accent-blue);
+            font-weight: 700;
+            font-size: 18px;
+            box-shadow: 0 0 15px rgba(56, 189, 248, 0.15);
+        }
+
+        .brand-text {
+            font-size: 16px;
+            font-weight: 700;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+        }
+
+        .brand-text span {
+            display: block;
+            font-size: 10px;
+            color: var(--text-muted);
+            letter-spacing: 1px;
+            margin-top: 2px;
+            font-weight: 500;
+        }
+
+        .menu-section {
+            margin-bottom: 28px;
+        }
+
+        .menu-label {
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            color: var(--text-muted);
+            padding-left: 12px;
+            margin-bottom: 12px;
+        }
+
+        .menu-list {
+            list-style: none;
+        }
+
+        .menu-item a {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 14px;
+            color: #94a3b8;
+            text-decoration: none;
+            font-size: 14px;
+            font-weight: 500;
+            border-radius: 8px;
+            transition: all 0.2s ease;
+            margin-bottom: 4px;
+        }
+
+        .menu-item a:hover {
+            color: var(--text-main);
+            background-color: rgba(255, 255, 255, 0.02);
+        }
+
+        .menu-item.active a {
+            color: var(--accent-cyan);
+            background-color: rgba(6, 182, 212, 0.06);
+            border: 1px solid rgba(6, 182, 212, 0.15);
+            font-weight: 600;
+        }
+
+        .menu-link-content {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .menu-icon {
+            font-size: 16px;
+        }
+
+        .badge-count {
+            background-color: #ef4444;
+            color: white;
+            font-size: 10px;
+            font-weight: 700;
+            padding: 2px 8px;
+            border-radius: 10px;
+        }
+
+        /* --- MAIN AREA CONFIG --- */
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+        }
+
+        .top-navbar {
+            height: 64px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 32px;
+            background-color: var(--bg-darker);
+        }
+
+        .page-title {
+            font-size: 14px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+        }
+
+        .navbar-actions {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .badge-admin-tag {
+            background-color: rgba(6, 182, 212, 0.1);
+            border: 1px solid rgba(6, 182, 212, 0.2);
+            color: var(--accent-cyan);
+            font-size: 10px;
+            font-weight: 700;
+            padding: 4px 10px;
+            border-radius: 4px;
+            letter-spacing: 0.5px;
+        }
+
+        .icon-btn {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            font-size: 18px;
+            position: relative;
+            padding: 4px;
+        }
+
+        .user-avatar {
+            width: 32px;
+            height: 32px;
+            background-color: #1e293b;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            font-weight: 700;
+            color: #cbd5e1;
+            border: 1px solid var(--border-color);
+        }
+
+        /* --- VIEW LAYOUT --- */
+        .workspace-view {
+            padding: 32px;
+            display: grid;
+            grid-template-columns: 1fr 340px;
+            gap: 24px;
+            flex: 1;
+            align-items: start;
+        }
+
+        /* Map Canvas Outer Shell */
+        .map-container {
+            background-color: #ffffff; /* Explicit blueprint architectural styling matches the mockup inner frame */
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            position: relative;
+            aspect-ratio: 16 / 9;
+            overflow: hidden;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+
+        .map-canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        /* --- CONTROL SIDEBAR SIDE --- */
+        .widgets-column {
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+        }
+
+        .panel {
+            background-color: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 24px;
+        }
+
+        .panel-meta {
+            font-size: 11px;
+            font-weight: 700;
+            color: #f59e0b;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 20px;
+        }
+
+        .panel-heading-serif {
+            font-family: 'Playfair Display', serif;
+            font-size: 22px;
+            font-weight: 600;
+            color: var(--accent-cyan);
+            margin-bottom: 4px;
+        }
+
+        .panel-sub-label {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-bottom: 24px;
+        }
+
+        /* Navigation Matrix Metrics block */
+        .navigation-metrics {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            border-top: 1px solid rgba(255, 255, 255, 0.05);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            padding: 16px 0;
+            margin-bottom: 24px;
+            text-align: center;
+        }
+
+        .metric-block {
+            border-right: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .metric-block:last-child {
+            border-right: none;
+        }
+
+        .metric-value {
+            font-family: 'Playfair Display', serif;
+            font-size: 24px;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .metric-block:nth-child(1) .metric-value { color: var(--accent-blue); }
+        .metric-block:nth-child(2) .metric-value { color: #10b981; }
+        .metric-block:nth-child(3) .metric-value { color: #ffffff; }
+
+        .metric-label {
+            font-size: 10px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        /* Secondary Action Bar Layout */
+        .btn-qr-wide {
+            width: 100%;
+            background: linear-gradient(180deg, #203f5e 0%, #173047 100%);
+            border: 1px solid rgba(56, 189, 248, 0.25);
+            padding: 14px;
+            border-radius: 8px;
+            font-family: 'Playfair Display', serif;
+            font-size: 15px;
+            letter-spacing: 1.5px;
+            font-weight: 500;
+            color: var(--text-main);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-transform: uppercase;
+        }
+
+        .btn-qr-wide:hover {
+            border-color: rgba(56, 189, 248, 0.4);
+            box-shadow: 0 0 15px rgba(56, 189, 248, 0.1);
+        }
+
+        /* --- DIRECTIONS LIST PANEL --- */
+        .directions-header {
+            font-size: 14px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 20px;
+        }
+
+        .directions-list {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .step-row {
+            display: flex;
+            align-items: flex-start;
+            gap: 16px;
+        }
+
+        .step-number {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            font-weight: 700;
+            flex-shrink: 0;
+            margin-top: 2px;
+        }
+
+        .step-row:nth-child(1) .step-number { background-color: #2563eb; color: white; }
+        .step-row:nth-child(2) .step-number { background-color: #0891b2; color: white; }
+        .step-row:nth-child(3) .step-number { background-color: #ea580c; color: white; }
+
+        .step-text {
+            font-size: 13px;
+            color: #94a3b8;
+            line-height: 1.5;
+        }
+
+        .step-text strong {
+            color: var(--text-main);
+            font-weight: 600;
+        }
+
+        .shelf-highlight {
+            color: var(--accent-blue) !important;
+        }
+
+        /* Responsive */
+        @media (max-width: 1100px) {
+            .workspace-view {
+                grid-template-columns: 1fr;
+            }
+        }
+        @media (max-width: 768px) {
+            body { flex-direction: column; }
+            .sidebar { width: 100%; border-right: none; border-bottom: 1px solid var(--border-color); }
+        }
+    </style>
+    <script src="{% static 'js/supabase-config.js' %}"></script>
+</head>
+<body>
+
+    <aside class="sidebar">
+        <div class="brand-logo">
+            <div class="logo-icon">A</div>
+            <div class="brand-text">
+                Ayla
+                <span>Admin Panel</span>
+            </div>
+        </div>
+
+        <nav class="menu-section">
+            <h4 class="menu-label">Overview</h4>
+            <ul class="menu-list">
+                <li class="menu-item">
+                    <a href="#">
+                        <div class="menu-link-content">
+                            <span class="menu-icon">🏠</span>
+                            <span>Dashboard</span>
+                        </div>
+                    </a>
+                </li>
+                <li class="menu-item active">
+                    <a href="#">
+                        <div class="menu-link-content">
+                            <span class="menu-icon">🗺️</span>
+                            <span>Indoor Map</span>
+                        </div>
+                    </a>
+                </li>
+                <li class="menu-item">
+                    <a href="#">
+                        <div class="menu-link-content">
+                            <span class="menu-icon">📷</span>
+                            <span>QR Scanner</span>
+                        </div>
+                    </a>
+                </li>
+            </ul>
+        </nav>
+
+        <nav class="menu-section">
+            <h4 class="menu-label">Management</h4>
+            <ul class="menu-list">
+                <li class="menu-item">
+                    <a href="#">
+                        <div class="menu-link-content">
+                            <span class="menu-icon">📋</span>
+                            <span>Transactions</span>
+                        </div>
+                        <span class="badge-count">12</span>
+                    </a>
+                </li>
+                <li class="menu-item">
+                    <a href="#">
+                        <div class="menu-link-content">
+                            <span class="menu-icon">📊</span>
+                            <span>Log Management</span>
+                        </div>
+                    </a>
+                </li>
+                <li class="menu-item">
+                    <a href="#">
+                        <div class="menu-link-content">
+                            <span class="menu-icon">📚</span>
+                            <span>Manage Books</span>
+                        </div>
+                    </a>
+                </li>
+                <li class="menu-item">
+                    <a href="#">
+                        <div class="menu-link-content">
+                            <span class="menu-icon">👥</span>
+                            <span>Manage Patrons</span>
+                        </div>
+                    </a>
+                </li>
+            </ul>
+        </nav>
+    </aside>
+
+    <div class="main-content">
+        <header class="top-navbar">
+            <h2 class="page-title">Indoor Map & Navigation</h2>
+            <div class="navbar-actions">
+                <span class="badge-admin-tag">ADMIN</span>
+                <button class="icon-btn">🔔</button>
+                <div class="user-avatar">AD</div>
+            </div>
+        </header>
+
+        <main class="workspace-view">
+            
+            <div class="map-container">
+                <svg class="map-canvas" viewBox="0 0 800 450" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <rect width="800" height="450" fill="#f8fafc"/>
+                    
+                    <g stroke="#cbd5e1" stroke-width="1">
+                        <line x1="50" y1="80" x2="650" y2="80" />
+                        <line x1="50" y1="180" x2="600" y2="180" />
+                        <line x1="120" y1="280" x2="750" y2="280" stroke-dasharray="4 4" />
+                        <line x1="50" y1="360" x2="750" y2="360" />
+
+                        <line x1="120" y1="80" x2="120" y2="360" />
+                        <line x1="220" y1="80" x2="220" y2="280" />
+                        <line x1="320" y1="50" x2="320" y2="360" />
+                        <line x1="440" y1="80" x2="440" y2="360" />
+                        <line x1="560" y1="50" x2="560" y2="360" />
+                        <line x1="680" y1="80" x2="680" y2="360" />
+                    </g>
+
+                    <g fill="#64748b" font-family="sans-serif" font-size="9" font-weight="600">
+                        <text x="75" y="110">4.128</text>
+                        <text x="75" y="150">4.130</text>
+                        <text x="75" y="220">4.132</text>
+                        <text x="150" y="130">Alkymi</text>
+                        <text x="350" y="160">Kjemiblokk 5</text>
+                        <text x="350" y="110">116</text>
+                        <text x="470" y="130">113</text>
+                        <text x="590" y="110">M158</text>
+                        <text x="700" y="220">101</text>
+                        <text x="270" y="340">4.155</text>
+                        <text x="350" y="340">4.160</text>
+                    </g>
+
+                    <rect x="500" y="90" width="24" height="24" rx="4" fill="#38bdf8" fill-opacity="0.2"/>
+                    <circle cx="508" cy="98" r="2" fill="#0284c7"/>
+                    <line x1="508" y1="101" x2="508" y2="108" stroke="#0284c7" stroke-width="2"/>
+                    <circle cx="516" cy="98" r="2" fill="#0284c7"/>
+                    <line x1="516" y1="101" x2="516" y2="108" stroke="#0284c7" stroke-width="2"/>
+
+                    <rect x="525" y="140" width="20" height="20" rx="4" fill="#22c55e" fill-opacity="0.15"/>
+                    <path d="M531 153 L535 147 L539 153 Z" fill="#16a34a"/>
+
+                    <g transform="translate(580, 390)">
+                        <rect width="20" height="20" rx="4" fill="#22c55e" fill-opacity="0.15"/>
+                        <path d="M4 14 L8 14 L8 10 L12 10 L12 6 L16 6" stroke="#16a34a" stroke-width="2" fill="none"/>
+                    </g>
+
+                    <circle cx="410" cy="220" r="45" fill="#38bdf8" fill-opacity="0.35" stroke="#38bdf8" stroke-width="1"/>
+                    <circle cx="410" cy="220" r="5" fill="#0284c7"/>
+
+                    <path d="M 120 315 L 260 315 L 410 220 L 520 200 L 570 215 L 610 200" 
+                          stroke="#38bdf8" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" />
+                    
+                    <g transform="translate(610, 180)">
+                        <circle cx="10" cy="10" r="12" fill="#0284c7" />
+                        <text x="6" y="14" fill="#ffffff" font-family="sans-serif" font-size="11" font-weight="bold">B</text>
+                        <text x="18" y="-4" fill="#0284c7" font-family="sans-serif" font-size="10" font-weight="bold">KS</text>
+                    </g>
+                </svg>
+            </div>
+
+            <div class="widgets-column">
+                
+                <section class="panel">
+                    <div class="panel-meta">
+                        <span>🧭</span> Navigating To
+                    </div>
+                    <h3 class="panel-heading-serif">Section 3 · Shelf A12</h3>
+                    <p class="panel-sub-label">Data Structures & Algorithms in Python</p>
+                    
+                    <div class="navigation-metrics">
+                        <div class="metric-block">
+                            <div class="metric-value">3</div>
+                            <div class="metric-label">Stops</div>
+                        </div>
+                        <div class="metric-block">
+                            <div class="metric-value">45m</div>
+                            <div class="metric-label">Distance</div>
+                        </div>
+                        <div class="metric-block">
+                            <div class="metric-value">~30s</div>
+                            <div class="metric-label">Est. Time</div>
+                        </div>
+                    </div>
+
+                    <button class="btn-qr-wide">QR Scanner</button>
+                </section>
+
+                <section class="panel">
+                    <h3 class="directions-header">📋 Directions</h3>
+                    
+                    <div class="directions-list">
+                        <div class="step-row">
+                            <div class="step-number">1</div>
+                            <p class="step-text">Head straight from <strong>Entrance</strong> toward East Wing</p>
+                        </div>
+                        
+                        <div class="step-row">
+                            <div class="step-number">2</div>
+                            <p class="step-text">Turn <strong>right</strong> at the Section 3 marker</p>
+                        </div>
+
+                        <div class="step-row">
+                            <div class="step-number">3</div>
+                            <p class="step-text">📍 Book is at <strong class="shelf-highlight">Shelf A, Row 12</strong></p>
+                        </div>
+                    </div>
+                </section>
+
+            </div>
+        </main>
+    </div>
+
+</body>
+</html>

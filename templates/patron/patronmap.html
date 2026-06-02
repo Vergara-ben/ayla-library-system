@@ -1,0 +1,297 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AYLA Library — Floor Map</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<style>
+  :root{--bg:#0d1a0f;--surface:#111f13;--surface2:#162019;--border:#1e3322;--accent:#4ade80;--accent2:#f59e0b;--text:#e8f5e9;--muted:#6b8f72;--danger:#f87171;}
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);height:100vh;display:flex;flex-direction:column;overflow:hidden;}
+
+  .navbar{flex-shrink:0;background:#0d1a0fed;backdrop-filter:blur(20px);border-bottom:1px solid var(--border);padding:14px 20px;display:flex;align-items:center;gap:12px;z-index:200;}
+  .back-btn{width:36px;height:36px;border-radius:10px;border:1px solid var(--border);background:var(--surface2);display:flex;align-items:center;justify-content:center;cursor:pointer;text-decoration:none;color:var(--text);font-size:16px;}
+  .nav-title{font-family:'Syne',sans-serif;font-size:18px;font-weight:800;flex:1;}
+  .floor-toggle{display:flex;gap:4px;}
+  .fl-btn{padding:6px 12px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--muted);font-size:12px;cursor:pointer;transition:all 0.2s;}
+  .fl-btn.active{border-color:var(--accent);color:var(--accent);background:#4ade8015;}
+
+  /* MAP */
+  #map{flex:1;position:relative;z-index:1;}
+  .leaflet-container{background:#0d1a0f!important;}
+
+  /* INFO PANEL */
+  .info-panel{
+    flex-shrink:0;background:#0d1a0fed;backdrop-filter:blur(20px);
+    border-top:1px solid var(--border);padding:16px 20px;
+    z-index:200;
+  }
+  .shelf-info{display:flex;align-items:center;gap:12px;margin-bottom:12px;}
+  .shelf-dot{width:12px;height:12px;border-radius:50%;background:var(--accent2);box-shadow:0 0 8px var(--accent2);flex-shrink:0;}
+  .shelf-details{flex:1;}
+  .shelf-name{font-family:'Syne',sans-serif;font-size:15px;font-weight:700;}
+  .shelf-path{font-size:12px;color:var(--muted);}
+  .nav-status{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);}
+  .status-dot{width:7px;height:7px;border-radius:50%;}
+  .status-dot.green{background:var(--accent);box-shadow:0 0 6px var(--accent);}
+  .status-dot.amber{background:var(--accent2);box-shadow:0 0 6px var(--accent2);}
+
+  .btn-row{display:flex;gap:8px;}
+  .btn-nav{
+    flex:1;padding:13px;
+    background:linear-gradient(135deg,#22c55e,#16a34a);
+    border:none;border-radius:12px;
+    color:#0d1a0f;font-family:'Syne',sans-serif;font-size:14px;font-weight:700;
+    cursor:pointer;transition:all 0.2s;display:flex;align-items:center;justify-content:center;gap:6px;
+  }
+  .btn-nav:hover{transform:translateY(-1px);}
+  .btn-nav.disabled{background:var(--surface2);color:var(--muted);border:1px solid var(--border);}
+  .btn-layers{padding:13px 16px;background:var(--surface2);border:1px solid var(--border);border-radius:12px;color:var(--text);font-size:14px;cursor:pointer;transition:all 0.2s;}
+  .btn-layers:hover{border-color:var(--accent);}
+
+  /* LEGEND */
+  .map-legend{
+    position:absolute;top:12px;right:12px;z-index:500;
+    background:#111f13ee;backdrop-filter:blur(10px);
+    border:1px solid var(--border);border-radius:12px;padding:12px 14px;
+  }
+  .legend-item{display:flex;align-items:center;gap:8px;margin-bottom:7px;font-size:11px;color:var(--muted);}
+  .legend-item:last-child{margin-bottom:0;}
+  .legend-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;}
+  .l-target{background:var(--accent2);}
+  .l-shelf{background:#4ade8060;}
+  .l-patron{background:#60a5fa;}
+  .l-exit{background:#9333ea;}
+
+  /* BLUETOOTH MODAL */
+  .modal-overlay{position:fixed;inset:0;z-index:1000;background:#00000080;display:flex;align-items:center;justify-content:center;padding:20px;opacity:0;pointer-events:none;transition:opacity 0.3s;}
+  .modal-overlay.show{opacity:1;pointer-events:all;}
+  .modal{background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:32px;max-width:360px;width:100%;text-align:center;transform:translateY(20px);transition:transform 0.3s;}
+  .modal-overlay.show .modal{transform:translateY(0);}
+  .modal-icon{font-size:48px;margin-bottom:16px;}
+  .modal-title{font-family:'Syne',sans-serif;font-size:20px;font-weight:800;margin-bottom:8px;}
+  .modal-text{font-size:13px;color:var(--muted);margin-bottom:24px;line-height:1.6;}
+  .btn-enable{width:100%;padding:13px;background:linear-gradient(135deg,#22c55e,#16a34a);border:none;border-radius:12px;color:#0d1a0f;font-family:'Syne',sans-serif;font-size:15px;font-weight:700;cursor:pointer;margin-bottom:10px;}
+  .btn-skip{width:100%;padding:13px;background:transparent;border:1px solid var(--border);border-radius:12px;color:var(--muted);font-family:'DM Sans',sans-serif;font-size:14px;cursor:pointer;}
+</style>
+</head>
+<body>
+<nav class="navbar">
+  <a href="{% url 'patron_book_details' 1 %}" class="back-btn">←</a>
+  <div class="nav-title">Floor Map</div>
+  <div class="floor-toggle">
+    <button class="fl-btn active">L1</button>
+    <button class="fl-btn" onclick="this.classList.add('active');this.previousElementSibling.classList.remove('active')">L2</button>
+  </div>
+</nav>
+
+<div id="map">
+  <!-- Legend -->
+  <div class="map-legend">
+    <div class="legend-item"><div class="legend-dot l-target"></div>Target Shelf</div>
+    <div class="legend-item"><div class="legend-dot l-shelf"></div>Shelf</div>
+    <div class="legend-item"><div class="legend-dot l-patron"></div>Your Position</div>
+    <div class="legend-item"><div class="legend-dot l-exit"></div>Exit / Entrance</div>
+  </div>
+</div>
+
+<div class="info-panel">
+  <div class="shelf-info">
+    <div class="shelf-dot"></div>
+    <div class="shelf-details">
+      <div class="shelf-name">Shelf C — Computer Science</div>
+      <div class="shelf-path">Level 1 · Row 3 · Position 12</div>
+    </div>
+    <div class="nav-status" id="navStatus">
+      <div class="status-dot amber" id="statusDot"></div>
+      <span id="statusText">BLE: Inactive</span>
+    </div>
+  </div>
+  <div class="btn-row">
+    <button class="btn-layers">🗂️ Layers</button>
+    <button class="btn-nav disabled" id="navBtn" onclick="showBTModal()">📡 Enable Navigation</button>
+  </div>
+</div>
+
+<!-- BT Modal -->
+<div class="modal-overlay" id="btModal">
+  <div class="modal">
+    <div class="modal-icon">📡</div>
+    <div class="modal-title">Enable Navigation</div>
+    <div class="modal-text">Turn on Bluetooth to enable indoor positioning. This allows AYLA to show your real-time location on the map and guide you to the target shelf.</div>
+    <button class="btn-enable" onclick="enableBLE()">Enable Bluetooth →</button>
+    <button class="btn-skip" onclick="closeBTModal()">Maybe later</button>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+// Custom CRS for floor plan
+const map = L.map('map', {
+  crs: L.CRS.Simple,
+  minZoom: -2,
+  maxZoom: 3,
+  zoomControl: false,
+  attributionControl: false,
+});
+
+const bounds = [[0,0],[600,900]];
+
+// Draw library floor plan using canvas
+const canvas = document.createElement('canvas');
+canvas.width = 900; canvas.height = 600;
+const ctx = canvas.getContext('2d');
+
+// Background
+ctx.fillStyle = '#111f13';
+ctx.fillRect(0, 0, 900, 600);
+
+// Outer walls
+ctx.strokeStyle = '#2d6a4f';
+ctx.lineWidth = 4;
+ctx.strokeRect(20, 20, 860, 560);
+
+// Reception
+ctx.fillStyle = '#162019';
+ctx.fillRect(30, 30, 200, 80);
+ctx.fillStyle = '#2d6a4f';
+ctx.fillRect(30, 30, 200, 4);
+ctx.fillStyle = '#4ade8070';
+ctx.font = 'bold 13px sans-serif';
+ctx.fillText('📋 Reception / Entrance', 40, 75);
+
+// Shelves
+const shelves = [
+  {x:30,y:140,w:100,h:200,label:'Shelf A\nFiction',color:'#1e3a5f',accent:'#3b82f6'},
+  {x:150,y:140,w:100,h:200,label:'Shelf B\nMathematics',color:'#1a3a1f',accent:'#4ade80'},
+  {x:270,y:140,w:100,h:200,label:'Shelf C\nComputer Science',color:'#3b1f1f',accent:'#f59e0b',target:true},
+  {x:390,y:140,w:100,h:200,label:'Shelf D\nScience',color:'#1e3a5f',accent:'#3b82f6'},
+  {x:510,y:140,w:100,h:200,label:'Shelf E\nHistory',color:'#1a3a1f',accent:'#4ade80'},
+  {x:30,y:380,w:100,h:160,label:'Shelf F\nReference',color:'#2d1a4a',accent:'#a855f7'},
+  {x:150,y:380,w:100,h:160,label:'Shelf G\nBiography',color:'#1e3a5f',accent:'#3b82f6'},
+  {x:270,y:380,w:100,h:160,label:'Shelf H\nSelf-Help',color:'#1a3a1f',accent:'#4ade80'},
+];
+
+shelves.forEach(s=>{
+  ctx.fillStyle = s.color;
+  ctx.fillRect(s.x,s.y,s.w,s.h);
+  ctx.strokeStyle = s.target ? '#f59e0b' : s.accent+'80';
+  ctx.lineWidth = s.target ? 3 : 1.5;
+  ctx.strokeRect(s.x,s.y,s.w,s.h);
+  if(s.target){
+    ctx.fillStyle = '#f59e0b20';
+    ctx.fillRect(s.x,s.y,s.w,s.h);
+  }
+  ctx.fillStyle = s.accent;
+  ctx.font = 'bold 11px sans-serif';
+  ctx.textAlign = 'center';
+  const lines = s.label.split('\n');
+  lines.forEach((line,i)=>ctx.fillText(line, s.x+s.w/2, s.y+s.h/2-6+(i*16)));
+});
+ctx.textAlign = 'left';
+
+// Reading area
+ctx.fillStyle = '#162019';
+ctx.fillRect(640,140,210,240);
+ctx.strokeStyle = '#2d6a4f50';
+ctx.lineWidth=1.5;
+ctx.strokeRect(640,140,210,240);
+ctx.fillStyle = '#4ade8060';
+ctx.font = 'bold 12px sans-serif';
+ctx.fillText('📖 Reading Area', 655, 265);
+
+// Tables in reading area
+[[660,160],[720,160],[780,160],[660,200],[720,200],[780,200]].forEach(([tx,ty])=>{
+  ctx.fillStyle='#1e3322';
+  ctx.fillRect(tx,ty,50,30);
+  ctx.strokeStyle='#2d6a4f50';
+  ctx.lineWidth=1;
+  ctx.strokeRect(tx,ty,50,30);
+});
+
+// Restrooms
+ctx.fillStyle='#162019';
+ctx.fillRect(640,400,100,60);
+ctx.fillStyle='#6b8f72';
+ctx.font='11px sans-serif';
+ctx.fillText('🚻 Restrooms',648,435);
+
+// Exit
+ctx.fillStyle='#2d1a4a';
+ctx.fillRect(760,380,120,30);
+ctx.fillStyle='#a855f7';
+ctx.font='bold 11px sans-serif';
+ctx.fillText('🚪 Exit →',775,400);
+
+// Path waypoints (dashed line from entrance to target shelf)
+ctx.setLineDash([8,5]);
+ctx.strokeStyle='#f59e0b80';
+ctx.lineWidth=2;
+ctx.beginPath();
+ctx.moveTo(130,30);
+ctx.lineTo(130,80);
+ctx.lineTo(320,80);
+ctx.lineTo(320,140);
+ctx.stroke();
+ctx.setLineDash([]);
+
+// Target pin
+ctx.fillStyle='#f59e0b';
+ctx.beginPath();
+ctx.arc(320,130,10,0,Math.PI*2);
+ctx.fill();
+ctx.fillStyle='white';
+ctx.font='bold 10px sans-serif';
+ctx.textAlign='center';
+ctx.fillText('📍',320,134);
+ctx.textAlign='left';
+
+const dataURL = canvas.toDataURL();
+const imageOverlay = L.imageOverlay(dataURL, bounds).addTo(map);
+map.fitBounds(bounds);
+
+// Add target marker
+const targetIcon = L.divIcon({
+  className:'',
+  html:`<div style="background:#f59e0b;border:2px solid #fff;border-radius:50% 50% 50% 0;transform:rotate(-45deg);width:20px;height:20px;box-shadow:0 0 10px #f59e0b80"></div>`,
+  iconSize:[20,20], iconAnchor:[10,20]
+});
+L.marker([470,320],{icon:targetIcon}).addTo(map).bindPopup('<b>Shelf C — CS</b><br>Your target shelf');
+
+// Shelf markers
+const neutralIcon = L.divIcon({
+  className:'',
+  html:`<div style="background:#4ade8060;border:1px solid #4ade80;border-radius:3px;width:14px;height:14px"></div>`,
+  iconSize:[14,14],iconAnchor:[7,7]
+});
+[[250,80],[370,80],[490,80],[130,450],[250,450]].forEach(([y,x])=>{
+  L.marker([y,x],{icon:neutralIcon}).addTo(map);
+});
+
+// Navigation functions
+function showBTModal(){document.getElementById('btModal').classList.add('show');}
+function closeBTModal(){document.getElementById('btModal').classList.remove('show');}
+function enableBLE(){
+  closeBTModal();
+  document.getElementById('statusDot').className='status-dot green';
+  document.getElementById('statusText').textContent='BLE: Active';
+  document.getElementById('navBtn').classList.remove('disabled');
+  document.getElementById('navBtn').textContent='🧭 Navigating...';
+
+  // Add patron dot
+  const patronIcon = L.divIcon({
+    className:'',
+    html:`<div style="background:#60a5fa;border:3px solid #fff;border-radius:50%;width:16px;height:16px;box-shadow:0 0 12px #60a5fa;animation:pulse 1.5s infinite"></div><style>@keyframes pulse{0%,100%{box-shadow:0 0 8px #60a5fa;}50%{box-shadow:0 0 18px #60a5fa;}}</style>`,
+    iconSize:[16,16],iconAnchor:[8,8]
+  });
+  L.marker([100,130],{icon:patronIcon}).addTo(map).bindPopup('📍 You are here');
+
+  // Draw nav path
+  L.polyline([[100,130],[200,130],[200,280],[470,280],[470,320]],{color:'#60a5fa',weight:3,dashArray:'8,5',opacity:0.8}).addTo(map);
+}
+</script>
+</body>
+</html>
