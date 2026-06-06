@@ -114,32 +114,38 @@
                 </button>
             </div>
 
-            <form id="editPatronForm" class="space-y-4 text-xs">
-                
+            <form method="post" action="{% url 'admin_edit_patron' patron.patron_id %}" class="space-y-4 text-xs">
+                {% csrf_token %}
+                {% if error %}
+                    <div class="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">{{ error }}</div>
+                {% elif success %}
+                    <div class="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">{{ success }}</div>
+                {% endif %}
+
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div class="space-y-1.5">
                         <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">First Name</label>
-                        <input type="text" id="firstName" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium placeholder-slate-600 tracking-wide" style="background-color: var(--bg-input);" required>
+                        <input type="text" id="firstName" name="first_name" value="{{ initial.first_name|default:'' }}" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium placeholder-slate-600 tracking-wide" style="background-color: var(--bg-input);" required>
                     </div>
                     <div class="space-y-1.5">
                         <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Last Name</label>
-                        <input type="text" id="lastName" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium placeholder-slate-600 tracking-wide" style="background-color: var(--bg-input);" required>
+                        <input type="text" id="lastName" name="last_name" value="{{ initial.last_name|default:'' }}" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium placeholder-slate-600 tracking-wide" style="background-color: var(--bg-input);" required>
                     </div>
                 </div>
 
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div class="space-y-1.5">
-                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">ID Number</label>
-                        <input type="text" id="idNumber" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-mono tracking-wide" style="background-color: var(--bg-input);" required readonly>
+                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Patron ID</label>
+                        <input type="text" value="{{ patron.patron_id }}" readonly class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 bg-slate-900 focus:outline-none font-mono tracking-wide" style="background-color: var(--bg-input);">
                     </div>
                     <div class="space-y-1.5">
                         <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Patron Type</label>
                         <div class="relative">
-                            <select id="patronType" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium appearance-none pr-10 cursor-pointer tracking-wide" style="background-color: var(--bg-input);" required>
+                            <select id="patronType" name="patron_type" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium appearance-none pr-10 cursor-pointer tracking-wide" style="background-color: var(--bg-input);" required>
                                 <option value="">Select type...</option>
-                                <option value="student">Student</option>
-                                <option value="faculty">Faculty</option>
-                                <option value="staff">Staff</option>
+                                <option value="student" {% if initial.patron_type == 'student' %}selected{% endif %}>Student</option>
+                                <option value="faculty" {% if initial.patron_type == 'faculty' %}selected{% endif %}>Faculty</option>
+                                <option value="staff" {% if initial.patron_type == 'staff' %}selected{% endif %}>Staff</option>
                             </select>
                             <i class="fa-solid fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 text-[10px] pointer-events-none"></i>
                         </div>
@@ -149,30 +155,30 @@
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div class="space-y-1.5">
                         <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Email</label>
-                        <input type="email" id="email" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-mono tracking-wide" style="background-color: var(--bg-input);" required>
+                        <input type="email" id="email" name="email" value="{{ initial.email|default:'' }}" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-mono tracking-wide" style="background-color: var(--bg-input);" required>
                     </div>
                     <div class="space-y-1.5">
                         <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Contact</label>
-                        <input type="text" id="contact" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium tracking-wide" style="background-color: var(--bg-input);">
+                        <input type="text" id="contact" name="contact" value="{{ initial.contact|default:'' }}" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium tracking-wide" style="background-color: var(--bg-input);">
                     </div>
                 </div>
 
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div class="space-y-1.5">
                         <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Course / Department</label>
-                        <input type="text" id="course" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium tracking-wide" style="background-color: var(--bg-input);">
+                        <input type="text" id="course" name="course_department" value="{{ initial.course_department|default:'' }}" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium tracking-wide" style="background-color: var(--bg-input);">
                     </div>
                     <div class="space-y-1.5">
                         <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Status</label>
-                        <select id="status" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium appearance-none pr-10 cursor-pointer tracking-wide" style="background-color: var(--bg-input);">
-                            <option value="active">Active</option>
-                            <option value="inactive">Inactive</option>
+                        <select id="status" name="status" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium appearance-none pr-10 cursor-pointer tracking-wide" style="background-color: var(--bg-input);">
+                            <option value="Active" {% if initial.status == 'Active' %}selected{% endif %}>Active</option>
+                            <option value="Inactive" {% if initial.status == 'Inactive' %}selected{% endif %}>Inactive</option>
                         </select>
                     </div>
                 </div>
 
                 <div class="pt-4 flex items-center justify-end gap-3">
-                    <button type="button" id="cancelBtn" class="px-5 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:text-slate-100 hover:bg-slate-800/40 font-semibold tracking-wide transition-colors min-w-[100px]">
+                    <button type="button" onclick="window.location.href='{% url 'admin_manage_patron' %}'" class="px-5 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:text-slate-100 hover:bg-slate-800/40 font-semibold tracking-wide transition-colors min-w-[100px]">
                         Cancel
                     </button>
                     <button type="submit" class="bg-cyan-700 hover:bg-cyan-600 text-white font-bold px-5 py-2.5 rounded-lg flex items-center gap-2 tracking-wide transition-colors shadow-md">
@@ -182,66 +188,8 @@
 
             </form>
 
-            <div id="successMessage" class="success-message">
-                Patron updated successfully!
-            </div>
-            <div id="errorMessage" class="error-message">
-                Error updating patron. Please try again.
-            </div>
-
         </div>
     </div>
 
 </body>
-<script>
-document.addEventListener('DOMContentLoaded', async () => {
-  const form = document.getElementById('editPatronForm');
-  const cancelBtn = document.getElementById('cancelBtn');
-  const successMsg = document.getElementById('successMessage');
-  const errorMsg = document.getElementById('errorMessage');
-
-  // Get patron ID from URL or session
-  const patronId = new URLSearchParams(window.location.search).get('id');
-
-  function showMessage(element, duration = 3000) {
-    element.style.display = 'block';
-    setTimeout(() => {
-      element.style.display = 'none';
-    }, duration);
-  }
-
-  // Load patron data
-  if (patronId) {
-    // In a real implementation, fetch from Supabase
-    console.log('Loading patron:', patronId);
-  }
-
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-
-    const updates = {
-      first_name: document.getElementById('firstName').value,
-      last_name: document.getElementById('lastName').value,
-      patron_type: document.getElementById('patronType').value,
-      email: document.getElementById('email').value,
-      contact: document.getElementById('contact').value,
-      course_department: document.getElementById('course').value,
-      status: document.getElementById('status').value,
-      updated_at: new Date().toISOString(),
-    };
-
-    const result = await updatePatron(patronId, updates);
-    
-    if (result) {
-      showMessage(successMsg);
-    } else {
-      showMessage(errorMsg);
-    }
-  });
-
-  cancelBtn.addEventListener('click', () => {
-    window.history.back();
-  });
-});
-</script>
 </html>

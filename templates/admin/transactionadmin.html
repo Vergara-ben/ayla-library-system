@@ -63,15 +63,15 @@
             <div>
                 <p class="px-2 text-xs font-bold tracking-widest text-slate-500 uppercase mb-3">Overview</p>
                 <div class="space-y-1">
-                    <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                    <a href="{% url 'admin_dashboard' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
                         <i class="fa-solid fa-chart-pie w-5 text-sm"></i>
                         <span class="text-sm font-medium">Dashboard</span>
                     </a>
-                    <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                    <a href="{% url 'admin_indoor_map' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
                         <i class="fa-solid fa-map w-5 text-sm"></i>
                         <span class="text-sm font-medium">Indoor Map</span>
                     </a>
-                    <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                    <a href="{% url 'admin_qr_scanner' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
                         <i class="fa-solid fa-qrcode w-5 text-sm"></i>
                         <span class="text-sm font-medium">QR Scanner</span>
                     </a>
@@ -81,22 +81,22 @@
             <div>
                 <p class="px-2 text-xs font-bold tracking-widest text-slate-500 uppercase mb-3">Management</p>
                 <div class="space-y-1">
-                    <a href="#" class="flex items-center justify-between px-3 py-2 rounded-lg bg-slate-800/50 text-cyan-400 font-medium border border-slate-700/50">
+                    <a href="{% url 'admin_transaction' %}" class="flex items-center justify-between px-3 py-2 rounded-lg bg-slate-800/50 text-cyan-400 font-medium border border-slate-700/50">
                         <div class="flex items-center gap-3">
                             <i class="fa-solid fa-file-invoice w-5 text-sm"></i>
                             <span class="text-sm">Transactions</span>
                         </div>
                         <span class="bg-rose-500/20 text-rose-400 text-xs px-2 py-0.5 rounded-full font-semibold">12</span>
                     </a>
-                    <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                    <a href="{% url 'admin_log_management' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
                         <i class="fa-solid fa-clipboard-list w-5 text-sm"></i>
                         <span class="text-sm font-medium">Log Management</span>
                     </a>
-                    <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                    <a href="{% url 'admin_book_detail' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
                         <i class="fa-solid fa-book w-5 text-sm"></i>
                         <span class="text-sm font-medium">Manage Books</span>
                     </a>
-                    <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                    <a href="{% url 'admin_manage_patron' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
                         <i class="fa-solid fa-users w-5 text-sm"></i>
                         <span class="text-sm font-medium">Manage Patrons</span>
                     </a>
@@ -126,22 +126,22 @@
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
                     <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Total Borrowed</p>
-                    <p class="text-3xl font-bold text-cyan-400 mt-2">1,284</p>
+                    <p class="text-3xl font-bold text-cyan-400 mt-2">{{ total_borrowed }}</p>
                     <p class="text-[10px] text-slate-500 mt-1">All time</p>
                 </div>
                 <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
                     <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Total Returned</p>
-                    <p class="text-3xl font-bold text-slate-300 mt-2">1,197</p>
+                    <p class="text-3xl font-bold text-slate-300 mt-2">{{ total_returned }}</p>
                     <p class="text-[10px] text-slate-500 mt-1">All time</p>
                 </div>
                 <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
                     <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Currently Out</p>
-                    <p class="text-3xl font-bold text-amber-500 mt-2">87</p>
+                    <p class="text-3xl font-bold text-amber-500 mt-2">{{ currently_out }}</p>
                     <p class="text-[10px] text-slate-500 mt-1">Active borrows</p>
                 </div>
                 <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
                     <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Overdue</p>
-                    <p class="text-3xl font-bold text-rose-500 mt-2">12</p>
+                    <p class="text-3xl font-bold text-rose-500 mt-2">{{ overdue_count }}</p>
                     <p class="text-[10px] text-slate-500 mt-1">Past due date</p>
                 </div>
             </div>
@@ -193,100 +193,58 @@
                                 <th class="py-3 px-6">Due Date</th>
                                 <th class="py-3 px-6">Returned</th>
                                 <th class="py-3 px-6 text-center w-28">Status</th>
+                                <th class="py-3 px-6 text-center w-36">Actions</th>
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-slate-800/40 text-xs text-slate-300">
-                            <tr class="hover:bg-slate-800/10 transition-colors">
-                                <td class="py-4 px-6 font-mono text-slate-500">#TX-2401</td>
-                                <td class="py-4 px-6">
-                                    <div class="font-bold text-slate-200">Maria Santos</div>
-                                    <div class="text-[10px] text-slate-500 font-mono mt-0.5">2021-10234</div>
-                                </td>
-                                <td class="py-4 px-6">
-                                    <div class="font-medium text-slate-300">Data Structures & Algorithms in Python</div>
-                                    <div class="text-[10px] text-slate-500 mt-0.5">Goodrich · COPY-001</div>
-                                </td>
-                                <td class="py-4 px-6 text-slate-400">Dec 1, 2024</td>
-                                <td class="py-4 px-6 text-slate-400">Dec 15, 2024</td>
-                                <td class="py-4 px-6 text-emerald-500/90 font-medium">Dec 14, 2024</td>
-                                <td class="py-4 px-6 text-center">
-                                    <span class="inline-block bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded text-[10px] font-medium min-w-[76px]">Returned</span>
-                                </td>
-                            </tr>
-                            <tr class="hover:bg-slate-800/10 transition-colors">
-                                <td class="py-4 px-6 font-mono text-slate-500">#TX-2402</td>
-                                <td class="py-4 px-6">
-                                    <div class="font-bold text-slate-200">Juan dela Cruz</div>
-                                    <div class="text-[10px] text-slate-500 font-mono mt-0.5">2022-00456</div>
-                                </td>
-                                <td class="py-4 px-6">
-                                    <div class="font-medium text-slate-300">Introduction to Algorithms (CLRS)</div>
-                                    <div class="text-[10px] text-slate-500 mt-0.5">Cormen et al. · COPY-002</div>
+                            {% for tx in transactions %}
+                                <tr class="hover:bg-slate-800/10 transition-colors">
+                                    <td class="py-4 px-6 font-mono text-slate-500">#TX-{{ tx.transaction_id }}</td>
+                                    <td class="py-4 px-6">
+                                        <div class="font-bold text-slate-200">{{ tx.patron.fullname if tx.patron else 'In-Library User' }}</div>
+                                        <div class="text-[10px] text-slate-500 font-mono mt-0.5">{{ tx.patron.patron_id if tx.patron else '—' }}</div>
                                     </td>
-                                <td class="py-4 px-6 text-slate-400">Dec 3, 2024</td>
-                                <td class="py-4 px-6 text-slate-400">Dec 17, 2024</td>
-                                <td class="py-4 px-6 text-slate-500">—</td>
-                                <td class="py-4 px-6 text-center">
-                                    <span class="inline-block bg-amber-500/10 text-amber-500 border border-amber-500/20 px-2 py-0.5 rounded text-[10px] font-medium min-w-[76px]">Borrowed</span>
-                                </td>
-                            </tr>
-                            <tr class="hover:bg-slate-800/10 transition-colors">
-                                <td class="py-4 px-6 font-mono text-slate-500">#TX-2403</td>
-                                <td class="py-4 px-6">
-                                    <div class="font-bold text-slate-200">Ana Reyes</div>
-                                    <div class="text-[10px] text-slate-500 font-mono mt-0.5">2023-01122</div>
-                                </td>
-                                <td class="py-4 px-6">
-                                    <div class="font-medium text-slate-300">Operating System Concepts</div>
-                                    <div class="text-[10px] text-slate-500 mt-0.5">Silberschatz · COPY-003</div>
-                                </td>
-                                <td class="py-4 px-6 text-slate-400">Nov 20, 2024</td>
-                                <td class="py-4 px-6 text-slate-400">Dec 4, 2024</td>
-                                <td class="py-4 px-6 text-slate-500">—</td>
-                                <td class="py-4 px-6 text-center">
-                                    <span class="inline-block bg-rose-500/10 text-rose-400 border border-rose-500/20 px-2 py-0.5 rounded text-[10px] font-medium min-w-[76px]">Overdue</span>
-                                </td>
-                            </tr>
-                            <tr class="hover:bg-slate-800/10 transition-colors">
-                                <td class="py-4 px-6 font-mono text-slate-500">#TX-2404</td>
-                                <td class="py-4 px-6">
-                                    <div class="font-bold text-slate-200">Carlo Mendoza</div>
-                                    <div class="text-[10px] text-slate-500 font-mono mt-0.5">2020-08821</div>
-                                </td>
-                                <td class="py-4 px-6">
-                                    <div class="font-medium text-slate-300">Clean Code</div>
-                                    <div class="text-[10px] text-slate-500 mt-0.5">Robert C. Martin · COPY-001</div>
-                                </td>
-                                <td class="py-4 px-6 text-slate-400">Dec 5, 2024</td>
-                                <td class="py-4 px-6 text-slate-400">Dec 19, 2024</td>
-                                <td class="py-4 px-6 text-emerald-500/90 font-medium">Dec 18, 2024</td>
-                                <td class="py-4 px-6 text-center">
-                                    <span class="inline-block bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded text-[10px] font-medium min-w-[76px]">Returned</span>
-                                </td>
-                            </tr>
-                            <tr class="hover:bg-slate-800/10 transition-colors">
-                                <td class="py-4 px-6 font-mono text-slate-500">#TX-2405</td>
-                                <td class="py-4 px-6">
-                                    <div class="font-bold text-slate-200">Liza Torres</div>
-                                    <div class="text-[10px] text-slate-500 font-mono mt-0.5">2021-05567</div>
-                                </td>
-                                <td class="py-4 px-6">
-                                    <div class="font-medium text-slate-300">Computer Networks</div>
-                                    <div class="text-[10px] text-slate-500 mt-0.5">Tanenbaum · COPY-004</div>
-                                </td>
-                                <td class="py-4 px-6 text-slate-400">Dec 8, 2024</td>
-                                <td class="py-4 px-6 text-slate-400">Dec 22, 2024</td>
-                                <td class="py-4 px-6 text-slate-500">—</td>
-                                <td class="py-4 px-6 text-center">
-                                    <span class="inline-block bg-amber-500/10 text-amber-500 border border-amber-500/20 px-2 py-0.5 rounded text-[10px] font-medium min-w-[76px]">Borrowed</span>
-                                </td>
-                            </tr>
+                                    <td class="py-4 px-6">
+                                        <div class="font-medium text-slate-300">{{ tx.book.title }}</div>
+                                        <div class="text-[10px] text-slate-500 mt-0.5">{{ tx.book.author }}</div>
+                                    </td>
+                                    <td class="py-4 px-6 text-slate-400">{{ tx.transaction_date|date:"M j, Y" }}</td>
+                                    <td class="py-4 px-6 text-slate-400">{{ tx.due_date|date:"M j, Y" if tx.due_date else '—' }}</td>
+                                    <td class="py-4 px-6 text-emerald-500/90 font-medium">{{ tx.return_date|date:"M j, Y" if tx.return_date else '—' }}</td>
+                                    <td class="py-4 px-6 text-center">
+                                        {% if tx.overdue_flag %}
+                                            <span class="inline-block bg-rose-500/10 text-rose-400 border border-rose-500/20 px-2 py-0.5 rounded text-[10px] font-medium min-w-[76px]">Overdue</span>
+                                        {% elif tx.return_date %}
+                                            <span class="inline-block bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded text-[10px] font-medium min-w-[76px]">Returned</span>
+                                        {% elif tx.transaction_type == 'Borrow' %}
+                                            <span class="inline-block bg-amber-500/10 text-amber-500 border border-amber-500/20 px-2 py-0.5 rounded text-[10px] font-medium min-w-[76px]">Borrowed</span>
+                                        {% else %}
+                                            <span class="inline-block bg-slate-800/50 text-slate-400 border border-slate-700/40 px-2 py-0.5 rounded text-[10px] font-medium min-w-[76px]">{{ tx.transaction_type }}</span>
+                                        {% endif %}
+                                    </td>
+                                    <td class="py-4 px-6 text-center">
+                                        {% if not tx.return_date and tx.transaction_type == 'Borrow' %}
+                                            <form method="post" action="{% url 'admin_transaction_action' tx.transaction_id %}" class="inline-flex justify-center">
+                                                {% csrf_token %}
+                                                <input type="hidden" name="action" value="return">
+                                                <button type="submit" class="rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-1 text-[10px] font-semibold hover:bg-emerald-500/20 hover:text-emerald-100">Mark Returned</button>
+                                            </form>
+                                        {% else %}
+                                            <span class="text-slate-500">—</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                            {% empty %}
+                                <tr>
+                                    <td colspan="8" class="py-6 px-6 text-center text-slate-500">No transactions found.</td>
+                                </tr>
+                            {% endfor %}
                         </tbody>
                     </table>
                 </div>
 
                 <div class="px-5 py-4 border-t border-slate-800/60 flex items-center justify-between text-xs text-slate-500">
-                    <span class="font-medium">Showing <span class="text-slate-400">1-5</span> of <span class="text-slate-400">1,284</span> transactions</span>
+                    <span class="font-medium">Showing <span class="text-slate-400">{{ transactions|length }}</span> of <span class="text-slate-400">{{ transaction_count }}</span> transactions</span>
                     
                     <div class="flex items-center gap-1">
                         <button class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors cursor-not-allowed" disabled>&larr; Prev</button>

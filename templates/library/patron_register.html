@@ -1,0 +1,108 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Patron Registration</title>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Plus Jakarta Sans', sans-serif; background: #0b1510; color: #f5fff7; margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
+        .card { width: 100%; max-width: 500px; padding: 32px; background: rgba(7,17,10,0.92); border: 1px solid rgba(255,255,255,0.08); border-radius: 28px; box-shadow: 0 20px 80px rgba(0,0,0,0.5); }
+        h1 { margin-top: 0; margin-bottom: 24px; }
+        .form-group { margin-bottom: 20px; }
+        label { display: block; margin-bottom: 10px; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; color: #93a59a; font-weight: 700; }
+        .input { position: relative; }
+        .input input, .input select { width: 100%; padding: 17px 18px 17px 50px; border: none; outline: none; border-radius: 18px; background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.06); color: white; font-size: 14px; }
+        .input input:focus, .input select:focus { border-color: rgba(74,222,128,.4); box-shadow: 0 0 0 5px rgba(74,222,128,.08), 0 10px 25px rgba(74,222,128,.08); }
+        .input select { padding-left: 50px; }
+        .input select option { background: #0b1510; color: white; }
+        .icon { position: absolute; left: 18px; top: 50%; transform: translateY(-50%); opacity: .6; }
+        .btn { width: 100%; border: none; padding: 17px; border-radius: 18px; font-size: 15px; font-weight: 800; cursor: pointer; background: linear-gradient(135deg, #4ade80, #22c55e); color: #031108; box-shadow: 0 15px 35px rgba(74,222,128,.25); margin-top: 10px; }
+        .btn:hover { transform: translateY(-2px) scale(1.01); box-shadow: 0 20px 45px rgba(74,222,128,.35); }
+        .error-text { color: red; margin-top: 16px; font-size: 14px; }
+        .login-link { text-align: center; margin-top: 16px; font-size: 14px; color: #93a59a; }
+        .login-link a { color: #4ade80; text-decoration: none; font-weight: 700; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>Create Patron Account</h1>
+        <form method="POST" action="{% url 'patron_register' %}">
+            {% csrf_token %}
+            
+            <div class="form-group">
+                <label for="fullname">Full Name</label>
+                <div class="input">
+                    <div class="icon">👤</div>
+                    <input type="text" id="fullname" name="fullname" placeholder="Your full name" required>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="email">Email Address</label>
+                <div class="input">
+                    <div class="icon">✉</div>
+                    <input type="email" id="email" name="email" placeholder="name@domain.com" required>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="password">Password</label>
+                <div class="input">
+                    <div class="icon">🔒</div>
+                    <input type="password" id="password" name="password" placeholder="••••••••••" required>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="confirm_password">Confirm Password</label>
+                <div class="input">
+                    <div class="icon">🔒</div>
+                    <input type="password" id="confirm_password" name="confirm_password" placeholder="••••••••••" required>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="patron_type">Patron Type</label>
+                <div class="input">
+                    <div class="icon">📋</div>
+                    <select id="patron_type" name="patron_type" required>
+                        <option value="">Select patron type</option>
+                        <option value="Student">Student</option>
+                        <option value="Teacher">Teacher</option>
+                        <option value="Parent">Parent</option>
+                        <option value="General Visitor">General Visitor</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="contact_number">Contact Number</label>
+                <div class="input">
+                    <div class="icon">📞</div>
+                    <input type="text" id="contact_number" name="contact_number" placeholder="09xxxxxxxxx" required>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="address">Address</label>
+                <div class="input">
+                    <div class="icon">📍</div>
+                    <input type="text" id="address" name="address" placeholder="Your address" required>
+                </div>
+            </div>
+
+            <button type="submit" class="btn">Create Account →</button>
+        </form>
+
+        {% if error %}
+        <p class="error-text">{{ error }}</p>
+        {% endif %}
+
+        <div class="login-link">
+            Already have an account? <a href="{% url 'patron_login' %}">Sign In</a>
+        </div>
+    </div>
+</body>
+</html>

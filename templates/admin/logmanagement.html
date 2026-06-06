@@ -63,15 +63,15 @@
             <div>
                 <p class="px-2 text-xs font-bold tracking-widest text-slate-500 uppercase mb-3">Overview</p>
                 <div class="space-y-1">
-                    <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                    <a href="{% url 'admin_dashboard' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
                         <i class="fa-solid fa-chart-pie w-5 text-sm"></i>
                         <span class="text-sm font-medium">Dashboard</span>
                     </a>
-                    <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                    <a href="{% url 'admin_indoor_map' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
                         <i class="fa-solid fa-map w-5 text-sm"></i>
                         <span class="text-sm font-medium">Indoor Map</span>
                     </a>
-                    <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                    <a href="{% url 'admin_qr_scanner' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
                         <i class="fa-solid fa-qrcode w-5 text-sm"></i>
                         <span class="text-sm font-medium">QR Scanner</span>
                     </a>
@@ -81,22 +81,22 @@
             <div>
                 <p class="px-2 text-xs font-bold tracking-widest text-slate-500 uppercase mb-3">Management</p>
                 <div class="space-y-1">
-                    <a href="#" class="flex items-center justify-between px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                    <a href="{% url 'admin_transaction' %}" class="flex items-center justify-between px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
                         <div class="flex items-center gap-3">
                             <i class="fa-solid fa-file-invoice w-5 text-sm"></i>
                             <span class="text-sm font-medium">Transactions</span>
                         </div>
                         <span class="bg-rose-500/20 text-rose-400 text-xs px-2 py-0.5 rounded-full font-semibold">12</span>
                     </a>
-                    <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-800/50 text-cyan-400 font-medium border border-slate-700/50">
+                    <a href="{% url 'admin_log_management' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-800/50 text-cyan-400 font-medium border border-slate-700/50">
                         <i class="fa-solid fa-clipboard-list w-5 text-sm"></i>
                         <span class="text-sm">Log Management</span>
                     </a>
-                    <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                    <a href="{% url 'admin_book_detail' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
                         <i class="fa-solid fa-book w-5 text-sm"></i>
                         <span class="text-sm font-medium">Manage Books</span>
                     </a>
-                    <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                    <a href="{% url 'admin_manage_patron' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
                         <i class="fa-solid fa-users w-5 text-sm"></i>
                         <span class="text-sm font-medium">Manage Patrons</span>
                     </a>
@@ -126,17 +126,17 @@
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
                     <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Today's Entries</p>
-                    <p class="text-3xl font-bold text-cyan-400 mt-2">142</p>
+                    <p class="text-3xl font-bold text-cyan-400 mt-2">{{ todays_entries }}</p>
                     <p class="text-[10px] text-slate-500 mt-1">Library entries today</p>
                 </div>
                 <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
                     <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Today's Exits</p>
-                    <p class="text-3xl font-bold text-blue-400 mt-2">139</p>
+                    <p class="text-3xl font-bold text-blue-400 mt-2">{{ todays_exits }}</p>
                     <p class="text-[10px] text-slate-500 mt-1">Library exits today</p>
                 </div>
                 <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
                     <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Inside Now</p>
-                    <p class="text-3xl font-bold text-amber-500 mt-2">23</p>
+                    <p class="text-3xl font-bold text-amber-500 mt-2">{{ currently_inside }}</p>
                     <p class="text-[10px] text-slate-500 mt-1">Current occupancy</p>
                 </div>
                 <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
@@ -226,77 +226,35 @@
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-slate-800/40 text-xs text-slate-300">
-                            <tr class="hover:bg-slate-800/10 transition-colors">
-                                <td class="py-4 px-6 font-mono text-slate-500">#LOG-8801</td>
-                                <td class="py-4 px-6 font-bold text-slate-200">Maria Santos</td>
-                                <td class="py-4 px-6 font-mono text-slate-400">2021-10234</td>
-                                <td class="py-4 px-6 text-center">
-                                    <span class="inline-block bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded text-[10px] font-bold tracking-wide w-14">Entry</span>
-                                </td>
-                                <td class="py-4 px-6 text-slate-300 font-medium">08:12 AM</td>
-                                <td class="py-4 px-6 text-slate-400">Dec 10, 2024</td>
-                                <td class="py-4 px-6 text-slate-400 flex items-center gap-2">
-                                    <i class="fa-solid fa-id-card text-[10px] text-slate-600"></i> ID Scan
-                                </td>
-                            </tr>
-                            <tr class="hover:bg-slate-800/10 transition-colors">
-                                <td class="py-4 px-6 font-mono text-slate-500">#LOG-8802</td>
-                                <td class="py-4 px-6 font-bold text-slate-200">Juan dela Cruz</td>
-                                <td class="py-4 px-6 font-mono text-slate-400">2022-00456</td>
-                                <td class="py-4 px-6 text-center">
-                                    <span class="inline-block bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded text-[10px] font-bold tracking-wide w-14">Entry</span>
-                                </td>
-                                <td class="py-4 px-6 text-slate-300 font-medium">08:35 AM</td>
-                                <td class="py-4 px-6 text-slate-400">Dec 10, 2024</td>
-                                <td class="py-4 px-6 text-slate-400 flex items-center gap-2">
-                                    <i class="fa-solid fa-id-card text-[10px] text-slate-600"></i> ID Scan
-                                </td>
-                            </tr>
-                            <tr class="hover:bg-slate-800/10 transition-colors">
-                                <td class="py-4 px-6 font-mono text-slate-500">#LOG-8803</td>
-                                <td class="py-4 px-6 font-bold text-slate-200">Ana Reyes</td>
-                                <td class="py-4 px-6 font-mono text-slate-400">2023-01122</td>
-                                <td class="py-4 px-6 text-center">
-                                    <span class="inline-block bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded text-[10px] font-bold tracking-wide w-14">Entry</span>
-                                </td>
-                                <td class="py-4 px-6 text-slate-300 font-medium">09:01 AM</td>
-                                <td class="py-4 px-6 text-slate-400">Dec 10, 2024</td>
-                                <td class="py-4 px-6 text-slate-400 flex items-center gap-2">
-                                    <i class="fa-solid fa-qrcode text-[10px] text-slate-600"></i> QR Code
-                                </td>
-                            </tr>
-                            <tr class="hover:bg-slate-800/10 transition-colors">
-                                <td class="py-4 px-6 font-mono text-slate-500">#LOG-8804</td>
-                                <td class="py-4 px-6 font-bold text-slate-200">Maria Santos</td>
-                                <td class="py-4 px-6 font-mono text-slate-400">2021-10234</td>
-                                <td class="py-4 px-6 text-center">
-                                    <span class="inline-block bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-0.5 rounded text-[10px] font-bold tracking-wide w-14">Exit</span>
-                                </td>
-                                <td class="py-4 px-6 text-slate-300 font-medium">10:48 AM</td>
-                                <td class="py-4 px-6 text-slate-400">Dec 10, 2024</td>
-                                <td class="py-4 px-6 text-slate-400 flex items-center gap-2">
-                                    <i class="fa-solid fa-id-card text-[10px] text-slate-600"></i> ID Scan
-                                </td>
-                            </tr>
-                            <tr class="hover:bg-slate-800/10 transition-colors">
-                                <td class="py-4 px-6 font-mono text-slate-500">#LOG-8805</td>
-                                <td class="py-4 px-6 font-bold text-slate-200">Carlo Mendoza</td>
-                                <td class="py-4 px-6 font-mono text-slate-400">2020-08821</td>
-                                <td class="py-4 px-6 text-center">
-                                    <span class="inline-block bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded text-[10px] font-bold tracking-wide w-14">Entry</span>
-                                </td>
-                                <td class="py-4 px-6 text-slate-300 font-medium">11:15 AM</td>
-                                <td class="py-4 px-6 text-slate-400">Dec 10, 2024</td>
-                                <td class="py-4 px-6 text-slate-400 flex items-center gap-2">
-                                    <i class="fa-solid fa-qrcode text-[10px] text-slate-600"></i> QR Code
-                                </td>
-                            </tr>
+                            {% for log in logs %}
+                                <tr class="hover:bg-slate-800/10 transition-colors">
+                                    <td class="py-4 px-6 font-mono text-slate-500">#LOG-{{ log.log_id }}</td>
+                                    <td class="py-4 px-6 font-bold text-slate-200">{{ log.patron.fullname }}</td>
+                                    <td class="py-4 px-6 font-mono text-slate-400">{{ log.patron.patron_id }}</td>
+                                    <td class="py-4 px-6 text-center">
+                                        {% if log.log_type == 'Entry' %}
+                                            <span class="inline-block bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded text-[10px] font-bold tracking-wide w-14">Entry</span>
+                                        {% else %}
+                                            <span class="inline-block bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-0.5 rounded text-[10px] font-bold tracking-wide w-14">Exit</span>
+                                        {% endif %}
+                                    </td>
+                                    <td class="py-4 px-6 text-slate-300 font-medium">{{ log.timestamp|time:"h:i A" }}</td>
+                                    <td class="py-4 px-6 text-slate-400">{{ log.timestamp|date:"M j, Y" }}</td>
+                                    <td class="py-4 px-6 text-slate-400 flex items-center gap-2">
+                                        <i class="fa-solid fa-id-card text-[10px] text-slate-600"></i> ID Scan
+                                    </td>
+                                </tr>
+                            {% empty %}
+                                <tr>
+                                    <td colspan="7" class="py-6 px-6 text-center text-slate-500">No logs found for today.</td>
+                                </tr>
+                            {% endfor %}
                         </tbody>
                     </table>
                 </div>
 
                 <div class="px-5 py-4 border-t border-slate-800/60 flex items-center justify-between text-xs text-slate-500 bg-slate-900/5">
-                    <span class="font-medium">Showing <span class="text-slate-400">1-5</span> of <span class="text-slate-400">142</span> logs for Dec 10, 2024</span>
+                    <span class="font-medium">Showing <span class="text-slate-400">{{ logs|length }}</span> of <span class="text-slate-400">{{ log_count }}</span> logs for {{ today|date:"M j, Y" }}</span>
                     
                     <div class="flex items-center gap-1">
                         <button class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors cursor-not-allowed" disabled>&larr; Prev</button>

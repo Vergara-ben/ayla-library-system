@@ -615,7 +615,7 @@
             <h4 class="menu-label">Overview</h4>
             <ul class="menu-list">
                 <li class="menu-item active">
-                    <a href="#">
+                    <a href="{% url 'admin_dashboard' %}">
                         <div class="menu-link-content">
                             <span class="menu-icon">🏠</span>
                             <span>Dashboard</span>
@@ -623,7 +623,7 @@
                     </a>
                 </li>
                 <li class="menu-item">
-                    <a href="#">
+                    <a href="{% url 'admin_indoor_map' %}">
                         <div class="menu-link-content">
                             <span class="menu-icon">🗺️</span>
                             <span>Indoor Map</span>
@@ -631,7 +631,7 @@
                     </a>
                 </li>
                 <li class="menu-item">
-                    <a href="#">
+                    <a href="{% url 'admin_qr_scanner' %}">
                         <div class="menu-link-content">
                             <span class="menu-icon">📷</span>
                             <span>QR Scanner</span>
@@ -645,7 +645,7 @@
             <h4 class="menu-label">Management</h4>
             <ul class="menu-list">
                 <li class="menu-item">
-                    <a href="#">
+                    <a href="{% url 'admin_transaction' %}">
                         <div class="menu-link-content">
                             <span class="menu-icon">📋</span>
                             <span>Transactions</span>
@@ -654,7 +654,7 @@
                     </a>
                 </li>
                 <li class="menu-item">
-                    <a href="#">
+                    <a href="{% url 'admin_log_management' %}">
                         <div class="menu-link-content">
                             <span class="menu-icon">📊</span>
                             <span>Log Management</span>
@@ -662,7 +662,7 @@
                     </a>
                 </li>
                 <li class="menu-item">
-                    <a href="#">
+                    <a href="{% url 'admin_book_detail' %}">
                         <div class="menu-link-content">
                             <span class="menu-icon">📚</span>
                             <span>Manage Books</span>
@@ -670,7 +670,7 @@
                     </a>
                 </li>
                 <li class="menu-item">
-                    <a href="#">
+                    <a href="{% url 'admin_manage_patron' %}">
                         <div class="menu-link-content">
                             <span class="menu-icon">👥</span>
                             <span>Manage Patrons</span>
@@ -699,33 +699,33 @@
                 <div>
                     <span class="hero-welcome-tag">Admin Dashboard</span>
                     <h1 class="hero-title">Good morning, Admin 👋</h1>
-                    <p class="hero-subtitle">Monday, December 10, 2024 • <span>23 patrons currently in the library</span></p>
+                    <p class="hero-subtitle">Monday, December 10, 2024 • <span>{{ visitors_today }} patrons currently in the library</span></p>
                 </div>
                 <div class="hero-actions">
-                    <button class="btn btn-outline">Manage Books</button>
-                    <button class="btn btn-filled">Manage Patrons</button>
+                    <a href="{% url 'admin_book_detail' %}" class="btn btn-outline">Manage Books</a>
+                    <a href="{% url 'admin_manage_patron' %}" class="btn btn-filled">Manage Patrons</a>
                 </div>
             </section>
 
             <section class="stats-grid">
                 <div class="stat-card">
                     <h4 class="stat-label">Books Available</h4>
-                    <div class="stat-value">7,037</div>
-                    <div class="stat-indicator up">↑ 14 returned today</div>
+                    <div class="stat-value">{{ books_available }}</div>
+                    <div class="stat-indicator up">Available now</div>
                 </div>
                 <div class="stat-card">
                     <h4 class="stat-label">Currently Borrowed</h4>
-                    <div class="stat-value">1,087</div>
+                    <div class="stat-value">{{ currently_borrowed }}</div>
                     <div class="stat-indicator">Across all patrons</div>
                 </div>
                 <div class="stat-card">
                     <h4 class="stat-label">Overdue Books</h4>
-                    <div class="stat-value">12</div>
-                    <div class="stat-indicator down">↑ 2 new overdue</div>
+                    <div class="stat-value">{{ overdue_books }}</div>
+                    <div class="stat-indicator down">Overdue right now</div>
                 </div>
                 <div class="stat-card">
                     <h4 class="stat-label">Library Visitors</h4>
-                    <div class="stat-value">142</div>
+                    <div class="stat-value">{{ visitors_today }}</div>
                     <div class="stat-indicator">Entries today</div>
                 </div>
             </section>
@@ -735,53 +735,38 @@
                 <section class="panel">
                     <div class="panel-header">
                         <h3 class="panel-title">📋 Recent Transactions</h3>
-                        <a href="#" class="btn-view-all">View all &rarr;</a>
+                        <a href="{% url 'admin_transaction' %}" class="btn-view-all">View all &rarr;</a>
                     </div>
 
                     <div class="transaction-list">
-                        <div class="transaction-row">
-                            <div class="book-info-block">
-                                <div class="book-cover-placeholder cover-1"></div>
-                                <div class="book-details">
-                                    <h4 class="book-title">Data Structures & Algorithms</h4>
-                                    <p class="book-meta">Maria Santos • Dec 10</p>
+                        {% for tx in recent_transactions %}
+                            <div class="transaction-row">
+                                <div class="book-info-block">
+                                    <div class="book-cover-placeholder"></div>
+                                    <div class="book-details">
+                                        <h4 class="book-title">{{ tx.book.title }}</h4>
+                                        <p class="book-meta">{% if tx.patron %}{{ tx.patron.fullname }}{% else %}Guest{% endif %} • {{ tx.transaction_date|date:"M j" }}</p>
+                                    </div>
+                                </div>
+                                {% if tx.overdue_flag %}
+                                    <span class="status-pill overdue">Overdue</span>
+                                {% elif tx.return_date %}
+                                    <span class="status-pill returned">Returned</span>
+                                {% else %}
+                                    <span class="status-pill borrowed">Borrowed</span>
+                                {% endif %}
+                            </div>
+                        {% empty %}
+                            <div class="transaction-row">
+                                <div class="book-info-block">
+                                    <div class="book-cover-placeholder"></div>
+                                    <div class="book-details">
+                                        <h4 class="book-title">No recent transactions</h4>
+                                        <p class="book-meta">Check back later</p>
+                                    </div>
                                 </div>
                             </div>
-                            <span class="status-pill returned">Returned</span>
-                        </div>
-                        
-                        <div class="transaction-row">
-                            <div class="book-info-block">
-                                <div class="book-cover-placeholder cover-2"></div>
-                                <div class="book-details">
-                                    <h4 class="book-title">Introduction to Algorithms</h4>
-                                    <p class="book-meta">Juan dela Cruz • Dec 10</p>
-                                </div>
-                            </div>
-                            <span class="status-pill borrowed">Borrowed</span>
-                        </div>
-
-                        <div class="transaction-row">
-                            <div class="book-info-block">
-                                <div class="book-cover-placeholder cover-3"></div>
-                                <div class="book-details">
-                                    <h4 class="book-title">Operating System Concepts</h4>
-                                    <p class="book-meta">Ana Reyes • Dec 10</p>
-                                </div>
-                            </div>
-                            <span class="status-pill overdue">Overdue</span>
-                        </div>
-
-                        <div class="transaction-row">
-                            <div class="book-info-block">
-                                <div class="book-cover-placeholder cover-4"></div>
-                                <div class="book-details">
-                                    <h4 class="book-title">Clean Code</h4>
-                                    <p class="book-meta">Carlo Mendoza • Dec 9</p>
-                                </div>
-                            </div>
-                            <span class="status-pill returned">Returned</span>
-                        </div>
+                        {% endfor %}
                     </div>
                 </section>
 
@@ -814,7 +799,7 @@
                     <section class="panel">
                         <div class="panel-header">
                             <h3 class="panel-title">🚪 Today's Entry Log</h3>
-                            <a href="#" class="btn-view-all">View &rarr;</a>
+                            <a href="{% url 'admin_log_management' %}" class="btn-view-all">View &rarr;</a>
                         </div>
                         <div class="log-stats-list">
                             <div class="log-stat-row">

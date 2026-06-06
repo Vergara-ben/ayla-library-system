@@ -134,6 +134,8 @@
   }
   .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 8px 28px rgba(34, 197, 94, 0.5); }
 
+  .error-text { color: #f87171; margin-bottom: 20px; font-size: 14px; }
+
   /* SUCCESS SCREEN */
   .success-screen {
     display: none; text-align: center;
@@ -196,70 +198,75 @@
     <div class="step" id="s3"></div>
   </div>
 
-  <div class="card" id="formCard">
-    <div id="step1">
-      <div class="section-title">👤 Personal Information</div>
-      <div class="form-grid">
-        <div class="form-group">
-          <label>First Name</label>
-          <input type="text" id="firstName" placeholder="Maria">
-        </div>
-        <div class="form-group">
-          <label>Last Name</label>
-          <input type="text" id="lastName" placeholder="Santos">
-        </div>
-        <div class="form-group full">
-          <label>Email Address</label>
-          <input type="email" placeholder="maria@school.edu">
-        </div>
-        <div class="form-group full">
-          <label>Contact Number</label>
-          <input type="tel" placeholder="+63 9XX XXX XXXX">
-        </div>
-        <div class="form-group full">
-          <label>Address</label>
-          <textarea placeholder="House No., Street, Barangay, City" rows="2" style="resize:none"></textarea>
-        </div>
-      </div>
-      <div class="btn-row">
-        <button class="btn-primary" onclick="goStep(2)">Next →</button>
-      </div>
-    </div>
+  {% if error %}
+  <p class="error-text">{{ error }}</p>
+  {% endif %}
 
-    <div id="step2" style="display:none">
-      <div class="section-title">🏷️ Patron Type</div>
-      <p style="font-size:13px;color:#a3c2a6;margin-bottom:20px;">Select your patron category</p>
-      <div class="patron-types">
-        <div class="type-card" onclick="selectType(this)"><div class="type-icon">🎓</div><div class="type-label">Student</div></div>
-        <div class="type-card" onclick="selectType(this)"><div class="type-icon">👩‍🏫</div><div class="type-label">Teacher</div></div>
-        <div class="type-card" onclick="selectType(this)"><div class="type-icon">👨‍👩‍👧</div><div class="type-label">Parent</div></div>
-        <div class="type-card" onclick="selectType(this)"><div class="type-icon">🧑</div><div class="type-label">General Visitor</div></div>
-      </div>
-      <div class="btn-row">
-        <button class="btn-secondary" onclick="goStep(1)">← Back</button>
-        <button class="btn-primary" onclick="goStep(3)">Next →</button>
-      </div>
-    </div>
+  <form method="POST" action="{% url 'patron_register' %}">
+    {% csrf_token %}
+    <input type="hidden" name="patron_type" id="patron_type_input" value="">
 
-    <div id="step3" style="display:none">
-      <div class="section-title">🔐 Set Password</div>
-      <div class="form-group" style="margin-bottom:16px">
-        <label>Password</label>
-        <input type="password" placeholder="At least 8 characters">
+    <div class="card" id="formCard">
+      <div id="step1">
+        <div class="section-title">👤 Personal Information</div>
+        <div class="form-grid">
+          <div class="form-group full">
+            <label>Full Name</label>
+            <input type="text" id="fullName" name="fullname" placeholder="Maria Santos" required>
+          </div>
+          <div class="form-group full">
+            <label>Email Address</label>
+            <input type="email" id="email" name="email" placeholder="maria@school.edu" required>
+          </div>
+          <div class="form-group full">
+            <label>Contact Number</label>
+            <input type="tel" id="contactNumber" name="contact_number" placeholder="+63 9XX XXX XXXX" required>
+          </div>
+          <div class="form-group full">
+            <label>Address</label>
+            <textarea id="address" name="address" placeholder="House No., Street, Barangay, City" rows="2" style="resize:none" required></textarea>
+          </div>
+        </div>
+        <div class="btn-row">
+          <button type="button" class="btn-primary" onclick="goStep(2)">Next →</button>
+        </div>
       </div>
-      <div class="form-group" style="margin-bottom:24px">
-        <label>Confirm Password</label>
-        <input type="password" placeholder="Repeat password">
+
+      <div id="step2" style="display:none">
+        <div class="section-title">🏷️ Patron Type</div>
+        <p style="font-size:13px;color:#a3c2a6;margin-bottom:20px;">Select your patron category</p>
+        <div class="patron-types">
+          <div class="type-card" onclick="selectType(this)"><div class="type-icon">🎓</div><div class="type-label">Student</div></div>
+          <div class="type-card" onclick="selectType(this)"><div class="type-icon">👩‍🏫</div><div class="type-label">Teacher</div></div>
+          <div class="type-card" onclick="selectType(this)"><div class="type-icon">👨‍👩‍👧</div><div class="type-label">Parent</div></div>
+          <div class="type-card" onclick="selectType(this)"><div class="type-icon">🧑</div><div class="type-label">General Visitor</div></div>
+        </div>
+        <div class="btn-row">
+          <button type="button" class="btn-secondary" onclick="goStep(1)">← Back</button>
+          <button type="button" class="btn-primary" onclick="goStep(3)">Next →</button>
+        </div>
       </div>
-      <div style="font-size:12px;color:#a3c2a6;background:rgba(13, 26, 15, 0.8);border-radius:10px;padding:12px 14px;border:1px solid rgba(255,255,255,0.1);margin-bottom:8px">
-        📋 By registering, you agree to the library's borrowing policy and terms of use.
-      </div>
-      <div class="btn-row">
-        <button class="btn-secondary" onclick="goStep(2)">← Back</button>
-        <button class="btn-primary" onclick="showSuccess()">Register ✓</button>
+
+      <div id="step3" style="display:none">
+        <div class="section-title">🔐 Set Password</div>
+        <div class="form-group" style="margin-bottom:16px">
+          <label>Password</label>
+          <input type="password" id="password" name="password" placeholder="At least 8 characters" required>
+        </div>
+        <div class="form-group" style="margin-bottom:24px">
+          <label>Confirm Password</label>
+          <input type="password" id="confirmPassword" name="confirm_password" placeholder="Repeat password" required>
+        </div>
+        <div style="font-size:12px;color:#a3c2a6;background:rgba(13, 26, 15, 0.8);border-radius:10px;padding:12px 14px;border:1px solid rgba(255,255,255,0.1);margin-bottom:8px">
+          📋 By registering, you agree to the library's borrowing policy and terms of use.
+        </div>
+        <div class="btn-row">
+          <button type="button" class="btn-secondary" onclick="goStep(2)">← Back</button>
+          <button type="submit" class="btn-primary">Register ✓</button>
+        </div>
       </div>
     </div>
-  </div>
+  </form>
 
   <div class="card success-screen" id="successCard">
     <div class="success-icon">✅</div>
@@ -291,11 +298,11 @@ function goStep(n) {
 function selectType(el) {
   document.querySelectorAll('.type-card').forEach(c=>c.classList.remove('selected'));
   el.classList.add('selected');
+  document.getElementById('patron_type_input').value = el.querySelector('.type-label').innerText;
 }
 function showSuccess() {
-  const fname = document.getElementById('firstName').value.trim() || "MARIA";
-  const lname = document.getElementById('lastName').value.trim() || "SANTOS";
-  document.getElementById('display_name').innerText = `${fname.toUpperCase()} ${lname.toUpperCase()}`;
+  const fullName = document.getElementById('fullName').value.trim() || "MARIA SANTOS";
+  document.getElementById('display_name').innerText = fullName.toUpperCase();
   
   document.getElementById('formCard').style.display='none';
   document.getElementById('successCard').classList.add('show');

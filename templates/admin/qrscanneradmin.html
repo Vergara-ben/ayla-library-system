@@ -77,15 +77,15 @@
             <div>
                 <p class="px-2 text-xs font-bold tracking-widest text-slate-500 uppercase mb-3">Overview</p>
                 <div class="space-y-1">
-                    <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                    <a href="{% url 'admin_dashboard' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
                         <i class="fa-solid fa-chart-pie w-5 text-sm"></i>
                         <span class="text-sm font-medium">Dashboard</span>
                     </a>
-                    <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                    <a href="{% url 'admin_indoor_map' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
                         <i class="fa-solid fa-map w-5 text-sm"></i>
                         <span class="text-sm font-medium">Indoor Map</span>
                     </a>
-                    <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-800/50 text-cyan-400 font-medium border border-slate-700/50">
+                    <a href="{% url 'admin_qr_scanner' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-800/50 text-cyan-400 font-medium border border-slate-700/50">
                         <i class="fa-solid fa-qrcode w-5 text-sm"></i>
                         <span class="text-sm">QR Scanner</span>
                     </a>
@@ -95,22 +95,22 @@
             <div>
                 <p class="px-2 text-xs font-bold tracking-widest text-slate-500 uppercase mb-3">Management</p>
                 <div class="space-y-1">
-                    <a href="#" class="flex items-center justify-between px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                    <a href="{% url 'admin_transaction' %}" class="flex items-center justify-between px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
                         <div class="flex items-center gap-3">
                             <i class="fa-solid fa-file-invoice w-5 text-sm"></i>
                             <span class="text-sm font-medium">Transactions</span>
                         </div>
                         <span class="bg-rose-500/20 text-rose-400 text-xs px-2 py-0.5 rounded-full font-semibold">12</span>
                     </a>
-                    <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                    <a href="{% url 'admin_log_management' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
                         <i class="fa-solid fa-clipboard-list w-5 text-sm"></i>
                         <span class="text-sm font-medium">Log Management</span>
                     </a>
-                    <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                    <a href="{% url 'admin_book_detail' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
                         <i class="fa-solid fa-book w-5 text-sm"></i>
                         <span class="text-sm font-medium">Manage Books</span>
                     </a>
-                    <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                    <a href="{% url 'admin_manage_patron' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
                         <i class="fa-solid fa-users w-5 text-sm"></i>
                         <span class="text-sm font-medium">Manage Patrons</span>
                     </a>

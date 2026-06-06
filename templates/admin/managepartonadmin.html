@@ -63,15 +63,15 @@
             <div>
                 <p class="px-2 text-xs font-bold tracking-widest text-slate-500 uppercase mb-3">Overview</p>
                 <div class="space-y-1">
-                    <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                    <a href="{% url 'admin_dashboard' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
                         <i class="fa-solid fa-chart-pie w-5 text-sm"></i>
                         <span class="text-sm font-medium">Dashboard</span>
                     </a>
-                    <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                    <a href="{% url 'admin_indoor_map' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
                         <i class="fa-solid fa-map w-5 text-sm"></i>
                         <span class="text-sm font-medium">Indoor Map</span>
                     </a>
-                    <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                    <a href="{% url 'admin_qr_scanner' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
                         <i class="fa-solid fa-qrcode w-5 text-sm"></i>
                         <span class="text-sm font-medium">QR Scanner</span>
                     </a>
@@ -81,22 +81,22 @@
             <div>
                 <p class="px-2 text-xs font-bold tracking-widest text-slate-500 uppercase mb-3">Management</p>
                 <div class="space-y-1">
-                    <a href="#" class="flex items-center justify-between px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                    <a href="{% url 'admin_transaction' %}" class="flex items-center justify-between px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
                         <div class="flex items-center gap-3">
                             <i class="fa-solid fa-file-invoice w-5 text-sm"></i>
                             <span class="text-sm font-medium">Transactions</span>
                         </div>
                         <span class="bg-rose-500/20 text-rose-400 text-xs px-2 py-0.5 rounded-full font-semibold">12</span>
                     </a>
-                    <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                    <a href="{% url 'admin_log_management' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
                         <i class="fa-solid fa-clipboard-list w-5 text-sm"></i>
                         <span class="text-sm font-medium">Log Management</span>
                     </a>
-                    <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                    <a href="{% url 'admin_book_detail' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
                         <i class="fa-solid fa-book w-5 text-sm"></i>
                         <span class="text-sm font-medium">Manage Books</span>
                     </a>
-                    <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-800/50 text-cyan-400 font-medium border border-slate-700/50">
+                    <a href="{% url 'admin_manage_patron' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-800/50 text-cyan-400 font-medium border border-slate-700/50">
                         <i class="fa-solid fa-users w-5 text-sm"></i>
                         <span class="text-sm">Manage Patrons</span>
                     </a>
@@ -126,22 +126,22 @@
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
                     <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Total Patrons</p>
-                    <p class="text-3xl font-bold text-slate-300 mt-2">4,872</p>
+                    <p class="text-3xl font-bold text-slate-300 mt-2">{{ total_patrons }}</p>
                     <p class="text-[10px] text-slate-500 mt-1">Registered users</p>
                 </div>
                 <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
                     <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Active</p>
-                    <p class="text-3xl font-bold text-cyan-400 mt-2">4,210</p>
+                    <p class="text-3xl font-bold text-cyan-400 mt-2">{{ active_patrons }}</p>
                     <p class="text-[10px] text-slate-500 mt-1">With active account</p>
                 </div>
                 <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
                     <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">With Borrows</p>
-                    <p class="text-3xl font-bold text-amber-500/90 mt-2">87</p>
+                    <p class="text-3xl font-bold text-amber-500/90 mt-2">{{ patrons_with_borrows }}</p>
                     <p class="text-[10px] text-slate-500 mt-1">Currently borrowing</p>
                 </div>
                 <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
                     <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">With Overdue</p>
-                    <p class="text-3xl font-bold text-rose-500/90 mt-2">12</p>
+                    <p class="text-3xl font-bold text-rose-500/90 mt-2">{{ patrons_overdue }}</p>
                     <p class="text-[10px] text-slate-500 mt-1">Past due date</p>
                 </div>
             </div>
@@ -157,9 +157,9 @@
                         <button class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-amber-500/90 text-[11px] font-semibold px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors">
                             <i class="fa-solid fa-file-invoice"></i> Generate Report
                         </button>
-                        <button class="bg-cyan-700/30 text-cyan-400 border border-cyan-800/80 hover:bg-cyan-700/50 text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
+                        <a href="{% url 'admin_add_patron' %}" class="inline-flex items-center justify-center bg-cyan-700/30 text-cyan-400 border border-cyan-800/80 hover:bg-cyan-700/50 text-[11px] font-bold px-3 py-1.5 rounded-lg gap-1.5 transition-colors">
                             <i class="fa-solid fa-plus text-[10px]"></i> Add Patron
-                        </button>
+                        </a>
                     </div>
                 </div>
 
@@ -205,137 +205,52 @@
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-slate-800/40 text-xs text-slate-300">
-                            <tr class="hover:bg-slate-800/10 transition-colors">
-                                <td class="py-4 px-6 flex items-center gap-3">
-                                    <div class="w-8 h-8 rounded-full bg-cyan-950 text-cyan-400 border border-cyan-800/60 flex items-center justify-center font-bold text-[11px]">MS</div>
-                                    <div>
-                                        <div class="font-bold text-slate-200">Maria Santos</div>
-                                        <div class="text-[9px] text-slate-500 mt-0.5">Joined Sep 2021</div>
-                                    </div>
-                                </td>
-                                <td class="py-4 px-6 font-mono text-slate-400">2021-10234</td>
-                                <td class="py-4 px-6">
-                                    <span class="bg-blue-950/50 text-blue-400 border border-blue-900/40 px-2 py-0.5 rounded text-[10px] font-bold tracking-wide">Student</span>
-                                </td>
-                                <td class="py-4 px-6 text-slate-400">BS Computer Science</td>
-                                <td class="py-4 px-6 font-mono text-slate-500">m.santos@school.edu</td>
-                                <td class="py-4 px-6 text-center font-semibold text-slate-400"><span class="text-slate-200">3</span> / 0</td>
-                                <td class="py-4 px-6 text-center">
-                                    <span class="inline-block bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded text-[10px] font-bold tracking-wide w-16">Active</span>
-                                </td>
-                                <td class="py-4 px-6 text-center">
-                                    <div class="flex items-center justify-center gap-1.5">
-                                        <button class="w-7 h-7 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 transition-colors"><i class="fa-solid fa-pencil text-[10px]"></i></button>
-                                        <button class="w-7 h-7 rounded border border-slate-800 text-rose-500/70 hover:text-rose-400 hover:bg-rose-950/20 transition-colors"><i class="fa-solid fa-trash-can text-[10px]"></i></button>
-                                    </div>
-                                </td>
-                            </tr>
-                            <tr class="hover:bg-slate-800/10 transition-colors">
-                                <td class="py-4 px-6 flex items-center gap-3">
-                                    <div class="w-8 h-8 rounded-full bg-indigo-950 text-indigo-400 border border-indigo-900/40 flex items-center justify-center font-bold text-[11px]">JD</div>
-                                    <div>
-                                        <div class="font-bold text-slate-200">Juan dela Cruz</div>
-                                        <div class="text-[9px] text-slate-500 mt-0.5">Joined Jan 2022</div>
-                                    </div>
-                                </td>
-                                <td class="py-4 px-6 font-mono text-slate-400">2022-00456</td>
-                                <td class="py-4 px-6">
-                                    <span class="bg-blue-950/50 text-blue-400 border border-blue-900/40 px-2 py-0.5 rounded text-[10px] font-bold tracking-wide">Student</span>
-                                </td>
-                                <td class="py-4 px-6 text-slate-400">BS Information Technology</td>
-                                <td class="py-4 px-6 font-mono text-slate-500">j.delacruz@school.edu</td>
-                                <td class="py-4 px-6 text-center font-semibold text-slate-400"><span class="text-slate-200">1</span> / 0</td>
-                                <td class="py-4 px-6 text-center">
-                                    <span class="inline-block bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded text-[10px] font-bold tracking-wide w-16">Active</span>
-                                </td>
-                                <td class="py-4 px-6 text-center">
-                                    <div class="flex items-center justify-center gap-1.5">
-                                        <button class="w-7 h-7 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 transition-colors"><i class="fa-solid fa-pencil text-[10px]"></i></button>
-                                        <button class="w-7 h-7 rounded border border-slate-800 text-rose-500/70 hover:text-rose-400 hover:bg-rose-950/20 transition-colors"><i class="fa-solid fa-trash-can text-[10px]"></i></button>
-                                    </div>
-                                </td>
-                            </tr>
-                            <tr class="hover:bg-slate-800/10 transition-colors">
-                                <td class="py-4 px-6 flex items-center gap-3">
-                                    <div class="w-8 h-8 rounded-full bg-amber-950 text-amber-500 border border-amber-900/40 flex items-center justify-center font-bold text-[11px]">AR</div>
-                                    <div>
-                                        <div class="font-bold text-slate-200">Ana Reyes</div>
-                                        <div class="text-[9px] text-slate-500 mt-0.5">Joined Jun 2023</div>
-                                    </div>
-                                </td>
-                                <td class="py-4 px-6 font-mono text-slate-400">2023-01122</td>
-                                <td class="py-4 px-6">
-                                    <span class="bg-blue-950/50 text-blue-400 border border-blue-900/40 px-2 py-0.5 rounded text-[10px] font-bold tracking-wide">Student</span>
-                                </td>
-                                <td class="py-4 px-6 text-slate-400">BS Computer Engineering</td>
-                                <td class="py-4 px-6 font-mono text-slate-500">a.reyes@school.edu</td>
-                                <td class="py-4 px-6 text-center font-semibold text-slate-400"><span class="text-slate-200">1</span> / <span class="text-rose-400 font-bold">1</span></td>
-                                <td class="py-4 px-6 text-center">
-                                    <span class="inline-block bg-rose-500/10 text-rose-400 border border-rose-500/20 px-2 py-0.5 rounded text-[10px] font-bold tracking-wide w-16">Overdue</span>
-                                </td>
-                                <td class="py-4 px-6 text-center">
-                                    <div class="flex items-center justify-center gap-1.5">
-                                        <button class="w-7 h-7 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 transition-colors"><i class="fa-solid fa-pencil text-[10px]"></i></button>
-                                        <button class="w-7 h-7 rounded border border-slate-800 text-rose-500/70 hover:text-rose-400 hover:bg-rose-950/20 transition-colors"><i class="fa-solid fa-trash-can text-[10px]"></i></button>
-                                    </div>
-                                </td>
-                            </tr>
-                            <tr class="hover:bg-slate-800/10 transition-colors">
-                                <td class="py-4 px-6 flex items-center gap-3">
-                                    <div class="w-8 h-8 rounded-full bg-emerald-950 text-emerald-400 border border-emerald-900/40 flex items-center justify-center font-bold text-[11px]">Dr</div>
-                                    <div>
-                                        <div class="font-bold text-slate-200">Dr. Ramon Flores</div>
-                                        <div class="text-[9px] text-slate-500 mt-0.5">Joined Mar 2018</div>
-                                    </div>
-                                </td>
-                                <td class="py-4 px-6 font-mono text-slate-400">F-2018-0042</td>
-                                <td class="py-4 px-6">
-                                    <span class="bg-amber-950/50 text-amber-400 border border-amber-900/40 px-2 py-0.5 rounded text-[10px] font-bold tracking-wide">Faculty</span>
-                                </td>
-                                <td class="py-4 px-6 text-slate-400">Dept. of Computer Science</td>
-                                <td class="py-4 px-6 font-mono text-slate-500">r.flores@school.edu</td>
-                                <td class="py-4 px-6 text-center font-semibold text-slate-400">0 / 0</td>
-                                <td class="py-4 px-6 text-center">
-                                    <span class="inline-block bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded text-[10px] font-bold tracking-wide w-16">Active</span>
-                                </td>
-                                <td class="py-4 px-6 text-center">
-                                    <div class="flex items-center justify-center gap-1.5">
-                                        <button class="w-7 h-7 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 transition-colors"><i class="fa-solid fa-pencil text-[10px]"></i></button>
-                                        <button class="w-7 h-7 rounded border border-slate-800 text-rose-500/70 hover:text-rose-400 hover:bg-rose-950/20 transition-colors"><i class="fa-solid fa-trash-can text-[10px]"></i></button>
-                                    </div>
-                                </td>
-                            </tr>
-                            <tr class="hover:bg-slate-800/10 transition-colors">
-                                <td class="py-4 px-6 flex items-center gap-3">
-                                    <div class="w-8 h-8 rounded-full bg-slate-800 text-slate-400 border border-slate-700/60 flex items-center justify-center font-bold text-[11px]">LT</div>
-                                    <div>
-                                        <div class="font-bold text-slate-200">Liza Torres</div>
-                                        <div class="text-[9px] text-slate-500 mt-0.5">Joined Aug 2021</div>
-                                    </div>
-                                </td>
-                                <td class="py-4 px-6 font-mono text-slate-400">2021-05567</td>
-                                <td class="py-4 px-6">
-                                    <span class="bg-blue-950/50 text-blue-400 border border-blue-900/40 px-2 py-0.5 rounded text-[10px] font-bold tracking-wide">Student</span>
-                                </td>
-                                <td class="py-4 px-6 text-slate-400">BS Electronics Engineering</td>
-                                <td class="py-4 px-6 font-mono text-slate-500">l.torres@school.edu</td>
-                                <td class="py-4 px-6 text-center font-semibold text-slate-400"><span class="text-slate-200">2</span> / 0</td>
-                                <td class="py-4 px-6 text-center">
-                                    <span class="inline-block bg-slate-800/50 text-slate-500 border border-slate-700/40 px-2 py-0.5 rounded text-[10px] font-bold tracking-wide w-16">Inactive</span>
-                                </td>
-                                <td class="py-4 px-6 text-center">
-                                    <div class="flex items-center justify-center gap-1.5">
-                                        <button class="w-7 h-7 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 transition-colors"><i class="fa-solid fa-pencil text-[10px]"></i></button>
-                                        <button class="w-7 h-7 rounded border border-slate-800 text-rose-500/70 hover:text-rose-400 hover:bg-rose-950/20 transition-colors"><i class="fa-solid fa-trash-can text-[10px]"></i></button>
-                                    </div>
-                                </td>
-                            </tr>
+                            {% for patron in patrons %}
+                                <tr class="hover:bg-slate-800/10 transition-colors">
+                                    <td class="py-4 px-6 flex items-center gap-3">
+                                        <div class="w-8 h-8 rounded-full bg-cyan-950 text-cyan-400 border border-cyan-800/60 flex items-center justify-center font-bold text-[11px]">{{ patron.fullname|slice:':1'|upper }}</div>
+                                        <div>
+                                            <div class="font-bold text-slate-200">{{ patron.fullname }}</div>
+                                            <div class="text-[9px] text-slate-500 mt-0.5">Joined {{ patron.registration_date|date:'M Y' }}</div>
+                                        </div>
+                                    </td>
+                                    <td class="py-4 px-6 font-mono text-slate-400">{{ patron.patron_id }}</td>
+                                    <td class="py-4 px-6">
+                                        <span class="bg-blue-950/50 text-blue-400 border border-blue-900/40 px-2 py-0.5 rounded text-[10px] font-bold tracking-wide">{{ patron.patron_type|capfirst }}</span>
+                                    </td>
+                                    <td class="py-4 px-6 text-slate-400">{{ patron.address }}</td>
+                                    <td class="py-4 px-6 font-mono text-slate-500">{{ patron.email }}</td>
+                                    <td class="py-4 px-6 text-center font-semibold text-slate-400">
+                                        <span class="text-slate-200">{{ patron.active_borrows }}</span> / <span class="text-rose-400">{{ patron.overdue_count }}</span>
+                                    </td>
+                                    <td class="py-4 px-6 text-center">
+                                        {% if patron.account_status == 'Active' %}
+                                            <span class="inline-block bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded text-[10px] font-bold tracking-wide w-16">Active</span>
+                                        {% else %}
+                                            <span class="inline-block bg-slate-800/50 text-slate-400 border border-slate-700/40 px-2 py-0.5 rounded text-[10px] font-bold tracking-wide w-16">{{ patron.account_status }}</span>
+                                        {% endif %}
+                                    </td>
+                                    <td class="py-4 px-6 text-center">
+                                        <div class="flex items-center justify-center gap-1.5">
+                                            <a href="{% url 'admin_edit_patron' patron.patron_id %}" class="w-7 h-7 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 transition-colors flex items-center justify-center"><i class="fa-solid fa-pencil text-[10px]"></i></a>
+                                            <form method="post" action="{% url 'admin_delete_patron' patron.patron_id %}" class="inline-block">
+                                                {% csrf_token %}
+                                                <button type="submit" class="w-7 h-7 rounded border border-slate-800 text-rose-500/70 hover:text-rose-400 hover:bg-rose-950/20 transition-colors flex items-center justify-center"><i class="fa-solid fa-trash-can text-[10px]"></i></button>
+                                            </form>
+                                        </div>
+                                    </td>
+                                </tr>
+                            {% empty %}
+                                <tr>
+                                    <td colspan="8" class="py-6 px-6 text-center text-slate-500">No patrons found.</td>
+                                </tr>
+                            {% endfor %}
                         </tbody>
                     </table>
                 </div>
 
                 <div class="px-5 py-4 border-t border-slate-800/60 flex items-center justify-between text-xs text-slate-500 bg-slate-900/5">
-                    <span class="font-medium">Showing <span class="text-slate-400">1-5</span> of <span class="text-slate-400">4,872</span> patrons</span>
+                    <span class="font-medium">Showing <span class="text-slate-400">{{ patrons|length }}</span> of <span class="text-slate-400">{{ total_patrons }}</span> patrons</span>
                     
                     <div class="flex items-center gap-1">
                         <button class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors cursor-not-allowed" disabled>&larr; Prev</button>

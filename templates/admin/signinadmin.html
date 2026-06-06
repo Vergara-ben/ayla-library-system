@@ -455,14 +455,15 @@
             <h2 class="signin-title">Admin Sign In</h2>
             <p class="signin-subtitle">Enter your admin credentials to continue</p>
 
-            <form id="signinForm" onsubmit="event.preventDefault();">
+            <form id="signinForm" method="POST" action="{% url 'admin_login' %}">
+                {% csrf_token %}
                 <div class="form-group">
                     <label class="form-label" for="admin-id">Admin ID or Email</label>
                     <div class="input-wrapper">
                         <span class="input-wrapper-icon input-icon">
                             👤
                         </span>
-                        <input type="email" id="admin-id" class="form-input" placeholder="admin@school.edu.ph" required>
+                        <input type="email" id="admin-id" name="email" class="form-input" placeholder="admin@school.edu.ph" required>
                     </div>
                 </div>
 
@@ -470,7 +471,7 @@
                     <label class="form-label" for="password">Password</label>
                     <div class="input-wrapper">
                         <span class="input-icon">🔒</span>
-                        <input type="password" id="password" class="form-input" placeholder="Enter admin password" required>
+                        <input type="password" id="password" name="password" class="form-input" placeholder="Enter admin password" required>
                     </div>
                 </div>
 
@@ -491,9 +492,11 @@
                 </button>
             </form>
 
-            <div id="errorMessage" style="background-color: rgba(220, 38, 38, 0.1); border: 1px solid rgba(220, 38, 38, 0.3); color: #fca5a5; padding: 12px; border-radius: 8px; margin-top: 16px; font-size: 13px; display: none;"></div>
+            <div id="errorMessage" style="background-color: rgba(220, 38, 38, 0.1); border: 1px solid rgba(220, 38, 38, 0.3); color: #fca5a5; padding: 12px; border-radius: 8px; margin-top: 16px; font-size: 13px; display: {% if error %}block{% else %}none{% endif %};">
+                {{ error }}
+            </div>
 
-            <p class="switch-portal">Not an admin? <a href="#">Go to patron login &rarr;</a></p>
+            <p class="switch-portal">Not an admin? <a href="{% url 'patron_login' %}">Go to patron login &rarr;</a></p>
         </div>
 
         <div class="notice-box">
@@ -505,33 +508,4 @@
     </aside>
 
 </body>
-<script>
-document.addEventListener('DOMContentLoaded', () => {
-  const form = document.getElementById('signinForm');
-  const errorMsg = document.getElementById('errorMessage');
-
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-
-    const email = document.getElementById('admin-id').value;
-    const password = document.getElementById('password').value;
-
-    const user = await adminSignIn(email, password);
-    
-    if (user) {
-      showNotification('success', 'Sign in successful!');
-    setTimeout(() => window.location.href = "{% url 'admin_dashboard' %}", 1000);
-    } else {
-      showNotification('error', 'Invalid email or password. Please try again.');
-    }
-  });
-
-  // Check if already signed in
-  getCurrentUser().then(user => {
-        if (user) {
-            window.location.href = "{% url 'admin_dashboard' %}";
-        }
-  });
-});
-</script>
 </html>
