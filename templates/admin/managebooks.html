@@ -16,10 +16,12 @@
             --bg-main: #060d13;
             --bg-sidebar: #0b151e;
             --bg-card: #0d1b26;
+            --bg-modal: #0f2230;
             --bg-input: #112535;
             --text-primary: #e2e8f0;
             --text-muted: #64748b;
             --border-color: #1e293b;
+            --border-modal: #1d354a;
         }
 
         body {
@@ -157,7 +159,7 @@
                         <button class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-amber-500/90 text-[11px] font-semibold px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors">
                             <i class="fa-solid fa-file-invoice"></i> Generate Report
                         </button>
-                        <button class="bg-cyan-700/30 text-cyan-400 border border-cyan-800/80 hover:bg-cyan-700/50 text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
+                        <button onclick="openAddModal()" class="bg-cyan-700/30 text-cyan-400 border border-cyan-800/80 hover:bg-cyan-700/50 text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
                             <i class="fa-solid fa-plus text-[10px]"></i> Add Book
                         </button>
                     </div>
@@ -216,7 +218,7 @@
                                 </td>
                                 <td class="py-4 px-6 text-slate-300">{{ book.author }}</td>
                                 <td class="py-4 px-6 font-mono text-slate-400">{{ book.ISBN|default:"-" }}</td>
-                                <td class="py-4 px-6 font-mono text-slate-400">{{ book.section.name|default:"-" }} {{ book.shelf_level.name|default:"" }}</td>
+                                <td class="py-4 px-6 font-mono text-slate-400">{{ book.section.name|default:"-" }} {{ book.shelf_level.label|default:"" }}</td>
                                 <td class="py-4 px-6">
                                     <span class="bg-cyan-950/60 text-cyan-400 border border-cyan-900/40 px-1.5 py-0.5 rounded text-[9px] font-bold tracking-wide uppercase">{{ book.genre|default:"General" }}</span>
                                 </td>
@@ -265,6 +267,280 @@
 
         </main>
     </div>
+
+    <!-- Add Book Modal -->
+    <div id="addBookModal" class="hidden absolute inset-0 bg-black/60 z-40 flex items-center justify-center p-4 overflow-y-auto">
+        <div class="w-full max-w-2xl rounded-2xl border p-6 flex flex-col gap-5 shadow-2xl relative my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color);">
+            <div class="flex items-center justify-between">
+                <h3 class="text-base font-bold text-slate-200 tracking-wide">Add New Book</h3>
+                <button type="button" onclick="closeAddModal()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40 transition-colors">
+                    <i class="fa-solid fa-xmark text-sm"></i>
+                </button>
+            </div>
+            <form id="addBookForm" method="post" class="space-y-4 text-xs">
+                {% csrf_token %}
+                {% if error %}
+                    <div class="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">{{ error }}</div>
+                {% endif %}
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div class="space-y-1.5">
+                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Title</label>
+                        <input type="text" name="title" id="addTitle" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" required>
+                    </div>
+                    <div class="space-y-1.5">
+                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Author</label>
+                        <input type="text" name="author" id="addAuthor" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" required>
+                    </div>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div class="space-y-1.5">
+                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Publication Year</label>
+                        <input type="number" name="publication_year" id="addPublicationYear" min="1000" max="2099" placeholder="e.g. 2023" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                    </div>
+                    <div class="space-y-1.5">
+                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">ISBN</label>
+                        <input type="text" name="ISBN" id="addIsbn" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                    </div>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div class="space-y-1.5">
+                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Genre</label>
+                        <input type="text" name="genre" id="addGenre" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                    </div>
+                    <div class="space-y-1.5">
+                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Cover Image URL</label>
+                        <input type="text" name="cover_img_url" id="addCoverImgUrl" placeholder="https://example.com/image.jpg" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                    </div>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div class="space-y-1.5">
+                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Status</label>
+                        <select name="status" id="addStatus" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium appearance-none pr-10 cursor-pointer" style="background-color: var(--bg-input);">
+                            <option value="Available">Available</option>
+                            <option value="Borrowed">Borrowed</option>
+                            <option value="Overdue">Overdue</option>
+                            <option value="Lost">Lost</option>
+                            <option value="Being Read">Being Read</option>
+                            <option value="Donated">Donated</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div class="space-y-1.5">
+                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Section</label>
+                        <div class="relative">
+                            <select name="section" id="addSection" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium appearance-none pr-10 cursor-pointer" style="background-color: var(--bg-input);">
+                                <option value="">Select section...</option>
+                                {% for section in sections %}
+                                    <option value="{{ section.section_id }}">{{ section.name }}</option>
+                                {% endfor %}
+                            </select>
+                            <i class="fa-solid fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 text-[10px] pointer-events-none"></i>
+                        </div>
+                    </div>
+                    <div class="space-y-1.5">
+                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Shelf Level</label>
+                        <div class="relative">
+                            <select name="shelf_level" id="addShelfLevel" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium appearance-none pr-10 cursor-pointer" style="background-color: var(--bg-input);">
+                                <option value="">Select shelf level...</option>
+                                {% for shelf_level in shelf_levels %}
+                                    <option value="{{ shelf_level.shelf_level_id }}">{{ shelf_level.label }}</option>
+                                {% endfor %}
+                            </select>
+                            <i class="fa-solid fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 text-[10px] pointer-events-none"></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="pt-4 flex items-center justify-end gap-3">
+                    <button type="button" onclick="closeAddModal()" class="px-5 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:text-slate-100 hover:bg-slate-800/40 font-semibold tracking-wide transition-colors min-w-[100px]">
+                        Cancel
+                    </button>
+                    <button type="submit" class="bg-cyan-700 hover:bg-cyan-600 text-white font-bold px-5 py-2.5 rounded-lg flex items-center gap-2 tracking-wide transition-colors shadow-md">
+                        <i class="fa-solid fa-check text-xs"></i> Add Book
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Edit Book Modal -->
+    <div id="editBookModal" class="hidden absolute inset-0 bg-black/60 z-40 flex items-center justify-center p-4 overflow-y-auto">
+        <div class="w-full max-w-2xl rounded-2xl border p-6 flex flex-col gap-5 shadow-2xl relative my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color);">
+            <div class="flex items-center justify-between">
+                <h3 class="text-base font-bold text-slate-200 tracking-wide">Edit Book</h3>
+                <button type="button" onclick="closeEditModal()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40 transition-colors">
+                    <i class="fa-solid fa-xmark text-sm"></i>
+                </button>
+            </div>
+            <form id="editBookForm" method="post" class="space-y-4 text-xs">
+                {% csrf_token %}
+                <input type="hidden" name="book_id" id="editBookId">
+                {% if error %}
+                    <div class="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">{{ error }}</div>
+                {% elif success %}
+                    <div class="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">{{ success }}</div>
+                {% endif %}
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div class="space-y-1.5">
+                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Title</label>
+                        <input type="text" name="title" id="editTitle" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" required>
+                    </div>
+                    <div class="space-y-1.5">
+                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Author</label>
+                        <input type="text" name="author" id="editAuthor" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" required>
+                    </div>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div class="space-y-1.5">
+                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Publication Year</label>
+                        <input type="number" name="publication_year" id="editPublicationYear" min="1000" max="2099" placeholder="e.g. 2023" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                    </div>
+                    <div class="space-y-1.5">
+                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">ISBN</label>
+                        <input type="text" name="ISBN" id="editIsbn" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                    </div>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div class="space-y-1.5">
+                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Genre</label>
+                        <input type="text" name="genre" id="editGenre" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                    </div>
+                    <div class="space-y-1.5">
+                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Cover Image URL</label>
+                        <input type="text" name="cover_img_url" id="editCoverImgUrl" placeholder="https://example.com/image.jpg" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                    </div>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div class="space-y-1.5">
+                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Status</label>
+                        <select name="status" id="editStatus" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium appearance-none pr-10 cursor-pointer" style="background-color: var(--bg-input);">
+                            <option value="Available">Available</option>
+                            <option value="Borrowed">Borrowed</option>
+                            <option value="Overdue">Overdue</option>
+                            <option value="Lost">Lost</option>
+                            <option value="Being Read">Being Read</option>
+                            <option value="Donated">Donated</option>
+                        </select>
+                    </div>
+                    <div class="space-y-1.5">
+                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Section</label>
+                        <div class="relative">
+                            <select name="section" id="editSection" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium appearance-none pr-10 cursor-pointer" style="background-color: var(--bg-input);">
+                                <option value="">Select section...</option>
+                                {% for section in sections %}
+                                    <option value="{{ section.section_id }}">{{ section.name }}</option>
+                                {% endfor %}
+                            </select>
+                            <i class="fa-solid fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 text-[10px] pointer-events-none"></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="space-y-1.5">
+                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Shelf Level</label>
+                    <div class="relative">
+                        <select name="shelf_level" id="editShelfLevel" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium appearance-none pr-10 cursor-pointer" style="background-color: var(--bg-input);">
+                            <option value="">Select shelf level...</option>
+                            {% for shelf_level in shelf_levels %}
+                                <option value="{{ shelf_level.shelf_level_id }}">{{ shelf_level.label }}</option>
+                            {% endfor %}
+                        </select>
+                        <i class="fa-solid fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 text-[10px] pointer-events-none"></i>
+                    </div>
+                </div>
+                <div class="pt-4 flex items-center justify-end gap-3">
+                    <button type="button" onclick="closeEditModal()" class="px-5 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:text-slate-100 hover:bg-slate-800/40 font-semibold tracking-wide transition-colors min-w-[100px]">
+                        Cancel
+                    </button>
+                    <button type="submit" class="bg-cyan-700 hover:bg-cyan-600 text-white font-bold px-5 py-2.5 rounded-lg flex items-center gap-2 tracking-wide transition-colors shadow-md">
+                        <i class="fa-solid fa-check text-xs"></i> Save Book
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        function openAddModal() {
+            document.getElementById('addBookModal').classList.remove('hidden');
+            document.getElementById('addBookForm').reset();
+        }
+
+        function closeAddModal() {
+            document.getElementById('addBookModal').classList.add('hidden');
+        }
+
+        function closeEditModal() {
+            window.location.href = '{% url 'admin_management' %}';
+        }
+
+        document.getElementById('addBookForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const formData = new FormData(this);
+            
+            fetch('/admin-portal/add-book/', {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    window.location.href = '{% url 'admin_management' %}';
+                } else {
+                    alert(data.error || 'An error occurred');
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('An error occurred while adding the book');
+            });
+        });
+
+        document.getElementById('editBookForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const formData = new FormData(this);
+            const bookId = formData.get('book_id');
+            
+            fetch(`/admin-portal/edit-book/${bookId}/`, {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    window.location.href = '{% url 'admin_management' %}';
+                } else {
+                    alert(data.error || 'An error occurred');
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('An error occurred while saving the book');
+            });
+        });
+
+        // Show modal if editing mode is active
+        {% if book %}
+            document.addEventListener('DOMContentLoaded', function() {
+                document.getElementById('editBookId').value = '{{ book.book_id }}';
+                document.getElementById('editTitle').value = '{{ initial.title|default:"" }}';
+                document.getElementById('editAuthor').value = '{{ initial.author|default:"" }}';
+                document.getElementById('editPublicationYear').value = '{{ initial.publication_year|default:"" }}';
+                document.getElementById('editIsbn').value = '{{ initial.ISBN|default:"" }}';
+                document.getElementById('editGenre').value = '{{ initial.genre|default:"" }}';
+                document.getElementById('editCoverImgUrl').value = '{{ initial.cover_img_url|default:"" }}';
+                document.getElementById('editStatus').value = '{{ initial.status|default:"Available" }}';
+                document.getElementById('editSection').value = '{{ initial.section_id|default:"" }}';
+                document.getElementById('editShelfLevel').value = '{{ initial.shelf_level_id|default:"" }}';
+                document.getElementById('editBookModal').classList.remove('hidden');
+            });
+        {% endif %}
+    </script>
 
 </body>
 </html>

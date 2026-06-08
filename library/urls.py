@@ -17,6 +17,7 @@ urlpatterns = [
     path('admin-portal/signin/', views.admin_signin, name='admin_signin'),
     path('admin-portal/dashboard/', views.admin_dashboard, name='admin_dashboard_admin'),
     path('admin-portal/management/', views.admin_management, name='admin_management'),
+    path('admin-portal/add-book/', views.admin_add_book, name='admin_add_book'),
     path('admin-portal/add-patron/', views.admin_add_patron, name='admin_add_patron'),
     path('admin-portal/manage-patron/', views.admin_manage_patron, name='admin_manage_patron'),
     path('admin-portal/edit-patron/<int:patron_id>/', views.admin_edit_patron, name='admin_edit_patron'),

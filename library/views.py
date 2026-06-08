@@ -10,7 +10,7 @@ from .auth_utils import (
     patron_login_required,
     admin_login_required,
 )
-from .models import Book, Patron, PatronLog, Transaction, User
+from .models import Book, Patron, PatronLog, Transaction, User, Section, ShelfLevel
 
 # Patron views
 def patron_login(request):
@@ -204,6 +204,8 @@ def admin_management(request):
     total_copies = total_books
     available_count = books.filter(status='Available').count()
     borrowed_count = books.filter(status='Borrowed').count()
+    sections = Section.objects.all()
+    shelf_levels = ShelfLevel.objects.all()
 
     context = {
         'books': books,
@@ -211,6 +213,76 @@ def admin_management(request):
         'total_copies': total_copies,
         'available_count': available_count,
         'borrowed_count': borrowed_count,
+        'sections': sections,
+        'shelf_levels': shelf_levels,
+    }
+    return render(request, 'admin/managebooks.html', context)
+
+
+@admin_login_required
+def admin_add_book(request):
+    error = None
+
+    if request.method == 'POST':
+        title = request.POST.get('title', '').strip()
+        author = request.POST.get('author', '').strip()
+        isbn = request.POST.get('ISBN', '').strip()
+        genre = request.POST.get('genre', '').strip()
+        status = request.POST.get('status', 'Available').strip()
+        section_id = request.POST.get('section', '').strip()
+        shelf_level_id = request.POST.get('shelf_level', '').strip()
+        publication_year = request.POST.get('publication_year', '').strip()
+        cover_img_url = request.POST.get('cover_img_url', '').strip()
+
+        if not title or not author:
+            error = 'Title and author are required.'
+            if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                from django.http import JsonResponse
+                return JsonResponse({'success': False, 'error': error})
+        else:
+            section = None
+            shelf_level = None
+
+            if section_id:
+                section = Section.objects.filter(section_id=section_id).first()
+            if shelf_level_id:
+                shelf_level = ShelfLevel.objects.filter(shelf_level_id=shelf_level_id).first()
+
+            Book.objects.create(
+                title=title,
+                author=author,
+                ISBN=isbn,
+                genre=genre,
+                status=status or 'Available',
+                section=section,
+                shelf_level=shelf_level,
+                publication_year=int(publication_year) if publication_year else None,
+                cover_img_url=cover_img_url if cover_img_url else None
+            )
+
+            if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                from django.http import JsonResponse
+                return JsonResponse({'success': True, 'message': 'Book added successfully.'})
+            return redirect('admin_management')
+
+    # Get books list context for managebooks.html
+    books = Book.objects.select_related('section', 'shelf_level').order_by('title')
+    total_books = books.count()
+    total_copies = total_books
+    available_count = books.filter(status='Available').count()
+    borrowed_count = books.filter(status='Borrowed').count()
+    sections = Section.objects.all()
+    shelf_levels = ShelfLevel.objects.all()
+
+    context = {
+        'books': books,
+        'total_books': total_books,
+        'total_copies': total_copies,
+        'available_count': available_count,
+        'borrowed_count': borrowed_count,
+        'sections': sections,
+        'shelf_levels': shelf_levels,
+        'error': error,
     }
     return render(request, 'admin/managebooks.html', context)
 
@@ -221,44 +293,77 @@ def admin_add_patron(request):
     initial = {}
 
     if request.method == 'POST':
-        first_name = request.POST.get('first_name', '').strip()
-        last_name = request.POST.get('last_name', '').strip()
+        fullname = request.POST.get('fullname', '').strip()
         patron_type = request.POST.get('patron_type', '').strip()
         email = request.POST.get('email', '').strip()
-        contact_number = request.POST.get('contact', '').strip()
-        course_department = request.POST.get('course_department', '').strip()
-        status = request.POST.get('status', 'Active').strip()
+        contact_number = request.POST.get('contact_number', '').strip()
+        address = request.POST.get('address', '').strip()
+        qr_code = request.POST.get('qr_code', '').strip()
+        password = request.POST.get('password', '').strip()
+        account_status = request.POST.get('account_status', 'Active').strip()
 
         initial = {
-            'first_name': first_name,
-            'last_name': last_name,
+            'fullname': fullname,
             'patron_type': patron_type,
             'email': email,
-            'contact': contact_number,
-            'course_department': course_department,
-            'status': status,
+            'contact_number': contact_number,
+            'address': address,
+            'qr_code': qr_code,
+            'account_status': account_status,
         }
 
-        if not all([first_name, last_name, patron_type, email]):
-            error = 'First name, last name, patron type, and email are required.'
+        if not all([fullname, patron_type, email, password]):
+            error = 'Full name, patron type, email, and password are required.'
         elif Patron.objects.filter(email=email).exists():
             error = 'A patron with that email already exists.'
         else:
-            fullname = f"{first_name} {last_name}"
-            hashed_password = hash_password('AylaDefault123!')
+            hashed_password = hash_password(password)
+            if not qr_code:
+                qr_code = str(uuid4())
             Patron.objects.create(
                 fullname=fullname,
                 email=email,
                 password_hash=hashed_password,
                 patron_type=patron_type,
                 contact_number=contact_number,
-                address=course_department,
-                qr_code=str(uuid4()),
-                account_status=status or 'Active',
+                address=address,
+                qr_code=qr_code,
+                account_status=account_status or 'Active',
             )
             return redirect('admin_manage_patron')
 
-    return render(request, 'admin/addpatron.html', {'error': error, 'initial': initial})
+    # Get patron list context
+    patrons = Patron.objects.annotate(
+        active_borrows=Count(
+            'transaction',
+            filter=Q(transaction__transaction_type='Borrow', transaction__return_date__isnull=True)
+        ),
+        overdue_count=Count(
+            'transaction',
+            filter=Q(transaction__overdue_flag=True)
+        ),
+        borrow_count=Count(
+            'transaction',
+            filter=Q(transaction__transaction_type='Borrow')
+        ),
+    ).order_by('-registration_date')
+
+    total_patrons = patrons.count()
+    active_patrons = Patron.objects.filter(account_status='Active').count()
+    patrons_with_borrows = patrons.filter(active_borrows__gt=0).count()
+    patrons_overdue = patrons.filter(overdue_count__gt=0).count()
+
+    context = {
+        'patrons': patrons,
+        'total_patrons': total_patrons,
+        'active_patrons': active_patrons,
+        'patrons_with_borrows': patrons_with_borrows,
+        'patrons_overdue': patrons_overdue,
+        'add_mode': True,
+        'error': error,
+        'initial': initial,
+    }
+    return render(request, 'admin/managepatron.html', context)
 
 
 @admin_login_required
@@ -301,56 +406,86 @@ def admin_edit_patron(request, patron_id):
 
     error = None
     success = None
-    first_name, last_name = patron.fullname.split(' ', 1) if ' ' in patron.fullname else (patron.fullname, '')
     initial = {
-        'first_name': first_name,
-        'last_name': last_name,
+        'fullname': patron.fullname,
         'patron_type': patron.patron_type,
         'email': patron.email,
-        'contact': patron.contact_number,
-        'course_department': patron.address,
-        'status': patron.account_status,
+        'contact_number': patron.contact_number,
+        'address': patron.address,
+        'qr_code': patron.qr_code,
+        'account_status': patron.account_status,
     }
 
     if request.method == 'POST':
-        first_name = request.POST.get('first_name', '').strip()
-        last_name = request.POST.get('last_name', '').strip()
+        fullname = request.POST.get('fullname', '').strip()
         patron_type = request.POST.get('patron_type', '').strip()
         email = request.POST.get('email', '').strip()
-        contact_number = request.POST.get('contact', '').strip()
-        course_department = request.POST.get('course_department', '').strip()
-        status = request.POST.get('status', 'Active').strip()
+        contact_number = request.POST.get('contact_number', '').strip()
+        address = request.POST.get('address', '').strip()
+        qr_code = request.POST.get('qr_code', '').strip()
+        password = request.POST.get('password', '').strip()
+        account_status = request.POST.get('account_status', 'Active').strip()
 
-        if not all([first_name, last_name, patron_type, email]):
-            error = 'First name, last name, patron type, and email are required.'
+        if not all([fullname, patron_type, email]):
+            error = 'Full name, patron type, and email are required.'
         elif Patron.objects.exclude(patron_id=patron_id).filter(email=email).exists():
             error = 'A different patron already uses that email.'
         else:
-            patron.fullname = f"{first_name} {last_name}"
+            patron.fullname = fullname
             patron.patron_type = patron_type
             patron.email = email
             patron.contact_number = contact_number
-            patron.address = course_department
-            patron.account_status = status or 'Active'
+            patron.address = address
+            patron.qr_code = qr_code if qr_code else patron.qr_code
+            patron.account_status = account_status or 'Active'
+            if password:
+                patron.password_hash = hash_password(password)
             patron.save()
             success = 'Patron updated successfully.'
             initial.update({
-                'first_name': first_name,
-                'last_name': last_name,
+                'fullname': fullname,
                 'patron_type': patron_type,
                 'email': email,
-                'contact': contact_number,
-                'course_department': course_department,
-                'status': status,
+                'contact_number': contact_number,
+                'address': address,
+                'qr_code': qr_code,
+                'account_status': account_status,
             })
 
+    # Get patron list context
+    patrons = Patron.objects.annotate(
+        active_borrows=Count(
+            'transaction',
+            filter=Q(transaction__transaction_type='Borrow', transaction__return_date__isnull=True)
+        ),
+        overdue_count=Count(
+            'transaction',
+            filter=Q(transaction__overdue_flag=True)
+        ),
+        borrow_count=Count(
+            'transaction',
+            filter=Q(transaction__transaction_type='Borrow')
+        ),
+    ).order_by('-registration_date')
+
+    total_patrons = patrons.count()
+    active_patrons = Patron.objects.filter(account_status='Active').count()
+    patrons_with_borrows = patrons.filter(active_borrows__gt=0).count()
+    patrons_overdue = patrons.filter(overdue_count__gt=0).count()
+
     context = {
+        'patrons': patrons,
+        'total_patrons': total_patrons,
+        'active_patrons': active_patrons,
+        'patrons_with_borrows': patrons_with_borrows,
+        'patrons_overdue': patrons_overdue,
+        'edit_mode': True,
         'patron': patron,
         'error': error,
         'success': success,
         'initial': initial,
     }
-    return render(request, 'admin/editpatron.html', context)
+    return render(request, 'admin/managepatron.html', context)
 
 
 @admin_login_required
@@ -371,45 +506,83 @@ def admin_edit_book(request, book_id):
     initial = {
         'title': book.title,
         'author': book.author,
-        'isbn': book.ISBN,
+        'ISBN': book.ISBN,
+        'publication_year': book.publication_year,
         'genre': book.genre,
+        'cover_img_url': book.cover_img_url,
         'status': book.status,
-        'section': book.section.name if book.section else '',
-        'shelf_level': book.shelf_level.name if book.shelf_level else '',
+        'section_id': book.section.section_id if book.section else '',
+        'shelf_level_id': book.shelf_level.shelf_level_id if book.shelf_level else '',
     }
 
     if request.method == 'POST':
         title = request.POST.get('title', '').strip()
         author = request.POST.get('author', '').strip()
-        isbn = request.POST.get('isbn', '').strip()
+        isbn = request.POST.get('ISBN', '').strip()
+        publication_year = request.POST.get('publication_year', '').strip()
         genre = request.POST.get('genre', '').strip()
+        cover_img_url = request.POST.get('cover_img_url', '').strip()
         status = request.POST.get('status', '').strip()
+        section_id = request.POST.get('section', '').strip()
+        shelf_level_id = request.POST.get('shelf_level', '').strip()
 
         if not title or not author:
             error = 'Title and author are required.'
+            if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                from django.http import JsonResponse
+                return JsonResponse({'success': False, 'error': error})
         else:
             book.title = title
             book.author = author
             book.ISBN = isbn
+            book.publication_year = int(publication_year) if publication_year else None
             book.genre = genre
+            book.cover_img_url = cover_img_url if cover_img_url else None
             book.status = status or book.status
+            if section_id:
+                book.section = Section.objects.filter(section_id=section_id).first()
+            if shelf_level_id:
+                book.shelf_level = ShelfLevel.objects.filter(shelf_level_id=shelf_level_id).first()
             book.save()
             success = 'Book details updated successfully.'
             initial.update({
                 'title': title,
                 'author': author,
-                'isbn': isbn,
+                'ISBN': isbn,
+                'publication_year': publication_year,
                 'genre': genre,
+                'cover_img_url': cover_img_url,
                 'status': status,
+                'section_id': section_id,
+                'shelf_level_id': shelf_level_id,
             })
+            if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                from django.http import JsonResponse
+                return JsonResponse({'success': True, 'message': success})
+
+    # Get books list context for managebooks.html
+    books = Book.objects.select_related('section', 'shelf_level').order_by('title')
+    total_books = books.count()
+    total_copies = total_books
+    available_count = books.filter(status='Available').count()
+    borrowed_count = books.filter(status='Borrowed').count()
+    sections = Section.objects.all()
+    shelf_levels = ShelfLevel.objects.all()
 
     context = {
+        'books': books,
+        'total_books': total_books,
+        'total_copies': total_copies,
+        'available_count': available_count,
+        'borrowed_count': borrowed_count,
+        'sections': sections,
+        'shelf_levels': shelf_levels,
         'book': book,
         'error': error,
         'success': success,
         'initial': initial,
     }
-    return render(request, 'admin/editbook.html', context)
+    return render(request, 'admin/managebooks.html', context)
 
 
 @admin_login_required
