@@ -23,6 +23,7 @@ urlpatterns = [
     path('admin-portal/delete-patron/<int:patron_id>/', views.admin_delete_patron, name='admin_delete_patron'),
     path('admin-portal/book-detail/', views.admin_book_detail, name='admin_book_detail'),
     path('admin-portal/edit-book/<int:book_id>/', views.admin_edit_book, name='admin_edit_book'),
+    path('admin-portal/delete-book/<int:book_id>/', views.admin_delete_book, name='admin_delete_book'),
     path('admin-portal/qr-scanner/', views.admin_qr_scanner, name='admin_qr_scanner'),
     path('admin-portal/transaction/', views.admin_transaction, name='admin_transaction'),
     path('admin-portal/transaction/<int:transaction_id>/action/', views.admin_transaction_action, name='admin_transaction_action'),

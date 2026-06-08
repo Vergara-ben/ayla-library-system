@@ -126,19 +126,19 @@ def admin_login(request):
         try:
             admin = User.objects.get(email=email)
         except User.DoesNotExist:
-            return render(request, 'admin/signinadmin.html', {'error': 'Invalid email or password'})
+            return render(request, 'admin/signin.html', {'error': 'Invalid email or password'})
 
         if admin.account_status != 'Active':
-            return render(request, 'admin/signinadmin.html', {'error': 'Your account is suspended or inactive'})
+            return render(request, 'admin/signin.html', {'error': 'Your account is suspended or inactive'})
 
         if not check_password(password, admin.password_hash):
-            return render(request, 'admin/signinadmin.html', {'error': 'Invalid email or password'})
+            return render(request, 'admin/signin.html', {'error': 'Invalid email or password'})
 
         request.session['admin_id'] = admin.admin_id
         request.session['admin_fullname'] = admin.fullname
         return redirect('/admin-portal/dashboard/')
 
-    return render(request, 'admin/signinadmin.html')
+    return render(request, 'admin/signin.html')
 
 
 def admin_logout(request):
@@ -152,30 +152,67 @@ def admin_dashboard(request):
     admin = User.objects.filter(admin_id=admin_id).first()
     today = timezone.localdate()
 
+    # Book counts by status
     books_available = Book.objects.filter(status='Available').count()
-    currently_borrowed = Transaction.objects.filter(transaction_type='Borrow', return_date__isnull=True).count()
-    overdue_books = Transaction.objects.filter(overdue_flag=True).count()
+    books_borrowed = Book.objects.filter(status='Borrowed').count()
+    books_overdue = Book.objects.filter(status='Overdue').count()
+    books_lost = Book.objects.filter(status='Lost').count()
+    books_donated = Book.objects.filter(status='Donated').count()
+    books_being_read = Book.objects.filter(status='Being Read').count()
+
+    # Patron counts
+    total_patrons = Patron.objects.count()
+    patrons_active = Patron.objects.filter(account_status='Active').count()
+    patrons_suspended = Patron.objects.filter(account_status='Suspended').count()
+    patrons_inactive = Patron.objects.filter(account_status='Inactive').count()
+
+    # Recent transactions (5 most recent)
+    recent_transactions = Transaction.objects.select_related('patron', 'book').order_by('-transaction_date')[:5]
+
+    # PatronLog entry count for today
     visitors_today = PatronLog.objects.filter(timestamp__date=today, log_type='Entry').count()
-    recent_transactions = Transaction.objects.select_related('patron', 'book').order_by('-transaction_date')[:4]
 
     context = {
         'admin': admin,
+        # Book status counts
         'books_available': books_available,
-        'currently_borrowed': currently_borrowed,
-        'overdue_books': overdue_books,
-        'visitors_today': visitors_today,
+        'books_borrowed': books_borrowed,
+        'books_overdue': books_overdue,
+        'books_lost': books_lost,
+        'books_donated': books_donated,
+        'books_being_read': books_being_read,
+        # Patron counts
+        'total_patrons': total_patrons,
+        'patrons_active': patrons_active,
+        'patrons_suspended': patrons_suspended,
+        'patrons_inactive': patrons_inactive,
+        # Transactions and logs
         'recent_transactions': recent_transactions,
+        'visitors_today': visitors_today,
     }
-    return render(request, 'admin/dashboardadmin.html', context)
+    return render(request, 'admin/dashboard.html', context)
 
 
 def admin_signin(request):
-    return render(request, 'admin/signinadmin.html')
+    return render(request, 'admin/signin.html')
 
 
 @admin_login_required
 def admin_management(request):
-    return render(request, 'admin/managementadmin.html')
+    books = Book.objects.select_related('section', 'shelf_level').order_by('title')
+    total_books = books.count()
+    total_copies = total_books
+    available_count = books.filter(status='Available').count()
+    borrowed_count = books.filter(status='Borrowed').count()
+
+    context = {
+        'books': books,
+        'total_books': total_books,
+        'total_copies': total_copies,
+        'available_count': available_count,
+        'borrowed_count': borrowed_count,
+    }
+    return render(request, 'admin/managebooks.html', context)
 
 
 @admin_login_required
@@ -221,23 +258,23 @@ def admin_add_patron(request):
             )
             return redirect('admin_manage_patron')
 
-    return render(request, 'admin/addparton.html', {'error': error, 'initial': initial})
+    return render(request, 'admin/addpatron.html', {'error': error, 'initial': initial})
 
 
 @admin_login_required
 def admin_manage_patron(request):
     patrons = Patron.objects.annotate(
         active_borrows=Count(
-            'transaction_set',
-            filter=Q(transaction_set__transaction_type='Borrow', transaction_set__return_date__isnull=True)
+            'transaction',
+            filter=Q(transaction__transaction_type='Borrow', transaction__return_date__isnull=True)
         ),
         overdue_count=Count(
-            'transaction_set',
-            filter=Q(transaction_set__overdue_flag=True)
+            'transaction',
+            filter=Q(transaction__overdue_flag=True)
         ),
         borrow_count=Count(
-            'transaction_set',
-            filter=Q(transaction_set__transaction_type='Borrow')
+            'transaction',
+            filter=Q(transaction__transaction_type='Borrow')
         ),
     ).order_by('-registration_date')
 
@@ -253,7 +290,7 @@ def admin_manage_patron(request):
         'patrons_with_borrows': patrons_with_borrows,
         'patrons_overdue': patrons_overdue,
     }
-    return render(request, 'admin/managepartonadmin.html', context)
+    return render(request, 'admin/managepatron.html', context)
 
 
 @admin_login_required
@@ -313,7 +350,7 @@ def admin_edit_patron(request, patron_id):
         'success': success,
         'initial': initial,
     }
-    return render(request, 'admin/editparton.html', context)
+    return render(request, 'admin/editpatron.html', context)
 
 
 @admin_login_required
@@ -327,7 +364,7 @@ def admin_delete_patron(request, patron_id):
 def admin_edit_book(request, book_id):
     book = Book.objects.filter(book_id=book_id).first()
     if book is None:
-        return redirect('admin_book_detail')
+        return redirect('admin_management')
 
     error = None
     success = None
@@ -372,7 +409,14 @@ def admin_edit_book(request, book_id):
         'success': success,
         'initial': initial,
     }
-    return render(request, 'admin/editbookadmin.html', context)
+    return render(request, 'admin/editbook.html', context)
+
+
+@admin_login_required
+def admin_delete_book(request, book_id):
+    if request.method == 'POST':
+        Book.objects.filter(book_id=book_id).delete()
+    return redirect('admin_management')
 
 
 @admin_login_required
@@ -405,12 +449,12 @@ def admin_book_detail(request):
         'borrowed_count': borrowed_count,
         'overdue_count': overdue_count,
     }
-    return render(request, 'admin/bookdetailadmin.html', context)
+    return render(request, 'admin/bookdetail.html', context)
 
 
 @admin_login_required
 def admin_qr_scanner(request):
-    return render(request, 'admin/qrscanneradmin.html')
+    return render(request, 'admin/qrscanner.html')
 
 
 @admin_login_required
@@ -431,12 +475,12 @@ def admin_transaction(request):
         'overdue_count': overdue_count,
         'transaction_count': transaction_count,
     }
-    return render(request, 'admin/transactionadmin.html', context)
+    return render(request, 'admin/transaction.html', context)
 
 
 @admin_login_required
 def admin_indoor_map(request):
-    return render(request, 'admin/indoormapadmin.html')
+    return render(request, 'admin/indoormap.html')
 
 
 @admin_login_required

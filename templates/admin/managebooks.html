@@ -63,15 +63,15 @@
             <div>
                 <p class="px-2 text-xs font-bold tracking-widest text-slate-500 uppercase mb-3">Overview</p>
                 <div class="space-y-1">
-                    <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                    <a href="{% url 'admin_dashboard' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
                         <i class="fa-solid fa-chart-pie w-5 text-sm"></i>
                         <span class="text-sm font-medium">Dashboard</span>
                     </a>
-                    <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                    <a href="{% url 'admin_indoor_map' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
                         <i class="fa-solid fa-map w-5 text-sm"></i>
                         <span class="text-sm font-medium">Indoor Map</span>
                     </a>
-                    <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                    <a href="{% url 'admin_qr_scanner' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
                         <i class="fa-solid fa-qrcode w-5 text-sm"></i>
                         <span class="text-sm font-medium">QR Scanner</span>
                     </a>
@@ -81,22 +81,22 @@
             <div>
                 <p class="px-2 text-xs font-bold tracking-widest text-slate-500 uppercase mb-3">Management</p>
                 <div class="space-y-1">
-                    <a href="#" class="flex items-center justify-between px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                    <a href="{% url 'admin_transaction' %}" class="flex items-center justify-between px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
                         <div class="flex items-center gap-3">
                             <i class="fa-solid fa-file-invoice w-5 text-sm"></i>
                             <span class="text-sm font-medium">Transactions</span>
                         </div>
                         <span class="bg-rose-500/20 text-rose-400 text-xs px-2 py-0.5 rounded-full font-semibold">12</span>
                     </a>
-                    <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                    <a href="{% url 'admin_log_management' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
                         <i class="fa-solid fa-clipboard-list w-5 text-sm"></i>
                         <span class="text-sm font-medium">Log Management</span>
                     </a>
-                    <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-800/50 text-cyan-400 font-medium border border-slate-700/50">
+                    <a href="{% url 'admin_management' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-800/50 text-cyan-400 font-medium border border-slate-700/50">
                         <i class="fa-solid fa-book w-5 text-sm"></i>
                         <span class="text-sm">Manage Books</span>
                     </a>
-                    <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                    <a href="{% url 'admin_manage_patron' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
                         <i class="fa-solid fa-users w-5 text-sm"></i>
                         <span class="text-sm font-medium">Manage Patrons</span>
                     </a>
@@ -126,22 +126,22 @@
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
                     <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Total Titles</p>
-                    <p class="text-3xl font-bold text-slate-300 mt-2">2,341</p>
+                    <p class="text-3xl font-bold text-slate-300 mt-2">{{ total_books }}</p>
                     <p class="text-[10px] text-slate-500 mt-1">Unique books</p>
                 </div>
                 <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
                     <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Total Copies</p>
-                    <p class="text-3xl font-bold text-cyan-400 mt-2">8,124</p>
+                    <p class="text-3xl font-bold text-cyan-400 mt-2">{{ total_copies }}</p>
                     <p class="text-[10px] text-slate-500 mt-1">Physical copies</p>
                 </div>
                 <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
                     <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Available</p>
-                    <p class="text-3xl font-bold text-blue-400 mt-2">7,037</p>
+                    <p class="text-3xl font-bold text-blue-400 mt-2">{{ available_count }}</p>
                     <p class="text-[10px] text-slate-500 mt-1">On shelves now</p>
                 </div>
                 <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
                     <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Borrowed Out</p>
-                    <p class="text-3xl font-bold text-amber-500 mt-2">1,087</p>
+                    <p class="text-3xl font-bold text-amber-500 mt-2">{{ borrowed_count }}</p>
                     <p class="text-[10px] text-slate-500 mt-1">Currently loaned</p>
                 </div>
             </div>
@@ -205,113 +205,53 @@
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-slate-800/40 text-xs text-slate-300">
+                            {% for book in books %}
                             <tr class="hover:bg-slate-800/10 transition-colors">
                                 <td class="py-4 px-6 flex items-start gap-3">
                                     <div class="w-8 h-10 rounded bg-cyan-950/40 border border-cyan-900/30 flex-shrink-0 flex items-center justify-center text-[10px] font-medium text-cyan-700 select-none"></div>
                                     <div>
-                                        <div class="font-bold text-slate-200">Data Structures & Algorithms in Python</div>
-                                        <div class="text-[10px] text-slate-500 mt-0.5">2nd Edition &middot; 2021</div>
+                                        <div class="font-bold text-slate-200">{{ book.title }}</div>
+                                        <div class="text-[10px] text-slate-500 mt-0.5">{{ book.genre|default:"" }}</div>
                                     </div>
                                 </td>
-                                <td class="py-4 px-6 text-slate-300">Michael T. Goodrich</td>
-                                <td class="py-4 px-6 font-mono text-slate-400">978-1-119-64862-5</td>
-                                <td class="py-4 px-6 font-mono text-slate-400">QA76.9.D35 G66</td>
+                                <td class="py-4 px-6 text-slate-300">{{ book.author }}</td>
+                                <td class="py-4 px-6 font-mono text-slate-400">{{ book.ISBN|default:"-" }}</td>
+                                <td class="py-4 px-6 font-mono text-slate-400">{{ book.section.name|default:"-" }} {{ book.shelf_level.name|default:"" }}</td>
                                 <td class="py-4 px-6">
-                                    <span class="bg-cyan-950/60 text-cyan-400 border border-cyan-900/40 px-1.5 py-0.5 rounded text-[9px] font-bold tracking-wide uppercase">CS / IT</span>
+                                    <span class="bg-cyan-950/60 text-cyan-400 border border-cyan-900/40 px-1.5 py-0.5 rounded text-[9px] font-bold tracking-wide uppercase">{{ book.genre|default:"General" }}</span>
                                 </td>
-                                <td class="py-4 px-6 text-center font-semibold text-slate-400">5</td>
+                                <td class="py-4 px-6 text-center font-semibold text-slate-400">{{ book.copies|default:1 }}</td>
                                 <td class="py-4 px-6 text-center">
-                                    <span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-bold">3</span>
+                                    {% if book.status == 'Available' %}
+                                        <span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-bold">{{ book.copies|default:1 }}</span>
+                                    {% elif book.status == 'Borrowed' %}
+                                        <span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-amber-500/10 text-amber-500 border border-amber-500/20 text-[10px] font-bold">0</span>
+                                    {% else %}
+                                        <span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-rose-500/10 text-rose-400 border border-rose-500/20 text-[10px] font-bold">0</span>
+                                    {% endif %}
                                 </td>
                                 <td class="py-4 px-6 text-center">
                                     <div class="flex items-center justify-center gap-1.5">
-                                        <button class="w-7 h-7 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 transition-colors"><i class="fa-solid fa-pencil text-[10px]"></i></button>
-                                        <button class="w-7 h-7 rounded border border-slate-800 text-rose-500/70 hover:text-rose-400 hover:bg-rose-950/20 transition-colors"><i class="fa-solid fa-trash-can text-[10px]"></i></button>
+                                        <a href="{% url 'admin_edit_book' book.book_id %}" class="w-7 h-7 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 transition-colors"><i class="fa-solid fa-pencil text-[10px]"></i></a>
+                                        <form method="post" action="{% url 'admin_delete_book' book.book_id %}" class="inline">
+                                            {% csrf_token %}
+                                            <button type="submit" class="w-7 h-7 rounded border border-slate-800 text-rose-500/70 hover:text-rose-400 hover:bg-rose-950/20 transition-colors"><i class="fa-solid fa-trash-can text-[10px]"></i></button>
+                                        </form>
                                     </div>
                                 </td>
                             </tr>
-                            <tr class="hover:bg-slate-800/10 transition-colors">
-                                <td class="py-4 px-6 flex items-start gap-3">
-                                    <div class="w-8 h-10 rounded bg-indigo-950/30 border border-indigo-900/20 flex-shrink-0 flex items-center justify-center text-[10px] font-medium text-indigo-800 select-none"></div>
-                                    <div>
-                                        <div class="font-bold text-slate-200">Introduction to Algorithms (CLRS)</div>
-                                        <div class="text-[10px] text-slate-500 mt-0.5">4th Edition &middot; 2022</div>
-                                    </div>
-                                </td>
-                                <td class="py-4 px-6 text-slate-300">Cormen, Leiserson et al.</td>
-                                <td class="py-4 px-6 font-mono text-slate-400">978-0-262-04630-3</td>
-                                <td class="py-4 px-6 font-mono text-slate-400">QA76.9.A43 C67</td>
-                                <td class="py-4 px-6">
-                                    <span class="bg-cyan-950/60 text-cyan-400 border border-cyan-900/40 px-1.5 py-0.5 rounded text-[9px] font-bold tracking-wide uppercase">CS / IT</span>
-                                </td>
-                                <td class="py-4 px-6 text-center font-semibold text-slate-400">4</td>
-                                <td class="py-4 px-6 text-center">
-                                    <span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-amber-500/10 text-amber-500 border border-amber-500/20 text-[10px] font-bold">1</span>
-                                </td>
-                                <td class="py-4 px-6 text-center">
-                                    <div class="flex items-center justify-center gap-1.5">
-                                        <button class="w-7 h-7 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 transition-colors"><i class="fa-solid fa-pencil text-[10px]"></i></button>
-                                        <button class="w-7 h-7 rounded border border-slate-800 text-rose-500/70 hover:text-rose-400 hover:bg-rose-950/20 transition-colors"><i class="fa-solid fa-trash-can text-[10px]"></i></button>
-                                    </div>
-                                </td>
+                            {% empty %}
+                            <tr>
+                                <td colspan="8" class="py-8 text-center text-slate-500">No books found in the library.</td>
                             </tr>
-                            <tr class="hover:bg-slate-800/10 transition-colors">
-                                <td class="py-4 px-6 flex items-start gap-3">
-                                    <div class="w-8 h-10 rounded bg-amber-950/20 border border-amber-900/20 flex-shrink-0 flex items-center justify-center text-[10px] font-medium text-amber-800 select-none"></div>
-                                    <div>
-                                        <div class="font-bold text-slate-200">Clean Code</div>
-                                        <div class="text-[10px] text-slate-500 mt-0.5">1st Edition &middot; 2008</div>
-                                    </div>
-                                </td>
-                                <td class="py-4 px-6 text-slate-300">Robert C. Martin</td>
-                                <td class="py-4 px-6 font-mono text-slate-400">978-0-132-35088-4</td>
-                                <td class="py-4 px-6 font-mono text-slate-400">QA76.76.O47 M37</td>
-                                <td class="py-4 px-6">
-                                    <span class="bg-cyan-950/60 text-cyan-400 border border-cyan-900/40 px-1.5 py-0.5 rounded text-[9px] font-bold tracking-wide uppercase">CS / IT</span>
-                                </td>
-                                <td class="py-4 px-6 text-center font-semibold text-slate-400">6</td>
-                                <td class="py-4 px-6 text-center">
-                                    <span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-bold">6</span>
-                                </td>
-                                <td class="py-4 px-6 text-center">
-                                    <div class="flex items-center justify-center gap-1.5">
-                                        <button class="w-7 h-7 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 transition-colors"><i class="fa-solid fa-pencil text-[10px]"></i></button>
-                                        <button class="w-7 h-7 rounded border border-slate-800 text-rose-500/70 hover:text-rose-400 hover:bg-rose-950/20 transition-colors"><i class="fa-solid fa-trash-can text-[10px]"></i></button>
-                                    </div>
-                                </td>
-                            </tr>
-                            <tr class="hover:bg-slate-800/10 transition-colors">
-                                <td class="py-4 px-6 flex items-start gap-3">
-                                    <div class="w-8 h-10 rounded bg-blue-950/30 border border-blue-900/20 flex-shrink-0 flex items-center justify-center text-[10px] font-medium text-blue-800 select-none"></div>
-                                    <div>
-                                        <div class="font-bold text-slate-200">Computer Networks</div>
-                                        <div class="text-[10px] text-slate-500 mt-0.5">5th Edition &middot; 2010</div>
-                                    </div>
-                                </td>
-                                <td class="py-4 px-6 text-slate-300">Andrew S. Tanenbaum</td>
-                                <td class="py-4 px-6 font-mono text-slate-400">978-0-132-12695-3</td>
-                                <td class="py-4 px-6 font-mono text-slate-400">TK5105.5.T36</td>
-                                <td class="py-4 px-6">
-                                    <span class="bg-cyan-950/60 text-cyan-400 border border-cyan-900/40 px-1.5 py-0.5 rounded text-[9px] font-bold tracking-wide uppercase">CS / IT</span>
-                                </td>
-                                <td class="py-4 px-6 text-center font-semibold text-slate-400">3</td>
-                                <td class="py-4 px-6 text-center">
-                                    <span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-rose-500/10 text-rose-400 border border-rose-500/20 text-[10px] font-bold">0</span>
-                                </td>
-                                <td class="py-4 px-6 text-center">
-                                    <div class="flex items-center justify-center gap-1.5">
-                                        <button class="w-7 h-7 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 transition-colors"><i class="fa-solid fa-pencil text-[10px]"></i></button>
-                                        <button class="w-7 h-7 rounded border border-slate-800 text-rose-500/70 hover:text-rose-400 hover:bg-rose-950/20 transition-colors"><i class="fa-solid fa-trash-can text-[10px]"></i></button>
-                                    </div>
-                                </td>
-                            </tr>
+                            {% endfor %}
                         </tbody>
                     </table>
                 </div>
 
                 <div class="px-5 py-4 border-t border-slate-800/60 flex items-center justify-between text-xs text-slate-500 bg-slate-900/5">
-                    <span class="font-medium">Showing <span class="text-slate-400">1-4</span> of <span class="text-slate-400">2,341</span> books</span>
-                    
+                    <span class="font-medium">Showing <span class="text-slate-400">{{ books|length }}</span> of <span class="text-slate-400">{{ total_books }}</span> books</span>
+
                     <div class="flex items-center gap-1">
                         <button class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors cursor-not-allowed" disabled>&larr; Prev</button>
                         <button class="px-3 py-1.5 rounded bg-cyan-700/30 text-cyan-400 font-bold border border-cyan-800/50">1</button>

@@ -662,7 +662,7 @@
                     </a>
                 </li>
                 <li class="menu-item">
-                    <a href="{% url 'admin_book_detail' %}">
+                    <a href="{% url 'admin_management' %}">
                         <div class="menu-link-content">
                             <span class="menu-icon">📚</span>
                             <span>Manage Books</span>
@@ -702,7 +702,7 @@
                     <p class="hero-subtitle">Monday, December 10, 2024 • <span>{{ visitors_today }} patrons currently in the library</span></p>
                 </div>
                 <div class="hero-actions">
-                    <a href="{% url 'admin_book_detail' %}" class="btn btn-outline">Manage Books</a>
+                    <a href="{% url 'admin_management' %}" class="btn btn-outline">Manage Books</a>
                     <a href="{% url 'admin_manage_patron' %}" class="btn btn-filled">Manage Patrons</a>
                 </div>
             </section>
@@ -714,19 +714,42 @@
                     <div class="stat-indicator up">Available now</div>
                 </div>
                 <div class="stat-card">
-                    <h4 class="stat-label">Currently Borrowed</h4>
-                    <div class="stat-value">{{ currently_borrowed }}</div>
-                    <div class="stat-indicator">Across all patrons</div>
+                    <h4 class="stat-label">Books Borrowed</h4>
+                    <div class="stat-value">{{ books_borrowed }}</div>
+                    <div class="stat-indicator">Currently out</div>
                 </div>
                 <div class="stat-card">
                     <h4 class="stat-label">Overdue Books</h4>
-                    <div class="stat-value">{{ overdue_books }}</div>
+                    <div class="stat-value">{{ books_overdue }}</div>
                     <div class="stat-indicator down">Overdue right now</div>
                 </div>
                 <div class="stat-card">
-                    <h4 class="stat-label">Library Visitors</h4>
-                    <div class="stat-value">{{ visitors_today }}</div>
-                    <div class="stat-indicator">Entries today</div>
+                    <h4 class="stat-label">Total Patrons</h4>
+                    <div class="stat-value">{{ total_patrons }}</div>
+                    <div class="stat-indicator">Registered users</div>
+                </div>
+            </section>
+
+            <section class="stats-grid">
+                <div class="stat-card">
+                    <h4 class="stat-label">Books Lost</h4>
+                    <div class="stat-value">{{ books_lost }}</div>
+                    <div class="stat-indicator down">Lost items</div>
+                </div>
+                <div class="stat-card">
+                    <h4 class="stat-label">Books Donated</h4>
+                    <div class="stat-value">{{ books_donated }}</div>
+                    <div class="stat-indicator">Donated items</div>
+                </div>
+                <div class="stat-card">
+                    <h4 class="stat-label">Being Read</h4>
+                    <div class="stat-value">{{ books_being_read }}</div>
+                    <div class="stat-indicator">In-library reading</div>
+                </div>
+                <div class="stat-card">
+                    <h4 class="stat-label">Active Patrons</h4>
+                    <div class="stat-value">{{ patrons_active }}</div>
+                    <div class="stat-indicator up">Active accounts</div>
                 </div>
             </section>
 
@@ -804,15 +827,15 @@
                         <div class="log-stats-list">
                             <div class="log-stat-row">
                                 <span class="log-stat-label">Total entries</span>
-                                <span class="log-stat-val">142</span>
+                                <span class="log-stat-val">{{ visitors_today }}</span>
                             </div>
                             <div class="log-stat-row">
-                                <span class="log-stat-label">Total exits</span>
-                                <span class="log-stat-val">119</span>
+                                <span class="log-stat-label">Suspended patrons</span>
+                                <span class="log-stat-val">{{ patrons_suspended }}</span>
                             </div>
                             <div class="log-stat-row">
-                                <span class="log-stat-label">Currently inside</span>
-                                <span class="log-stat-val">23</span>
+                                <span class="log-stat-label">Inactive patrons</span>
+                                <span class="log-stat-val">{{ patrons_inactive }}</span>
                             </div>
                         </div>
                     </section>

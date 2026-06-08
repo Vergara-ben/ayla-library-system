@@ -54,7 +54,7 @@
         <div class="w-full max-w-2xl rounded-2xl border p-6 flex flex-col gap-5 shadow-2xl relative my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color);">
             <div class="flex items-center justify-between">
                 <h3 class="text-base font-bold text-slate-200 tracking-wide">Edit Book</h3>
-                <button type="button" onclick="window.location.href='{% url 'admin_book_detail' %}'" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40 transition-colors">
+                <button type="button" onclick="window.location.href='{% url 'admin_management' %}'" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40 transition-colors">
                     <i class="fa-solid fa-xmark text-sm"></i>
                 </button>
             </div>
@@ -106,7 +106,7 @@
                     <input type="text" readonly value="{{ initial.shelf_level|default:'Unassigned' }}" class="w-full rounded-lg px-3 py-2.5 text-slate-300 border border-slate-700/60 bg-slate-900 font-medium" style="background-color: var(--bg-input);">
                 </div>
                 <div class="pt-4 flex items-center justify-end gap-3">
-                    <button type="button" onclick="window.location.href='{% url 'admin_book_detail' %}'" class="px-5 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:text-slate-100 hover:bg-slate-800/40 font-semibold tracking-wide transition-colors min-w-[100px]">
+                    <button type="button" onclick="window.location.href='{% url 'admin_management' %}'" class="px-5 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:text-slate-100 hover:bg-slate-800/40 font-semibold tracking-wide transition-colors min-w-[100px]">
                         Cancel
                     </button>
                     <button type="submit" class="bg-cyan-700 hover:bg-cyan-600 text-white font-bold px-5 py-2.5 rounded-lg flex items-center gap-2 tracking-wide transition-colors shadow-md">

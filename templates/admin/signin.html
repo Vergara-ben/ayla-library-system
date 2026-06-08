@@ -492,7 +492,7 @@
                 </button>
             </form>
 
-            <div id="errorMessage" style="background-color: rgba(220, 38, 38, 0.1); border: 1px solid rgba(220, 38, 38, 0.3); color: #fca5a5; padding: 12px; border-radius: 8px; margin-top: 16px; font-size: 13px; display: {% if error %}block{% else %}none{% endif %};">
+            <div id="errorMessage" {% if error %}style="background-color: rgba(220, 38, 38, 0.1); border: 1px solid rgba(220, 38, 38, 0.3); color: #fca5a5; padding: 12px; border-radius: 8px; margin-top: 16px; font-size: 13px; display: block;"{% else %}style="display: none;"{% endif %}>
                 {{ error }}
             </div>
 
