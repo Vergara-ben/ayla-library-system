@@ -190,6 +190,527 @@
             letter-spacing: 0.5px;
         }
 
+        .mode-toggle {
+            background: linear-gradient(180deg, #203f5e 0%, #173047 100%);
+            border: 1px solid rgba(56, 189, 248, 0.25);
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-main);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .mode-toggle:hover {
+            border-color: rgba(56, 189, 248, 0.4);
+            box-shadow: 0 0 15px rgba(56, 189, 248, 0.1);
+        }
+
+        .mode-toggle.active {
+            background: linear-gradient(180deg, #06b6d4 0%, #0891b2 100%);
+            border-color: rgba(6, 182, 212, 0.5);
+        }
+
+        /* Management Interface Styles */
+        .management-interface {
+            display: none;
+            padding: 32px;
+            flex: 1;
+        }
+
+        .management-interface.active {
+            display: block;
+        }
+
+        .view-interface {
+            display: grid;
+            grid-template-columns: 1fr 340px;
+            gap: 24px;
+            flex: 1;
+            align-items: start;
+        }
+
+        .view-interface.hidden {
+            display: none;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 20px;
+            margin-bottom: 32px;
+        }
+
+        .stat-card {
+            background-color: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 24px;
+        }
+
+        .stat-label {
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            color: var(--text-muted);
+            margin-bottom: 12px;
+        }
+
+        .stat-value {
+            font-family: 'Playfair Display', serif;
+            font-size: 32px;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .stat-value.cyan { color: var(--accent-cyan); }
+        .stat-value.green { color: #10b981; }
+        .stat-value.blue { color: var(--accent-blue); }
+        .stat-value.amber { color: #f59e0b; }
+
+        .stat-sub {
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        .management-table-container {
+            background-color: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            overflow: hidden;
+            margin-bottom: 32px;
+        }
+
+        .table-header {
+            padding: 20px 24px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .table-title {
+            font-size: 14px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(180deg, #203f5e 0%, #173047 100%);
+            border: 1px solid rgba(56, 189, 248, 0.25);
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-main);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .btn-primary:hover {
+            border-color: rgba(56, 189, 248, 0.4);
+            box-shadow: 0 0 15px rgba(56, 189, 248, 0.1);
+        }
+
+        .management-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .management-table th {
+            padding: 16px 24px;
+            text-align: left;
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-muted);
+            border-bottom: 1px solid var(--border-color);
+            background-color: rgba(255, 255, 255, 0.02);
+        }
+
+        .management-table td {
+            padding: 16px 24px;
+            font-size: 12px;
+            color: #94a3b8;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .management-table tr:hover td {
+            background-color: rgba(255, 255, 255, 0.02);
+        }
+
+        .status-badge {
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .status-badge.active {
+            background-color: rgba(16, 185, 129, 0.1);
+            border: 1px solid rgba(16, 185, 129, 0.2);
+            color: #10b981;
+        }
+
+        .status-badge.inactive {
+            background-color: rgba(100, 116, 139, 0.1);
+            border: 1px solid rgba(100, 116, 139, 0.2);
+            color: #94a3b8;
+        }
+
+        .status-badge.renovation {
+            background-color: rgba(245, 158, 11, 0.1);
+            border: 1px solid rgba(245, 158, 11, 0.2);
+            color: #f59e0b;
+        }
+
+        .action-btn {
+            width: 28px;
+            height: 28px;
+            border-radius: 6px;
+            border: 1px solid var(--border-color);
+            background: none;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            transition: all 0.2s ease;
+        }
+
+        .action-btn:hover {
+            background-color: rgba(255, 255, 255, 0.05);
+        }
+
+        .action-btn.success { color: #10b981; }
+        .action-btn.warning { color: #f59e0b; }
+        .action-btn.danger { color: #ef4444; }
+
+        .floorplan-section {
+            background-color: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            overflow: hidden;
+            margin-bottom: 24px;
+        }
+
+        .shelf-item {
+            background-color: rgba(255, 255, 255, 0.01);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 16px;
+        }
+
+        .shelf-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 16px;
+        }
+
+        .shelf-info {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .shelf-name {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-main);
+        }
+
+        .shelf-coords {
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        .nested-content {
+            margin-left: 24px;
+            border-left: 2px solid var(--border-color);
+            padding-left: 20px;
+        }
+
+        .section-item {
+            background-color: rgba(255, 255, 255, 0.005);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 16px;
+            margin-bottom: 12px;
+        }
+
+        .section-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 12px;
+        }
+
+        .section-name {
+            font-size: 13px;
+            font-weight: 600;
+            color: #cbd5e1;
+        }
+
+        .level-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 12px;
+            background-color: rgba(255, 255, 255, 0.02);
+            border-radius: 4px;
+            margin-bottom: 8px;
+        }
+
+        .level-name {
+            font-size: 11px;
+            color: #94a3b8;
+        }
+
+        .add-link {
+            font-size: 11px;
+            color: var(--accent-cyan);
+            font-weight: 600;
+            cursor: pointer;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .add-link:hover {
+            color: var(--accent-blue);
+        }
+
+        /* Modal Styles */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background-color: rgba(0, 0, 0, 0.6);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            overflow-y: auto;
+        }
+
+        .modal-overlay.active {
+            display: flex;
+        }
+
+        .modal {
+            background-color: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 24px;
+            width: 100%;
+            max-width: 480px;
+            position: relative;
+        }
+
+        .modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 24px;
+        }
+
+        .modal-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--text-main);
+        }
+
+        .modal-close {
+            width: 28px;
+            height: 28px;
+            border-radius: 6px;
+            border: 1px solid var(--border-color);
+            background: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            transition: all 0.2s ease;
+        }
+
+        .modal-close:hover {
+            background-color: rgba(255, 255, 255, 0.05);
+            color: var(--text-main);
+        }
+
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        .form-label {
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+            display: block;
+        }
+
+        .form-input {
+            width: 100%;
+            padding: 12px 16px;
+            background-color: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-size: 13px;
+            color: var(--text-main);
+            transition: all 0.2s ease;
+        }
+
+        .form-input:focus {
+            outline: none;
+            border-color: var(--accent-cyan);
+        }
+
+        .form-input::placeholder {
+            color: var(--text-muted);
+        }
+
+        .form-textarea {
+            resize: none;
+            min-height: 80px;
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+
+        .modal-footer {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 12px;
+            margin-top: 24px;
+            padding-top: 24px;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .btn-cancel {
+            padding: 10px 20px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            background: none;
+            color: #cbd5e1;
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .btn-cancel:hover {
+            background-color: rgba(255, 255, 255, 0.05);
+            color: var(--text-main);
+        }
+
+        .btn-submit {
+            padding: 10px 20px;
+            border-radius: 8px;
+            border: none;
+            background: linear-gradient(180deg, #06b6d4 0%, #0891b2 100%);
+            color: white;
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn-submit:hover {
+            box-shadow: 0 0 15px rgba(6, 182, 212, 0.3);
+        }
+
+        .error-message {
+            background-color: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.2);
+            border-radius: 8px;
+            padding: 12px 16px;
+            margin-bottom: 16px;
+            font-size: 13px;
+            color: #fca5a5;
+        }
+
+        .preview-image {
+            width: 64px;
+            height: 64px;
+            object-fit: cover;
+            border-radius: 6px;
+            border: 1px solid var(--border-color);
+        }
+
+        .no-image {
+            width: 64px;
+            height: 64px;
+            background-color: rgba(255, 255, 255, 0.05);
+            border-radius: 6px;
+            border: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        .empty-state {
+            padding: 32px;
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 13px;
+        }
+
+        @media (max-width: 1200px) {
+            .stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+
+        @media (max-width: 768px) {
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+            .view-interface {
+                grid-template-columns: 1fr;
+            }
+        }
+
         .icon-btn {
             background: none;
             border: none;
@@ -516,13 +1037,17 @@
         <header class="top-navbar">
             <h2 class="page-title">Indoor Map & Navigation</h2>
             <div class="navbar-actions">
+                <button class="mode-toggle" id="modeToggle" onclick="toggleMode()">
+                    <span>🗺️</span>
+                    <span id="modeText">View Mode</span>
+                </button>
                 <span class="badge-admin-tag">ADMIN</span>
                 <button class="icon-btn">🔔</button>
                 <div class="user-avatar">AD</div>
             </div>
         </header>
 
-        <main class="workspace-view">
+        <main class="workspace-view view-interface" id="viewInterface">
             
             <div class="map-container">
                 <svg class="map-canvas" viewBox="0 0 800 450" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -634,7 +1159,443 @@
 
             </div>
         </main>
+
+        <!-- Management Interface -->
+        <main class="management-interface" id="managementInterface">
+            
+            <!-- Statistics Cards -->
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <p class="stat-label">Total Floor Plans</p>
+                    <p class="stat-value cyan">{{ floorplans|length }}</p>
+                    <p class="stat-sub">All floor plans</p>
+                </div>
+                <div class="stat-card">
+                    <p class="stat-label">Active</p>
+                    <p class="stat-value green">{{ floorplans|dictsort:"is_active"|slice:":1" }}</p>
+                    <p class="stat-sub">Currently active</p>
+                </div>
+                <div class="stat-card">
+                    <p class="stat-label">Total Shelves</p>
+                    <p class="stat-value blue">{{ floorplans|dictsort:"shelf_set"|slice:":1" }}</p>
+                    <p class="stat-sub">All shelves</p>
+                </div>
+                <div class="stat-card">
+                    <p class="stat-label">Under Renovation</p>
+                    <p class="stat-value amber">{{ floorplans|dictsort:"renovation_notice"|slice:":1" }}</p>
+                    <p class="stat-sub">Renovation notices</p>
+                </div>
+            </div>
+
+            <!-- Floor Plans Table -->
+            <div class="management-table-container">
+                <div class="table-header">
+                    <h4 class="table-title">🗺️ Floor Plans</h4>
+                    <button class="btn-primary" onclick="openUploadModal()">
+                        <span>📤</span> Upload Floor Plan
+                    </button>
+                </div>
+                <table class="management-table">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Image Preview</th>
+                            <th>Uploaded At</th>
+                            <th>Status</th>
+                            <th>Renovation Notice</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for floorplan in floorplans %}
+                        <tr>
+                            <td>#{{ floorplan.floor_plan_id }}</td>
+                            <td>
+                                {% if floorplan.image_url %}
+                                    <img src="/media/{{ floorplan.image_url }}" alt="Floor Plan" class="preview-image">
+                                {% else %}
+                                    <div class="no-image">No Image</div>
+                                {% endif %}
+                            </td>
+                            <td>{{ floorplan.uploaded_at|date:"M d, Y H:i" }}</td>
+                            <td>
+                                {% if floorplan.is_active %}
+                                    <span class="status-badge active">Active</span>
+                                {% else %}
+                                    <span class="status-badge inactive">Inactive</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if floorplan.renovation_notice %}
+                                    <span class="status-badge renovation">{{ floorplan.renovation_notice }}</span>
+                                {% else %}
+                                    <span style="color: var(--text-muted); font-size: 11px;">None</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <div style="display: flex; gap: 8px;">
+                                    <form method="post" action="{% url 'set_active_floorplan' %}" style="display: inline;">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="floorplan_id" value="{{ floorplan.floor_plan_id }}">
+                                        <button type="submit" class="action-btn success" title="Set Active">✓</button>
+                                    </form>
+                                    <button onclick="openRenovationModal({{ floorplan.floor_plan_id }}, '{{ floorplan.renovation_notice|default:""|escapejs }}', '{{ floorplan.renovation_message|default:""|escapejs }}')" class="action-btn warning" title="Toggle Renovation">🔧</button>
+                                    <form method="post" action="{% url 'delete_floorplan' %}" style="display: inline;" onsubmit="return confirm('Are you sure you want to delete this floor plan?');">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="floorplan_id" value="{{ floorplan.floor_plan_id }}">
+                                        <button type="submit" class="action-btn danger" title="Delete">🗑️</button>
+                                    </form>
+                                </div>
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="6" class="empty-state">No floor plans found.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Shelves Management Section -->
+            {% for floorplan in floorplans %}
+            <div class="floorplan-section">
+                <div class="table-header">
+                    <h4 class="table-title">🗺️ Floor Plan #{{ floorplan.floor_plan_id }} - Shelves</h4>
+                    <button class="btn-primary" onclick="openAddShelfModal({{ floorplan.floor_plan_id }})">
+                        <span>➕</span> Add Shelf
+                    </button>
+                </div>
+                <div style="padding: 24px;">
+                    {% for shelf in floorplan.shelf_set.all %}
+                    <div class="shelf-item">
+                        <div class="shelf-header">
+                            <div class="shelf-info">
+                                <span>📦</span>
+                                <span class="shelf-name">{{ shelf.name }}</span>
+                                <span class="shelf-coords">({{ shelf.map_x }}, {{ shelf.map_y }})</span>
+                            </div>
+                            <form method="post" action="{% url 'delete_shelf' %}" style="display: inline;" onsubmit="return confirm('Are you sure you want to delete this shelf?');">
+                                {% csrf_token %}
+                                <input type="hidden" name="shelf_id" value="{{ shelf.shelf_id }}">
+                                <button type="submit" class="action-btn danger">🗑️</button>
+                            </form>
+                        </div>
+                        {% if shelf.description %}
+                            <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 16px;">{{ shelf.description }}</p>
+                        {% endif %}
+
+                        <!-- Sections -->
+                        <div class="nested-content">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                                <h6 style="font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted);">Sections</h6>
+                                <span class="add-link" onclick="openAddSectionModal({{ shelf.shelf_id }})">+ Add Section</span>
+                            </div>
+                            {% for section in shelf.section_set.all %}
+                            <div class="section-item">
+                                <div class="section-header">
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                        <span>📁</span>
+                                        <span class="section-name">{{ section.name }}</span>
+                                    </div>
+                                    <form method="post" action="{% url 'delete_section' %}" style="display: inline;" onsubmit="return confirm('Are you sure you want to delete this section?');">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="section_id" value="{{ section.section_id }}">
+                                        <button type="submit" class="action-btn danger">🗑️</button>
+                                    </form>
+                                </div>
+                                {% if section.description %}
+                                    <p style="font-size: 11px; color: var(--text-muted); margin-bottom: 12px;">{{ section.description }}</p>
+                                {% endif %}
+
+                                <!-- Shelf Levels -->
+                                <div class="nested-content">
+                                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                        <span style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted);">Shelf Levels</span>
+                                        <span class="add-link" onclick="openAddShelfLevelModal({{ section.section_id }})">+ Add Level</span>
+                                    </div>
+                                    {% for level in section.shelflevel_set.all %}
+                                    <div class="level-item">
+                                        <div style="display: flex; align-items: center; gap: 8px;">
+                                            <span>📚</span>
+                                            <span class="level-name">Level {{ level.level_number }}{% if level.label %} - {{ level.label }}{% endif %}</span>
+                                        </div>
+                                        <form method="post" action="{% url 'delete_shelf_level' %}" style="display: inline;" onsubmit="return confirm('Are you sure you want to delete this shelf level?');">
+                                            {% csrf_token %}
+                                            <input type="hidden" name="shelf_level_id" value="{{ level.shelf_level_id }}">
+                                            <button type="submit" class="action-btn danger">🗑️</button>
+                                        </form>
+                                    </div>
+                                    {% empty %}
+                                    <p style="font-size: 11px; color: var(--text-muted); font-style: italic;">No shelf levels</p>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                            {% empty %}
+                            <p style="font-size: 11px; color: var(--text-muted); font-style: italic;">No sections</p>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% empty %}
+                    <p style="font-size: 12px; color: var(--text-muted); font-style: italic;">No shelves for this floor plan</p>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endfor %}
+
+        </main>
     </div>
+
+    <!-- Upload Floor Plan Modal -->
+    <div id="uploadModal" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 class="modal-title">Upload Floor Plan</h3>
+                <button type="button" class="modal-close" onclick="closeUploadModal()">✕</button>
+            </div>
+            <form id="uploadForm" method="post" enctype="multipart/form-data" action="{% url 'floorplan_management' %}">
+                {% csrf_token %}
+                {% if error %}
+                    <div class="error-message">{{ error }}</div>
+                {% endif %}
+                <div class="form-group">
+                    <label class="form-label">Floor Plan Image (PNG only)</label>
+                    <input type="file" name="image" id="uploadImage" accept=".png" class="form-input" required>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn-cancel" onclick="closeUploadModal()">Cancel</button>
+                    <button type="submit" class="btn-submit">
+                        <span>📤</span> Upload
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Renovation Modal -->
+    <div id="renovationModal" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 class="modal-title">Renovation Notice</h3>
+                <button type="button" class="modal-close" onclick="closeRenovationModal()">✕</button>
+            </div>
+            <form id="renovationForm" method="post" action="{% url 'toggle_renovation' %}">
+                {% csrf_token %}
+                <input type="hidden" name="floorplan_id" id="renovationFloorplanId">
+                <div class="form-group">
+                    <label class="form-label">Renovation Notice</label>
+                    <input type="text" name="renovation_notice" id="renovationNotice" class="form-input" placeholder="e.g., Under Renovation">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Renovation Message</label>
+                    <textarea name="renovation_message" id="renovationMessage" rows="3" class="form-input form-textarea" placeholder="Additional details about the renovation..."></textarea>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn-cancel" onclick="closeRenovationModal()">Cancel</button>
+                    <button type="submit" class="btn-submit">
+                        <span>✓</span> Save
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Add Shelf Modal -->
+    <div id="addShelfModal" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 class="modal-title">Add Shelf</h3>
+                <button type="button" class="modal-close" onclick="closeAddShelfModal()">✕</button>
+            </div>
+            <form id="addShelfForm" method="post" action="{% url 'add_shelf' %}">
+                {% csrf_token %}
+                <input type="hidden" name="floorplan_id" id="addShelfFloorplanId">
+                <div class="form-group">
+                    <label class="form-label">Shelf Name</label>
+                    <input type="text" name="name" id="addShelfName" class="form-input" required>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">Map X</label>
+                        <input type="number" name="map_x" id="addShelfMapX" step="0.1" value="0" class="form-input">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Map Y</label>
+                        <input type="number" name="map_y" id="addShelfMapY" step="0.1" value="0" class="form-input">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Description</label>
+                    <textarea name="description" id="addShelfDescription" rows="2" class="form-input form-textarea"></textarea>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn-cancel" onclick="closeAddShelfModal()">Cancel</button>
+                    <button type="submit" class="btn-submit">
+                        <span>✓</span> Add Shelf
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Add Section Modal -->
+    <div id="addSectionModal" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 class="modal-title">Add Section</h3>
+                <button type="button" class="modal-close" onclick="closeAddSectionModal()">✕</button>
+            </div>
+            <form id="addSectionForm" method="post" action="{% url 'add_section' %}">
+                {% csrf_token %}
+                <input type="hidden" name="shelf_id" id="addSectionShelfId">
+                <div class="form-group">
+                    <label class="form-label">Section Name</label>
+                    <input type="text" name="name" id="addSectionName" class="form-input" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Description</label>
+                    <textarea name="description" id="addSectionDescription" rows="2" class="form-input form-textarea"></textarea>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn-cancel" onclick="closeAddSectionModal()">Cancel</button>
+                    <button type="submit" class="btn-submit">
+                        <span>✓</span> Add Section
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Add Shelf Level Modal -->
+    <div id="addShelfLevelModal" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 class="modal-title">Add Shelf Level</h3>
+                <button type="button" class="modal-close" onclick="closeAddShelfLevelModal()">✕</button>
+            </div>
+            <form id="addShelfLevelForm" method="post" action="{% url 'add_shelf_level' %}">
+                {% csrf_token %}
+                <input type="hidden" name="section_id" id="addShelfLevelSectionId">
+                <div class="form-group">
+                    <label class="form-label">Level Number</label>
+                    <input type="number" name="level_number" id="addShelfLevelNumber" value="1" min="1" class="form-input" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Label</label>
+                    <input type="text" name="label" id="addShelfLevelLabel" class="form-input">
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn-cancel" onclick="closeAddShelfLevelModal()">Cancel</button>
+                    <button type="submit" class="btn-submit">
+                        <span>✓</span> Add Level
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        function toggleMode() {
+            const viewInterface = document.getElementById('viewInterface');
+            const managementInterface = document.getElementById('managementInterface');
+            const modeToggle = document.getElementById('modeToggle');
+            const modeText = document.getElementById('modeText');
+
+            if (viewInterface.classList.contains('hidden')) {
+                // Switch to View Mode
+                viewInterface.classList.remove('hidden');
+                managementInterface.classList.remove('active');
+                modeToggle.classList.remove('active');
+                modeText.textContent = 'View Mode';
+            } else {
+                // Switch to Management Mode
+                viewInterface.classList.add('hidden');
+                managementInterface.classList.add('active');
+                modeToggle.classList.add('active');
+                modeText.textContent = 'Manage Mode';
+            }
+        }
+
+        function openUploadModal() {
+            document.getElementById('uploadModal').classList.add('active');
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closeUploadModal() {
+            document.getElementById('uploadModal').classList.remove('active');
+            document.body.style.overflow = 'auto';
+        }
+
+        function openRenovationModal(floorplanId, notice, message) {
+            document.getElementById('renovationFloorplanId').value = floorplanId;
+            document.getElementById('renovationNotice').value = notice;
+            document.getElementById('renovationMessage').value = message;
+            document.getElementById('renovationModal').classList.add('active');
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closeRenovationModal() {
+            document.getElementById('renovationModal').classList.remove('active');
+            document.body.style.overflow = 'auto';
+        }
+
+        function openAddShelfModal(floorplanId) {
+            document.getElementById('addShelfFloorplanId').value = floorplanId;
+            document.getElementById('addShelfModal').classList.add('active');
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closeAddShelfModal() {
+            document.getElementById('addShelfModal').classList.remove('active');
+            document.body.style.overflow = 'auto';
+        }
+
+        function openAddSectionModal(shelfId) {
+            document.getElementById('addSectionShelfId').value = shelfId;
+            document.getElementById('addSectionModal').classList.add('active');
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closeAddSectionModal() {
+            document.getElementById('addSectionModal').classList.remove('active');
+            document.body.style.overflow = 'auto';
+        }
+
+        function openAddShelfLevelModal(sectionId) {
+            document.getElementById('addShelfLevelSectionId').value = sectionId;
+            document.getElementById('addShelfLevelModal').classList.add('active');
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closeAddShelfLevelModal() {
+            document.getElementById('addShelfLevelModal').classList.remove('active');
+            document.body.style.overflow = 'auto';
+        }
+
+        // Close modals on escape key
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                closeUploadModal();
+                closeRenovationModal();
+                closeAddShelfModal();
+                closeAddSectionModal();
+                closeAddShelfLevelModal();
+            }
+        });
+
+        // Close modals when clicking outside
+        ['uploadModal', 'renovationModal', 'addShelfModal', 'addSectionModal', 'addShelfLevelModal'].forEach(modalId => {
+            document.getElementById(modalId).addEventListener('click', function(e) {
+                if (e.target === this) {
+                    if (modalId === 'uploadModal') closeUploadModal();
+                    else if (modalId === 'renovationModal') closeRenovationModal();
+                    else if (modalId === 'addShelfModal') closeAddShelfModal();
+                    else if (modalId === 'addSectionModal') closeAddSectionModal();
+                    else if (modalId === 'addShelfLevelModal') closeAddShelfLevelModal();
+                }
+            });
+        });
+    </script>
 
 </body>
 </html>

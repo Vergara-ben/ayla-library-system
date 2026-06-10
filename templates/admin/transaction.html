@@ -597,33 +597,22 @@
                     'X-Requested-With': 'XMLHttpRequest'
                 }
             })
-            .then(response => response.text())
-            .then(html => {
-                // Parse the HTML to extract patron data
-                const parser = new DOMParser();
-                const doc = parser.parseFromString(html, 'text/html');
-                const rows = doc.querySelectorAll('tbody tr');
-                
+            .then(response => response.json())
+            .then(data => {
                 patronDropdown.innerHTML = '';
                 
-                if (rows.length === 0) {
+                if (!data.patrons || data.patrons.length === 0) {
                     patronDropdown.innerHTML = '<div class="p-3 text-xs text-slate-500">No patrons found</div>';
                 } else {
-                    rows.forEach(row => {
-                        const patronId = row.querySelector('td:nth-child(2)')?.textContent?.trim() || '';
-                        const fullname = row.querySelector('td:nth-child(3)')?.textContent?.trim() || '';
-                        const email = row.querySelector('td:nth-child(4)')?.textContent?.trim() || '';
-                        
-                        if (patronId && fullname) {
-                            const option = document.createElement('div');
-                            option.className = 'p-3 hover:bg-slate-800 cursor-pointer border-b border-slate-800 last:border-b-0';
-                            option.innerHTML = `
-                                <div class="font-medium text-slate-200 text-xs">${fullname}</div>
-                                <div class="text-[10px] text-slate-500">${email}</div>
-                            `;
-                            option.addEventListener('click', () => selectPatron(patronId, fullname, email));
-                            patronDropdown.appendChild(option);
-                        }
+                    data.patrons.forEach(patron => {
+                        const option = document.createElement('div');
+                        option.className = 'p-3 hover:bg-slate-800 cursor-pointer border-b border-slate-800 last:border-b-0';
+                        option.innerHTML = `
+                            <div class="font-medium text-slate-200 text-xs">${patron.fullname}</div>
+                            <div class="text-[10px] text-slate-500">${patron.email}</div>
+                        `;
+                        option.addEventListener('click', () => selectPatron(patron.patron_id, patron.fullname, patron.email));
+                        patronDropdown.appendChild(option);
                     });
                 }
                 
@@ -631,6 +620,7 @@
             })
             .catch(error => {
                 console.error('Error searching patrons:', error);
+                patronDropdown.innerHTML = '<div class="p-3 text-xs text-rose-400">Error searching patrons</div>';
             });
         }
 

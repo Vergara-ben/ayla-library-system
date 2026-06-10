@@ -378,6 +378,26 @@ def admin_add_patron(request):
 
 @admin_login_required
 def admin_manage_patron(request):
+    search_query = request.GET.get('search', '').strip()
+    
+    # Handle AJAX search requests
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest' and search_query:
+        patrons = Patron.objects.filter(
+            Q(fullname__icontains=search_query) | Q(email__icontains=search_query)
+        ).filter(account_status='Active')[:10]
+        
+        patron_list = []
+        for patron in patrons:
+            patron_list.append({
+                'patron_id': patron.patron_id,
+                'fullname': patron.fullname,
+                'email': patron.email,
+                'patron_type': patron.patron_type,
+            })
+        
+        return JsonResponse({'patrons': patron_list})
+    
+    # Regular page load
     patrons = Patron.objects.annotate(
         active_borrows=Count(
             'transaction',
