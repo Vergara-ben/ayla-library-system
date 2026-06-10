@@ -57,6 +57,74 @@
             background: var(--border-color);
             border-radius: 3px;
         }
+
+        /* Mobile Responsive Styles */
+        @media (max-width: 1024px) {
+            aside {
+                position: fixed;
+                left: -100%;
+                top: 0;
+                height: 100vh;
+                z-index: 50;
+                transition: left 0.3s ease;
+            }
+            aside.open {
+                left: 0;
+            }
+            .mobile-menu-btn {
+                display: flex !important;
+            }
+            main {
+                padding: 1rem;
+            }
+        }
+
+        @media (max-width: 768px) {
+            header {
+                padding: 0 1rem;
+            }
+            header h2 {
+                font-size: 1rem;
+            }
+            .flex.items-center.gap-3.p-1\.5.rounded-xl {
+                flex-direction: column;
+            }
+            .flex-1.flex.items-center.justify-center.gap-2 {
+                width: 100%;
+            }
+        }
+
+        @media (max-width: 640px) {
+            .grid-cols-1.lg\:grid-cols-12 {
+                grid-template-columns: 1fr;
+            }
+            .lg\:col-span-5, .lg\:col-span-7 {
+                grid-column: span 1;
+            }
+            header .flex.items-center.gap-4 {
+                gap: 0.5rem;
+            }
+            header span.bg-cyan-950 {
+                display: none;
+            }
+            .aspect-\[21\/9\] {
+                aspect-ratio: 16/9;
+            }
+        }
+
+        .mobile-menu-btn {
+            display: none;
+            align-items: center;
+            justify-content: center;
+            width: 2.5rem;
+            height: 2.5rem;
+            border-radius: 0.5rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            cursor: pointer;
+            margin-right: 0.75rem;
+        }
     </style>
     <script src="{% static 'js/supabase-config.js' %}"></script>
 </head>
@@ -114,6 +182,18 @@
                         <i class="fa-solid fa-users w-5 text-sm"></i>
                         <span class="text-sm font-medium">Manage Patrons</span>
                     </a>
+                    <a href="{% url 'donation_management' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                        <i class="fa-solid fa-hand-holding-heart w-5 text-sm"></i>
+                        <span class="text-sm font-medium">Donations</span>
+                    </a>
+                    <a href="{% url 'announcement_management' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                        <i class="fa-solid fa-bullhorn w-5 text-sm"></i>
+                        <span class="text-sm font-medium">Announcements</span>
+                    </a>
+                    <a href="{% url 'floorplan_management' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                        <i class="fa-solid fa-layer-group w-5 text-sm"></i>
+                        <span class="text-sm font-medium">Floor Plans</span>
+                    </a>
                 </div>
             </div>
         </nav>
@@ -122,7 +202,12 @@
     <div class="flex-1 flex flex-col overflow-hidden">
         
         <header class="h-16 flex-shrink-0 flex items-center justify-between px-8" style="background-color: var(--bg-main);">
-            <h2 class="logo-text text-lg tracking-wider text-slate-200 uppercase">QR Scanner</h2>
+            <div class="flex items-center">
+                <button class="mobile-menu-btn" onclick="toggleSidebar()">
+                    <i class="fa-solid fa-bars"></i>
+                </button>
+                <h2 class="logo-text text-lg tracking-wider text-slate-200 uppercase">QR Scanner</h2>
+            </div>
             <div class="flex items-center gap-4">
                 <span class="bg-cyan-950 text-cyan-400 text-xs px-2.5 py-1 rounded font-bold border border-cyan-800 tracking-wider">ADMIN</span>
                 <button class="relative text-slate-400 hover:text-slate-200 p-1">
@@ -228,5 +313,21 @@
         </main>
     </div>
 
+    <script>
+        function toggleSidebar() {
+            const sidebar = document.querySelector('aside');
+            sidebar.classList.toggle('open');
+        }
+
+        document.addEventListener('click', function(e) {
+            const sidebar = document.querySelector('aside');
+            const menuBtn = document.querySelector('.mobile-menu-btn');
+            if (window.innerWidth <= 1024) {
+                if (!sidebar.contains(e.target) && !menuBtn.contains(e.target)) {
+                    sidebar.classList.remove('open');
+                }
+            }
+        });
+    </script>
 </body>
 </html>

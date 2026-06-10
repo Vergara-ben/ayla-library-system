@@ -43,8 +43,82 @@
             background: var(--border-color);
             border-radius: 3px;
         }
+
+        /* Mobile Responsive Styles */
+        @media (max-width: 1024px) {
+            aside {
+                position: fixed;
+                left: -100%;
+                top: 0;
+                height: 100vh;
+                z-index: 50;
+                transition: left 0.3s ease;
+            }
+            aside.open {
+                left: 0;
+            }
+            .mobile-menu-btn {
+                display: flex !important;
+            }
+            main {
+                padding: 1rem;
+            }
+        }
+
+        @media (max-width: 768px) {
+            header {
+                padding: 0 1rem;
+            }
+            header h2 {
+                font-size: 1rem;
+            }
+            .grid-cols-1.sm\:grid-cols-2.lg\:grid-cols-4 {
+                grid-template-columns: 1fr 1fr;
+            }
+        }
+
+        @media (max-width: 640px) {
+            .grid-cols-1.sm\:grid-cols-2.lg\:grid-cols-4 {
+                grid-template-columns: 1fr;
+            }
+            header .flex.items-center.gap-4 {
+                gap: 0.5rem;
+            }
+            header span.bg-cyan-950 {
+                display: none;
+            }
+            .flex.flex-col.md\:flex-row {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            .flex.items-center.gap-1.self-end.md\:self-auto {
+                align-self: flex-end;
+            }
+            .flex.flex-col.lg\:flex-row.lg\:items-center {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            .flex.items-center.gap-2.self-start.lg\:self-auto {
+                align-self: stretch;
+            }
+        }
+
+        .mobile-menu-btn {
+            display: none;
+            align-items: center;
+            justify-content: center;
+            width: 2.5rem;
+            height: 2.5rem;
+            border-radius: 0.5rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            cursor: pointer;
+            margin-right: 0.75rem;
+        }
     </style>
     <script src="{% static 'js/supabase-config.js' %}"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
 </head>
 <body class="flex h-screen overflow-hidden">
 
@@ -100,6 +174,18 @@
                         <i class="fa-solid fa-users w-5 text-sm"></i>
                         <span class="text-sm font-medium">Manage Patrons</span>
                     </a>
+                    <a href="{% url 'donation_management' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                        <i class="fa-solid fa-hand-holding-heart w-5 text-sm"></i>
+                        <span class="text-sm font-medium">Donations</span>
+                    </a>
+                    <a href="{% url 'announcement_management' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                        <i class="fa-solid fa-bullhorn w-5 text-sm"></i>
+                        <span class="text-sm font-medium">Announcements</span>
+                    </a>
+                    <a href="{% url 'floorplan_management' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                        <i class="fa-solid fa-layer-group w-5 text-sm"></i>
+                        <span class="text-sm font-medium">Floor Plans</span>
+                    </a>
                 </div>
             </div>
         </nav>
@@ -108,7 +194,12 @@
     <div class="flex-1 flex flex-col overflow-hidden">
         
         <header class="h-16 flex-shrink-0 flex items-center justify-between px-8" style="background-color: var(--bg-main);">
-            <h2 class="logo-text text-lg tracking-wider text-slate-200 uppercase">Transactions History</h2>
+            <div class="flex items-center">
+                <button class="mobile-menu-btn" onclick="toggleSidebar()">
+                    <i class="fa-solid fa-bars"></i>
+                </button>
+                <h2 class="logo-text text-lg tracking-wider text-slate-200 uppercase">Transactions History</h2>
+            </div>
             <div class="flex items-center gap-4">
                 <span class="bg-cyan-950 text-cyan-400 text-xs px-2.5 py-1 rounded font-bold border border-cyan-800 tracking-wider">ADMIN</span>
                 <button class="relative text-slate-400 hover:text-slate-200 p-1">
@@ -153,11 +244,27 @@
                         <i class="fa-solid fa-list-alt text-slate-400 text-xs"></i>
                         <h4 class="text-sm font-bold text-slate-200 tracking-wide">All Transactions</h4>
                     </div>
-                    <div class="flex items-center gap-1 bg-slate-900 p-1 rounded-lg border border-slate-800 self-end md:self-auto">
-                        <button class="px-3 py-1 rounded text-xs font-semibold bg-cyan-700/30 text-cyan-400 border border-cyan-800/50">All</button>
-                        <button class="px-3 py-1 rounded text-xs font-semibold text-slate-500 hover:text-slate-300 transition-colors">Borrowed</button>
-                        <button class="px-3 py-1 rounded text-xs font-semibold text-slate-500 hover:text-slate-300 transition-colors">Returned</button>
-                        <button class="px-3 py-1 rounded text-xs font-semibold text-slate-500 hover:text-slate-300 transition-colors">Overdue</button>
+                    <div class="flex items-center gap-3 self-end md:self-auto">
+                        <a href="{% url 'export_transactions' %}" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-amber-500/90 text-[11px] font-semibold px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors">
+                            <i class="fa-solid fa-file-invoice"></i> Export
+                        </a>
+                        <a href="{% url 'download_transaction_template' %}" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-emerald-500/90 text-[11px] font-semibold px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors">
+                            <i class="fa-solid fa-file-excel"></i> Download Template
+                        </a>
+                        <button onclick="document.getElementById('excelFileInput').click()" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-cyan-500/90 text-[11px] font-semibold px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors">
+                            <i class="fa-solid fa-upload"></i> Import Excel
+                        </button>
+                        <input type="file" id="excelFileInput" accept=".xlsx" style="display: none;" onchange="uploadExcelFile(this)">
+                        <button type="button" id="open-transaction-modal-btn" class="bg-cyan-600/20 text-cyan-400 border border-cyan-600/30 px-4 py-2 rounded-lg text-xs font-semibold hover:bg-cyan-600/30 transition-colors flex items-center gap-2">
+                            <i class="fa-solid fa-plus"></i>
+                            Process New Transaction
+                        </button>
+                        <div class="flex items-center gap-1 bg-slate-900 p-1 rounded-lg border border-slate-800">
+                            <button class="px-3 py-1 rounded text-xs font-semibold bg-cyan-700/30 text-cyan-400 border border-cyan-800/50">All</button>
+                            <button class="px-3 py-1 rounded text-xs font-semibold text-slate-500 hover:text-slate-300 transition-colors">Borrowed</button>
+                            <button class="px-3 py-1 rounded text-xs font-semibold text-slate-500 hover:text-slate-300 transition-colors">Returned</button>
+                            <button class="px-3 py-1 rounded text-xs font-semibold text-slate-500 hover:text-slate-300 transition-colors">Overdue</button>
+                        </div>
                     </div>
                 </div>
 
@@ -284,5 +391,555 @@
         </main>
     </div>
 
+    <!-- QR Scanner Modal -->
+    <div id="qr-scanner-modal" class="fixed inset-0 z-50 hidden">
+        <div class="absolute inset-0 bg-black/80" onclick="closeScannerModal()"></div>
+        <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-lg">
+            <div class="rounded-xl border border-slate-700 overflow-hidden shadow-2xl" style="background-color: var(--bg-card);">
+                <div class="p-4 border-b border-slate-700 flex items-center justify-between">
+                    <h3 class="text-sm font-bold text-slate-200">Scan Book QR Code</h3>
+                    <button type="button" onclick="closeScannerModal()" class="text-slate-400 hover:text-slate-200">
+                        <i class="fa-solid fa-times"></i>
+                    </button>
+                </div>
+                <div class="p-4">
+                    <div class="relative aspect-video bg-slate-900 rounded-lg overflow-hidden mb-4">
+                        <video id="qr-video" class="w-full h-full object-cover" autoplay playsinline></video>
+                        <canvas id="qr-canvas" class="hidden"></canvas>
+                        <div id="scanner-loading" class="absolute inset-0 flex items-center justify-center text-slate-400 text-xs">
+                            <i class="fa-solid fa-spinner fa-spin mr-2"></i>
+                            Starting camera...
+                        </div>
+                    </div>
+                    <div id="scan-status" class="text-center text-xs text-slate-400 mb-4">
+                        Position the QR code within the camera view
+                    </div>
+                    <button type="button" onclick="closeScannerModal()" class="w-full bg-slate-800 text-slate-300 border border-slate-700 px-4 py-2 rounded-lg text-xs font-semibold hover:bg-slate-700 transition-colors">
+                        Cancel
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Transaction Processing Modal -->
+    <div id="transaction-modal" class="fixed inset-0 z-50 hidden">
+        <div class="absolute inset-0 bg-black/80" onclick="closeTransactionModal()"></div>
+        <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+            <div class="rounded-xl border border-slate-700 overflow-hidden shadow-2xl" style="background-color: var(--bg-card);">
+                <div class="p-5 border-b border-slate-700 flex items-center justify-between">
+                    <div class="flex items-center gap-2">
+                        <i class="fa-solid fa-qrcode text-slate-400 text-xs"></i>
+                        <h3 class="text-sm font-bold text-slate-200 tracking-wide">Process New Transaction</h3>
+                    </div>
+                    <button type="button" onclick="closeTransactionModal()" class="text-slate-400 hover:text-slate-200">
+                        <i class="fa-solid fa-times"></i>
+                    </button>
+                </div>
+                <div class="p-5 space-y-5">
+                    {% csrf_token %}
+                    <!-- Transaction Type Selection -->
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider">Transaction Type</label>
+                        <div class="flex gap-3">
+                            <label class="flex items-center gap-2 cursor-pointer">
+                                <input type="radio" name="transaction_type" value="Borrow" class="w-4 h-4 text-cyan-500 bg-slate-900 border-slate-700 focus:ring-cyan-500 focus:ring-offset-slate-900">
+                                <span class="text-sm text-slate-300">Borrow</span>
+                            </label>
+                            <label class="flex items-center gap-2 cursor-pointer">
+                                <input type="radio" name="transaction_type" value="Return" class="w-4 h-4 text-cyan-500 bg-slate-900 border-slate-700 focus:ring-cyan-500 focus:ring-offset-slate-900">
+                                <span class="text-sm text-slate-300">Return</span>
+                            </label>
+                            <label class="flex items-center gap-2 cursor-pointer">
+                                <input type="radio" name="transaction_type" value="In-Library Reading" class="w-4 h-4 text-cyan-500 bg-slate-900 border-slate-700 focus:ring-cyan-500 focus:ring-offset-slate-900">
+                                <span class="text-sm text-slate-300">In-Library Reading</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Patron Search -->
+                    <div id="patron-search-section">
+                        <label class="block text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider">Select Patron</label>
+                        <div class="relative">
+                            <i class="fa-solid fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-xs"></i>
+                            <input type="text" id="patron-search" placeholder="Search patron by name or email..." class="w-full bg-slate-950/80 border border-slate-800 rounded-lg pl-9 pr-4 py-2 text-xs text-slate-300 focus:outline-none focus:border-cyan-800 placeholder-slate-600 transition-colors">
+                            <div id="patron-dropdown" class="absolute z-10 w-full mt-1 bg-slate-900 border border-slate-800 rounded-lg shadow-xl max-h-48 overflow-y-auto hidden">
+                                <!-- Patron options will be populated here -->
+                            </div>
+                        </div>
+                        <input type="hidden" id="selected-patron-id" value="">
+                        <div id="selected-patron-display" class="mt-2 text-xs text-slate-400 hidden">
+                            Selected: <span id="patron-name" class="text-cyan-400 font-medium"></span>
+                        </div>
+                    </div>
+
+                    <!-- Scan Books Section -->
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider">Books to Process</label>
+                        <button type="button" id="scan-book-btn" class="bg-cyan-700/30 text-cyan-400 border border-cyan-800/50 px-4 py-2 rounded-lg text-xs font-semibold hover:bg-cyan-700/40 transition-colors flex items-center gap-2">
+                            <i class="fa-solid fa-qrcode"></i>
+                            Scan Book
+                        </button>
+                    </div>
+
+                    <!-- Scanned Books List -->
+                    <div id="scanned-books-section" class="hidden">
+                        <div class="flex items-center justify-between mb-2">
+                            <label class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Scanned Books</label>
+                            <span id="scanned-count" class="text-xs text-slate-500">0 books</span>
+                        </div>
+                        <div id="scanned-books-list" class="space-y-2 max-h-48 overflow-y-auto">
+                            <!-- Scanned books will be added here -->
+                        </div>
+                    </div>
+
+                    <!-- Process Transaction Button -->
+                    <div>
+                        <button type="button" id="process-transaction-btn" class="w-full bg-emerald-600/20 text-emerald-400 border border-emerald-600/30 px-4 py-3 rounded-lg text-sm font-semibold hover:bg-emerald-600/30 transition-colors flex items-center justify-center gap-2">
+                            <i class="fa-solid fa-check"></i>
+                            Process Transaction
+                        </button>
+                    </div>
+
+                    <!-- Success/Error Messages -->
+                    <div id="transaction-message" class="hidden rounded-lg p-3 text-xs"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function toggleSidebar() {
+            const sidebar = document.querySelector('aside');
+            sidebar.classList.toggle('open');
+        }
+
+        document.addEventListener('click', function(e) {
+            const sidebar = document.querySelector('aside');
+            const menuBtn = document.querySelector('.mobile-menu-btn');
+            if (window.innerWidth <= 1024) {
+                if (!sidebar.contains(e.target) && !menuBtn.contains(e.target)) {
+                    sidebar.classList.remove('open');
+                }
+            }
+        });
+
+        // Transaction Modal Functions
+        const openTransactionModalBtn = document.getElementById('open-transaction-modal-btn');
+        const transactionModal = document.getElementById('transaction-modal');
+
+        openTransactionModalBtn.addEventListener('click', openTransactionModal);
+
+        function openTransactionModal() {
+            transactionModal.classList.remove('hidden');
+        }
+
+        function closeTransactionModal() {
+            transactionModal.classList.add('hidden');
+        }
+
+        // Transaction Processing JavaScript
+        let scannedBooks = [];
+        let videoStream = null;
+        let scanInterval = null;
+
+        // Transaction type change handler
+        document.querySelectorAll('input[name="transaction_type"]').forEach(radio => {
+            radio.addEventListener('change', function() {
+                const patronSection = document.getElementById('patron-search-section');
+                const selectedType = this.value;
+                
+                if (selectedType === 'In-Library Reading') {
+                    patronSection.classList.add('hidden');
+                    document.getElementById('selected-patron-id').value = '';
+                    document.getElementById('selected-patron-display').classList.add('hidden');
+                } else {
+                    patronSection.classList.remove('hidden');
+                }
+            });
+        });
+
+        // Patron search functionality
+        const patronSearchInput = document.getElementById('patron-search');
+        const patronDropdown = document.getElementById('patron-dropdown');
+        let patronSearchTimeout = null;
+
+        patronSearchInput.addEventListener('input', function() {
+            const query = this.value.trim();
+            
+            clearTimeout(patronSearchTimeout);
+            
+            if (query.length < 2) {
+                patronDropdown.classList.add('hidden');
+                return;
+            }
+            
+            patronSearchTimeout = setTimeout(() => {
+                searchPatrons(query);
+            }, 300);
+        });
+
+        patronSearchInput.addEventListener('focus', function() {
+            if (this.value.trim().length >= 2) {
+                patronDropdown.classList.remove('hidden');
+            }
+        });
+
+        document.addEventListener('click', function(e) {
+            if (!patronSearchInput.contains(e.target) && !patronDropdown.contains(e.target)) {
+                patronDropdown.classList.add('hidden');
+            }
+        });
+
+        function searchPatrons(query) {
+            fetch(`/admin-portal/manage-patron/?search=${encodeURIComponent(query)}`, {
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
+            })
+            .then(response => response.text())
+            .then(html => {
+                // Parse the HTML to extract patron data
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(html, 'text/html');
+                const rows = doc.querySelectorAll('tbody tr');
+                
+                patronDropdown.innerHTML = '';
+                
+                if (rows.length === 0) {
+                    patronDropdown.innerHTML = '<div class="p-3 text-xs text-slate-500">No patrons found</div>';
+                } else {
+                    rows.forEach(row => {
+                        const patronId = row.querySelector('td:nth-child(2)')?.textContent?.trim() || '';
+                        const fullname = row.querySelector('td:nth-child(3)')?.textContent?.trim() || '';
+                        const email = row.querySelector('td:nth-child(4)')?.textContent?.trim() || '';
+                        
+                        if (patronId && fullname) {
+                            const option = document.createElement('div');
+                            option.className = 'p-3 hover:bg-slate-800 cursor-pointer border-b border-slate-800 last:border-b-0';
+                            option.innerHTML = `
+                                <div class="font-medium text-slate-200 text-xs">${fullname}</div>
+                                <div class="text-[10px] text-slate-500">${email}</div>
+                            `;
+                            option.addEventListener('click', () => selectPatron(patronId, fullname, email));
+                            patronDropdown.appendChild(option);
+                        }
+                    });
+                }
+                
+                patronDropdown.classList.remove('hidden');
+            })
+            .catch(error => {
+                console.error('Error searching patrons:', error);
+            });
+        }
+
+        function selectPatron(patronId, fullname, email) {
+            document.getElementById('selected-patron-id').value = patronId;
+            document.getElementById('patron-name').textContent = `${fullname} (${email})`;
+            document.getElementById('selected-patron-display').classList.remove('hidden');
+            document.getElementById('patron-search').value = fullname;
+            patronDropdown.classList.add('hidden');
+        }
+
+        // QR Scanner functionality
+        const scanBookBtn = document.getElementById('scan-book-btn');
+        const qrModal = document.getElementById('qr-scanner-modal');
+        const video = document.getElementById('qr-video');
+        const canvas = document.getElementById('qr-canvas');
+        const scannerLoading = document.getElementById('scanner-loading');
+        const scanStatus = document.getElementById('scan-status');
+
+        scanBookBtn.addEventListener('click', openScannerModal);
+
+        function openScannerModal() {
+            qrModal.classList.remove('hidden');
+            startCamera();
+        }
+
+        function closeScannerModal() {
+            qrModal.classList.add('hidden');
+            stopCamera();
+        }
+
+        async function startCamera() {
+            try {
+                scannerLoading.classList.remove('hidden');
+                scanStatus.textContent = 'Starting camera...';
+                
+                videoStream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: 'environment' } 
+                });
+                video.srcObject = videoStream;
+                
+                video.onloadedmetadata = () => {
+                    scannerLoading.classList.add('hidden');
+                    scanStatus.textContent = 'Position the QR code within the camera view';
+                    startScanning();
+                };
+            } catch (error) {
+                console.error('Error accessing camera:', error);
+                scannerLoading.innerHTML = '<i class="fa-solid fa-exclamation-triangle mr-2"></i>Camera access denied';
+                scanStatus.textContent = 'Please allow camera access to scan QR codes';
+            }
+        }
+
+        function stopCamera() {
+            if (scanInterval) {
+                clearInterval(scanInterval);
+                scanInterval = null;
+            }
+            if (videoStream) {
+                videoStream.getTracks().forEach(track => track.stop());
+                videoStream = null;
+            }
+            video.srcObject = null;
+        }
+
+        function startScanning() {
+            const ctx = canvas.getContext('2d');
+            
+            scanInterval = setInterval(() => {
+                if (video.readyState === video.HAVE_ENOUGH_DATA) {
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                    
+                    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                    const code = jsQR(imageData.data, imageData.width, imageData.height);
+                    
+                    if (code) {
+                        handleQRCode(code.data);
+                    }
+                }
+            }, 100);
+        }
+
+        function handleQRCode(qrData) {
+            const bookId = qrData.trim();
+            
+            if (!bookId) {
+                scanStatus.textContent = 'Invalid QR code';
+                return;
+            }
+            
+            scanStatus.textContent = 'QR code detected! Fetching book details...';
+            
+            // Fetch book details
+            fetch(`/admin-portal/get-book-by-id/?book_id=${encodeURIComponent(bookId)}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        addScannedBook(data);
+                        closeScannerModal();
+                    } else {
+                        scanStatus.textContent = `Error: ${data.error}`;
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching book:', error);
+                    scanStatus.textContent = 'Error fetching book details';
+                });
+        }
+
+        function addScannedBook(book) {
+            // Check if book already scanned
+            if (scannedBooks.some(b => b.book_id === book.book_id)) {
+                showMessage('Book already scanned', 'warning');
+                return;
+            }
+            
+            scannedBooks.push(book);
+            updateScannedBooksList();
+        }
+
+        function removeScannedBook(bookId) {
+            scannedBooks = scannedBooks.filter(b => b.book_id !== bookId);
+            updateScannedBooksList();
+        }
+
+        function updateScannedBooksList() {
+            const listContainer = document.getElementById('scanned-books-list');
+            const section = document.getElementById('scanned-books-section');
+            const countSpan = document.getElementById('scanned-count');
+            
+            if (scannedBooks.length === 0) {
+                section.classList.add('hidden');
+                return;
+            }
+            
+            section.classList.remove('hidden');
+            countSpan.textContent = `${scannedBooks.length} book${scannedBooks.length !== 1 ? 's' : ''}`;
+            
+            listContainer.innerHTML = scannedBooks.map(book => `
+                <div class="flex items-center justify-between p-3 bg-slate-900/50 rounded-lg border border-slate-800">
+                    <div class="flex-1 min-w-0">
+                        <div class="font-medium text-slate-200 text-xs truncate">${book.title}</div>
+                        <div class="text-[10px] text-slate-500">${book.author}</div>
+                        <div class="text-[10px] mt-1">
+                            <span class="inline-block px-2 py-0.5 rounded text-[10px] font-medium ${getStatusClass(book.status)}">${book.status}</span>
+                        </div>
+                    </div>
+                    <button type="button" onclick="removeScannedBook(${book.book_id})" class="ml-3 text-slate-500 hover:text-rose-400 transition-colors">
+                        <i class="fa-solid fa-times"></i>
+                    </button>
+                </div>
+            `).join('');
+        }
+
+        function getStatusClass(status) {
+            switch(status) {
+                case 'Available':
+                    return 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20';
+                case 'Borrowed':
+                    return 'bg-amber-500/10 text-amber-500 border border-amber-500/20';
+                case 'Overdue':
+                    return 'bg-rose-500/10 text-rose-400 border border-rose-500/20';
+                case 'Being Read':
+                    return 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20';
+                default:
+                    return 'bg-slate-800/50 text-slate-400 border border-slate-700/40';
+            }
+        }
+
+        // Process Transaction
+        const processBtn = document.getElementById('process-transaction-btn');
+        processBtn.addEventListener('click', processTransaction);
+
+        function processTransaction() {
+            const transactionType = document.querySelector('input[name="transaction_type"]:checked')?.value;
+            const patronId = document.getElementById('selected-patron-id').value;
+            
+            // Validation
+            if (!transactionType) {
+                showMessage('Please select a transaction type', 'error');
+                return;
+            }
+            
+            if (transactionType !== 'In-Library Reading' && !patronId) {
+                showMessage('Please select a patron', 'error');
+                return;
+            }
+            
+            if (scannedBooks.length === 0) {
+                showMessage('Please scan at least one book', 'error');
+                return;
+            }
+            
+            // Prepare form data
+            const formData = new FormData();
+            formData.append('transaction_type', transactionType);
+            formData.append('patron_id', patronId);
+            scannedBooks.forEach(book => {
+                formData.append('book_ids', book.book_id);
+            });
+            
+            // Get CSRF token
+            const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value || 
+                             getCookie('csrftoken');
+            
+            processBtn.disabled = true;
+            processBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i>Processing...';
+            
+            fetch('/admin-portal/process-transaction/', {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': csrfToken,
+                    'X-Requested-With': 'XMLHttpRequest'
+                },
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    showMessage(data.message, 'success');
+                    // Clear scanned books
+                    scannedBooks = [];
+                    updateScannedBooksList();
+                    // Reload page to show updated transaction history
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 1500);
+                } else {
+                    if (data.errors) {
+                        showMessage(`${data.error}: ${data.errors.join(', ')}`, 'error');
+                    } else {
+                        showMessage(data.error, 'error');
+                    }
+                }
+            })
+            .catch(error => {
+                console.error('Error processing transaction:', error);
+                showMessage('Error processing transaction', 'error');
+            })
+            .finally(() => {
+                processBtn.disabled = false;
+                processBtn.innerHTML = '<i class="fa-solid fa-check"></i>Process Transaction';
+            });
+        }
+
+        function showMessage(message, type) {
+            const messageDiv = document.getElementById('transaction-message');
+            messageDiv.classList.remove('hidden');
+            
+            if (type === 'success') {
+                messageDiv.className = 'rounded-lg p-3 text-xs bg-emerald-500/10 text-emerald-400 border border-emerald-500/20';
+            } else if (type === 'error') {
+                messageDiv.className = 'rounded-lg p-3 text-xs bg-rose-500/10 text-rose-400 border border-rose-500/20';
+            } else if (type === 'warning') {
+                messageDiv.className = 'rounded-lg p-3 text-xs bg-amber-500/10 text-amber-400 border border-amber-500/20';
+            }
+            
+            messageDiv.textContent = message;
+            
+            setTimeout(() => {
+                messageDiv.classList.add('hidden');
+            }, 5000);
+        }
+
+        function getCookie(name) {
+            let cookieValue = null;
+            if (document.cookie && document.cookie !== '') {
+                const cookies = document.cookie.split(';');
+                for (let i = 0; i < cookies.length; i++) {
+                    const cookie = cookies[i].trim();
+                    if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                        break;
+                    }
+                }
+            }
+            return cookieValue;
+        }
+
+        function uploadExcelFile(input) {
+            if (input.files && input.files[0]) {
+                const formData = new FormData();
+                formData.append('excel_file', input.files[0]);
+                
+                fetch('{% url 'import_transactions' %}', {
+                    method: 'POST',
+                    body: formData,
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'X-CSRFToken': getCookie('csrftoken')
+                    }
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        alert(data.message);
+                        window.location.href = '{% url 'admin_transaction' %}';
+                    } else {
+                        alert(data.error || 'An error occurred during import');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('An error occurred while importing the Excel file');
+                });
+            }
+        }
+    </script>
 </body>
 </html>

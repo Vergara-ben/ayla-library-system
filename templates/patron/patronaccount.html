@@ -78,6 +78,15 @@
   .save-changes{width:100%;padding:12px;background:linear-gradient(135deg,#22c55e,#16a34a);border:none;border-radius:10px;color:#0d1a0f;font-family:'Syne',sans-serif;font-size:14px;font-weight:700;cursor:pointer;margin-top:4px;transition:all 0.2s;}
   .save-changes:hover{transform:translateY(-1px);}
 
+  /* Mobile Responsive */
+  @media (max-width: 480px){
+    .form-grid{grid-template-columns:1fr;}
+    .profile-hero{flex-direction:column;text-align:center;padding:20px;}
+    .avatar{margin:0 auto;}
+    .qr-section{flex-direction:column;text-align:center;}
+    .qr-mini{margin:0 auto;}
+  }
+
   /* LOGOUT */
   .logout-btn{width:100%;padding:14px;background:transparent;border:1px solid #f8717140;border-radius:12px;color:var(--danger);font-family:'Syne',sans-serif;font-size:14px;font-weight:700;cursor:pointer;transition:all 0.2s;display:flex;align-items:center;justify-content:center;gap:8px;}
   .logout-btn:hover{background:#f8717110;border-color:var(--danger);}

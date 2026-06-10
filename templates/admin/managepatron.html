@@ -53,6 +53,79 @@
         .modal-overlay.active {
             display: flex;
         }
+
+        /* Mobile Responsive Styles */
+        @media (max-width: 1024px) {
+            aside {
+                position: fixed;
+                left: -100%;
+                top: 0;
+                height: 100vh;
+                z-index: 50;
+                transition: left 0.3s ease;
+            }
+            aside.open {
+                left: 0;
+            }
+            .mobile-menu-btn {
+                display: flex !important;
+            }
+            main {
+                padding: 1rem;
+            }
+        }
+
+        @media (max-width: 768px) {
+            header {
+                padding: 0 1rem;
+            }
+            header h2 {
+                font-size: 1rem;
+            }
+            .grid-cols-1.sm\:grid-cols-2.lg\:grid-cols-4 {
+                grid-template-columns: 1fr 1fr;
+            }
+        }
+
+        @media (max-width: 640px) {
+            .grid-cols-1.sm\:grid-cols-2.lg\:grid-cols-4 {
+                grid-template-columns: 1fr;
+            }
+            header .flex.items-center.gap-4 {
+                gap: 0.5rem;
+            }
+            header span.bg-cyan-950 {
+                display: none;
+            }
+            .flex.flex-col.sm\:flex-row {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            .flex.items-center.gap-2.self-end.sm\:self-auto {
+                align-self: flex-end;
+            }
+            .flex.flex-col.lg\:flex-row.lg\:items-center {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            .flex.items-center.gap-2.self-end.lg\:self-auto {
+                align-self: stretch;
+            }
+        }
+
+        .mobile-menu-btn {
+            display: none;
+            align-items: center;
+            justify-content: center;
+            width: 2.5rem;
+            height: 2.5rem;
+            border-radius: 0.5rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            cursor: pointer;
+            margin-right: 0.75rem;
+        }
     </style>
     <script src="{% static 'js/supabase-config.js' %}"></script>
 </head>
@@ -110,6 +183,18 @@
                         <i class="fa-solid fa-users w-5 text-sm"></i>
                         <span class="text-sm">Manage Patrons</span>
                     </a>
+                    <a href="{% url 'donation_management' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                        <i class="fa-solid fa-hand-holding-heart w-5 text-sm"></i>
+                        <span class="text-sm font-medium">Donations</span>
+                    </a>
+                    <a href="{% url 'announcement_management' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                        <i class="fa-solid fa-bullhorn w-5 text-sm"></i>
+                        <span class="text-sm font-medium">Announcements</span>
+                    </a>
+                    <a href="{% url 'floorplan_management' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                        <i class="fa-solid fa-layer-group w-5 text-sm"></i>
+                        <span class="text-sm font-medium">Floor Plans</span>
+                    </a>
                 </div>
             </div>
         </nav>
@@ -118,7 +203,12 @@
     <div class="flex-1 flex flex-col overflow-hidden">
         
         <header class="h-16 flex-shrink-0 flex items-center justify-between px-8" style="background-color: var(--bg-main);">
-            <h2 class="logo-text text-lg tracking-wider text-slate-200 uppercase">Manage Patrons</h2>
+            <div class="flex items-center">
+                <button class="mobile-menu-btn" onclick="toggleSidebar()">
+                    <i class="fa-solid fa-bars"></i>
+                </button>
+                <h2 class="logo-text text-lg tracking-wider text-slate-200 uppercase">Manage Patrons</h2>
+            </div>
             <div class="flex items-center gap-4">
                 <span class="bg-cyan-950 text-cyan-400 text-xs px-2.5 py-1 rounded font-bold border border-cyan-800 tracking-wider">ADMIN</span>
                 <button class="relative text-slate-400 hover:text-slate-200 p-1">
@@ -167,6 +257,13 @@
                         <button class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-amber-500/90 text-[11px] font-semibold px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors">
                             <i class="fa-solid fa-file-invoice"></i> Generate Report
                         </button>
+                        <a href="{% url 'download_patron_template' %}" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-emerald-500/90 text-[11px] font-semibold px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors">
+                            <i class="fa-solid fa-file-excel"></i> Download Template
+                        </a>
+                        <button onclick="document.getElementById('excelFileInput').click()" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-cyan-500/90 text-[11px] font-semibold px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors">
+                            <i class="fa-solid fa-upload"></i> Import Excel
+                        </button>
+                        <input type="file" id="excelFileInput" accept=".xlsx" style="display: none;" onchange="uploadExcelFile(this)">
                         <button onclick="openModal('add')" class="inline-flex items-center justify-center bg-cyan-700/30 text-cyan-400 border border-cyan-800/80 hover:bg-cyan-700/50 text-[11px] font-bold px-3 py-1.5 rounded-lg gap-1.5 transition-colors">
                             <i class="fa-solid fa-plus text-[10px]"></i> Add Patron
                         </button>
@@ -373,6 +470,21 @@
     </div>
 
     <script>
+        function toggleSidebar() {
+            const sidebar = document.querySelector('aside');
+            sidebar.classList.toggle('open');
+        }
+
+        document.addEventListener('click', function(e) {
+            const sidebar = document.querySelector('aside');
+            const menuBtn = document.querySelector('.mobile-menu-btn');
+            if (window.innerWidth <= 1024) {
+                if (!sidebar.contains(e.target) && !menuBtn.contains(e.target)) {
+                    sidebar.classList.remove('open');
+                }
+            }
+        });
+
         function openModal(mode, patronId = null) {
             const modal = document.getElementById('modalOverlay');
             const form = document.getElementById('patronForm');
@@ -420,6 +532,34 @@
                     document.getElementById('accountStatus').value = cells[6].querySelector('span').textContent;
                     break;
                 }
+            }
+        }
+
+        function uploadExcelFile(input) {
+            if (input.files && input.files[0]) {
+                const formData = new FormData();
+                formData.append('excel_file', input.files[0]);
+                
+                fetch('{% url 'import_patrons' %}', {
+                    method: 'POST',
+                    body: formData,
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest'
+                    }
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        alert(data.message);
+                        window.location.href = '{% url 'admin_manage_patron' %}';
+                    } else {
+                        alert(data.error || 'An error occurred during import');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('An error occurred while importing the Excel file');
+                });
             }
         }
 

@@ -172,6 +172,18 @@
   @keyframes fadeDown { from { opacity:0; transform:translateY(-16px);} to { opacity:1; transform:translateY(0);} }
   @keyframes fadeUp { from { opacity:0; transform:translateY(16px);} to { opacity:1; transform:translateY(0);} }
   @keyframes popIn { from { opacity:0; transform:scale(0.92);} to { opacity:1; transform:scale(1);} }
+
+  /* Mobile Responsive */
+  @media (max-width: 480px){
+    .form-grid{grid-template-columns:1fr;}
+    .patron-types{grid-template-columns:1fr;}
+    .btn-row{flex-direction:column;}
+    .btn-secondary{width:100%;}
+    .action-btns{flex-direction:column;}
+    .btn-dl{width:100%;}
+    .card{padding:24px 20px;}
+    .page{padding:24px 16px;}
+  }
 </style>
 </head>
 <body>

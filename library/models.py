@@ -181,6 +181,7 @@ class Book(models.Model):
         default='Available'
     )
     cover_img_url = models.CharField(max_length=255, blank=True, null=True)
+    qr_code = models.CharField(max_length=255, blank=True, null=True)
 
     class Meta:
         db_table = 'Books'

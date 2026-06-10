@@ -76,6 +76,30 @@
   .modal-text{font-size:13px;color:var(--muted);margin-bottom:24px;line-height:1.6;}
   .btn-enable{width:100%;padding:13px;background:linear-gradient(135deg,#22c55e,#16a34a);border:none;border-radius:12px;color:#0d1a0f;font-family:'Syne',sans-serif;font-size:15px;font-weight:700;cursor:pointer;margin-bottom:10px;}
   .btn-skip{width:100%;padding:13px;background:transparent;border:1px solid var(--border);border-radius:12px;color:var(--muted);font-family:'DM Sans',sans-serif;font-size:14px;cursor:pointer;}
+
+  /* Mobile Responsive */
+  @media (max-width: 640px){
+    .navbar{padding:10px 14px;}
+    .nav-title{font-size:16px;}
+    .fl-btn{padding:5px 10px;font-size:11px;}
+    .info-panel{padding:12px 14px;}
+    .shelf-info{flex-direction:column;align-items:flex-start;gap:8px;}
+    .shelf-dot{margin-bottom:4px;}
+    .btn-row{flex-direction:column;}
+    .btn-nav{width:100%;}
+    .btn-layers{width:100%;}
+    .map-legend{top:8px;right:8px;padding:8px 10px;font-size:10px;}
+    .legend-item{margin-bottom:5px;}
+    .modal{padding:24px 20px;}
+  }
+
+  @media (max-width: 480px){
+    .nav-title{font-size:14px;}
+    .back-btn{width:32px;height:32px;font-size:14px;}
+    .shelf-name{font-size:13px;}
+    .shelf-path{font-size:11px;}
+    .map-legend{display:none;}
+  }
 </style>
 </head>
 <body>

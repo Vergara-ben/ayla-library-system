@@ -30,4 +30,46 @@ urlpatterns = [
     path('admin-portal/transaction/<int:transaction_id>/action/', views.admin_transaction_action, name='admin_transaction_action'),
     path('admin-portal/indoor-map/', views.admin_indoor_map, name='admin_indoor_map'),
     path('admin-portal/log-management/', views.admin_log_management, name='admin_log_management'),
+    path('admin-portal/book-details/<int:book_id>/', views.admin_book_details_ajax, name='admin_book_details_ajax'),
+    path('admin-portal/search-book-by-qr/', views.search_book_by_qr, name='search_book_by_qr'),
+    path('admin-portal/download-book-template/', views.download_book_template, name='download_book_template'),
+    path('admin-portal/import-books/', views.import_books, name='import_books'),
+    # Patron Import
+    path('admin-portal/download-patron-template/', views.download_patron_template, name='download_patron_template'),
+    path('admin-portal/import-patrons/', views.import_patrons, name='import_patrons'),
+    # Donation Import
+    path('admin-portal/download-donation-template/', views.download_donation_template, name='download_donation_template'),
+    path('admin-portal/import-donations/', views.import_donations, name='import_donations'),
+    # Announcement Import
+    path('admin-portal/download-announcement-template/', views.download_announcement_template, name='download_announcement_template'),
+    path('admin-portal/import-announcements/', views.import_announcements, name='import_announcements'),
+    path('admin-portal/get-book-by-id/', views.get_book_by_id, name='get_book_by_id'),
+    path('admin-portal/process-transaction/', views.process_transaction, name='process_transaction'),
+    # Donation Management
+    path('admin-portal/donation-management/', views.donation_management, name='donation_management'),
+    path('admin-portal/update-donation-status/', views.update_donation_status, name='update_donation_status'),
+    path('admin-portal/delete-donation/', views.delete_donation, name='delete_donation'),
+    # Announcement Management
+    path('admin-portal/announcement-management/', views.announcement_management, name='announcement_management'),
+    path('admin-portal/toggle-announcement/', views.toggle_announcement, name='toggle_announcement'),
+    path('admin-portal/delete-announcement/', views.delete_announcement, name='delete_announcement'),
+    # Floor Plan Management
+    path('admin-portal/floorplan-management/', views.floorplan_management, name='floorplan_management'),
+    path('admin-portal/set-active-floorplan/', views.set_active_floorplan, name='set_active_floorplan'),
+    path('admin-portal/toggle-renovation/', views.toggle_renovation, name='toggle_renovation'),
+    path('admin-portal/delete-floorplan/', views.delete_floorplan, name='delete_floorplan'),
+    path('admin-portal/add-shelf/', views.add_shelf, name='add_shelf'),
+    path('admin-portal/delete-shelf/', views.delete_shelf, name='delete_shelf'),
+    path('admin-portal/add-section/', views.add_section, name='add_section'),
+    path('admin-portal/delete-section/', views.delete_section, name='delete_section'),
+    path('admin-portal/add-shelf-level/', views.add_shelf_level, name='add_shelf_level'),
+    path('admin-portal/delete-shelf-level/', views.delete_shelf_level, name='delete_shelf_level'),
+    # Transaction Import/Export
+    path('admin-portal/download-transaction-template/', views.download_transaction_template, name='download_transaction_template'),
+    path('admin-portal/import-transactions/', views.import_transactions, name='import_transactions'),
+    path('admin-portal/export-transactions/', views.export_transactions, name='export_transactions'),
+    # Log Import/Export
+    path('admin-portal/download-log-template/', views.download_log_template, name='download_log_template'),
+    path('admin-portal/import-logs/', views.import_logs, name='import_logs'),
+    path('admin-portal/export-logs/', views.export_logs, name='export_logs'),
 ]
