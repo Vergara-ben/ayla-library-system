@@ -391,37 +391,6 @@
         </main>
     </div>
 
-    <!-- QR Scanner Modal -->
-    <div id="qr-scanner-modal" class="fixed inset-0 z-50 hidden">
-        <div class="absolute inset-0 bg-black/80" onclick="closeScannerModal()"></div>
-        <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-lg">
-            <div class="rounded-xl border border-slate-700 overflow-hidden shadow-2xl" style="background-color: var(--bg-card);">
-                <div class="p-4 border-b border-slate-700 flex items-center justify-between">
-                    <h3 class="text-sm font-bold text-slate-200">Scan Book QR Code</h3>
-                    <button type="button" onclick="closeScannerModal()" class="text-slate-400 hover:text-slate-200">
-                        <i class="fa-solid fa-times"></i>
-                    </button>
-                </div>
-                <div class="p-4">
-                    <div class="relative aspect-video bg-slate-900 rounded-lg overflow-hidden mb-4">
-                        <video id="qr-video" class="w-full h-full object-cover" autoplay playsinline></video>
-                        <canvas id="qr-canvas" class="hidden"></canvas>
-                        <div id="scanner-loading" class="absolute inset-0 flex items-center justify-center text-slate-400 text-xs">
-                            <i class="fa-solid fa-spinner fa-spin mr-2"></i>
-                            Starting camera...
-                        </div>
-                    </div>
-                    <div id="scan-status" class="text-center text-xs text-slate-400 mb-4">
-                        Position the QR code within the camera view
-                    </div>
-                    <button type="button" onclick="closeScannerModal()" class="w-full bg-slate-800 text-slate-300 border border-slate-700 px-4 py-2 rounded-lg text-xs font-semibold hover:bg-slate-700 transition-colors">
-                        Cancel
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
-
     <!-- Transaction Processing Modal -->
     <div id="transaction-modal" class="fixed inset-0 z-50 hidden">
         <div class="absolute inset-0 bg-black/80" onclick="closeTransactionModal()"></div>
@@ -476,10 +445,17 @@
                     <!-- Scan Books Section -->
                     <div>
                         <label class="block text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider">Books to Process</label>
-                        <button type="button" id="scan-book-btn" class="bg-cyan-700/30 text-cyan-400 border border-cyan-800/50 px-4 py-2 rounded-lg text-xs font-semibold hover:bg-cyan-700/40 transition-colors flex items-center gap-2">
-                            <i class="fa-solid fa-qrcode"></i>
-                            Scan Book
-                        </button>
+                        <div class="relative aspect-video bg-slate-900 rounded-lg overflow-hidden mb-4">
+                            <video id="qr-video" class="w-full h-full object-cover" autoplay playsinline></video>
+                            <canvas id="qr-canvas" class="hidden"></canvas>
+                            <div id="scanner-loading" class="absolute inset-0 flex items-center justify-center text-slate-400 text-xs">
+                                <i class="fa-solid fa-spinner fa-spin mr-2"></i>
+                                Starting camera...
+                            </div>
+                        </div>
+                        <div id="scan-status" class="text-center text-xs text-slate-400 mb-4">
+                            Position the QR code within the camera view
+                        </div>
                     </div>
 
                     <!-- Scanned Books List -->
@@ -532,10 +508,12 @@
 
         function openTransactionModal() {
             transactionModal.classList.remove('hidden');
+            startCamera();
         }
 
         function closeTransactionModal() {
             transactionModal.classList.add('hidden');
+            stopCamera();
         }
 
         // Transaction Processing JavaScript
@@ -633,24 +611,10 @@
         }
 
         // QR Scanner functionality
-        const scanBookBtn = document.getElementById('scan-book-btn');
-        const qrModal = document.getElementById('qr-scanner-modal');
         const video = document.getElementById('qr-video');
         const canvas = document.getElementById('qr-canvas');
         const scannerLoading = document.getElementById('scanner-loading');
         const scanStatus = document.getElementById('scan-status');
-
-        scanBookBtn.addEventListener('click', openScannerModal);
-
-        function openScannerModal() {
-            qrModal.classList.remove('hidden');
-            startCamera();
-        }
-
-        function closeScannerModal() {
-            qrModal.classList.add('hidden');
-            stopCamera();
-        }
 
         async function startCamera() {
             try {
@@ -715,13 +679,13 @@
             
             scanStatus.textContent = 'QR code detected! Fetching book details...';
             
-            // Fetch book details
-            fetch(`/admin-portal/get-book-by-id/?book_id=${encodeURIComponent(bookId)}`)
+            // Fetch book details by QR code
+            fetch(`/admin-portal/search-book-by-qr/?qr_code=${encodeURIComponent(bookId)}`)
                 .then(response => response.json())
                 .then(data => {
                     if (data.success) {
-                        addScannedBook(data);
-                        closeScannerModal();
+                        addScannedBook(data.book);
+                        scanStatus.textContent = 'Book added successfully. Scan another book or process transaction.';
                     } else {
                         scanStatus.textContent = `Error: ${data.error}`;
                     }
