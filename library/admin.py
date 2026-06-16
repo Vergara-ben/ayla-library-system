@@ -1,6 +1,6 @@
 from django.contrib import admin
 from .models import (
-    FloorPlan, BLEBeacon, Shelf, Waypoint, WaypointConnection,
+    FloorPlan, BLEBeacon, Room, Shelf, Waypoint, WaypointConnection,
     Section, ShelfLevel, Book, Donation, User, Announcement,
     Patron, Transaction, PatronLog
 )
@@ -22,12 +22,20 @@ class BLEBeaconAdmin(admin.ModelAdmin):
     raw_id_fields = ('floor_plan',)
 
 
-@admin.register(Shelf)
-class ShelfAdmin(admin.ModelAdmin):
-    list_display = ('shelf_id', 'name', 'floor_plan', 'map_x', 'map_y')
+@admin.register(Room)
+class RoomAdmin(admin.ModelAdmin):
+    list_display = ('room_id', 'name', 'floor_plan', 'map_x', 'map_y')
     list_filter = ('floor_plan',)
     search_fields = ('name', 'description')
     raw_id_fields = ('floor_plan',)
+
+
+@admin.register(Shelf)
+class ShelfAdmin(admin.ModelAdmin):
+    list_display = ('shelf_id', 'name', 'room', 'map_x', 'map_y')
+    list_filter = ('room',)
+    search_fields = ('name', 'description')
+    raw_id_fields = ('room',)
 
 
 @admin.register(Waypoint)
@@ -112,8 +120,8 @@ class TransactionAdmin(admin.ModelAdmin):
 
 @admin.register(PatronLog)
 class PatronLogAdmin(admin.ModelAdmin):
-    list_display = ('log_id', 'patron', 'log_type', 'timestamp')
-    list_filter = ('log_type', 'timestamp')
+    list_display = ('log_id', 'patron', 'school', 'purpose_of_visit', 'entry_time', 'exit_time')
+    list_filter = ('entry_time', 'exit_time')
     search_fields = ('patron__fullname',)
     raw_id_fields = ('patron',)
-    date_hierarchy = 'timestamp'
+    date_hierarchy = 'entry_time'

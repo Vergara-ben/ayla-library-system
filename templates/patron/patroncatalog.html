@@ -129,11 +129,11 @@
 </nav>
 
 <div class="search-section">
-  <div class="search-wrap">
+  <form class="search-wrap" method="get" action="{% url 'patron_catalog' %}">
     <span class="search-icon">🔍</span>
-    <input class="search-input" type="search" placeholder="Search by title, author, ISBN..." id="searchInput" oninput="filterBooks(this.value)">
+    <input class="search-input" type="search" name="search" value="{{ search_query }}" placeholder="Search by title, author, ISBN..." id="searchInput" oninput="filterBooks(this.value)">
     <span class="search-clear" id="clearBtn" onclick="clearSearch()">✕</span>
-  </div>
+  </form>
   <div class="filters">
     <div class="chip active" onclick="filterCat(this,'all')">All</div>
     <div class="chip" onclick="filterCat(this,'cs')">Computer Science</div>
@@ -146,95 +146,38 @@
 </div>
 
 <div class="results-header">
-  <div class="results-count" id="resCount">Showing 6 books</div>
+  <div class="results-count" id="resCount">Showing {{ books|length }} book{{ books|length|pluralize }}</div>
   <div class="sort-btn">Sort: Relevance ▾</div>
 </div>
 
 <div class="book-list" id="bookList">
-  <a href="{% url 'patron_book_details' 1 %}" class="book-card">
-    <div class="book-cover cover-a">Data Struct.</div>
+  {% for book in books %}
+  <a href="{% url 'patron_book_details' book.book_id %}" class="book-card">
+    <div class="book-cover {% cycle 'cover-a' 'cover-b' 'cover-c' 'cover-d' 'cover-e' 'cover-f' %}">{{ book.title|truncatechars:14 }}</div>
     <div class="book-info">
       <div class="book-title-row">
-        <div class="book-title">Data Structures & Algorithms in Python</div>
-        <div class="avail-badge avail-red">Borrowed</div>
-      </div>
-      <div class="book-author">Michael T. Goodrich · 2013</div>
-      <div class="book-meta">
-        <span class="meta-tag">Computer Science</span>
-        <span class="meta-tag">📍 Shelf C · CS · Level 1</span>
-      </div>
-    </div>
-  </a>
-  <a href="{% url 'patron_book_details' 1 %}" class="book-card">
-    <div class="book-cover cover-b">Clean Code</div>
-    <div class="book-info">
-      <div class="book-title-row">
-        <div class="book-title">Clean Code: A Handbook of Agile Software</div>
+        <div class="book-title">{{ book.title }}</div>
+        {% if book.status == 'Available' %}
         <div class="avail-badge avail-green">Available</div>
+        {% elif book.status == 'Borrowed' or book.status == 'Overdue' or book.status == 'Lost' %}
+        <div class="avail-badge avail-red">{{ book.status }}</div>
+        {% else %}
+        <div class="avail-badge avail-gray">{{ book.status }}</div>
+        {% endif %}
       </div>
-      <div class="book-author">Robert C. Martin · 2008</div>
+      <div class="book-author">{{ book.author }}{% if book.publication_year %} · {{ book.publication_year }}{% endif %}</div>
       <div class="book-meta">
-        <span class="meta-tag">Computer Science</span>
-        <span class="meta-tag">📍 Shelf C · CS · Level 1</span>
+        {% if book.genre %}<span class="meta-tag">{{ book.genre }}</span>{% endif %}
+        {% if book.section %}<span class="meta-tag">📍 {{ book.section.name }}{% if book.shelf_level %} · {{ book.shelf_level.label|default:book.shelf_level.level_number }}{% endif %}</span>{% endif %}
       </div>
     </div>
   </a>
-  <a href="{% url 'patron_book_details' 1 %}" class="book-card">
-    <div class="book-cover cover-c">Discrete Math</div>
-    <div class="book-info">
-      <div class="book-title-row">
-        <div class="book-title">Discrete Mathematics and Its Applications</div>
-        <div class="avail-badge avail-red">Borrowed</div>
-      </div>
-      <div class="book-author">Kenneth H. Rosen · 2018</div>
-      <div class="book-meta">
-        <span class="meta-tag">Mathematics</span>
-        <span class="meta-tag">📍 Shelf B · Math · Level 2</span>
-      </div>
-    </div>
-  </a>
-  <a href="{% url 'patron_book_details' 1 %}" class="book-card">
-    <div class="book-cover cover-d">Pragmatic Prog.</div>
-    <div class="book-info">
-      <div class="book-title-row">
-        <div class="book-title">The Pragmatic Programmer</div>
-        <div class="avail-badge avail-green">Available</div>
-      </div>
-      <div class="book-author">Hunt & Thomas · 2019</div>
-      <div class="book-meta">
-        <span class="meta-tag">Computer Science</span>
-        <span class="meta-tag">📍 Shelf C · CS · Level 1</span>
-      </div>
-    </div>
-  </a>
-  <a href="{% url 'patron_book_details' 1 %}" class="book-card">
-    <div class="book-cover cover-e">Design Patterns</div>
-    <div class="book-info">
-      <div class="book-title-row">
-        <div class="book-title">Design Patterns: Elements of Reusable OOP</div>
-        <div class="avail-badge avail-green">Available</div>
-      </div>
-      <div class="book-author">Gang of Four · 1994</div>
-      <div class="book-meta">
-        <span class="meta-tag">Computer Science</span>
-        <span class="meta-tag">📍 Shelf C · CS · Level 2</span>
-      </div>
-    </div>
-  </a>
-  <a href="{% url 'patron_book_details' 1 %}" class="book-card">
-    <div class="book-cover cover-f">Operating Systems</div>
-    <div class="book-info">
-      <div class="book-title-row">
-        <div class="book-title">Operating Systems: Three Easy Pieces</div>
-        <div class="avail-badge avail-gray">1 copy</div>
-      </div>
-      <div class="book-author">Arpaci-Dusseau · 2018</div>
-      <div class="book-meta">
-        <span class="meta-tag">Computer Science</span>
-        <span class="meta-tag">📍 Shelf C · CS · Level 2</span>
-      </div>
-    </div>
-  </a>
+  {% empty %}
+  <div class="empty">
+    <div class="empty-icon">📚</div>
+    <div>No books found.</div>
+  </div>
+  {% endfor %}
 </div>
 
 <nav class="bottom-nav">

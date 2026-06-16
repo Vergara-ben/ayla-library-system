@@ -8,6 +8,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@0,600;1,400&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
         :root {
             --bg-darker: #050b11;
@@ -242,6 +244,135 @@
             display: block;
         }
 
+        /* Leaflet dark theme styling */
+        .leaflet-container {
+            background-color: #0c1925;
+        }
+
+        .leaflet-bar {
+            border: 1px solid var(--border-color);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+        }
+
+        .leaflet-bar a {
+            background-color: var(--bg-card);
+            color: var(--text-main);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .leaflet-bar a:hover {
+            background-color: var(--accent-blue);
+            color: white;
+        }
+
+        .leaflet-popup-content-wrapper,
+        .leaflet-popup-tip {
+            background-color: var(--bg-card);
+            color: var(--text-main);
+            border: 1px solid var(--border-color);
+        }
+
+        .leaflet-popup-content h3 {
+            color: var(--accent-cyan);
+            margin: 0 0 8px 0;
+            font-size: 14px;
+        }
+
+        .leaflet-popup-content p {
+            color: var(--text-muted);
+            margin: 0;
+            font-size: 12px;
+        }
+
+        /* Filter controls styling */
+        .filter-controls {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .filter-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .filter-item input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            accent-color: var(--accent-cyan);
+            cursor: pointer;
+        }
+
+        .filter-item label {
+            color: var(--text-main);
+            font-size: 13px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .filter-item label span.emoji {
+            font-size: 16px;
+        }
+
+        /* Floor plan selector */
+        .floorplan-selector {
+            margin-bottom: 20px;
+        }
+
+        .floorplan-selector select {
+            width: 100%;
+            padding: 10px 12px;
+            background-color: var(--bg-dark);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            color: var(--text-main);
+            font-size: 13px;
+            cursor: pointer;
+        }
+
+        .floorplan-selector select:focus {
+            outline: none;
+            border-color: var(--accent-cyan);
+        }
+
+        /* Error message styling */
+        .map-error {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: var(--text-muted);
+            text-align: center;
+            padding: 40px;
+        }
+
+        .map-error h3 {
+            color: var(--accent-cyan);
+            margin-bottom: 12px;
+            font-size: 18px;
+        }
+
+        .map-error p {
+            font-size: 13px;
+            line-height: 1.6;
+            margin-bottom: 16px;
+        }
+
+        .map-error a {
+            color: var(--accent-blue);
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+        .map-error a:hover {
+            text-decoration: underline;
+        }
+
         /* --- CONTROL SIDEBAR SIDE --- */
         .widgets-column {
             display: flex;
@@ -406,7 +537,6 @@
             .sidebar { width: 100%; border-right: none; border-bottom: 1px solid var(--border-color); }
         }
     </style>
-    <script src="{% static 'js/supabase-config.js' %}"></script>
 </head>
 <body>
 
@@ -438,14 +568,6 @@
                         </div>
                     </a>
                 </li>
-                <li class="menu-item">
-                    <a href="{% url 'admin_qr_scanner' %}">
-                        <div class="menu-link-content">
-                            <span class="menu-icon">📷</span>
-                            <span>QR Scanner</span>
-                        </div>
-                    </a>
-                </li>
             </ul>
         </nav>
 
@@ -458,7 +580,7 @@
                             <span class="menu-icon">📋</span>
                             <span>Transactions</span>
                         </div>
-                        <span class="badge-count">12</span>
+                        <span class="badge-count">{{ pending_transactions_count }}</span>
                     </a>
                 </li>
                 <li class="menu-item">
@@ -524,69 +646,58 @@
         </header>
 
         <main class="workspace-view">
-            
+
             <div class="map-container">
-                <svg class="map-canvas" viewBox="0 0 800 450" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <rect width="800" height="450" fill="#f8fafc"/>
-                    
-                    <g stroke="#cbd5e1" stroke-width="1">
-                        <line x1="50" y1="80" x2="650" y2="80" />
-                        <line x1="50" y1="180" x2="600" y2="180" />
-                        <line x1="120" y1="280" x2="750" y2="280" stroke-dasharray="4 4" />
-                        <line x1="50" y1="360" x2="750" y2="360" />
-
-                        <line x1="120" y1="80" x2="120" y2="360" />
-                        <line x1="220" y1="80" x2="220" y2="280" />
-                        <line x1="320" y1="50" x2="320" y2="360" />
-                        <line x1="440" y1="80" x2="440" y2="360" />
-                        <line x1="560" y1="50" x2="560" y2="360" />
-                        <line x1="680" y1="80" x2="680" y2="360" />
-                    </g>
-
-                    <g fill="#64748b" font-family="sans-serif" font-size="9" font-weight="600">
-                        <text x="75" y="110">4.128</text>
-                        <text x="75" y="150">4.130</text>
-                        <text x="75" y="220">4.132</text>
-                        <text x="150" y="130">Alkymi</text>
-                        <text x="350" y="160">Kjemiblokk 5</text>
-                        <text x="350" y="110">116</text>
-                        <text x="470" y="130">113</text>
-                        <text x="590" y="110">M158</text>
-                        <text x="700" y="220">101</text>
-                        <text x="270" y="340">4.155</text>
-                        <text x="350" y="340">4.160</text>
-                    </g>
-
-                    <rect x="500" y="90" width="24" height="24" rx="4" fill="#38bdf8" fill-opacity="0.2"/>
-                    <circle cx="508" cy="98" r="2" fill="#0284c7"/>
-                    <line x1="508" y1="101" x2="508" y2="108" stroke="#0284c7" stroke-width="2"/>
-                    <circle cx="516" cy="98" r="2" fill="#0284c7"/>
-                    <line x1="516" y1="101" x2="516" y2="108" stroke="#0284c7" stroke-width="2"/>
-
-                    <rect x="525" y="140" width="20" height="20" rx="4" fill="#22c55e" fill-opacity="0.15"/>
-                    <path d="M531 153 L535 147 L539 153 Z" fill="#16a34a"/>
-
-                    <g transform="translate(580, 390)">
-                        <rect width="20" height="20" rx="4" fill="#22c55e" fill-opacity="0.15"/>
-                        <path d="M4 14 L8 14 L8 10 L12 10 L12 6 L16 6" stroke="#16a34a" stroke-width="2" fill="none"/>
-                    </g>
-
-                    <circle cx="410" cy="220" r="45" fill="#38bdf8" fill-opacity="0.35" stroke="#38bdf8" stroke-width="1"/>
-                    <circle cx="410" cy="220" r="5" fill="#0284c7"/>
-
-                    <path d="M 120 315 L 260 315 L 410 220 L 520 200 L 570 215 L 610 200" 
-                          stroke="#38bdf8" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" />
-                    
-                    <g transform="translate(610, 180)">
-                        <circle cx="10" cy="10" r="12" fill="#0284c7" />
-                        <text x="6" y="14" fill="#ffffff" font-family="sans-serif" font-size="11" font-weight="bold">B</text>
-                        <text x="18" y="-4" fill="#0284c7" font-family="sans-serif" font-size="10" font-weight="bold">KS</text>
-                    </g>
-                </svg>
+                {% if no_floorplans %}
+                    <div class="map-error">
+                        <h3>No Floor Plans Uploaded</h3>
+                        <p>Please upload a floor plan image to view the indoor map.</p>
+                        <a href="{% url 'floorplan_management' %}">Go to Floor Plan Management</a>
+                    </div>
+                {% else %}
+                    <div id="floorplan-map" class="map-canvas"></div>
+                {% endif %}
             </div>
 
             <div class="widgets-column">
-                
+
+                {% if not no_floorplans %}
+                <section class="panel">
+                    <div class="panel-meta">
+                        <span>🗺️</span> Floor Plan
+                    </div>
+
+                    {% if floorplans != '[]' %}
+                    <div class="floorplan-selector">
+                        <select id="floorplan-select">
+                            <option value="">Select Floor Plan</option>
+                        </select>
+                    </div>
+                    {% endif %}
+
+                    <div class="filter-controls">
+                        <div class="filter-item">
+                            <input type="checkbox" id="show-rooms" checked>
+                            <label for="show-rooms">
+                                <span class="emoji">🏠</span> Rooms
+                            </label>
+                        </div>
+                        <div class="filter-item">
+                            <input type="checkbox" id="show-shelves" checked>
+                            <label for="show-shelves">
+                                <span class="emoji">📚</span> Shelves
+                            </label>
+                        </div>
+                        <div class="filter-item">
+                            <input type="checkbox" id="show-waypoints" checked>
+                            <label for="show-waypoints">
+                                <span class="emoji">📍</span> Waypoints
+                            </label>
+                        </div>
+                    </div>
+                </section>
+                {% endif %}
+
                 <section class="panel">
                     <div class="panel-meta">
                         <span>🧭</span> Navigating To
@@ -608,8 +719,6 @@
                             <div class="metric-label">Est. Time</div>
                         </div>
                     </div>
-
-                    <button class="btn-qr-wide">QR Scanner</button>
                 </section>
 
                 <section class="panel">
@@ -638,7 +747,228 @@
     </div>
 
     <script>
-        // No JavaScript needed for view-only mode
+        // Parse Django context data
+        const floorplanData = {{ floorplan|safe }};
+        const roomsData = {{ rooms|safe }};
+        const shelvesData = {{ shelves|safe }};
+        const waypointsData = {{ waypoints|safe }};
+        const floorplansList = {{ floorplans|safe }};
+
+        // Global variables
+        let map = null;
+        let imageOverlay = null;
+        let roomMarkers = [];
+        let shelfMarkers = [];
+        let waypointMarkers = [];
+
+        // Initialize map when DOM is ready
+        document.addEventListener('DOMContentLoaded', function() {
+            if (!floorplanData) {
+                console.error('No floor plan data available');
+                return;
+            }
+
+            if (!floorplanData.image_url) {
+                showError('Floor plan image URL is missing');
+                return;
+            }
+
+            initializeMap();
+            populateFloorplanSelector();
+            setupFilterControls();
+        });
+
+        function initializeMap() {
+            const mapContainer = document.getElementById('floorplan-map');
+            if (!mapContainer) return;
+
+            console.log('Floor plan data:', floorplanData);
+            console.log('Image URL:', floorplanData.image_url);
+
+            // Create map with Simple CRS for pixel-based coordinates
+            map = L.map('floorplan-map', {
+                crs: L.CRS.Simple,
+                minZoom: -2,
+                maxZoom: 2,
+                zoomControl: true
+            });
+
+            // Load floor plan image and detect dimensions
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            
+            img.onload = function() {
+                const width = img.naturalWidth;
+                const height = img.naturalHeight;
+
+                console.log('Image loaded successfully. Dimensions:', width, 'x', height);
+
+                // Set bounds based on image dimensions
+                const bounds = [[0, 0], [height, width]];
+                
+                // Add image overlay
+                imageOverlay = L.imageOverlay(floorplanData.image_url, bounds).addTo(map);
+                
+                // Fit map to bounds
+                map.fitBounds(bounds);
+
+                // Add markers
+                addMarkers();
+            };
+
+            img.onerror = function() {
+                console.error('Failed to load floor plan image. URL:', floorplanData.image_url);
+                showError('Failed to load floor plan image');
+            };
+
+            img.src = floorplanData.image_url;
+        }
+
+        function addMarkers() {
+            // Clear existing markers
+            clearMarkers();
+
+            // Add room markers
+            if (roomsData && roomsData.length > 0) {
+                roomsData.forEach(room => {
+                    const marker = createEmojiMarker(room.x, room.y, '🏠', room.name, room.description, '#38bdf8');
+                    roomMarkers.push(marker);
+                    marker.addTo(map);
+                });
+            }
+
+            // Add shelf markers
+            if (shelvesData && shelvesData.length > 0) {
+                shelvesData.forEach(shelf => {
+                    const marker = createEmojiMarker(shelf.x, shelf.y, '📚', shelf.name, shelf.description, '#22c55e');
+                    shelfMarkers.push(marker);
+                    marker.addTo(map);
+                });
+            }
+
+            // Add waypoint markers
+            if (waypointsData && waypointsData.length > 0) {
+                waypointsData.forEach(waypoint => {
+                    const marker = createEmojiMarker(waypoint.x, waypoint.y, '📍', waypoint.label || 'Waypoint', '', '#f59e0b');
+                    waypointMarkers.push(marker);
+                    marker.addTo(map);
+                });
+            }
+        }
+
+        function createEmojiMarker(x, y, emoji, title, description, color) {
+            const icon = L.divIcon({
+                className: 'emoji-marker',
+                html: `<div style="
+                    font-size: 24px;
+                    text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+                    cursor: pointer;
+                ">${emoji}</div>`,
+                iconSize: [30, 30],
+                iconAnchor: [15, 15]
+            });
+
+            const marker = L.marker([y, x], { icon: icon });
+
+            if (title || description) {
+                const popupContent = `
+                    <h3>${title}</h3>
+                    ${description ? `<p>${description}</p>` : ''}
+                `;
+                marker.bindPopup(popupContent);
+            }
+
+            return marker;
+        }
+
+        function clearMarkers() {
+            roomMarkers.forEach(marker => map.removeLayer(marker));
+            shelfMarkers.forEach(marker => map.removeLayer(marker));
+            waypointMarkers.forEach(marker => map.removeLayer(marker));
+            
+            roomMarkers = [];
+            shelfMarkers = [];
+            waypointMarkers = [];
+        }
+
+        function populateFloorplanSelector() {
+            const select = document.getElementById('floorplan-select');
+            if (!select || !floorplansList || floorplansList.length === 0) return;
+
+            floorplansList.forEach(fp => {
+                const option = document.createElement('option');
+                option.value = fp.id;
+                option.textContent = `Floor Plan ${fp.id}${fp.is_active ? ' (Active)' : ''}`;
+                if (fp.id === floorplanData.id) {
+                    option.selected = true;
+                }
+                select.appendChild(option);
+            });
+
+            // Handle floor plan selection change
+            select.addEventListener('change', function() {
+                const selectedId = parseInt(this.value);
+                if (selectedId && selectedId !== floorplanData.id) {
+                    // Reload page with selected floor plan
+                    window.location.href = `/admin-portal/indoor-map/?floorplan=${selectedId}`;
+                }
+            });
+        }
+
+        function setupFilterControls() {
+            const showRooms = document.getElementById('show-rooms');
+            const showShelves = document.getElementById('show-shelves');
+            const showWaypoints = document.getElementById('show-waypoints');
+
+            if (showRooms) {
+                showRooms.addEventListener('change', function() {
+                    roomMarkers.forEach(marker => {
+                        if (this.checked) {
+                            marker.addTo(map);
+                        } else {
+                            map.removeLayer(marker);
+                        }
+                    });
+                });
+            }
+
+            if (showShelves) {
+                showShelves.addEventListener('change', function() {
+                    shelfMarkers.forEach(marker => {
+                        if (this.checked) {
+                            marker.addTo(map);
+                        } else {
+                            map.removeLayer(marker);
+                        }
+                    });
+                });
+            }
+
+            if (showWaypoints) {
+                showWaypoints.addEventListener('change', function() {
+                    waypointMarkers.forEach(marker => {
+                        if (this.checked) {
+                            marker.addTo(map);
+                        } else {
+                            map.removeLayer(marker);
+                        }
+                    });
+                });
+            }
+        }
+
+        function showError(message) {
+            const mapContainer = document.getElementById('floorplan-map');
+            if (mapContainer) {
+                mapContainer.innerHTML = `
+                    <div class="map-error">
+                        <h3>Error Loading Map</h3>
+                        <p>${message}</p>
+                        <a href="{% url 'floorplan_management' %}">Go to Floor Plan Management</a>
+                    </div>
+                `;
+            }
+        }
     </script>
 
 </body>

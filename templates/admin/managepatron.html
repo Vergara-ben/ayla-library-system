@@ -127,7 +127,6 @@
             margin-right: 0.75rem;
         }
     </style>
-    <script src="{% static 'js/supabase-config.js' %}"></script>
 </head>
 <body class="flex h-screen overflow-hidden">
 
@@ -154,10 +153,6 @@
                         <i class="fa-solid fa-map w-5 text-sm"></i>
                         <span class="text-sm font-medium">Indoor Map</span>
                     </a>
-                    <a href="{% url 'admin_qr_scanner' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
-                        <i class="fa-solid fa-qrcode w-5 text-sm"></i>
-                        <span class="text-sm font-medium">QR Scanner</span>
-                    </a>
                 </div>
             </div>
 
@@ -169,7 +164,7 @@
                             <i class="fa-solid fa-file-invoice w-5 text-sm"></i>
                             <span class="text-sm font-medium">Transactions</span>
                         </div>
-                        <span class="bg-rose-500/20 text-rose-400 text-xs px-2 py-0.5 rounded-full font-semibold">12</span>
+                        <span class="bg-rose-500/20 text-rose-400 text-xs px-2 py-0.5 rounded-full font-semibold">{{ pending_transactions_count }}</span>
                     </a>
                     <a href="{% url 'admin_log_management' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
                         <i class="fa-solid fa-clipboard-list w-5 text-sm"></i>
@@ -194,6 +189,10 @@
                     <a href="{% url 'floorplan_management' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
                         <i class="fa-solid fa-layer-group w-5 text-sm"></i>
                         <span class="text-sm font-medium">Floor Plans</span>
+                    </a>
+                    <a href="{% url 'shelf_manager' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                        <i class="fa-solid fa-folder-tree w-5 text-sm"></i>
+                        <span class="text-sm font-medium">Shelf Manager</span>
                     </a>
                 </div>
             </div>
@@ -360,11 +359,25 @@
                     <span class="font-medium">Showing <span class="text-slate-400">{{ patrons|length }}</span> of <span class="text-slate-400">{{ total_patrons }}</span> patrons</span>
                     
                     <div class="flex items-center gap-1">
-                        <button class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors cursor-not-allowed" disabled>&larr; Prev</button>
-                        <button class="px-3 py-1.5 rounded bg-cyan-700/30 text-cyan-400 font-bold border border-cyan-800/50">1</button>
-                        <button class="px-3 py-1.5 rounded border border-slate-800 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors">2</button>
-                        <button class="px-3 py-1.5 rounded border border-slate-800 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors">3</button>
-                        <button class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors">Next &rarr;</button>
+                        {% if paginator.has_previous %}
+                            <a href="?page={{ paginator.previous_page_number }}" class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors">&larr; Prev</a>
+                        {% else %}
+                            <button class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors cursor-not-allowed" disabled>&larr; Prev</button>
+                        {% endif %}
+                        
+                        {% for page_num in paginator.page_range %}
+                            {% if page_num == patrons.number %}
+                                <button class="px-3 py-1.5 rounded bg-cyan-700/30 text-cyan-400 font-bold border border-cyan-800/50">{{ page_num }}</button>
+                            {% else %}
+                                <a href="?page={{ page_num }}" class="px-3 py-1.5 rounded border border-slate-800 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors">{{ page_num }}</a>
+                            {% endif %}
+                        {% endfor %}
+                        
+                        {% if paginator.has_next %}
+                            <a href="?page={{ paginator.next_page_number }}" class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors">Next &rarr;</a>
+                        {% else %}
+                            <button class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors cursor-not-allowed" disabled>Next &rarr;</button>
+                        {% endif %}
                     </div>
                 </div>
 
@@ -444,15 +457,9 @@
                     <textarea id="address" name="address" placeholder="Street address, city, etc." rows="2" value="{{ initial.address|default:'' }}" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium placeholder-slate-600 tracking-wide resize-none" style="background-color: var(--bg-input);">{{ initial.address|default:'' }}</textarea>
                 </div>
 
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div class="space-y-1.5">
-                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">QR Code</label>
-                        <input type="text" id="qrCode" name="qr_code" placeholder="Auto-generated if empty" value="{{ initial.qr_code|default:'' }}" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium placeholder-slate-600 tracking-wide" style="background-color: var(--bg-input);">
-                    </div>
-                    <div class="space-y-1.5">
-                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Password</label>
-                        <input type="password" id="password" name="password" placeholder="Required for new patrons" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium placeholder-slate-600 tracking-wide" style="background-color: var(--bg-input);">
-                    </div>
+                <div class="space-y-1.5">
+                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Password</label>
+                    <input type="password" id="password" name="password" placeholder="Required for new patrons" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium placeholder-slate-600 tracking-wide" style="background-color: var(--bg-input);">
                 </div>
 
                 <div class="pt-4 flex items-center justify-end gap-3">
@@ -574,7 +581,6 @@
                 document.getElementById('email').value = '{{ initial.email|default:''|escapejs }}';
                 document.getElementById('contactNumber').value = '{{ initial.contact_number|default:''|escapejs }}';
                 document.getElementById('address').value = '{{ initial.address|default:''|escapejs }}';
-                document.getElementById('qrCode').value = '{{ initial.qr_code|default:''|escapejs }}';
                 document.getElementById('accountStatus').value = '{{ initial.account_status|default:'Active'|escapejs }}';
             });
         {% endif %}

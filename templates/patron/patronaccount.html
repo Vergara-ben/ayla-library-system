@@ -120,25 +120,12 @@
 <div class="page">
   <!-- PROFILE -->
   <div class="profile-hero">
-    <div class="avatar">MS</div>
+    <div class="avatar">{{ patron.fullname|first|upper }}</div>
     <div class="profile-info">
-      <div class="profile-name">Maria Santos</div>
-      <div class="profile-type">🎓 Student Patron</div>
-      <div class="profile-email">maria.santos@school.edu</div>
-      <div class="patron-id">Patron ID: <span>LIB-2024-00143</span></div>
-    </div>
-  </div>
-
-  <!-- QR CODE -->
-  <div class="section" style="animation-delay:0.05s">
-    <div class="section-title" style="margin-bottom:14px;">🔐 My Library QR Code</div>
-    <div class="qr-section">
-      <div class="qr-mini">■</div>
-      <div class="qr-info">
-        <div class="qr-title">Maria Santos — LIB-2024-00143</div>
-        <div class="qr-sub">Scan at library entrance or self-checkout</div>
-      </div>
-      <button class="btn-dl">⬇️ Save</button>
+      <div class="profile-name">{{ patron.fullname }}</div>
+      <div class="profile-type">🎓 {{ patron.patron_type }} Patron</div>
+      <div class="profile-email">{{ patron.email }}</div>
+      <div class="patron-id">Patron ID: <span>{{ patron.patron_id }}</span></div>
     </div>
   </div>
 
@@ -148,74 +135,46 @@
       <div class="section-title">📚 Active Loans</div>
       <div class="see-all">View all</div>
     </div>
+    {% for tx in active_loans %}
     <div class="loan-row">
-      <div class="loan-cover">Data Struct.</div>
+      <div class="loan-cover">{{ tx.book.title|truncatechars:12 }}</div>
       <div class="loan-info">
-        <div class="loan-title">Data Structures & Algorithms in Python</div>
-        <div class="loan-author">Michael T. Goodrich</div>
+        <div class="loan-title">{{ tx.book.title }}</div>
+        <div class="loan-author">{{ tx.book.author }}</div>
         <div class="loan-due">
           <span class="due-label">Due:</span>
-          <span class="due-date amber">Dec 12, 2024</span>
+          <span class="due-date {% if tx.overdue_flag %}red{% else %}green{% endif %}">{{ tx.due_date|date:"M j, Y"|default:"—" }}</span>
         </div>
       </div>
-      <div class="loan-badge" style="background:#f59e0b20;color:var(--accent2)">2 days</div>
-    </div>
-    <div class="loan-row">
-      <div class="loan-cover b">Clean Code</div>
-      <div class="loan-info">
-        <div class="loan-title">Clean Code</div>
-        <div class="loan-author">Robert C. Martin</div>
-        <div class="loan-due">
-          <span class="due-label">Due:</span>
-          <span class="due-date green">Dec 20, 2024</span>
-        </div>
-      </div>
-      <div class="loan-badge" style="background:#22c55e20;color:var(--accent)">10 days</div>
-    </div>
-    <div class="loan-row">
-      <div class="loan-cover c">Discrete Math</div>
-      <div class="loan-info">
-        <div class="loan-title">Discrete Mathematics</div>
-        <div class="loan-author">Kenneth Rosen</div>
-        <div class="loan-due">
-          <span class="due-label">Due:</span>
-          <span class="due-date red">Dec 8, 2024</span>
-        </div>
-      </div>
+      {% if tx.overdue_flag %}
       <div class="loan-badge" style="background:#f8717120;color:var(--danger)">OVERDUE</div>
+      {% else %}
+      <div class="loan-badge" style="background:#22c55e20;color:var(--accent)">Active</div>
+      {% endif %}
     </div>
+    {% empty %}
+    <div class="loan-author">No active loans.</div>
+    {% endfor %}
   </div>
 
   <!-- HISTORY -->
   <div class="section" style="animation-delay:0.15s">
     <div class="section-header">
       <div class="section-title">🕐 Borrowing History</div>
-      <div class="see-all">See all 12</div>
+      <div class="see-all">{{ history|length }} total</div>
     </div>
+    {% for tx in history %}
     <div class="hist-row">
       <div class="hist-icon">📗</div>
       <div class="hist-info">
-        <div class="hist-title">Introduction to Algorithms (CLRS)</div>
-        <div class="hist-dates">Borrowed Oct 15 → Returned Nov 15, 2024</div>
+        <div class="hist-title">{{ tx.book.title }}</div>
+        <div class="hist-dates">Borrowed {{ tx.transaction_date|date:"M j" }} → Returned {{ tx.return_date|date:"M j, Y" }}</div>
       </div>
       <div style="font-size:10px;padding:3px 8px;border-radius:5px;background:#22c55e20;color:var(--accent);font-weight:700">Returned</div>
     </div>
-    <div class="hist-row">
-      <div class="hist-icon">📘</div>
-      <div class="hist-info">
-        <div class="hist-title">The Pragmatic Programmer</div>
-        <div class="hist-dates">Borrowed Sep 30 → Returned Oct 30, 2024</div>
-      </div>
-      <div style="font-size:10px;padding:3px 8px;border-radius:5px;background:#22c55e20;color:var(--accent);font-weight:700">Returned</div>
-    </div>
-    <div class="hist-row">
-      <div class="hist-icon">📕</div>
-      <div class="hist-info">
-        <div class="hist-title">Design Patterns: GoF</div>
-        <div class="hist-dates">Borrowed Sep 12 → Returned Oct 12, 2024</div>
-      </div>
-      <div style="font-size:10px;padding:3px 8px;border-radius:5px;background:#22c55e20;color:var(--accent);font-weight:700">Returned</div>
-    </div>
+    {% empty %}
+    <div class="hist-dates">No borrowing history yet.</div>
+    {% endfor %}
   </div>
 
   <!-- ACCOUNT INFO -->
@@ -223,25 +182,25 @@
     <div class="section-title" style="margin-bottom:16px">⚙️ Account Information</div>
     <div class="form-grid">
       <div class="form-group">
-        <label>First Name</label>
-        <input type="text" value="Maria" id="firstName" disabled>
+        <label>Full Name</label>
+        <input type="text" value="{{ patron.fullname }}" id="firstName" disabled>
       </div>
       <div class="form-group">
-        <label>Last Name</label>
-        <input type="text" value="Santos" id="lastName" disabled>
+        <label>Patron Type</label>
+        <input type="text" value="{{ patron.patron_type }}" id="lastName" disabled>
       </div>
     </div>
     <div class="form-group">
       <label>Email Address</label>
-      <input type="email" value="maria.santos@school.edu" id="email" disabled>
+      <input type="email" value="{{ patron.email }}" id="email" disabled>
     </div>
     <div class="form-group">
       <label>Contact Number</label>
-      <input type="tel" value="+63 912 345 6789" id="phone" disabled>
+      <input type="tel" value="{{ patron.contact_number|default:'' }}" id="phone" disabled>
     </div>
     <div class="form-group">
       <label>Address</label>
-      <input type="text" value="123 Rizal St., Quezon City" id="address" disabled>
+      <input type="text" value="{{ patron.address|default:'' }}" id="address" disabled>
     </div>
     <button class="save-changes" id="saveBtn" style="display:none" onclick="saveChanges()">Save Changes</button>
   </div>

@@ -1,4 +1,16 @@
 from django.db import models
+from django.utils import timezone
+
+
+class ActiveLocationManager(models.Manager):
+    """Manager that filters books to only include those in active locations"""
+    def get_queryset(self):
+        return super().get_queryset().filter(
+            section__shelf__room__floor_plan__is_active=True,
+            section__shelf__room__is_active=True,
+            section__shelf__is_active=True,
+            section__is_active=True
+        )
 
 
 # ─── 1. FLOOR PLANS ───────────────────────────────────────────
@@ -37,9 +49,9 @@ class BLEBeacon(models.Model):
         return f"Beacon {self.beacon_uuid}"
 
 
-# ─── 3. SHELVES ───────────────────────────────────────────────
-class Shelf(models.Model):
-    shelf_id = models.AutoField(primary_key=True)
+# ─── 3. ROOMS ─────────────────────────────────────────────────
+class Room(models.Model):
+    room_id = models.AutoField(primary_key=True)
     floor_plan = models.ForeignKey(
         FloorPlan,
         on_delete=models.CASCADE,
@@ -49,6 +61,30 @@ class Shelf(models.Model):
     map_x = models.FloatField()
     map_y = models.FloatField()
     description = models.TextField(blank=True, null=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = 'Rooms'
+
+    def __str__(self):
+        return self.name
+
+
+# ─── 4. SHELVES ───────────────────────────────────────────────
+class Shelf(models.Model):
+    shelf_id = models.AutoField(primary_key=True)
+    room = models.ForeignKey(
+        Room,
+        on_delete=models.CASCADE,
+        db_column='room_id',
+        null=True,
+        blank=True
+    )
+    name = models.CharField(max_length=255)
+    map_x = models.FloatField()
+    map_y = models.FloatField()
+    description = models.TextField(blank=True, null=True)
+    is_active = models.BooleanField(default=True)
 
     class Meta:
         db_table = 'Shelves'
@@ -57,7 +93,7 @@ class Shelf(models.Model):
         return self.name
 
 
-# ─── 4. WAYPOINTS ─────────────────────────────────────────────
+# ─── 5. WAYPOINTS ─────────────────────────────────────────────
 class Waypoint(models.Model):
     waypoint_id = models.AutoField(primary_key=True)
     floor_plan = models.ForeignKey(
@@ -83,7 +119,7 @@ class Waypoint(models.Model):
         return f"Waypoint {self.waypoint_id} ({self.label})"
 
 
-# ─── 5. WAYPOINT CONNECTIONS ──────────────────────────────────
+# ─── 6. WAYPOINT CONNECTIONS ──────────────────────────────────
 class WaypointConnection(models.Model):
     connection_id = models.AutoField(primary_key=True)
     waypoint_from = models.ForeignKey(
@@ -107,7 +143,7 @@ class WaypointConnection(models.Model):
         return f"Connection {self.waypoint_from_id} → {self.waypoint_to_id}"
 
 
-# ─── 6. SECTIONS ──────────────────────────────────────────────
+# ─── 7. SECTIONS ──────────────────────────────────────────────
 class Section(models.Model):
     section_id = models.AutoField(primary_key=True)
     shelf = models.ForeignKey(
@@ -117,6 +153,7 @@ class Section(models.Model):
     )
     name = models.CharField(max_length=255)
     description = models.TextField(blank=True, null=True)
+    is_active = models.BooleanField(default=True)
 
     class Meta:
         db_table = 'Sections'
@@ -125,7 +162,7 @@ class Section(models.Model):
         return self.name
 
 
-# ─── 7. SHELF LEVELS ──────────────────────────────────────────
+# ─── 8. SHELF LEVELS ──────────────────────────────────────────
 class ShelfLevel(models.Model):
     shelf_level_id = models.AutoField(primary_key=True)
     section = models.ForeignKey(
@@ -135,6 +172,7 @@ class ShelfLevel(models.Model):
     )
     level_number = models.IntegerField()
     label = models.CharField(max_length=255, blank=True, null=True)
+    is_active = models.BooleanField(default=True)
 
     class Meta:
         db_table = 'Shelf_Levels'
@@ -143,7 +181,7 @@ class ShelfLevel(models.Model):
         return f"Level {self.level_number} - {self.label}"
 
 
-# ─── 8. BOOKS ─────────────────────────────────────────────────
+# ─── 9. BOOKS ─────────────────────────────────────────────────
 class Book(models.Model):
 
     STATUS_CHOICES = [
@@ -183,6 +221,9 @@ class Book(models.Model):
     cover_img_url = models.CharField(max_length=255, blank=True, null=True)
     qr_code = models.CharField(max_length=255, blank=True, null=True)
 
+    objects = models.Manager()
+    active_locations = ActiveLocationManager()
+
     class Meta:
         db_table = 'Books'
 
@@ -190,7 +231,7 @@ class Book(models.Model):
         return self.title
 
 
-# ─── 9. DONATIONS ─────────────────────────────────────────────
+# ─── 10. DONATIONS ─────────────────────────────────────────────
 class Donation(models.Model):
 
     STATUS_CHOICES = [
@@ -220,7 +261,7 @@ class Donation(models.Model):
         return f"Donation from {self.donor_name}"
 
 
-# ─── 10. USERS (ADMIN ACCOUNTS) ───────────────────────────────
+# ─── 11. USERS (ADMIN ACCOUNTS) ───────────────────────────────
 class User(models.Model):
 
     STATUS_CHOICES = [
@@ -246,7 +287,7 @@ class User(models.Model):
         return self.fullname
 
 
-# ─── 11. ANNOUNCEMENTS ────────────────────────────────────────
+# ─── 12. ANNOUNCEMENTS ────────────────────────────────────────
 class Announcement(models.Model):
     announcement_id = models.AutoField(primary_key=True)
     posted_by = models.ForeignKey(
@@ -266,7 +307,7 @@ class Announcement(models.Model):
         return self.title
 
 
-# ─── 12. PATRON ───────────────────────────────────────────────
+# ─── 13. PATRON ───────────────────────────────────────────────
 class Patron(models.Model):
 
     PATRON_TYPE_CHOICES = [
@@ -292,7 +333,6 @@ class Patron(models.Model):
     email = models.EmailField(max_length=255, unique=True)
     contact_number = models.CharField(max_length=255, blank=True, null=True)
     address = models.TextField(blank=True, null=True)
-    qr_code = models.CharField(max_length=255, blank=True, null=True)
     account_status = models.CharField(
         max_length=50,
         choices=STATUS_CHOICES,
@@ -308,7 +348,7 @@ class Patron(models.Model):
         return self.fullname
 
 
-# ─── 13. TRANSACTIONS ─────────────────────────────────────────
+# ─── 14. TRANSACTIONS ─────────────────────────────────────────
 class Transaction(models.Model):
 
     TRANSACTION_TYPE_CHOICES = [
@@ -353,13 +393,9 @@ class Transaction(models.Model):
         return f"{self.transaction_type} - {self.book}"
 
 
-# ─── 14. PATRON LOGS ──────────────────────────────────────────
+# ─── 15. PATRON LOGS ──────────────────────────────────────────
 class PatronLog(models.Model):
-
-    LOG_TYPE_CHOICES = [
-        ('Entry', 'Entry'),
-        ('Exit', 'Exit'),
-    ]
+    """One visit session: entry_time is set on entry, exit_time on exit."""
 
     log_id = models.AutoField(primary_key=True)
     patron = models.ForeignKey(
@@ -367,14 +403,13 @@ class PatronLog(models.Model):
         on_delete=models.CASCADE,
         db_column='patron_id'
     )
-    log_type = models.CharField(
-        max_length=50,
-        choices=LOG_TYPE_CHOICES
-    )
-    timestamp = models.DateTimeField(auto_now_add=True)
+    school = models.CharField(max_length=255, blank=True, null=True)
+    purpose_of_visit = models.CharField(max_length=255, blank=True, null=True)
+    entry_time = models.DateTimeField(default=timezone.now)
+    exit_time = models.DateTimeField(blank=True, null=True)
 
     class Meta:
         db_table = 'Patron_Logs'
 
     def __str__(self):
-        return f"{self.log_type} - {self.patron} at {self.timestamp}"
+        return f"{self.patron} — entry {self.entry_time}"

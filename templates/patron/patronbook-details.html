@@ -122,23 +122,27 @@
 
 <!-- HERO -->
 <div class="hero">
-  <div class="book-cover-large">Data Structures &amp; Algorithms in Python</div>
-  <div class="book-main-title">Data Structures &amp; Algorithms in Python</div>
-  <div class="book-main-author">Michael T. Goodrich · Roberto Tamassia · Michael H. Goldwasser</div>
-  <div class="status-badge status-borrowed">🔴 Currently Borrowed</div>
+  <div class="book-cover-large">{{ book.title }}</div>
+  <div class="book-main-title">{{ book.title }}</div>
+  <div class="book-main-author">{{ book.author }}</div>
+  {% if book.status == 'Available' %}
+  <div class="status-badge status-available">🟢 {{ book.status }}</div>
+  {% elif book.status == 'Borrowed' or book.status == 'Overdue' or book.status == 'Lost' %}
+  <div class="status-badge status-borrowed">🔴 {{ book.status }}</div>
+  {% else %}
+  <div class="status-badge status-available">{{ book.status }}</div>
+  {% endif %}
 </div>
 
 <div class="page">
   <!-- Bibliographic Info -->
   <div class="detail-card">
     <div class="detail-section-title">📋 Book Information</div>
-    <div class="detail-row"><div class="detail-key">Publisher</div><div class="detail-val">Wiley</div></div>
-    <div class="detail-row"><div class="detail-key">Year</div><div class="detail-val">2013</div></div>
-    <div class="detail-row"><div class="detail-key">ISBN</div><div class="detail-val">978-1-118-29027-9</div></div>
-    <div class="detail-row"><div class="detail-key">Genre</div><div class="detail-val">Computer Science</div></div>
-    <div class="detail-row"><div class="detail-key">Call Number</div><div class="detail-val">QA76.73.P98 G66</div></div>
-    <div class="detail-row"><div class="detail-key">Edition</div><div class="detail-val">1st Edition</div></div>
-    <div class="detail-row"><div class="detail-key">Pages</div><div class="detail-val">748</div></div>
+    <div class="detail-row"><div class="detail-key">Author</div><div class="detail-val">{{ book.author }}</div></div>
+    <div class="detail-row"><div class="detail-key">Year</div><div class="detail-val">{{ book.publication_year|default:"N/A" }}</div></div>
+    <div class="detail-row"><div class="detail-key">ISBN</div><div class="detail-val">{{ book.ISBN|default:"N/A" }}</div></div>
+    <div class="detail-row"><div class="detail-key">Genre</div><div class="detail-val">{{ book.genre|default:"N/A" }}</div></div>
+    <div class="detail-row"><div class="detail-key">Status</div><div class="detail-val">{{ book.status }}</div></div>
   </div>
 
   <!-- Shelf Location -->
@@ -147,25 +151,24 @@
     <div class="detail-row">
       <div class="detail-key">Location</div>
       <div class="detail-val">
+        {% if shelf or section or shelf_level %}
         <div class="shelf-path">
-          <span class="shelf-step">Shelf C</span>
-          <span class="shelf-arrow">→</span>
-          <span class="shelf-step">Computer Science</span>
-          <span class="shelf-arrow">→</span>
-          <span class="shelf-step">Level 1</span>
+          {% if shelf %}<span class="shelf-step">{{ shelf.name }}</span>{% endif %}
+          {% if section %}{% if shelf %}<span class="shelf-arrow">→</span>{% endif %}<span class="shelf-step">{{ section.name }}</span>{% endif %}
+          {% if shelf_level %}{% if shelf or section %}<span class="shelf-arrow">→</span>{% endif %}<span class="shelf-step">{{ shelf_level.label|default:shelf_level.level_number }}</span>{% endif %}
         </div>
+        {% else %}Not assigned{% endif %}
       </div>
     </div>
-    <div class="detail-row"><div class="detail-key">Row</div><div class="detail-val">Row 3, Position 12</div></div>
-    <div class="detail-row"><div class="detail-key">Copies</div><div class="detail-val">1 Total · 0 Available</div></div>
+    {% if room %}<div class="detail-row"><div class="detail-key">Room</div><div class="detail-val">{{ room.name }}</div></div>{% endif %}
+    {% if floor_plan %}<div class="detail-row"><div class="detail-key">Floor Plan</div><div class="detail-val">Floor Plan {{ floor_plan.floor_plan_id }}</div></div>{% endif %}
   </div>
 
   <!-- Description -->
   <div class="detail-card">
     <div class="detail-section-title">📝 About This Book</div>
     <div class="description" id="desc">
-      Offers a presentation of the fundamental data structures and algorithms covering both traditional topics such as sorting, searching, and graph algorithms, as well as topics of data organization and representation...
-      <span class="read-more" onclick="expandDesc()">Read more</span>
+      {% if book.genre %}{{ book.title }} by {{ book.author }} is categorized under {{ book.genre }}.{% else %}{{ book.title }} by {{ book.author }}.{% endif %}
     </div>
   </div>
 </div>
@@ -173,7 +176,7 @@
 <!-- BOTTOM -->
 <div class="bottom-action">
   <button class="btn-reserve">💾 Reserve</button>
-  <button class="btn-map" onclick="window.location.href='{% url 'patron_map' %}'">🗺️ View on Map</button>
+  <button class="btn-map" onclick="window.location.href='{% url 'patron_map' %}?book_id={{ book.book_id }}'">🗺️ View on Map</button>
 </div>
 
 <script>

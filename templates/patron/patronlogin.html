@@ -564,7 +564,7 @@ label{
     </div>
 
     <div class="desc">
-      Experience a premium and secure digital library platform with modern authentication, QR access, and seamless account management for AYLA patrons.
+      Experience a premium and secure digital library platform with modern authentication and seamless account management for AYLA patrons.
     </div>
 
     <div class="features">
@@ -572,11 +572,6 @@ label{
       <div class="feature">
         <h4>Secure Login</h4>
         <p>Protected authentication system</p>
-      </div>
-
-      <div class="feature">
-        <h4>QR Access</h4>
-        <p>Fast and modern scanning</p>
       </div>
 
       <div class="feature">
@@ -600,7 +595,6 @@ label{
 
       <div class="tabs">
         <button class="tab active" id="loginTab">Sign In</button>
-        <button class="tab" id="qrTab">QR Scan</button>
       </div>
 
       <!-- LOGIN AREA -->
@@ -640,31 +634,6 @@ label{
         {% endif %}
       </div>
 
-      <!-- QR AREA -->
-      <div class="qr-area">
-
-        <div class="divider">
-          QR ACCESS
-        </div>
-
-        <div class="qr-box">
-
-          <div class="qr-icon">⬆</div>
-
-          <h3>Upload QR Pass</h3>
-
-          <p>
-            Drag and drop your pass card<br>
-            or browse image files
-          </p>
-
-        </div>
-
-        <button class="btn" style="margin-top:18px;" onclick="window.location.href='{% url 'patron_dashboard' %}'">
-          Scan Pass →
-        </button>
-      </div>
-
       <div class="create">
         New patron?
         <a href="{% url 'patron_register' %}">Create account</a>
@@ -675,36 +644,6 @@ label{
   </div>
 
 </div>
-
-<script>
-
-const loginTab = document.getElementById('loginTab');
-const qrTab = document.getElementById('qrTab');
-
-const formArea = document.querySelector('.form-area');
-const qrArea = document.querySelector('.qr-area');
-
-loginTab.addEventListener('click', () => {
-
-  loginTab.classList.add('active');
-  qrTab.classList.remove('active');
-
-  formArea.style.display = 'block';
-  qrArea.style.display = 'none';
-
-});
-
-qrTab.addEventListener('click', () => {
-
-  qrTab.classList.add('active');
-  loginTab.classList.remove('active');
-
-  formArea.style.display = 'none';
-  qrArea.style.display = 'block';
-
-});
-
-</script>
 
 </body>
 </html>

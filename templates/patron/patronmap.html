@@ -104,12 +104,8 @@
 </head>
 <body>
 <nav class="navbar">
-  <a href="{% url 'patron_book_details' 1 %}" class="back-btn">←</a>
+  <a href="{% if target.book_id %}{% url 'patron_book_details' target.book_id %}{% else %}{% url 'patron_catalog' %}{% endif %}" class="back-btn">←</a>
   <div class="nav-title">Floor Map</div>
-  <div class="floor-toggle">
-    <button class="fl-btn active">L1</button>
-    <button class="fl-btn" onclick="this.classList.add('active');this.previousElementSibling.classList.remove('active')">L2</button>
-  </div>
 </nav>
 
 <div id="map">
@@ -118,7 +114,7 @@
     <div class="legend-item"><div class="legend-dot l-target"></div>Target Shelf</div>
     <div class="legend-item"><div class="legend-dot l-shelf"></div>Shelf</div>
     <div class="legend-item"><div class="legend-dot l-patron"></div>Your Position</div>
-    <div class="legend-item"><div class="legend-dot l-exit"></div>Exit / Entrance</div>
+    <div class="legend-item"><div class="legend-dot l-exit"></div>Waypoint</div>
   </div>
 </div>
 
@@ -126,8 +122,8 @@
   <div class="shelf-info">
     <div class="shelf-dot"></div>
     <div class="shelf-details">
-      <div class="shelf-name">Shelf C — Computer Science</div>
-      <div class="shelf-path">Level 1 · Row 3 · Position 12</div>
+      <div class="shelf-name" id="shelfName">{% if target.shelf_name %}Target: {{ target.shelf_name }}{% else %}Browse the map{% endif %}</div>
+      <div class="shelf-path" id="shelfPath">{% if target.book_title %}{{ target.book_title }}{% else %}Tap the map or enable navigation{% endif %}</div>
     </div>
     <div class="nav-status" id="navStatus">
       <div class="status-dot amber" id="statusDot"></div>
@@ -135,10 +131,12 @@
     </div>
   </div>
   <div class="btn-row">
-    <button class="btn-layers">🗂️ Layers</button>
-    <button class="btn-nav disabled" id="navBtn" onclick="showBTModal()">📡 Enable Navigation</button>
+    <button class="btn-layers" onclick="toggleLayers()">🗂️ Layers</button>
+    <button class="btn-nav" id="navBtn" onclick="showBTModal()">📡 Enable Navigation</button>
   </div>
 </div>
+
+{{ target|json_script:"targetData" }}
 
 <!-- BT Modal -->
 <div class="modal-overlay" id="btModal">
@@ -153,169 +151,218 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
-// Custom CRS for floor plan
+const targetData = JSON.parse(document.getElementById('targetData').textContent || '{}');
+
 const map = L.map('map', {
   crs: L.CRS.Simple,
-  minZoom: -2,
-  maxZoom: 3,
+  minZoom: -5,
+  maxZoom: 4,
   zoomControl: false,
   attributionControl: false,
 });
 
-const bounds = [[0,0],[600,900]];
+let imgW = 0, imgH = 0;
+let mapData = null;
+let patronPos = null;            // {x, y} in floor-plan pixels (top-left origin)
+let routeLine = null, patronMarker = null;
+const shelfLayer = L.layerGroup();
+const waypointLayer = L.layerGroup();
+const beaconLayer = L.layerGroup();
+let extrasVisible = true;
+let bleInterval = null;
+const rssiBuffers = {};          // beacon_uuid -> [rssi, ...] (moving-average window)
 
-// Draw library floor plan using canvas
-const canvas = document.createElement('canvas');
-canvas.width = 900; canvas.height = 600;
-const ctx = canvas.getContext('2d');
+const NAV_DATA_URL = "{% url 'get_patron_map_data' %}";
+const NAV_ROUTE_URL = "{% url 'get_navigation_route' %}";
 
-// Background
-ctx.fillStyle = '#111f13';
-ctx.fillRect(0, 0, 900, 600);
+// Flip y so stored (x, y) is a top-left pixel origin (matches the admin tool).
+function toLatLng(x, y) { return [imgH - y, x]; }
+function fromLatLng(ll) { return { x: ll.lng, y: imgH - ll.lat }; }
 
-// Outer walls
-ctx.strokeStyle = '#2d6a4f';
-ctx.lineWidth = 4;
-ctx.strokeRect(20, 20, 860, 560);
-
-// Reception
-ctx.fillStyle = '#162019';
-ctx.fillRect(30, 30, 200, 80);
-ctx.fillStyle = '#2d6a4f';
-ctx.fillRect(30, 30, 200, 4);
-ctx.fillStyle = '#4ade8070';
-ctx.font = 'bold 13px sans-serif';
-ctx.fillText('📋 Reception / Entrance', 40, 75);
-
-// Shelves
-const shelves = [
-  {x:30,y:140,w:100,h:200,label:'Shelf A\nFiction',color:'#1e3a5f',accent:'#3b82f6'},
-  {x:150,y:140,w:100,h:200,label:'Shelf B\nMathematics',color:'#1a3a1f',accent:'#4ade80'},
-  {x:270,y:140,w:100,h:200,label:'Shelf C\nComputer Science',color:'#3b1f1f',accent:'#f59e0b',target:true},
-  {x:390,y:140,w:100,h:200,label:'Shelf D\nScience',color:'#1e3a5f',accent:'#3b82f6'},
-  {x:510,y:140,w:100,h:200,label:'Shelf E\nHistory',color:'#1a3a1f',accent:'#4ade80'},
-  {x:30,y:380,w:100,h:160,label:'Shelf F\nReference',color:'#2d1a4a',accent:'#a855f7'},
-  {x:150,y:380,w:100,h:160,label:'Shelf G\nBiography',color:'#1e3a5f',accent:'#3b82f6'},
-  {x:270,y:380,w:100,h:160,label:'Shelf H\nSelf-Help',color:'#1a3a1f',accent:'#4ade80'},
-];
-
-shelves.forEach(s=>{
-  ctx.fillStyle = s.color;
-  ctx.fillRect(s.x,s.y,s.w,s.h);
-  ctx.strokeStyle = s.target ? '#f59e0b' : s.accent+'80';
-  ctx.lineWidth = s.target ? 3 : 1.5;
-  ctx.strokeRect(s.x,s.y,s.w,s.h);
-  if(s.target){
-    ctx.fillStyle = '#f59e0b20';
-    ctx.fillRect(s.x,s.y,s.w,s.h);
-  }
-  ctx.fillStyle = s.accent;
-  ctx.font = 'bold 11px sans-serif';
-  ctx.textAlign = 'center';
-  const lines = s.label.split('\n');
-  lines.forEach((line,i)=>ctx.fillText(line, s.x+s.w/2, s.y+s.h/2-6+(i*16)));
-});
-ctx.textAlign = 'left';
-
-// Reading area
-ctx.fillStyle = '#162019';
-ctx.fillRect(640,140,210,240);
-ctx.strokeStyle = '#2d6a4f50';
-ctx.lineWidth=1.5;
-ctx.strokeRect(640,140,210,240);
-ctx.fillStyle = '#4ade8060';
-ctx.font = 'bold 12px sans-serif';
-ctx.fillText('📖 Reading Area', 655, 265);
-
-// Tables in reading area
-[[660,160],[720,160],[780,160],[660,200],[720,200],[780,200]].forEach(([tx,ty])=>{
-  ctx.fillStyle='#1e3322';
-  ctx.fillRect(tx,ty,50,30);
-  ctx.strokeStyle='#2d6a4f50';
-  ctx.lineWidth=1;
-  ctx.strokeRect(tx,ty,50,30);
-});
-
-// Restrooms
-ctx.fillStyle='#162019';
-ctx.fillRect(640,400,100,60);
-ctx.fillStyle='#6b8f72';
-ctx.font='11px sans-serif';
-ctx.fillText('🚻 Restrooms',648,435);
-
-// Exit
-ctx.fillStyle='#2d1a4a';
-ctx.fillRect(760,380,120,30);
-ctx.fillStyle='#a855f7';
-ctx.font='bold 11px sans-serif';
-ctx.fillText('🚪 Exit →',775,400);
-
-// Path waypoints (dashed line from entrance to target shelf)
-ctx.setLineDash([8,5]);
-ctx.strokeStyle='#f59e0b80';
-ctx.lineWidth=2;
-ctx.beginPath();
-ctx.moveTo(130,30);
-ctx.lineTo(130,80);
-ctx.lineTo(320,80);
-ctx.lineTo(320,140);
-ctx.stroke();
-ctx.setLineDash([]);
-
-// Target pin
-ctx.fillStyle='#f59e0b';
-ctx.beginPath();
-ctx.arc(320,130,10,0,Math.PI*2);
-ctx.fill();
-ctx.fillStyle='white';
-ctx.font='bold 10px sans-serif';
-ctx.textAlign='center';
-ctx.fillText('📍',320,134);
-ctx.textAlign='left';
-
-const dataURL = canvas.toDataURL();
-const imageOverlay = L.imageOverlay(dataURL, bounds).addTo(map);
-map.fitBounds(bounds);
-
-// Add target marker
-const targetIcon = L.divIcon({
-  className:'',
-  html:`<div style="background:#f59e0b;border:2px solid #fff;border-radius:50% 50% 50% 0;transform:rotate(-45deg);width:20px;height:20px;box-shadow:0 0 10px #f59e0b80"></div>`,
-  iconSize:[20,20], iconAnchor:[10,20]
-});
-L.marker([470,320],{icon:targetIcon}).addTo(map).bindPopup('<b>Shelf C — CS</b><br>Your target shelf');
-
-// Shelf markers
-const neutralIcon = L.divIcon({
-  className:'',
-  html:`<div style="background:#4ade8060;border:1px solid #4ade80;border-radius:3px;width:14px;height:14px"></div>`,
-  iconSize:[14,14],iconAnchor:[7,7]
-});
-[[250,80],[370,80],[490,80],[130,450],[250,450]].forEach(([y,x])=>{
-  L.marker([y,x],{icon:neutralIcon}).addTo(map);
-});
-
-// Navigation functions
-function showBTModal(){document.getElementById('btModal').classList.add('show');}
-function closeBTModal(){document.getElementById('btModal').classList.remove('show');}
-function enableBLE(){
-  closeBTModal();
-  document.getElementById('statusDot').className='status-dot green';
-  document.getElementById('statusText').textContent='BLE: Active';
-  document.getElementById('navBtn').classList.remove('disabled');
-  document.getElementById('navBtn').textContent='🧭 Navigating...';
-
-  // Add patron dot
-  const patronIcon = L.divIcon({
-    className:'',
-    html:`<div style="background:#60a5fa;border:3px solid #fff;border-radius:50%;width:16px;height:16px;box-shadow:0 0 12px #60a5fa;animation:pulse 1.5s infinite"></div><style>@keyframes pulse{0%,100%{box-shadow:0 0 8px #60a5fa;}50%{box-shadow:0 0 18px #60a5fa;}}</style>`,
-    iconSize:[16,16],iconAnchor:[8,8]
-  });
-  L.marker([100,130],{icon:patronIcon}).addTo(map).bindPopup('📍 You are here');
-
-  // Draw nav path
-  L.polyline([[100,130],[200,130],[200,280],[470,280],[470,320]],{color:'#60a5fa',weight:3,dashArray:'8,5',opacity:0.8}).addTo(map);
+function setStatus(color, text) {
+  const dot = document.getElementById('statusDot');
+  dot.className = 'status-dot ' + (color === 'green' ? 'green' : 'amber');
+  document.getElementById('statusText').textContent = text;
 }
+
+function loadImageSize(url) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
+    img.onerror = () => resolve({ w: 1000, h: 1000 });
+    img.src = url;
+  });
+}
+
+async function fetchJSON(url) {
+  const res = await fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+  return res.json();
+}
+
+async function initMap() {
+  let data;
+  try { data = await fetchJSON(NAV_DATA_URL); } catch (e) { setStatus('amber', 'Map unavailable'); return; }
+  if (!data.success) {
+    document.getElementById('shelfName').textContent = 'No floor plan available';
+    document.getElementById('shelfPath').textContent = data.error || '';
+    setStatus('amber', 'No active map');
+    return;
+  }
+  mapData = data;
+  imgW = data.image_width; imgH = data.image_height;
+  if (!imgW || !imgH) { const d = await loadImageSize(data.image_url); imgW = d.w; imgH = d.h; }
+
+  const bounds = [[0, 0], [imgH, imgW]];
+  if (data.image_url) L.imageOverlay(data.image_url, bounds).addTo(map);
+  map.fitBounds(bounds);
+  setTimeout(() => map.invalidateSize(), 200);
+
+  // Shelves (target highlighted amber)
+  data.shelves.forEach((s) => {
+    const isTarget = targetData.shelf_id && s.shelf_id === targetData.shelf_id;
+    L.circleMarker(toLatLng(s.x, s.y), {
+      radius: isTarget ? 9 : 6,
+      color: isTarget ? '#f59e0b' : '#4ade80',
+      weight: 2,
+      fillColor: isTarget ? '#f59e0b' : '#4ade80',
+      fillOpacity: isTarget ? 0.9 : 0.45,
+    }).bindTooltip((isTarget ? '🎯 ' : '') + s.name, { direction: 'top' }).addTo(shelfLayer);
+  });
+  shelfLayer.addTo(map);
+
+  // Waypoint graph (faint)
+  const wpById = {};
+  data.waypoints.forEach((w) => { wpById[w.waypoint_id] = w; });
+  data.connections.forEach((c) => {
+    const a = wpById[c.from], b = wpById[c.to];
+    if (a && b) L.polyline([toLatLng(a.x, a.y), toLatLng(b.x, b.y)], { color: '#2d6a4f', weight: 1, opacity: 0.4, dashArray: '4,4' }).addTo(waypointLayer);
+  });
+  data.waypoints.forEach((w) => {
+    L.circleMarker(toLatLng(w.x, w.y), { radius: 3, color: '#9333ea', weight: 1, fillColor: '#9333ea', fillOpacity: 0.6 }).addTo(waypointLayer);
+  });
+  waypointLayer.addTo(map);
+
+  // Beacons (faint blue)
+  data.beacons.forEach((b) => {
+    L.circleMarker(toLatLng(b.x, b.y), { radius: 4, color: '#60a5fa', weight: 1, fillColor: '#60a5fa', fillOpacity: 0.5 })
+      .bindTooltip('📡 ' + (b.label || b.beacon_uuid), { direction: 'top' }).addTo(beaconLayer);
+  });
+  beaconLayer.addTo(map);
+
+  // Tap to set location (manual / fallback positioning)
+  map.on('click', (e) => setPatronPosition(fromLatLng(e.latlng), 'manual'));
+
+  if (targetData.shelf_name) {
+    document.getElementById('shelfName').textContent = 'Target: ' + targetData.shelf_name;
+    document.getElementById('shelfPath').textContent = 'Tap the map or enable navigation to start';
+  } else {
+    document.getElementById('shelfPath').textContent = 'Open a book and tap "View on Map" to navigate to its shelf';
+  }
+  if (data.renovation_notice) setStatus('amber', data.renovation_notice);
+}
+
+function setPatronPosition(pos, source) {
+  patronPos = pos;
+  const ll = toLatLng(pos.x, pos.y);
+  if (!patronMarker) {
+    patronMarker = L.circleMarker(ll, { radius: 8, color: '#ffffff', weight: 3, fillColor: '#60a5fa', fillOpacity: 1 })
+      .bindTooltip('You are here', { direction: 'top' }).addTo(map);
+  } else {
+    patronMarker.setLatLng(ll);
+  }
+  setStatus(source === 'ble' ? 'green' : 'amber', source === 'ble' ? 'BLE: Active' : 'Location set (tap)');
+  if (targetData.shelf_id) computeRoute();
+}
+
+async function computeRoute() {
+  if (!patronPos || !targetData.shelf_id) return;
+  const url = NAV_ROUTE_URL + '?start_x=' + patronPos.x + '&start_y=' + patronPos.y + '&target_shelf_id=' + targetData.shelf_id;
+  let r;
+  try { r = await fetchJSON(url); } catch (e) { return; }
+  if (!r.success) { document.getElementById('shelfPath').textContent = r.error || 'No route found'; return; }
+  const latlngs = r.route.map((p) => toLatLng(p.x, p.y));
+  if (routeLine) map.removeLayer(routeLine);
+  routeLine = L.polyline(latlngs, { color: '#60a5fa', weight: 4, opacity: 0.9 }).addTo(map);
+  document.getElementById('navBtn').textContent = '🧭 Navigating…';
+  document.getElementById('shelfPath').textContent = 'Distance ≈ ' + Math.round(r.distance) + ' px · ' + Math.max(r.route.length - 1, 0) + ' segment(s)';
+}
+
+function toggleLayers() {
+  extrasVisible = !extrasVisible;
+  [waypointLayer, beaconLayer].forEach((lyr) => { extrasVisible ? lyr.addTo(map) : map.removeLayer(lyr); });
+}
+
+// ---- Bluetooth Low Energy positioning (best-effort, with manual fallback) ----
+function showBTModal() { document.getElementById('btModal').classList.add('show'); }
+function closeBTModal() { document.getElementById('btModal').classList.remove('show'); }
+
+function rssiToDistance(rssi, txPower, n) { return Math.pow(10, ((txPower || -59) - rssi) / (10 * (n || 2.0))); }
+
+function pushRssi(uuid, rssi, win) {
+  const buf = rssiBuffers[uuid] || (rssiBuffers[uuid] = []);
+  buf.push(rssi);
+  if (buf.length > (win || 5)) buf.shift();   // Moving Average window
+}
+
+function onAdvertisement(e) {
+  try {
+    if (e.rssi == null || !mapData) return;
+    const advUuids = (e.uuids || []).map((u) => String(u).toLowerCase());
+    const name = e.device && e.device.name;
+    mapData.beacons.forEach((b) => {
+      const bu = String(b.beacon_uuid).toLowerCase();
+      if (advUuids.includes(bu) || (name && name === b.label)) pushRssi(b.beacon_uuid, e.rssi);
+    });
+  } catch (_) { /* ignore malformed advertisements */ }
+}
+
+function trilaterate() {
+  if (!mapData) return;
+  const pts = [];
+  mapData.beacons.forEach((b) => {
+    const buf = rssiBuffers[b.beacon_uuid];
+    if (buf && buf.length) {
+      const avg = buf.reduce((a, c) => a + c, 0) / buf.length;
+      pts.push({ x: b.x, y: b.y, d: rssiToDistance(avg) });
+    }
+  });
+  if (pts.length < 3) return;   // need at least three beacons
+  // Linear least-squares trilateration using the last beacon as the reference point.
+  const ref = pts[pts.length - 1];
+  let Sxx = 0, Sxy = 0, Syy = 0, Sxb = 0, Syb = 0;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p = pts[i];
+    const ax = 2 * (p.x - ref.x), ay = 2 * (p.y - ref.y);
+    const bb = p.x * p.x - ref.x * ref.x + p.y * p.y - ref.y * ref.y + ref.d * ref.d - p.d * p.d;
+    Sxx += ax * ax; Sxy += ax * ay; Syy += ay * ay; Sxb += ax * bb; Syb += ay * bb;
+  }
+  const det = Sxx * Syy - Sxy * Sxy;
+  if (Math.abs(det) < 1e-6) return;
+  const x = (Syy * Sxb - Sxy * Syb) / det;
+  const y = (Sxx * Syb - Sxy * Sxb) / det;
+  if (isFinite(x) && isFinite(y)) setPatronPosition({ x: x, y: y }, 'ble');
+}
+
+async function enableBLE() {
+  closeBTModal();
+  if (!('bluetooth' in navigator) || !navigator.bluetooth.requestLEScan) {
+    setStatus('amber', 'BLE unavailable — tap to locate');
+    alert('Live Bluetooth positioning is not available in this browser. Tap anywhere on the map to set your location manually (fallback navigation).');
+    return;
+  }
+  try {
+    await navigator.bluetooth.requestLEScan({ acceptAllAdvertisements: true });
+    navigator.bluetooth.addEventListener('advertisementreceived', onAdvertisement);
+    setStatus('green', 'BLE: Scanning…');
+    if (bleInterval) clearInterval(bleInterval);
+    bleInterval = setInterval(trilaterate, 1500);
+  } catch (err) {
+    setStatus('amber', 'BLE blocked — tap to locate');
+    alert('Bluetooth scanning was blocked or failed. Tap anywhere on the map to set your location manually (fallback navigation).');
+  }
+}
+
+initMap();
 </script>
 </body>
 </html>

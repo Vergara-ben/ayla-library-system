@@ -114,7 +114,6 @@
             margin-right: 0.75rem;
         }
     </style>
-    <script src="{% static 'js/supabase-config.js' %}"></script>
 </head>
 <body class="flex h-screen overflow-hidden">
 
@@ -140,10 +139,6 @@
                     <a href="{% url 'admin_indoor_map' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
                         <i class="fa-solid fa-map w-5 text-sm"></i>
                         <span class="text-sm font-medium">Indoor Map</span>
-                    </a>
-                    <a href="{% url 'admin_qr_scanner' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
-                        <i class="fa-solid fa-qrcode w-5 text-sm"></i>
-                        <span class="text-sm font-medium">QR Scanner</span>
                     </a>
                 </div>
             </div>
@@ -181,6 +176,10 @@
                     <a href="{% url 'floorplan_management' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
                         <i class="fa-solid fa-layer-group w-5 text-sm"></i>
                         <span class="text-sm font-medium">Floor Plans</span>
+                    </a>
+                    <a href="{% url 'shelf_manager' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                        <i class="fa-solid fa-folder-tree w-5 text-sm"></i>
+                        <span class="text-sm font-medium">Shelf Manager</span>
                     </a>
                 </div>
             </div>

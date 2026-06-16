@@ -1,0 +1,492 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ayla Admin Panel - Shelf Manager</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-main: #060d13;
+            --bg-sidebar: #0b151e;
+            --bg-card: #0d1b26;
+            --bg-modal: #0f2230;
+            --bg-input: #112535;
+            --text-primary: #e2e8f0;
+            --text-muted: #64748b;
+            --border-color: #1e293b;
+        }
+        body { font-family: 'Inter', sans-serif; background-color: var(--bg-main); color: var(--text-primary); }
+        .logo-text { font-family: 'Rowdies', sans-serif; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: var(--bg-main); }
+        ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
+        .mobile-menu-btn { display: none; align-items: center; justify-content: center; width: 2.5rem; height: 2.5rem; border-radius: 0.5rem; background: var(--bg-card); border: 1px solid var(--border-color); color: var(--text-primary); cursor: pointer; margin-right: 0.75rem; }
+        @media (max-width: 1024px) {
+            aside { position: fixed; left: -100%; top: 0; height: 100vh; z-index: 50; transition: left 0.3s ease; }
+            aside.open { left: 0; }
+            .mobile-menu-btn { display: flex !important; }
+            main { padding: 1rem; }
+        }
+
+        /* ── Tree (IDE project explorer) ── */
+        .tree { font-size: 13px; }
+        .trow { display: flex; align-items: center; gap: 8px; padding: 5px 10px; border-radius: 8px; }
+        .trow:hover { background: rgba(148, 163, 184, 0.07); }
+        .chev { width: 14px; flex-shrink: 0; text-align: center; color: #64748b; cursor: pointer; transition: transform .15s; font-size: 10px; }
+        .chev.open { transform: rotate(90deg); }
+        .chev.leaf { visibility: hidden; cursor: default; }
+        .tname { color: #e2e8f0; font-weight: 500; white-space: nowrap; }
+        .tmeta { color: #64748b; font-size: 11px; white-space: nowrap; }
+        .tactions { display: none; align-items: center; gap: 4px; }
+        .trow:hover .tactions { display: flex; }
+        .spacer { margin-left: auto; }
+        .tbtn { width: 24px; height: 24px; border-radius: 6px; border: 1px solid var(--border-color); display: flex; align-items: center; justify-content: center; font-size: 10px; cursor: pointer; background: transparent; }
+        .tbtn.add { color: #22d3ee; } .tbtn.add:hover { background: rgba(14,116,144,.18); }
+        .tbtn.edit { color: #f59e0b; } .tbtn.edit:hover { background: rgba(180,83,9,.18); }
+        .tbtn.del { color: #fb7185; } .tbtn.del:hover { background: rgba(159,18,34,.18); }
+        .tbtn.view { color: #94a3b8; } .tbtn.view:hover { background: rgba(51,65,85,.3); }
+        .op50 { opacity: .5; }
+
+        /* toggle switch */
+        .sw { position: relative; display: inline-block; width: 30px; height: 16px; flex-shrink: 0; }
+        .sw input { opacity: 0; width: 0; height: 0; }
+        .sw .tk { position: absolute; inset: 0; background: #334155; border-radius: 999px; cursor: pointer; transition: .2s; }
+        .sw .tk:before { content: ''; position: absolute; width: 12px; height: 12px; left: 2px; top: 2px; background: #94a3b8; border-radius: 50%; transition: .2s; }
+        .sw input:checked + .tk { background: #0e7490; }
+        .sw input:checked + .tk:before { transform: translateX(14px); background: #22d3ee; }
+    </style>
+</head>
+<body class="flex h-screen overflow-hidden">
+
+    <aside class="w-64 flex-shrink-0 flex flex-col" style="background-color: var(--bg-sidebar); border-right: 1px solid var(--border-color);">
+        <div class="p-6 flex items-center gap-3" style="border-bottom: 1px solid var(--border-color);">
+            <div class="w-10 h-10 rounded-lg flex items-center justify-center text-xl font-bold text-cyan-400 bg-cyan-950/50 border border-cyan-800">A</div>
+            <div>
+                <h1 class="logo-text text-xl tracking-wider text-slate-100 leading-none">AYLA</h1>
+                <span class="text-xs tracking-widest text-slate-500 uppercase font-semibold">Admin Panel</span>
+            </div>
+        </div>
+        <nav class="flex-1 px-4 py-6 space-y-7 overflow-y-auto">
+            <div>
+                <p class="px-2 text-xs font-bold tracking-widest text-slate-500 uppercase mb-3">Overview</p>
+                <div class="space-y-1">
+                    <a href="{% url 'admin_dashboard' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                        <i class="fa-solid fa-chart-pie w-5 text-sm"></i><span class="text-sm font-medium">Dashboard</span>
+                    </a>
+                    <a href="{% url 'admin_indoor_map' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                        <i class="fa-solid fa-map w-5 text-sm"></i><span class="text-sm font-medium">Indoor Map</span>
+                    </a>
+                </div>
+            </div>
+            <div>
+                <p class="px-2 text-xs font-bold tracking-widest text-slate-500 uppercase mb-3">Management</p>
+                <div class="space-y-1">
+                    <a href="{% url 'admin_transaction' %}" class="flex items-center justify-between px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                        <div class="flex items-center gap-3"><i class="fa-solid fa-file-invoice w-5 text-sm"></i><span class="text-sm font-medium">Transactions</span></div>
+                        <span class="bg-rose-500/20 text-rose-400 text-xs px-2 py-0.5 rounded-full font-semibold">{{ pending_transactions_count }}</span>
+                    </a>
+                    <a href="{% url 'admin_log_management' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                        <i class="fa-solid fa-clipboard-list w-5 text-sm"></i><span class="text-sm font-medium">Log Management</span>
+                    </a>
+                    <a href="{% url 'admin_management' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                        <i class="fa-solid fa-book w-5 text-sm"></i><span class="text-sm font-medium">Manage Books</span>
+                    </a>
+                    <a href="{% url 'admin_manage_patron' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                        <i class="fa-solid fa-users w-5 text-sm"></i><span class="text-sm font-medium">Manage Patrons</span>
+                    </a>
+                    <a href="{% url 'donation_management' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                        <i class="fa-solid fa-hand-holding-heart w-5 text-sm"></i><span class="text-sm font-medium">Donations</span>
+                    </a>
+                    <a href="{% url 'announcement_management' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                        <i class="fa-solid fa-bullhorn w-5 text-sm"></i><span class="text-sm font-medium">Announcements</span>
+                    </a>
+                    <a href="{% url 'floorplan_management' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                        <i class="fa-solid fa-layer-group w-5 text-sm"></i><span class="text-sm font-medium">Floor Plans</span>
+                    </a>
+                    <a href="{% url 'shelf_manager' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-800/50 text-cyan-400 font-medium border border-slate-700/50">
+                        <i class="fa-solid fa-folder-tree w-5 text-sm"></i><span class="text-sm">Shelf Manager</span>
+                    </a>
+                </div>
+            </div>
+        </nav>
+    </aside>
+
+    <div class="flex-1 flex flex-col overflow-hidden">
+        <header class="h-16 flex-shrink-0 flex items-center justify-between px-8" style="background-color: var(--bg-main);">
+            <div class="flex items-center">
+                <button class="mobile-menu-btn" onclick="document.querySelector('aside').classList.toggle('open')"><i class="fa-solid fa-bars"></i></button>
+                <h2 class="logo-text text-lg tracking-wider text-slate-200 uppercase">Shelf Manager</h2>
+            </div>
+            <div class="flex items-center gap-4">
+                <span class="bg-cyan-950 text-cyan-400 text-xs px-2.5 py-1 rounded font-bold border border-cyan-800 tracking-wider">ADMIN</span>
+                <div class="w-8 h-8 rounded-full bg-cyan-900 border border-cyan-700 flex items-center justify-center text-xs font-bold text-cyan-200">AD</div>
+            </div>
+        </header>
+
+        <main class="flex-1 overflow-y-auto p-8 space-y-6">
+
+            <!-- View toggle -->
+            <div class="flex items-center justify-between gap-4 flex-wrap">
+                <div class="flex items-center gap-2 p-1 rounded-lg border border-slate-800" style="background-color: var(--bg-card);">
+                    <button id="tabTree" onclick="switchView('tree')" class="px-3 py-1.5 rounded-md text-xs font-bold tracking-wide bg-cyan-700/30 text-cyan-400 border border-cyan-800/50 flex items-center gap-2"><i class="fa-solid fa-folder-tree text-[10px]"></i> Tree</button>
+                    <button id="tabTable" onclick="switchView('table')" class="px-3 py-1.5 rounded-md text-xs font-bold tracking-wide text-slate-500 hover:text-slate-300 flex items-center gap-2"><i class="fa-solid fa-table-list text-[10px]"></i> Table</button>
+                </div>
+                <p class="text-[11px] text-slate-500">Toggle a switch to show/hide a location from patrons. Inactive items appear dimmed.</p>
+            </div>
+
+            <!-- TREE VIEW -->
+            <div id="treeView" class="rounded-xl border border-slate-800/80 shadow-2xl" style="background-color: var(--bg-card);">
+                <div class="p-4 border-b border-slate-800 flex items-center gap-2">
+                    <i class="fa-solid fa-sitemap text-cyan-600 text-xs"></i>
+                    <h4 class="text-sm font-bold text-slate-200 tracking-wide">Structure</h4>
+                    <span class="text-[10px] text-slate-500">(active floor plan)</span>
+                    <button onclick="loadTree()" class="ml-auto text-[10px] text-slate-400 hover:text-cyan-400 flex items-center gap-1"><i class="fa-solid fa-rotate-right"></i> Refresh</button>
+                </div>
+                <div class="tree p-3" id="treeRoot">
+                    <div class="text-slate-500 text-sm p-4">Loading…</div>
+                </div>
+            </div>
+
+            <!-- TABLE VIEW -->
+            <div id="tableView" class="hidden rounded-xl border border-slate-800/80 shadow-2xl" style="background-color: var(--bg-card);">
+                <div class="p-4 border-b border-slate-800 flex items-center gap-3 flex-wrap">
+                    <i class="fa-solid fa-table-list text-cyan-600 text-xs"></i>
+                    <h4 class="text-sm font-bold text-slate-200 tracking-wide">All Shelf Levels</h4>
+                    <div class="relative ml-auto w-full max-w-xs">
+                        <i class="fa-solid fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-xs"></i>
+                        <input id="flatSearch" oninput="renderFlat()" type="text" placeholder="Filter by name or path…" class="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-3 py-2 text-xs text-slate-300 focus:outline-none focus:border-cyan-800 placeholder-slate-600">
+                    </div>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="border-b border-slate-800/80 text-[10px] font-bold tracking-wider text-slate-500 uppercase bg-slate-900/5">
+                                <th class="py-3 px-6">Breadcrumb Path</th>
+                                <th class="py-3 px-6 w-28">Level</th>
+                                <th class="py-3 px-6 w-24 text-center">Books</th>
+                                <th class="py-3 px-6 w-24 text-center">Active</th>
+                            </tr>
+                        </thead>
+                        <tbody id="flatBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Add Modal -->
+    <div id="addModal" class="hidden absolute inset-0 bg-black/60 z-40 flex items-center justify-center p-4 overflow-y-auto">
+        <div class="w-full max-w-md rounded-2xl border p-6 flex flex-col gap-5 shadow-2xl my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color);">
+            <div class="flex items-center justify-between">
+                <h3 id="addTitle" class="text-base font-bold text-slate-200 tracking-wide">Add</h3>
+                <button type="button" onclick="closeModal('addModal')" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40"><i class="fa-solid fa-xmark text-sm"></i></button>
+            </div>
+            <div class="space-y-4 text-xs">
+                <div id="addNameField" class="space-y-1.5">
+                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Name</label>
+                    <input type="text" id="addName" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                </div>
+                <div id="addLevelFields" class="hidden grid grid-cols-2 gap-3">
+                    <div class="space-y-1.5">
+                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Level #</label>
+                        <input type="number" id="addLevelNum" min="1" value="1" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                    </div>
+                    <div class="space-y-1.5">
+                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Label</label>
+                        <input type="text" id="addLabel" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                    </div>
+                </div>
+                <div class="pt-2 flex items-center justify-end gap-3">
+                    <button type="button" onclick="closeModal('addModal')" class="px-5 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:bg-slate-800/40 font-semibold min-w-[100px]">Cancel</button>
+                    <button type="button" onclick="submitAdd()" class="bg-cyan-700 hover:bg-cyan-600 text-white font-bold px-5 py-2.5 rounded-lg flex items-center gap-2"><i class="fa-solid fa-check text-xs"></i> Add</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Modal -->
+    <div id="editModal" class="hidden absolute inset-0 bg-black/60 z-40 flex items-center justify-center p-4 overflow-y-auto">
+        <div class="w-full max-w-md rounded-2xl border p-6 flex flex-col gap-5 shadow-2xl my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color);">
+            <div class="flex items-center justify-between">
+                <h3 id="editTitle" class="text-base font-bold text-slate-200 tracking-wide">Rename</h3>
+                <button type="button" onclick="closeModal('editModal')" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40"><i class="fa-solid fa-xmark text-sm"></i></button>
+            </div>
+            <div class="space-y-4 text-xs">
+                <div id="editNameField" class="space-y-1.5">
+                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Name</label>
+                    <input type="text" id="editName" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                </div>
+                <div id="editLevelFields" class="hidden grid grid-cols-2 gap-3">
+                    <div class="space-y-1.5">
+                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Level #</label>
+                        <input type="number" id="editLevelNum" min="1" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                    </div>
+                    <div class="space-y-1.5">
+                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Label</label>
+                        <input type="text" id="editLabel" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                    </div>
+                </div>
+                <div class="pt-2 flex items-center justify-end gap-3">
+                    <button type="button" onclick="closeModal('editModal')" class="px-5 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:bg-slate-800/40 font-semibold min-w-[100px]">Cancel</button>
+                    <button type="button" onclick="submitEdit()" class="bg-cyan-700 hover:bg-cyan-600 text-white font-bold px-5 py-2.5 rounded-lg flex items-center gap-2"><i class="fa-solid fa-check text-xs"></i> Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Book View Modal -->
+    <div id="bookModal" class="hidden absolute inset-0 bg-black/60 z-40 flex items-center justify-center p-4 overflow-y-auto">
+        <div class="w-full max-w-sm rounded-2xl border p-6 flex flex-col gap-4 shadow-2xl my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color);">
+            <div class="flex items-center justify-between">
+                <h3 class="text-base font-bold text-slate-200 tracking-wide">Book Details</h3>
+                <button type="button" onclick="closeModal('bookModal')" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40"><i class="fa-solid fa-xmark text-sm"></i></button>
+            </div>
+            <div id="bookBody" class="text-xs text-slate-300 space-y-2"></div>
+        </div>
+    </div>
+
+    <script>
+        const CSRF = "{{ csrf_token }}";
+        const U = {
+            tree: "{% url 'get_shelf_tree' %}",
+            flat: "{% url 'get_shelf_levels_flat' %}",
+            toggle: "{% url 'toggle_active' %}",
+            addRoom: "{% url 'add_room' %}", addShelf: "{% url 'add_shelf' %}",
+            addSection: "{% url 'add_section' %}", addLevel: "{% url 'add_shelf_level' %}",
+            editRoom: "{% url 'edit_room' %}", editShelf: "{% url 'edit_shelf' %}",
+            editSection: "{% url 'edit_section' %}", editLevel: "{% url 'edit_shelf_level' %}",
+            delRoom: "{% url 'delete_room' %}", delShelf: "{% url 'delete_shelf' %}",
+            delSection: "{% url 'delete_section' %}", delLevel: "{% url 'delete_shelf_level' %}",
+            bookBase: "/admin-portal/book-details/",
+        };
+        const TYPE = {
+            floorplan: { icon: 'fa-layer-group', color: 'text-cyan-400', child: 'room' },
+            room:       { icon: 'fa-door-open',  color: 'text-amber-400', child: 'shelf',      toggle: 'room',       edit: U.editRoom,   del: U.delRoom,   idField: 'room_id',        word: 'Room' },
+            shelf:      { icon: 'fa-box',         color: 'text-purple-400', child: 'section',   toggle: 'shelf',      edit: U.editShelf,  del: U.delShelf,  idField: 'shelf_id',       word: 'Shelf' },
+            section:    { icon: 'fa-folder',      color: 'text-emerald-400', child: 'shelflevel', toggle: 'section', edit: U.editSection, del: U.delSection, idField: 'section_id',    word: 'Section' },
+            shelflevel: { icon: 'fa-bars-staggered', color: 'text-blue-400', toggle: 'shelflevel', edit: U.editLevel, del: U.delLevel,  idField: 'shelf_level_id', word: 'Shelf Level' },
+            book:       { icon: 'fa-book',        color: 'text-slate-400', word: 'Book' },
+        };
+        const childWord = { room: 'Room', shelf: 'Shelf', section: 'Section', shelflevel: 'Shelf Level' };
+
+        let flatData = [];
+        let addTarget = null, editTarget = null;
+
+        function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+        function val(id) { return document.getElementById(id).value; }
+        function show(id) { document.getElementById(id).classList.remove('hidden'); }
+        function hide(id) { document.getElementById(id).classList.add('hidden'); }
+        function openModal(id) { document.getElementById(id).classList.remove('hidden'); }
+        function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
+
+        async function post(url, data) {
+            const r = await fetch(url, { method: 'POST', headers: { 'X-CSRFToken': CSRF, 'X-Requested-With': 'XMLHttpRequest', 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(data).toString() });
+            return r.json();
+        }
+        async function getJSON(url) { const r = await fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } }); return r.json(); }
+
+        function statusBadge(s) {
+            const map = {
+                'Available': 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+                'Borrowed': 'bg-blue-500/10 text-blue-400 border-blue-500/20',
+                'Being Read': 'bg-amber-500/10 text-amber-400 border-amber-500/20',
+                'Overdue': 'bg-rose-500/10 text-rose-400 border-rose-500/20',
+                'Lost': 'bg-slate-500/10 text-slate-400 border-slate-500/20',
+                'Donated': 'bg-purple-500/10 text-purple-400 border-purple-500/20',
+            };
+            return '<span class="border px-2 py-0.5 rounded text-[10px] font-bold ' + (map[s] || map['Lost']) + '">' + esc(s) + '</span>';
+        }
+
+        // ── Tree ──
+        function renderNode(node, depth) {
+            const t = TYPE[node.type] || {};
+            const isBook = node.type === 'book';
+            const hasKids = node.children && node.children.length;
+            const pad = depth * 18 + 10;
+            const inactive = (!isBook && node.is_active === false) ? ' op50' : '';
+            const open = !isBook && hasKids && depth < 2;
+
+            let right = '';
+            if (isBook) {
+                right = '<div class="spacer flex items-center gap-2">' + statusBadge(node.status)
+                    + '<button class="tbtn view" title="View" onclick="viewBook(' + node.id + ')"><i class="fa-solid fa-eye"></i></button></div>';
+            } else {
+                let a = '';
+                if (t.child) a += '<button class="tbtn add" title="Add ' + childWord[t.child] + '" onclick="openAdd(\'' + node.type + '\',' + node.id + ')"><i class="fa-solid fa-plus"></i></button>';
+                if (t.edit) a += '<button class="tbtn edit" title="Rename" onclick="openEdit(\'' + node.type + '\',' + node.id + ',this)"><i class="fa-solid fa-pen"></i></button>';
+                if (t.del) a += '<button class="tbtn del" title="Delete" onclick="delNode(\'' + node.type + '\',' + node.id + ')"><i class="fa-solid fa-trash-can"></i></button>';
+                let tog = '';
+                if (t.toggle) tog = '<label class="sw"><input type="checkbox" ' + (node.is_active ? 'checked' : '') + ' onchange="tToggle(this,\'' + t.toggle + '\',' + node.id + ')"><span class="tk"></span></label>';
+                right = '<div class="spacer flex items-center gap-2"><div class="tactions">' + a + '</div>' + tog + '</div>';
+            }
+
+            const meta = (node.type === 'shelflevel')
+                ? '<span class="tmeta">· ' + node.book_count + ' book' + (node.book_count === 1 ? '' : 's') + '</span>'
+                : (isBook && node.author) ? '<span class="tmeta">· ' + esc(node.author) + '</span>' : '';
+            const chev = (isBook || !hasKids)
+                ? '<span class="chev leaf">▶</span>'
+                : '<span class="chev' + (open ? ' open' : '') + '" onclick="tChev(this)">▶</span>';
+            const data = 'data-name="' + esc(node.name || '') + '" data-label="' + esc(node.label || '') + '" data-level="' + (node.level_number || '') + '"';
+
+            let html = '<div class="tnode">';
+            html += '<div class="trow' + inactive + '" style="padding-left:' + pad + 'px" ' + data + '>';
+            html += chev;
+            html += '<i class="fa-solid ' + (t.icon || 'fa-file') + ' ' + (t.color || 'text-slate-400') + ' text-xs"></i>';
+            html += '<span class="tname">' + esc(node.name || '') + '</span>' + meta;
+            html += right + '</div>';
+            if (hasKids) {
+                html += '<div class="tkids" style="display:' + (open ? 'block' : 'none') + '">';
+                node.children.forEach(function (c) { html += renderNode(c, depth + 1); });
+                html += '</div>';
+            }
+            html += '</div>';
+            return html;
+        }
+
+        function tChev(el) {
+            const kids = el.closest('.tnode').querySelector(':scope > .tkids');
+            if (!kids) return;
+            const open = kids.style.display !== 'none';
+            kids.style.display = open ? 'none' : 'block';
+            el.classList.toggle('open', !open);
+        }
+
+        async function loadTree() {
+            const root = document.getElementById('treeRoot');
+            const d = await getJSON(U.tree);
+            if (!d.tree || !d.tree.length) {
+                root.innerHTML = '<div class="text-slate-500 text-sm p-4">No active floor plan or structure yet. Activate a floor plan and place rooms/shelves on the map first.</div>';
+                return;
+            }
+            let html = '';
+            d.tree.forEach(function (n) { html += renderNode(n, 0); });
+            root.innerHTML = html;
+        }
+
+        async function tToggle(cb, modelType, id) {
+            const r = await post(U.toggle, { model_type: modelType, id: id });
+            if (r.success) {
+                const row = cb.closest('.trow');
+                row.classList.toggle('op50', !r.is_active);
+                cb.checked = r.is_active;
+            } else { cb.checked = !cb.checked; alert(r.error || 'Failed to toggle'); }
+        }
+
+        function openAdd(parentType, parentId) {
+            const childType = TYPE[parentType].child;
+            addTarget = { parentType: parentType, parentId: parentId, childType: childType };
+            document.getElementById('addTitle').textContent = 'Add ' + childWord[childType];
+            if (childType === 'shelflevel') { hide('addNameField'); show('addLevelFields'); document.getElementById('addLevelNum').value = '1'; document.getElementById('addLabel').value = ''; }
+            else { show('addNameField'); hide('addLevelFields'); document.getElementById('addName').value = ''; }
+            openModal('addModal');
+        }
+
+        async function submitAdd() {
+            const a = addTarget; if (!a) return;
+            let url, data = {};
+            if (a.childType === 'room') { url = U.addRoom; data = { floor_plan_id: a.parentId, name: val('addName').trim(), map_x: 0, map_y: 0 }; }
+            else if (a.childType === 'shelf') { url = U.addShelf; data = { room_id: a.parentId, name: val('addName').trim(), map_x: 0, map_y: 0 }; }
+            else if (a.childType === 'section') { url = U.addSection; data = { shelf_id: a.parentId, name: val('addName').trim() }; }
+            else if (a.childType === 'shelflevel') { url = U.addLevel; data = { section_id: a.parentId, level_number: val('addLevelNum'), label: val('addLabel').trim() }; }
+            if (a.childType !== 'shelflevel' && !data.name) { alert('Name is required'); return; }
+            if (a.childType === 'shelflevel' && !data.level_number) { alert('Level number is required'); return; }
+            const r = await post(url, data);
+            if (r.success !== false) { closeModal('addModal'); loadTree(); } else alert(r.error || 'Failed to add');
+        }
+
+        function openEdit(type, id, btn) {
+            const row = btn.closest('.trow');
+            editTarget = { type: type, id: id };
+            document.getElementById('editTitle').textContent = 'Edit ' + TYPE[type].word;
+            if (type === 'shelflevel') { hide('editNameField'); show('editLevelFields'); document.getElementById('editLevelNum').value = row.getAttribute('data-level') || ''; document.getElementById('editLabel').value = row.getAttribute('data-label') || ''; }
+            else { show('editNameField'); hide('editLevelFields'); document.getElementById('editName').value = row.getAttribute('data-name') || ''; }
+            openModal('editModal');
+        }
+
+        async function submitEdit() {
+            const t = editTarget; if (!t) return;
+            const cfg = TYPE[t.type];
+            let data = {}; data[cfg.idField] = t.id;
+            if (t.type === 'shelflevel') { data.level_number = val('editLevelNum'); data.label = val('editLabel').trim(); if (!data.level_number) { alert('Level number is required'); return; } }
+            else { data.name = val('editName').trim(); if (!data.name) { alert('Name is required'); return; } }
+            const r = await post(cfg.edit, data);
+            if (r.success !== false) { closeModal('editModal'); loadTree(); } else alert(r.error || 'Failed to save');
+        }
+
+        async function delNode(type, id) {
+            if (!confirm('Delete this ' + TYPE[type].word + ' and everything inside it?')) return;
+            const cfg = TYPE[type]; let data = {}; data[cfg.idField] = id;
+            const r = await post(cfg.del, data);
+            if (r.success !== false) { loadTree(); } else alert(r.error || 'Failed to delete');
+        }
+
+        async function viewBook(id) {
+            const body = document.getElementById('bookBody');
+            body.innerHTML = '<div class="text-slate-500">Loading…</div>';
+            openModal('bookModal');
+            const d = await getJSON(U.bookBase + id + '/');
+            if (!d.success) { body.innerHTML = '<div class="text-rose-400">' + esc(d.error || 'Not found') + '</div>'; return; }
+            function row(k, v) { return '<div class="flex justify-between gap-3"><span class="text-slate-500">' + k + '</span><span class="text-slate-200 text-right">' + esc(v) + '</span></div>'; }
+            body.innerHTML =
+                '<div class="text-sm font-bold text-slate-100 mb-2">' + esc(d.title) + '</div>'
+                + row('Author', d.author) + row('Status', d.status) + row('Section', d.section)
+                + row('Shelf Level', d.shelf_level) + row('ISBN', d.ISBN) + row('Genre', d.genre)
+                + row('Year', d.publication_year) + row('Copies', d.copies);
+        }
+
+        // ── Table ──
+        async function loadFlat() {
+            const d = await getJSON(U.flat);
+            flatData = d.shelf_levels || [];
+            renderFlat();
+        }
+        function renderFlat() {
+            const q = (document.getElementById('flatSearch').value || '').toLowerCase();
+            const rows = flatData.filter(function (r) { return !q || (r.path + ' ' + r.label).toLowerCase().indexOf(q) !== -1; });
+            const body = document.getElementById('flatBody');
+            if (!rows.length) { body.innerHTML = '<tr><td colspan="4" class="py-6 px-6 text-center text-slate-500 text-xs">No shelf levels found.</td></tr>'; return; }
+            body.innerHTML = rows.map(function (r) {
+                return '<tr class="border-b border-slate-800/40 hover:bg-slate-800/10' + (r.is_active ? '' : ' op50') + '">'
+                    + '<td class="py-3 px-6 text-xs text-slate-400">' + esc(r.path) + ' <span class="text-slate-600">/</span> <span class="font-semibold text-slate-200">' + esc(r.label) + '</span></td>'
+                    + '<td class="py-3 px-6 text-xs text-slate-400">Level ' + r.level_number + '</td>'
+                    + '<td class="py-3 px-6 text-center"><span class="bg-slate-800/60 text-slate-300 px-2 py-0.5 rounded text-[11px] font-semibold">' + r.book_count + '</span></td>'
+                    + '<td class="py-3 px-6 text-center"><label class="sw"><input type="checkbox" ' + (r.is_active ? 'checked' : '') + ' onchange="tToggleFlat(this,' + r.id + ')"><span class="tk"></span></label></td>'
+                    + '</tr>';
+            }).join('');
+        }
+        async function tToggleFlat(cb, id) {
+            const r = await post(U.toggle, { model_type: 'shelflevel', id: id });
+            if (r.success) {
+                cb.closest('tr').classList.toggle('op50', !r.is_active);
+                cb.checked = r.is_active;
+                const item = flatData.find(function (x) { return x.id === id; });
+                if (item) item.is_active = r.is_active;
+            } else { cb.checked = !cb.checked; alert(r.error || 'Failed to toggle'); }
+        }
+
+        function switchView(v) {
+            const tree = v === 'tree';
+            document.getElementById('treeView').classList.toggle('hidden', !tree);
+            document.getElementById('tableView').classList.toggle('hidden', tree);
+            document.getElementById('tabTree').className = 'px-3 py-1.5 rounded-md text-xs font-bold tracking-wide flex items-center gap-2 ' + (tree ? 'bg-cyan-700/30 text-cyan-400 border border-cyan-800/50' : 'text-slate-500 hover:text-slate-300');
+            document.getElementById('tabTable').className = 'px-3 py-1.5 rounded-md text-xs font-bold tracking-wide flex items-center gap-2 ' + (!tree ? 'bg-cyan-700/30 text-cyan-400 border border-cyan-800/50' : 'text-slate-500 hover:text-slate-300');
+            if (!tree && !flatData.length) loadFlat();
+        }
+
+        document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { closeModal('addModal'); closeModal('editModal'); closeModal('bookModal'); } });
+        ['addModal', 'editModal', 'bookModal'].forEach(function (id) {
+            const el = document.getElementById(id);
+            el.addEventListener('click', function (e) { if (e.target === el) closeModal(id); });
+        });
+
+        loadTree();
+        loadFlat();
+    </script>
+</body>
+</html>

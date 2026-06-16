@@ -123,61 +123,23 @@
 <div class="page">
   <!-- ANNOUNCEMENTS -->
   <div class="panel active" id="ann">
-    <div class="section-date">December 2024</div>
-
-    <div class="ann-card unread" onclick="markRead(this)">
+    {% for ann in announcements %}
+    <div class="ann-card" onclick="markRead(this)">
       <div class="ann-header">
         <div class="ann-title-row">
-          <div class="ann-icon-badge">🎄</div>
-          <div class="ann-title">Christmas Holiday Hours</div>
+          <div class="ann-icon-badge">📢</div>
+          <div class="ann-title">{{ ann.title }}</div>
         </div>
-        <div style="display:flex;align-items:center;gap:8px">
-          <div class="ann-date">Dec 10</div>
-          <div class="unread-dot"></div>
-        </div>
+        <div class="ann-date">{{ ann.created_at|date:"M j" }}</div>
       </div>
-      <div class="ann-msg">The library will be closed on December 25–26 for Christmas holidays. Plan your book borrowings accordingly. Happy holidays from the AYLA team! 🎁</div>
-      <span class="ann-tag tag-amber">📅 Holiday Notice</span>
+      <div class="ann-msg">{{ ann.message|linebreaksbr }}</div>
     </div>
-
-    <div class="ann-card urgent" onclick="markRead(this)">
-      <div class="ann-header">
-        <div class="ann-title-row">
-          <div class="ann-icon-badge">⚠️</div>
-          <div class="ann-title">System Maintenance Tonight</div>
-        </div>
-        <div style="display:flex;align-items:center;gap:8px">
-          <div class="ann-date">Dec 9</div>
-          <div class="unread-dot"></div>
-        </div>
-      </div>
-      <div class="ann-msg">AYLA system will undergo scheduled maintenance from 11:00 PM to 1:00 AM. The portal and catalog may be temporarily unavailable during this window.</div>
-      <span class="ann-tag tag-red">⚠️ Urgent</span>
+    {% empty %}
+    <div class="empty">
+      <div class="empty-icon">📭</div>
+      <div>No announcements right now.</div>
     </div>
-
-    <div class="ann-card info" onclick="markRead(this)">
-      <div class="ann-header">
-        <div class="ann-title-row">
-          <div class="ann-icon-badge">📚</div>
-          <div class="ann-title">New Books Arrival!</div>
-        </div>
-        <div class="ann-date">Dec 5</div>
-      </div>
-      <div class="ann-msg">We've added 45 new titles to our Computer Science and Mathematics sections. Check out the catalog for the latest additions including CLRS 4th Edition and more!</div>
-      <span class="ann-tag tag-blue">📚 New Arrivals</span>
-    </div>
-
-    <div class="ann-card">
-      <div class="ann-header">
-        <div class="ann-title-row">
-          <div class="ann-icon-badge">📖</div>
-          <div class="ann-title">Extended Borrowing Period</div>
-        </div>
-        <div class="ann-date">Nov 30</div>
-      </div>
-      <div class="ann-msg">Students can now borrow books for up to 30 days during the semester break (December 15 – January 5). Visit the library to apply for extensions on current loans.</div>
-      <span class="ann-tag tag-green">✅ Policy Update</span>
-    </div>
+    {% endfor %}
   </div>
 
   <!-- NOTIFICATIONS -->

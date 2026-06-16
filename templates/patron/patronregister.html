@@ -283,14 +283,8 @@
   <div class="card success-screen" id="successCard">
     <div class="success-icon">✅</div>
     <div class="success-title">Registration Successful!</div>
-    <div class="success-sub">Your library account has been created.<br>Here is your unique QR code.</div>
-    <div class="qr-display">
-      <div class="qr-placeholder"></div>
-      <div class="qr-name" id="display_name">MARIA SANTOS</div>
-    </div>
+    <div class="success-sub">Your library account has been created.</div>
     <div class="action-btns">
-      <button class="btn-dl">🖨️ Print</button>
-      <button class="btn-dl">⬇️ Download</button>
       <button class="btn-dl primary" onclick="window.location.href='{% url 'patron_login' %}'">Login →</button>
     </div>
   </div>

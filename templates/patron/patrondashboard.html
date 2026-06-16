@@ -189,54 +189,62 @@
     <div class="logo-text">AYLA</div>
   </div>
   <div class="nav-right">
-    <a href="{% url 'patron_announcements' %}" class="nav-btn">🔔<span class="badge">2</span></a>
-    <a href="{% url 'patron_account' %}" class="avatar">MS</a>
+    <a href="{% url 'patron_announcements' %}" class="nav-btn">🔔{% if recent_announcements %}<span class="badge">{{ recent_announcements|length }}</span>{% endif %}</a>
+    <a href="{% url 'patron_account' %}" class="avatar">{{ patron.fullname|first|upper }}</a>
   </div>
 </nav>
 
 <div class="main">
 
   <!-- ANNOUNCEMENT -->
+  {% if recent_announcements %}
   <div class="announcement" id="annBanner">
     <div class="ann-icon">📢</div>
     <div class="ann-text">
-      <div class="ann-title">Library Announcement</div>
-      <div class="ann-msg">Library will be closed on Dec 25–26 for Christmas holidays. Plan your borrowings accordingly!</div>
+      <div class="ann-title">{{ recent_announcements.0.title }}</div>
+      <div class="ann-msg">{{ recent_announcements.0.message }}</div>
     </div>
     <div class="ann-close" onclick="document.getElementById('annBanner').style.display='none'">✕</div>
   </div>
+  {% endif %}
 
   <!-- GREETING -->
   <div class="greeting">
-    <h1>Good morning, Maria 🌤️</h1>
-    <p>You have <span>1 book due in 2 days</span>. Don't forget to renew!</p>
+    <h1>Hello, {{ patron.fullname }} 🌤️</h1>
+    {% if overdue_count %}
+    <p>You have <span>{{ overdue_count }} overdue book{{ overdue_count|pluralize }}</span>. Please return them soon!</p>
+    {% elif borrowed_count %}
+    <p>You have {{ borrowed_count }} active borrow{{ borrowed_count|pluralize }}. Happy reading!</p>
+    {% else %}
+    <p>You have no active borrows right now.</p>
+    {% endif %}
   </div>
 
   <!-- STATS -->
   <div class="stats">
     <div class="stat-card green" onclick="window.location.href='{% url 'patron_account' %}'">
       <div class="stat-icon">📚</div>
-      <div class="stat-num">3</div>
+      <div class="stat-num">{{ borrowed_count }}</div>
       <div class="stat-label">Books Borrowed</div>
       <div class="stat-sub">↑ Active borrows</div>
     </div>
     <div class="stat-card amber">
       <div class="stat-icon">⏰</div>
-      <div class="stat-num">2</div>
-      <div class="stat-label">Days Until Due</div>
-      <div class="stat-sub">⚠ Renew soon</div>
+      <div class="stat-num">{{ overdue_count }}</div>
+      <div class="stat-label">Overdue Books</div>
+      <div class="stat-sub">⚠ Return soon</div>
     </div>
     <div class="stat-card blue">
       <div class="stat-icon">🕐</div>
-      <div class="stat-num">12</div>
+      <div class="stat-num">{{ history_count }}</div>
       <div class="stat-label">Books in History</div>
-      <div class="stat-sub">↑ Since Jan 2024</div>
+      <div class="stat-sub">↑ Returned</div>
     </div>
     <div class="stat-card pink">
-      <div class="stat-icon">🔖</div>
-      <div class="stat-num">7</div>
-      <div class="stat-label">Saved Books</div>
-      <div class="stat-sub">↑ 2 added this week</div>
+      <div class="stat-icon">🆔</div>
+      <div class="stat-num">{{ patron.patron_id }}</div>
+      <div class="stat-label">Patron ID</div>
+      <div class="stat-sub">{{ patron.patron_type }}</div>
     </div>
   </div>
 
@@ -250,33 +258,23 @@
           <div class="card-title">📖 Active Borrows</div>
           <a href="{% url 'patron_account' %}" class="view-all">View all →</a>
         </div>
+        {% for tx in active_loans %}
         <div class="book-item">
-          <div class="book-thumb">Data Struct.</div>
+          <div class="book-thumb">{{ tx.book.title|truncatechars:11 }}</div>
           <div class="book-info">
-            <div class="book-title">Data Structures & Algorithms in Python</div>
-            <div class="book-author">Michael T. Goodrich</div>
-            <div class="progress-bar"><div class="progress-fill fill-amber" style="width:80%"></div></div>
+            <div class="book-title">{{ tx.book.title }}</div>
+            <div class="book-author">{{ tx.book.author }}</div>
+            <div class="progress-bar"><div class="progress-fill {% if tx.overdue_flag %}fill-red{% else %}fill-green{% endif %}" style="width:{% if tx.overdue_flag %}100{% else %}50{% endif %}%"></div></div>
           </div>
-          <div class="book-badge badge-amber">2 days left</div>
-        </div>
-        <div class="book-item">
-          <div class="book-thumb">Clean Code</div>
-          <div class="book-info">
-            <div class="book-title">Clean Code</div>
-            <div class="book-author">Robert C. Martin</div>
-            <div class="progress-bar"><div class="progress-fill fill-green" style="width:35%"></div></div>
-          </div>
-          <div class="book-badge badge-green">10 days left</div>
-        </div>
-        <div class="book-item">
-          <div class="book-thumb">Discrete Math</div>
-          <div class="book-info">
-            <div class="book-title">Discrete Mathematics</div>
-            <div class="book-author">Kenneth Rosen</div>
-            <div class="progress-bar"><div class="progress-fill fill-red" style="width:100%"></div></div>
-          </div>
+          {% if tx.overdue_flag %}
           <div class="book-badge badge-red">OVERDUE</div>
+          {% else %}
+          <div class="book-badge badge-green">Due {{ tx.due_date|date:"M j" }}</div>
+          {% endif %}
         </div>
+        {% empty %}
+        <div class="book-author">No active borrows.</div>
+        {% endfor %}
       </div>
 
       <!-- History -->
@@ -285,30 +283,18 @@
           <div class="card-title">🕐 Recent History</div>
           <a href="{% url 'patron_account' %}" class="view-all">View all →</a>
         </div>
+        {% for tx in recent_history %}
         <div class="history-item">
           <div class="hist-icon">📗</div>
           <div style="flex:1">
-            <div class="hist-title">Introduction to Algorithms</div>
-            <div class="hist-date">Returned Nov 15, 2024</div>
-          </div>
-          <div class="hist-status badge-green" style="border-radius:5px;padding:3px 8px;font-size:10px;background:#22c55e20;color:var(--accent)">Returned</div>
-        </div>
-        <div class="history-item">
-          <div class="hist-icon">📘</div>
-          <div style="flex:1">
-            <div class="hist-title">The Pragmatic Programmer</div>
-            <div class="hist-date">Returned Oct 30, 2024</div>
+            <div class="hist-title">{{ tx.book.title }}</div>
+            <div class="hist-date">Returned {{ tx.return_date|date:"M j, Y" }}</div>
           </div>
           <div class="hist-status" style="border-radius:5px;padding:3px 8px;font-size:10px;background:#22c55e20;color:var(--accent)">Returned</div>
         </div>
-        <div class="history-item">
-          <div class="hist-icon">📕</div>
-          <div style="flex:1">
-            <div class="hist-title">Design Patterns</div>
-            <div class="hist-date">Returned Oct 12, 2024</div>
-          </div>
-          <div class="hist-status" style="border-radius:5px;padding:3px 8px;font-size:10px;background:#22c55e20;color:var(--accent)">Returned</div>
-        </div>
+        {% empty %}
+        <div class="hist-date">No borrowing history yet.</div>
+        {% endfor %}
       </div>
     </div>
 
@@ -328,14 +314,20 @@
       <!-- Overdue -->
       <div class="card">
         <div class="card-title" style="margin-bottom:14px;">⚠️ Overdue Notice</div>
+        {% if overdue_loans %}
         <div class="overdue-card">
-          <div class="overdue-title">🚨 1 Overdue Book</div>
+          <div class="overdue-title">🚨 {{ overdue_count }} Overdue Book{{ overdue_count|pluralize }}</div>
+          {% for tx in overdue_loans %}
           <div class="overdue-item">
-            <div style="font-weight:600;font-size:12px;">Discrete Mathematics</div>
-            <div class="overdue-days">Due Dec 8 · P5/day fine</div>
+            <div style="font-weight:600;font-size:12px;">{{ tx.book.title }}</div>
+            <div class="overdue-days">Due {{ tx.due_date|date:"M j" }}</div>
           </div>
+          {% endfor %}
         </div>
         <button onclick="window.location.href='{% url 'patron_account' %}'" style="width:100%;margin-top:12px;padding:10px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--danger);font-family:'DM Sans',sans-serif;font-size:12px;cursor:pointer;transition:all 0.2s;" onmouseover="this.style.borderColor='var(--danger)'" onmouseout="this.style.borderColor='var(--border)'">View & Renew →</button>
+        {% else %}
+        <div class="overdue-days" style="color:var(--muted)">No overdue books. 🎉</div>
+        {% endif %}
       </div>
     </div>
   </div>

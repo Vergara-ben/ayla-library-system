@@ -10,7 +10,9 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@400;700&display=swap" rel="stylesheet">
-    
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+
     <style>
         :root {
             --bg-main: #060d13;
@@ -79,8 +81,56 @@
                 padding: 1rem;
             }
         }
+
+        /* Map configuration (beacons & waypoints) */
+        #mapConfig {
+            height: 520px;
+            width: 100%;
+            border-radius: 0.75rem;
+            border: 1px solid var(--border-color);
+            position: relative;
+            z-index: 0; /* contain Leaflet's high z-index panes so modals sit on top */
+        }
+        .leaflet-container {
+            background: #0b151e;
+        }
+        .mode-btn.mode-active {
+            background-color: #0e7490;
+            color: #ffffff;
+            border-color: #0891b2;
+        }
+        .leaflet-popup-content-wrapper,
+        .leaflet-popup-tip {
+            background: var(--bg-modal);
+            color: var(--text-primary);
+            border: 1px solid var(--border-modal);
+        }
+        .leaflet-popup-content {
+            margin: 10px 12px;
+            font-size: 12px;
+            line-height: 1.5;
+        }
+        .map-action-btn {
+            margin-top: 8px;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            border: 1px solid transparent;
+        }
+        .map-action-btn.danger {
+            background: rgba(244, 63, 94, 0.12);
+            color: #fb7185;
+            border-color: rgba(244, 63, 94, 0.3);
+        }
+        .map-action-btn.subtle {
+            background: rgba(148, 163, 184, 0.12);
+            color: #cbd5e1;
+            border-color: rgba(148, 163, 184, 0.25);
+            margin-left: 6px;
+        }
     </style>
-    <script src="{% static 'js/supabase-config.js' %}"></script>
 </head>
 <body class="flex h-screen overflow-hidden">
 
@@ -106,10 +156,6 @@
                     <a href="{% url 'admin_indoor_map' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
                         <i class="fa-solid fa-map w-5 text-sm"></i>
                         <span class="text-sm font-medium">Indoor Map</span>
-                    </a>
-                    <a href="{% url 'admin_qr_scanner' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
-                        <i class="fa-solid fa-qrcode w-5 text-sm"></i>
-                        <span class="text-sm font-medium">QR Scanner</span>
                     </a>
                 </div>
             </div>
@@ -147,6 +193,10 @@
                     <a href="{% url 'floorplan_management' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-800/50 text-cyan-400 font-medium border border-slate-700/50">
                         <i class="fa-solid fa-layer-group w-5 text-sm"></i>
                         <span class="text-sm">Floor Plans</span>
+                    </a>
+                    <a href="{% url 'shelf_manager' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                        <i class="fa-solid fa-folder-tree w-5 text-sm"></i>
+                        <span class="text-sm font-medium">Shelf Manager</span>
                     </a>
                 </div>
             </div>
@@ -230,7 +280,7 @@
                                 <td class="py-4 px-6 font-mono text-slate-400">#{{ floorplan.floor_plan_id }}</td>
                                 <td class="py-4 px-6">
                                     {% if floorplan.image_url %}
-                                        <img src="{% static floorplan.image_url %}" alt="Floor Plan" class="w-16 h-16 object-cover rounded border border-slate-700">
+                                        <img src="/media/{{ floorplan.image_url }}" alt="Floor Plan" class="w-16 h-16 object-cover rounded border border-slate-700">
                                     {% else %}
                                         <span class="text-slate-500">No image</span>
                                     {% endif %}
@@ -252,15 +302,19 @@
                                 <td class="py-4 px-6 text-slate-300">{{ floorplan.uploaded_at|date:"M d, Y H:i" }}</td>
                                 <td class="py-4 px-6 text-center">
                                     <div class="flex items-center justify-center gap-1.5">
-                                        {% if not floorplan.is_active %}
-                                            <form method="post" action="{% url 'set_active_floorplan' %}" class="inline">
-                                                {% csrf_token %}
-                                                <input type="hidden" name="floorplan_id" value="{{ floorplan.floor_plan_id }}">
-                                                <button type="submit" class="w-7 h-7 rounded border border-slate-800 text-emerald-500/70 hover:text-emerald-400 hover:bg-emerald-950/20 transition-colors" title="Set Active">
-                                                    <i class="fa-solid fa-check text-[10px]"></i>
-                                                </button>
-                                            </form>
-                                        {% endif %}
+                                        <form method="post" action="{% url 'set_active_floorplan' %}" class="inline">
+                                            {% csrf_token %}
+                                            <input type="hidden" name="floorplan_id" value="{{ floorplan.floor_plan_id }}">
+                                            {% if floorplan.is_active %}
+                                            <button type="submit" class="w-7 h-7 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 transition-colors" title="Set Inactive">
+                                                <i class="fa-solid fa-power-off text-[10px]"></i>
+                                            </button>
+                                            {% else %}
+                                            <button type="submit" class="w-7 h-7 rounded border border-slate-800 text-emerald-500/70 hover:text-emerald-400 hover:bg-emerald-950/20 transition-colors" title="Set Active">
+                                                <i class="fa-solid fa-check text-[10px]"></i>
+                                            </button>
+                                            {% endif %}
+                                        </form>
                                         <button data-floorplan-id="{{ floorplan.floor_plan_id }}" data-notice="{{ floorplan.renovation_notice|default:"" }}" data-message="{{ floorplan.renovation_message|default:"" }}" onclick="openRenovationModalFromData(this)" class="w-7 h-7 rounded border border-slate-800 text-amber-500/70 hover:text-amber-400 hover:bg-amber-950/20 transition-colors" title="Toggle Renovation">
                                             <i class="fa-solid fa-hammer text-[10px]"></i>
                                         </button>
@@ -285,37 +339,111 @@
 
             </div>
 
-            <!-- Shelves, Sections, and Shelf Levels Management -->
+            <!-- Map Configuration (Beacons & Waypoints) - active floor plan only -->
+            {% for floorplan in floorplans %}{% if floorplan.is_active %}
+            <div class="rounded-xl border border-slate-800/80 overflow-hidden shadow-2xl flex flex-col" style="background-color: var(--bg-card);">
+                <div class="p-5 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div class="flex items-center gap-2">
+                        <i class="fa-solid fa-location-dot text-cyan-600 text-xs"></i>
+                        <h4 class="text-sm font-bold text-slate-200 tracking-wide">Map Configuration &mdash; Floor Plan #{{ floorplan.floor_plan_id }}</h4>
+                    </div>
+                    <div class="flex items-center gap-2 self-end sm:self-auto flex-wrap">
+                        <button id="btnRoom" type="button" onclick="setMode('room')" class="mode-btn bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-cyan-400 text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
+                            <i class="fa-solid fa-door-open text-[10px]"></i> Place Room
+                        </button>
+                        <button id="btnShelf" type="button" onclick="setMode('shelf')" class="mode-btn bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-purple-400 text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
+                            <i class="fa-solid fa-box text-[10px]"></i> Place Shelf
+                        </button>
+                        <button id="btnBeacon" type="button" onclick="setMode('beacon')" class="mode-btn bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-blue-400 text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
+                            <i class="fa-solid fa-tower-broadcast text-[10px]"></i> Place Beacon
+                        </button>
+                        <button id="btnWaypoint" type="button" onclick="setMode('waypoint')" class="mode-btn bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-emerald-400 text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
+                            <i class="fa-solid fa-circle-nodes text-[10px]"></i> Place Waypoint
+                        </button>
+                    </div>
+                </div>
+                <div class="px-5 pt-4">
+                    <div id="mapModeHint" class="text-[11px] text-slate-500 mb-3">
+                        Select a placement mode, then click on the map. Left-click two waypoints in turn to connect them. Right-click any marker for delete / disconnect options.
+                    </div>
+                    <div class="flex flex-wrap items-center gap-4 mb-3 text-[10px] text-slate-400">
+                        <span class="flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded-full" style="background:#3b82f6"></span> Beacon</span>
+                        <span class="flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded-full" style="background:#22c55e"></span> Waypoint</span>
+                        <span class="flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded-full" style="background:#f59e0b"></span> Selected</span>
+                        <span class="flex items-center gap-1.5"><span class="inline-block w-4 h-0.5" style="background:#06b6d4"></span> Connection</span>
+                    </div>
+                </div>
+                <div class="px-5 pb-5">
+                    <div id="mapConfig"></div>
+                </div>
+            </div>
+            {% endif %}{% endfor %}
+
+            <!-- Rooms, Shelves, Sections, and Shelf Levels Management -->
             {% for floorplan in floorplans %}
             <div class="rounded-xl border border-slate-800/80 overflow-hidden shadow-2xl flex flex-col" style="background-color: var(--bg-card);">
                 <div class="p-5 border-b border-slate-800">
                     <h4 class="text-sm font-bold text-slate-200 tracking-wide">Floor Plan #{{ floorplan.floor_plan_id }} - Structure</h4>
                 </div>
                 
+                <!-- Rooms -->
+                <div class="p-5 border-b border-slate-800/50">
+                    <div class="flex items-center justify-between mb-4">
+                        <h5 class="text-xs font-bold text-slate-400 uppercase tracking-wider">Rooms</h5>
+                        <span class="text-[10px] text-slate-500 italic">Use &ldquo;Place Room&rdquo; on the map above</span>
+                    </div>
+                    <div class="space-y-2">
+                        {% for room in floorplan.room_set.all %}
+                        <div class="flex items-center justify-between p-3 rounded-lg border border-slate-800/60 bg-slate-900/20" data-room-id="{{ room.room_id }}" data-name="{{ room.name }}" data-map-x="{{ room.map_x }}" data-map-y="{{ room.map_y }}" data-description="{{ room.description|default:"" }}">
+                            <div class="flex items-center gap-3">
+                                <i class="fa-solid fa-door-open text-slate-500 text-xs"></i>
+                                <span class="text-xs font-medium text-slate-300">{{ room.name }}</span>
+                                <span class="text-[10px] text-slate-500">({{ room.map_x }}, {{ room.map_y }})</span>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <button onclick="openEditRoomModalFromData(this.closest('.flex.items-center.justify-between'))" class="text-amber-500/70 hover:text-amber-400 text-xs" title="Edit Room">
+                                    <i class="fa-solid fa-pen"></i>
+                                </button>
+                                <form method="post" action="{% url 'delete_room' %}" class="inline" onsubmit="return confirm('Delete this room and all its shelves?');">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="room_id" value="{{ room.room_id }}">
+                                    <button type="submit" class="text-rose-500/70 hover:text-rose-400 text-xs">
+                                        <i class="fa-solid fa-trash-can"></i>
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+                        {% empty %}
+                        <p class="text-xs text-slate-500">No rooms added.</p>
+                        {% endfor %}
+                    </div>
+                </div>
+
                 <!-- Shelves -->
                 <div class="p-5 border-b border-slate-800/50">
                     <div class="flex items-center justify-between mb-4">
                         <h5 class="text-xs font-bold text-slate-400 uppercase tracking-wider">Shelves</h5>
-                        <button data-floorplan-id="{{ floorplan.floor_plan_id }}" onclick="openAddShelfModalFromData(this)" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-cyan-500/90 text-[10px] font-semibold px-2 py-1 rounded-lg flex items-center gap-1 transition-colors">
-                            <i class="fa-solid fa-plus text-[8px]"></i> Add Shelf
-                        </button>
+                        <span class="text-[10px] text-slate-500 italic">Use &ldquo;Place Shelf&rdquo; on the map above</span>
                     </div>
                     <div class="space-y-2">
-                        {% for shelf in floorplan.shelf_set.all %}
-                        <div class="flex items-center justify-between p-3 rounded-lg border border-slate-800/60 bg-slate-900/20">
-                            <div class="flex items-center gap-3">
-                                <i class="fa-solid fa-box text-slate-500 text-xs"></i>
-                                <span class="text-xs font-medium text-slate-300">{{ shelf.name }}</span>
-                                <span class="text-[10px] text-slate-500">({{ shelf.map_x }}, {{ shelf.map_y }})</span>
+                        {% for room in floorplan.room_set.all %}
+                            {% for shelf in room.shelf_set.all %}
+                            <div class="flex items-center justify-between p-3 rounded-lg border border-slate-800/60 bg-slate-900/20">
+                                <div class="flex items-center gap-3">
+                                    <i class="fa-solid fa-box text-slate-500 text-xs"></i>
+                                    <span class="text-xs font-medium text-slate-300">{{ shelf.name }}</span>
+                                    <span class="text-[10px] text-slate-500">({{ shelf.map_x }}, {{ shelf.map_y }})</span>
+                                    <span class="text-[10px] text-slate-500">Room: {{ room.name }}</span>
+                                </div>
+                                <form method="post" action="{% url 'delete_shelf' %}" class="inline" onsubmit="return confirm('Delete this shelf and all its sections?');">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="shelf_id" value="{{ shelf.shelf_id }}">
+                                    <button type="submit" class="text-rose-500/70 hover:text-rose-400 text-xs">
+                                        <i class="fa-solid fa-trash-can"></i>
+                                    </button>
+                                </form>
                             </div>
-                            <form method="post" action="{% url 'delete_shelf' %}" class="inline" onsubmit="return confirm('Delete this shelf and all its sections?');">
-                                {% csrf_token %}
-                                <input type="hidden" name="shelf_id" value="{{ shelf.shelf_id }}">
-                                <button type="submit" class="text-rose-500/70 hover:text-rose-400 text-xs">
-                                    <i class="fa-solid fa-trash-can"></i>
-                                </button>
-                            </form>
-                        </div>
+                            {% endfor %}
                         {% empty %}
                         <p class="text-xs text-slate-500">No shelves added.</p>
                         {% endfor %}
@@ -328,22 +456,24 @@
                         <h5 class="text-xs font-bold text-slate-400 uppercase tracking-wider">Sections</h5>
                     </div>
                     <div class="space-y-2">
-                        {% for shelf in floorplan.shelf_set.all %}
-                            {% for section in shelf.section_set.all %}
-                            <div class="flex items-center justify-between p-3 rounded-lg border border-slate-800/60 bg-slate-900/20">
-                                <div class="flex items-center gap-3">
-                                    <i class="fa-solid fa-folder text-slate-500 text-xs"></i>
-                                    <span class="text-xs font-medium text-slate-300">{{ section.name }}</span>
-                                    <span class="text-[10px] text-slate-500">Shelf: {{ shelf.name }}</span>
+                        {% for room in floorplan.room_set.all %}
+                            {% for shelf in room.shelf_set.all %}
+                                {% for section in shelf.section_set.all %}
+                                <div class="flex items-center justify-between p-3 rounded-lg border border-slate-800/60 bg-slate-900/20">
+                                    <div class="flex items-center gap-3">
+                                        <i class="fa-solid fa-folder text-slate-500 text-xs"></i>
+                                        <span class="text-xs font-medium text-slate-300">{{ section.name }}</span>
+                                        <span class="text-[10px] text-slate-500">Shelf: {{ shelf.name }}</span>
+                                    </div>
+                                    <form method="post" action="{% url 'delete_section' %}" class="inline" onsubmit="return confirm('Delete this section and all its shelf levels?');">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="section_id" value="{{ section.section_id }}">
+                                        <button type="submit" class="text-rose-500/70 hover:text-rose-400 text-xs">
+                                            <i class="fa-solid fa-trash-can"></i>
+                                        </button>
+                                    </form>
                                 </div>
-                                <form method="post" action="{% url 'delete_section' %}" class="inline" onsubmit="return confirm('Delete this section and all its shelf levels?');">
-                                    {% csrf_token %}
-                                    <input type="hidden" name="section_id" value="{{ section.section_id }}">
-                                    <button type="submit" class="text-rose-500/70 hover:text-rose-400 text-xs">
-                                        <i class="fa-solid fa-trash-can"></i>
-                                    </button>
-                                </form>
-                            </div>
+                                {% endfor %}
                             {% endfor %}
                         {% empty %}
                         <p class="text-xs text-slate-500">No sections added.</p>
@@ -357,23 +487,25 @@
                         <h5 class="text-xs font-bold text-slate-400 uppercase tracking-wider">Shelf Levels</h5>
                     </div>
                     <div class="space-y-2">
-                        {% for shelf in floorplan.shelf_set.all %}
-                            {% for section in shelf.section_set.all %}
-                                {% for level in section.shelflevel_set.all %}
-                                <div class="flex items-center justify-between p-3 rounded-lg border border-slate-800/60 bg-slate-900/20">
-                                    <div class="flex items-center gap-3">
-                                        <i class="fa-solid fa-layer-group text-slate-500 text-xs"></i>
-                                        <span class="text-xs font-medium text-slate-300">{{ level.label|default:level.level_number }}</span>
-                                        <span class="text-[10px] text-slate-500">Level {{ level.level_number }} - Section: {{ section.name }}</span>
+                        {% for room in floorplan.room_set.all %}
+                            {% for shelf in room.shelf_set.all %}
+                                {% for section in shelf.section_set.all %}
+                                    {% for level in section.shelflevel_set.all %}
+                                    <div class="flex items-center justify-between p-3 rounded-lg border border-slate-800/60 bg-slate-900/20">
+                                        <div class="flex items-center gap-3">
+                                            <i class="fa-solid fa-layer-group text-slate-500 text-xs"></i>
+                                            <span class="text-xs font-medium text-slate-300">{{ level.label|default:level.level_number }}</span>
+                                            <span class="text-[10px] text-slate-500">Level {{ level.level_number }} - Section: {{ section.name }}</span>
+                                        </div>
+                                        <form method="post" action="{% url 'delete_shelf_level' %}" class="inline" onsubmit="return confirm('Delete this shelf level?');">
+                                            {% csrf_token %}
+                                            <input type="hidden" name="shelf_level_id" value="{{ level.shelf_level_id }}">
+                                            <button type="submit" class="text-rose-500/70 hover:text-rose-400 text-xs">
+                                                <i class="fa-solid fa-trash-can"></i>
+                                            </button>
+                                        </form>
                                     </div>
-                                    <form method="post" action="{% url 'delete_shelf_level' %}" class="inline" onsubmit="return confirm('Delete this shelf level?');">
-                                        {% csrf_token %}
-                                        <input type="hidden" name="shelf_level_id" value="{{ level.shelf_level_id }}">
-                                        <button type="submit" class="text-rose-500/70 hover:text-rose-400 text-xs">
-                                            <i class="fa-solid fa-trash-can"></i>
-                                        </button>
-                                    </form>
-                                </div>
+                                    {% endfor %}
                                 {% endfor %}
                             {% endfor %}
                         {% empty %}
@@ -399,8 +531,8 @@
             <form method="post" enctype="multipart/form-data" class="space-y-4 text-xs">
                 {% csrf_token %}
                 <div class="space-y-1.5">
-                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Floor Plan Image (PNG)</label>
-                    <input type="file" name="image" accept=".png" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" required>
+                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Floor Plan Image (PNG, JPG, JPEG)</label>
+                    <input type="file" name="image" accept=".png,.jpg,.jpeg" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" required>
                 </div>
                 <div class="pt-4 flex items-center justify-end gap-3">
                     <button type="button" onclick="closeAddModal()" class="px-5 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:text-slate-100 hover:bg-slate-800/40 font-semibold tracking-wide transition-colors min-w-[100px]">
@@ -408,6 +540,90 @@
                     </button>
                     <button type="submit" class="bg-cyan-700 hover:bg-cyan-600 text-white font-bold px-5 py-2.5 rounded-lg flex items-center gap-2 tracking-wide transition-colors shadow-md">
                         <i class="fa-solid fa-check text-xs"></i> Add Floor Plan
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Add Room Modal -->
+    <div id="addRoomModal" class="hidden absolute inset-0 bg-black/60 z-40 flex items-center justify-center p-4 overflow-y-auto">
+        <div class="w-full max-w-lg rounded-2xl border p-6 flex flex-col gap-5 shadow-2xl relative my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color);">
+            <div class="flex items-center justify-between">
+                <h3 class="text-base font-bold text-slate-200 tracking-wide">Add Room</h3>
+                <button type="button" onclick="closeAddRoomModal()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40 transition-colors">
+                    <i class="fa-solid fa-xmark text-sm"></i>
+                </button>
+            </div>
+            <form method="post" action="{% url 'add_room' %}" class="space-y-4 text-xs">
+                {% csrf_token %}
+                <input type="hidden" name="floorplan_id" id="roomFloorplanId">
+                <div class="space-y-1.5">
+                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Room Name</label>
+                    <input type="text" name="name" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" required>
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="space-y-1.5">
+                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Map X</label>
+                        <input type="number" step="0.1" name="map_x" value="0" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                    </div>
+                    <div class="space-y-1.5">
+                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Map Y</label>
+                        <input type="number" step="0.1" name="map_y" value="0" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                    </div>
+                </div>
+                <div class="space-y-1.5">
+                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Description</label>
+                    <textarea name="description" rows="2" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);"></textarea>
+                </div>
+                <div class="pt-4 flex items-center justify-end gap-3">
+                    <button type="button" onclick="closeAddRoomModal()" class="px-5 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:text-slate-100 hover:bg-slate-800/40 font-semibold tracking-wide transition-colors min-w-[100px]">
+                        Cancel
+                    </button>
+                    <button type="submit" class="bg-cyan-700 hover:bg-cyan-600 text-white font-bold px-5 py-2.5 rounded-lg flex items-center gap-2 tracking-wide transition-colors shadow-md">
+                        <i class="fa-solid fa-check text-xs"></i> Add Room
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Edit Room Modal -->
+    <div id="editRoomModal" class="hidden absolute inset-0 bg-black/60 z-40 flex items-center justify-center p-4 overflow-y-auto">
+        <div class="w-full max-w-lg rounded-2xl border p-6 flex flex-col gap-5 shadow-2xl relative my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color);">
+            <div class="flex items-center justify-between">
+                <h3 class="text-base font-bold text-slate-200 tracking-wide">Edit Room</h3>
+                <button type="button" onclick="closeEditRoomModal()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40 transition-colors">
+                    <i class="fa-solid fa-xmark text-sm"></i>
+                </button>
+            </div>
+            <form method="post" action="{% url 'edit_room' %}" class="space-y-4 text-xs">
+                {% csrf_token %}
+                <input type="hidden" name="room_id" id="editRoomId">
+                <div class="space-y-1.5">
+                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Room Name</label>
+                    <input type="text" name="name" id="editRoomName" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" required>
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="space-y-1.5">
+                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Map X</label>
+                        <input type="number" step="0.1" name="map_x" id="editRoomMapX" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                    </div>
+                    <div class="space-y-1.5">
+                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Map Y</label>
+                        <input type="number" step="0.1" name="map_y" id="editRoomMapY" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                    </div>
+                </div>
+                <div class="space-y-1.5">
+                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Description</label>
+                    <textarea name="description" id="editRoomDescription" rows="2" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);"></textarea>
+                </div>
+                <div class="pt-4 flex items-center justify-end gap-3">
+                    <button type="button" onclick="closeEditRoomModal()" class="px-5 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:text-slate-100 hover:bg-slate-800/40 font-semibold tracking-wide transition-colors min-w-[100px]">
+                        Cancel
+                    </button>
+                    <button type="submit" class="bg-cyan-700 hover:bg-cyan-600 text-white font-bold px-5 py-2.5 rounded-lg flex items-center gap-2 tracking-wide transition-colors shadow-md">
+                        <i class="fa-solid fa-check text-xs"></i> Update Room
                     </button>
                 </div>
             </form>
@@ -426,6 +642,12 @@
             <form method="post" action="{% url 'add_shelf' %}" class="space-y-4 text-xs">
                 {% csrf_token %}
                 <input type="hidden" name="floorplan_id" id="shelfFloorplanId">
+                <div class="space-y-1.5">
+                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Room</label>
+                    <select name="room_id" id="shelfRoomId" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" required>
+                        <option value="">Select a Room</option>
+                    </select>
+                </div>
                 <div class="space-y-1.5">
                     <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Shelf Name</label>
                     <input type="text" name="name" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" required>
@@ -552,6 +774,68 @@
         </div>
     </div>
 
+    <!-- Place Beacon Modal -->
+    <div id="beaconModal" class="hidden absolute inset-0 bg-black/60 z-40 flex items-center justify-center p-4 overflow-y-auto">
+        <div class="w-full max-w-md rounded-2xl border p-6 flex flex-col gap-5 shadow-2xl relative my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color);">
+            <div class="flex items-center justify-between">
+                <h3 class="text-base font-bold text-slate-200 tracking-wide">Place Beacon</h3>
+                <button type="button" onclick="closeBeaconModal()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40 transition-colors">
+                    <i class="fa-solid fa-xmark text-sm"></i>
+                </button>
+            </div>
+            <div class="space-y-4 text-xs">
+                <div class="space-y-1.5">
+                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Beacon UUID</label>
+                    <input type="text" id="beaconUuid" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" placeholder="e.g., 550e8400-e29b-41d4-a716-446655440000">
+                </div>
+                <div class="space-y-1.5">
+                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Label (optional)</label>
+                    <input type="text" id="beaconLabel" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" placeholder="e.g., North-East Corner">
+                </div>
+                <div class="pt-4 flex items-center justify-end gap-3">
+                    <button type="button" onclick="closeBeaconModal()" class="px-5 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:text-slate-100 hover:bg-slate-800/40 font-semibold tracking-wide transition-colors min-w-[100px]">
+                        Cancel
+                    </button>
+                    <button type="button" onclick="submitBeacon()" class="bg-cyan-700 hover:bg-cyan-600 text-white font-bold px-5 py-2.5 rounded-lg flex items-center gap-2 tracking-wide transition-colors shadow-md">
+                        <i class="fa-solid fa-check text-xs"></i> Save Beacon
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Place Waypoint Modal -->
+    <div id="waypointModal" class="hidden absolute inset-0 bg-black/60 z-40 flex items-center justify-center p-4 overflow-y-auto">
+        <div class="w-full max-w-md rounded-2xl border p-6 flex flex-col gap-5 shadow-2xl relative my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color);">
+            <div class="flex items-center justify-between">
+                <h3 class="text-base font-bold text-slate-200 tracking-wide">Place Waypoint</h3>
+                <button type="button" onclick="closeWaypointModal()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40 transition-colors">
+                    <i class="fa-solid fa-xmark text-sm"></i>
+                </button>
+            </div>
+            <div class="space-y-4 text-xs">
+                <div class="space-y-1.5">
+                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Label (optional)</label>
+                    <input type="text" id="waypointLabel" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" placeholder="e.g., Aisle 1 Junction">
+                </div>
+                <div class="space-y-1.5">
+                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Link to Shelf (optional)</label>
+                    <select id="waypointShelf" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                        <option value="">No shelf</option>
+                    </select>
+                </div>
+                <div class="pt-4 flex items-center justify-end gap-3">
+                    <button type="button" onclick="closeWaypointModal()" class="px-5 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:text-slate-100 hover:bg-slate-800/40 font-semibold tracking-wide transition-colors min-w-[100px]">
+                        Cancel
+                    </button>
+                    <button type="button" onclick="submitWaypoint()" class="bg-cyan-700 hover:bg-cyan-600 text-white font-bold px-5 py-2.5 rounded-lg flex items-center gap-2 tracking-wide transition-colors shadow-md">
+                        <i class="fa-solid fa-check text-xs"></i> Save Waypoint
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script>
         function openAddModal() {
             document.getElementById('addFloorPlanModal').classList.remove('hidden');
@@ -563,8 +847,66 @@
             document.body.style.overflow = 'auto';
         }
 
+        function openAddRoomModal(floorplanId) {
+            document.getElementById('roomFloorplanId').value = floorplanId;
+            document.getElementById('addRoomModal').classList.remove('hidden');
+            document.body.style.overflow = 'hidden';
+        }
+
+        function openAddRoomModalFromData(button) {
+            const floorplanId = button.getAttribute('data-floorplan-id');
+            openAddRoomModal(floorplanId);
+        }
+
+        function closeAddRoomModal() {
+            document.getElementById('addRoomModal').classList.add('hidden');
+            document.body.style.overflow = 'auto';
+        }
+
+        function openEditRoomModal(roomId, name, mapX, mapY, description) {
+            document.getElementById('editRoomId').value = roomId;
+            document.getElementById('editRoomName').value = name;
+            document.getElementById('editRoomMapX').value = mapX;
+            document.getElementById('editRoomMapY').value = mapY;
+            document.getElementById('editRoomDescription').value = description || '';
+            document.getElementById('editRoomModal').classList.remove('hidden');
+            document.body.style.overflow = 'hidden';
+        }
+
+        function openEditRoomModalFromData(button) {
+            const roomId = button.getAttribute('data-room-id');
+            const name = button.getAttribute('data-name');
+            const mapX = button.getAttribute('data-map-x');
+            const mapY = button.getAttribute('data-map-y');
+            const description = button.getAttribute('data-description');
+            openEditRoomModal(roomId, name, mapX, mapY, description);
+        }
+
+        function closeEditRoomModal() {
+            document.getElementById('editRoomModal').classList.add('hidden');
+            document.body.style.overflow = 'auto';
+        }
+
         function openAddShelfModal(floorplanId) {
             document.getElementById('shelfFloorplanId').value = floorplanId;
+            
+            // Populate room dropdown based on floorplan
+            const roomSelect = document.getElementById('shelfRoomId');
+            roomSelect.innerHTML = '<option value="">Select a Room</option>';
+            
+            // Find all rooms for this floorplan from the DOM
+            const floorplanElement = document.querySelector(`[data-floorplan-id="${floorplanId}"]`).closest('.rounded-xl');
+            const roomElements = floorplanElement.querySelectorAll('[data-room-id]');
+            
+            roomElements.forEach(roomElement => {
+                const roomId = roomElement.getAttribute('data-room-id');
+                const roomName = roomElement.getAttribute('data-name');
+                const option = document.createElement('option');
+                option.value = roomId;
+                option.textContent = roomName;
+                roomSelect.appendChild(option);
+            });
+            
             document.getElementById('addShelfModal').classList.remove('hidden');
             document.body.style.overflow = 'hidden';
         }
@@ -629,6 +971,8 @@
         document.addEventListener('keydown', function(e) {
             if (e.key === 'Escape') {
                 closeAddModal();
+                closeAddRoomModal();
+                closeEditRoomModal();
                 closeAddShelfModal();
                 closeAddSectionModal();
                 closeAddShelfLevelModal();
@@ -637,10 +981,12 @@
         });
 
         // Close modals when clicking outside
-        ['addFloorPlanModal', 'addShelfModal', 'addSectionModal', 'addShelfLevelModal', 'renovationModal'].forEach(modalId => {
+        ['addFloorPlanModal', 'addRoomModal', 'editRoomModal', 'addShelfModal', 'addSectionModal', 'addShelfLevelModal', 'renovationModal'].forEach(modalId => {
             document.getElementById(modalId).addEventListener('click', function(e) {
                 if (e.target === this) {
                     if (modalId === 'addFloorPlanModal') closeAddModal();
+                    else if (modalId === 'addRoomModal') closeAddRoomModal();
+                    else if (modalId === 'editRoomModal') closeEditRoomModal();
                     else if (modalId === 'addShelfModal') closeAddShelfModal();
                     else if (modalId === 'addSectionModal') closeAddSectionModal();
                     else if (modalId === 'addShelfLevelModal') closeAddShelfLevelModal();
@@ -648,6 +994,430 @@
                 }
             });
         });
+    </script>
+
+    <!-- Place Room Modal (map) -->
+    <div id="placeRoomModal" class="hidden absolute inset-0 bg-black/60 z-40 flex items-center justify-center p-4 overflow-y-auto">
+        <div class="w-full max-w-md rounded-2xl border p-6 flex flex-col gap-5 shadow-2xl relative my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color);">
+            <div class="flex items-center justify-between">
+                <h3 class="text-base font-bold text-slate-200 tracking-wide">Place Room</h3>
+                <button type="button" onclick="closeRoomPlaceModal()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40 transition-colors"><i class="fa-solid fa-xmark text-sm"></i></button>
+            </div>
+            <div class="space-y-4 text-xs">
+                <div class="space-y-1.5">
+                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Room Name</label>
+                    <input type="text" id="placeRoomName" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" placeholder="e.g., Main Reading Room">
+                </div>
+                <div class="space-y-1.5">
+                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Description (optional)</label>
+                    <input type="text" id="placeRoomDesc" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                </div>
+                <div class="pt-2 flex items-center justify-end gap-3">
+                    <button type="button" onclick="closeRoomPlaceModal()" class="px-5 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:text-slate-100 hover:bg-slate-800/40 font-semibold tracking-wide transition-colors min-w-[100px]">Cancel</button>
+                    <button type="button" onclick="submitRoomPlace()" class="bg-cyan-700 hover:bg-cyan-600 text-white font-bold px-5 py-2.5 rounded-lg flex items-center gap-2 tracking-wide transition-colors shadow-md"><i class="fa-solid fa-check text-xs"></i> Save Room</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Place Shelf Modal (map) -->
+    <div id="placeShelfModal" class="hidden absolute inset-0 bg-black/60 z-40 flex items-center justify-center p-4 overflow-y-auto">
+        <div class="w-full max-w-md rounded-2xl border p-6 flex flex-col gap-5 shadow-2xl relative my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color);">
+            <div class="flex items-center justify-between">
+                <h3 class="text-base font-bold text-slate-200 tracking-wide">Place Shelf</h3>
+                <button type="button" onclick="closeShelfPlaceModal()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40 transition-colors"><i class="fa-solid fa-xmark text-sm"></i></button>
+            </div>
+            <div class="space-y-4 text-xs">
+                <div class="space-y-1.5">
+                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Room</label>
+                    <select id="placeShelfRoom" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                        <option value="">Select a room…</option>
+                    </select>
+                </div>
+                <div class="space-y-1.5">
+                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Shelf Name</label>
+                    <input type="text" id="placeShelfName" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" placeholder="e.g., Shelf A">
+                </div>
+                <div class="space-y-1.5">
+                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Description (optional)</label>
+                    <input type="text" id="placeShelfDesc" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                </div>
+                <div class="pt-2 flex items-center justify-end gap-3">
+                    <button type="button" onclick="closeShelfPlaceModal()" class="px-5 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:text-slate-100 hover:bg-slate-800/40 font-semibold tracking-wide transition-colors min-w-[100px]">Cancel</button>
+                    <button type="button" onclick="submitShelfPlace()" class="bg-cyan-700 hover:bg-cyan-600 text-white font-bold px-5 py-2.5 rounded-lg flex items-center gap-2 tracking-wide transition-colors shadow-md"><i class="fa-solid fa-check text-xs"></i> Save Shelf</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Map Configuration logic (beacons & waypoints) -->
+    <script>
+    (function () {
+        const CSRF = "{{ csrf_token }}";
+        const URLS = {
+            mapData: "{% url 'get_map_data' %}",
+            addRoom: "{% url 'add_room' %}",
+            addShelf: "{% url 'add_shelf' %}",
+            addBeacon: "{% url 'add_beacon' %}",
+            deleteBeacon: "{% url 'delete_beacon' %}",
+            addWaypoint: "{% url 'add_waypoint' %}",
+            deleteWaypoint: "{% url 'delete_waypoint' %}",
+            addConn: "{% url 'add_waypoint_connection' %}",
+            deleteConn: "{% url 'delete_waypoint_connection' %}",
+        };
+
+        let lmap = null;
+        let imgW = 0, imgH = 0, floorPlanId = null;
+        let mode = null;            // 'room' | 'shelf' | 'beacon' | 'waypoint' | null
+        let pending = null;         // {x, y} of the click being confirmed
+        let selectedWaypointId = null;
+        let rooms = [];             // [{room_id, name, ...}] for the shelf dropdown
+
+        const beaconMarkers = {};   // beacon_id -> { marker, data }
+        const waypointMarkers = {}; // waypoint_id -> { marker, x, y, label, shelf }
+        const connections = {};     // connection_id -> { from, to, polyline }
+
+        // Flip y so stored (map_x, map_y) is a top-left pixel origin.
+        function toLatLng(x, y) { return [imgH - y, x]; }
+
+        async function postData(url, data) {
+            const res = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': CSRF,
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: new URLSearchParams(data).toString(),
+            });
+            return res.json();
+        }
+
+        function loadImageSize(url) {
+            return new Promise((resolve) => {
+                const img = new Image();
+                img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
+                img.onerror = () => resolve({ w: 1000, h: 1000 });
+                img.src = url;
+            });
+        }
+
+        function esc(s) {
+            return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
+                return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+            });
+        }
+
+        window.setMode = function (m) {
+            mode = (mode === m) ? null : m;
+            [['btnRoom', 'room'], ['btnShelf', 'shelf'], ['btnBeacon', 'beacon'], ['btnWaypoint', 'waypoint']].forEach(function (p) {
+                const el = document.getElementById(p[0]);
+                if (el) el.classList.toggle('mode-active', mode === p[1]);
+            });
+            const el = document.getElementById('mapConfig');
+            if (el) el.style.cursor = mode ? 'crosshair' : '';
+        };
+
+        function onMapClick(e) {
+            if (!mode) return;
+            pending = { x: e.latlng.lng, y: imgH - e.latlng.lat };
+            if (mode === 'beacon') openBeaconModal();
+            else if (mode === 'waypoint') openWaypointModal();
+            else if (mode === 'room') openRoomPlace();
+            else if (mode === 'shelf') openShelfPlace();
+        }
+
+        // ---- beacons ----
+        function addBeaconMarker(b) {
+            const m = L.circleMarker(toLatLng(b.map_x, b.map_y), {
+                radius: 8, color: '#1e40af', weight: 2, fillColor: '#3b82f6', fillOpacity: 0.9,
+            }).addTo(lmap);
+            m.bindTooltip('📡 ' + (b.label || 'Beacon') + ' — ' + b.beacon_uuid, { direction: 'top' });
+            m.on('contextmenu', function (e) { L.DomEvent.stop(e); openBeaconPopup(b.beacon_id, e.latlng); });
+            beaconMarkers[b.beacon_id] = { marker: m, data: b };
+        }
+
+        function openBeaconPopup(id, latlng) {
+            const b = beaconMarkers[id]; if (!b) return;
+            const d = b.data;
+            const html = '<div style="min-width:170px">'
+                + '<div style="font-weight:700">' + esc(d.label || 'Beacon') + '</div>'
+                + '<div style="font-size:11px;color:#94a3b8">UUID: ' + esc(d.beacon_uuid) + '</div>'
+                + '<button class="map-action-btn danger" onclick="mapDeleteBeacon(' + id + ')">Delete</button>'
+                + '</div>';
+            L.popup().setLatLng(latlng).setContent(html).openOn(lmap);
+        }
+
+        window.mapDeleteBeacon = async function (id) {
+            if (!confirm('Delete this beacon?')) return;
+            const r = await postData(URLS.deleteBeacon, { beacon_id: id });
+            if (r.success) {
+                lmap.removeLayer(beaconMarkers[id].marker);
+                delete beaconMarkers[id];
+                lmap.closePopup();
+            } else alert(r.error || 'Failed to delete beacon');
+        };
+
+        // ---- waypoints ----
+        function addWaypointMarker(w) {
+            const m = L.circleMarker(toLatLng(w.map_x, w.map_y), {
+                radius: 8, color: '#15803d', weight: 2, fillColor: '#22c55e', fillOpacity: 0.9,
+            }).addTo(lmap);
+            const tip = w.linked_shelf_name
+                ? '🟢 ' + (w.label || 'Waypoint') + ' → ' + w.linked_shelf_name
+                : '🟢 ' + (w.label || 'Waypoint');
+            m.bindTooltip(tip, { direction: 'top' });
+            m.on('click', function (e) { L.DomEvent.stop(e); onWaypointClick(w.waypoint_id); });
+            m.on('contextmenu', function (e) { L.DomEvent.stop(e); openWaypointPopup(w.waypoint_id, e.latlng); });
+            waypointMarkers[w.waypoint_id] = { marker: m, x: w.map_x, y: w.map_y, label: w.label, shelf: w.linked_shelf_name };
+        }
+
+        function highlightWaypoint(id, on) {
+            const w = waypointMarkers[id]; if (!w) return;
+            if (on) w.marker.setStyle({ fillColor: '#f59e0b', color: '#b45309', radius: 10 });
+            else w.marker.setStyle({ fillColor: '#22c55e', color: '#15803d', radius: 8 });
+        }
+
+        async function onWaypointClick(id) {
+            if (selectedWaypointId === null) {
+                selectedWaypointId = id;
+                highlightWaypoint(id, true);
+            } else if (selectedWaypointId === id) {
+                highlightWaypoint(id, false);
+                selectedWaypointId = null;
+            } else {
+                const fromId = selectedWaypointId;
+                const r = await postData(URLS.addConn, { waypoint_from_id: fromId, waypoint_to_id: id });
+                if (r.success) addConnectionLine(r.connection);
+                else alert(r.error || 'Failed to connect waypoints');
+                highlightWaypoint(fromId, false);
+                selectedWaypointId = null;
+            }
+        }
+
+        function openWaypointPopup(id, latlng) {
+            const w = waypointMarkers[id]; if (!w) return;
+            let connHtml = '';
+            Object.keys(connections).forEach(function (cid) {
+                const c = connections[cid];
+                if (c.from == id || c.to == id) {
+                    const otherId = (c.from == id) ? c.to : c.from;
+                    const other = waypointMarkers[otherId];
+                    const oname = other ? (other.label || ('WP #' + otherId)) : ('WP #' + otherId);
+                    connHtml += '<div style="margin-top:4px;font-size:11px;color:#94a3b8">↔ ' + esc(oname)
+                        + ' <button class="map-action-btn subtle" onclick="mapDisconnect(' + cid + ')">Disconnect</button></div>';
+                }
+            });
+            const html = '<div style="min-width:185px">'
+                + '<div style="font-weight:700">' + esc(w.label || 'Waypoint') + '</div>'
+                + (w.shelf ? '<div style="font-size:11px;color:#94a3b8">Shelf: ' + esc(w.shelf) + '</div>' : '')
+                + '<button class="map-action-btn danger" onclick="mapDeleteWaypoint(' + id + ')">Delete</button>'
+                + '<div style="margin-top:8px;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#64748b">Connections</div>'
+                + (connHtml || '<div style="font-size:11px;color:#64748b">None</div>')
+                + '</div>';
+            L.popup().setLatLng(latlng).setContent(html).openOn(lmap);
+        }
+
+        window.mapDeleteWaypoint = async function (id) {
+            if (!confirm('Delete this waypoint and all its connections?')) return;
+            const r = await postData(URLS.deleteWaypoint, { waypoint_id: id });
+            if (r.success) {
+                Object.keys(connections).forEach(function (cid) {
+                    const c = connections[cid];
+                    if (c.from == id || c.to == id) { lmap.removeLayer(c.polyline); delete connections[cid]; }
+                });
+                lmap.removeLayer(waypointMarkers[id].marker);
+                delete waypointMarkers[id];
+                if (selectedWaypointId == id) selectedWaypointId = null;
+                lmap.closePopup();
+            } else alert(r.error || 'Failed to delete waypoint');
+        };
+
+        window.mapDisconnect = async function (cid) {
+            const r = await postData(URLS.deleteConn, { connection_id: cid });
+            if (r.success) {
+                if (connections[cid]) { lmap.removeLayer(connections[cid].polyline); delete connections[cid]; }
+                lmap.closePopup();
+            } else alert(r.error || 'Failed to disconnect');
+        };
+
+        // ---- connections ----
+        function addConnectionLine(c) {
+            const a = waypointMarkers[c.waypoint_from_id];
+            const b = waypointMarkers[c.waypoint_to_id];
+            if (!a || !b) return;
+            const pl = L.polyline([toLatLng(a.x, a.y), toLatLng(b.x, b.y)], {
+                color: '#06b6d4', weight: 2, opacity: 0.75,
+            }).addTo(lmap);
+            connections[c.connection_id] = { from: c.waypoint_from_id, to: c.waypoint_to_id, polyline: pl };
+        }
+
+        // ---- modals ----
+        window.openBeaconModal = function () {
+            document.getElementById('beaconUuid').value = '';
+            document.getElementById('beaconLabel').value = '';
+            document.getElementById('beaconModal').classList.remove('hidden');
+        };
+        window.closeBeaconModal = function () {
+            document.getElementById('beaconModal').classList.add('hidden');
+        };
+        window.openWaypointModal = function () {
+            document.getElementById('waypointLabel').value = '';
+            const sel = document.getElementById('waypointShelf');
+            if (sel) sel.value = '';
+            document.getElementById('waypointModal').classList.remove('hidden');
+        };
+        window.closeWaypointModal = function () {
+            document.getElementById('waypointModal').classList.add('hidden');
+        };
+
+        window.submitBeacon = async function () {
+            const uuid = document.getElementById('beaconUuid').value.trim();
+            const label = document.getElementById('beaconLabel').value.trim();
+            if (!uuid) { alert('Beacon UUID is required'); return; }
+            if (!pending) return;
+            const r = await postData(URLS.addBeacon, {
+                floor_plan_id: floorPlanId, beacon_uuid: uuid, label: label,
+                map_x: pending.x, map_y: pending.y,
+            });
+            if (r.success) { addBeaconMarker(r.beacon); closeBeaconModal(); }
+            else alert(r.error || 'Failed to save beacon');
+        };
+
+        window.submitWaypoint = async function () {
+            const label = document.getElementById('waypointLabel').value.trim();
+            const shelf = document.getElementById('waypointShelf').value;
+            if (!pending) return;
+            const r = await postData(URLS.addWaypoint, {
+                floor_plan_id: floorPlanId, label: label, linked_shelf_id: shelf,
+                map_x: pending.x, map_y: pending.y,
+            });
+            if (r.success) { addWaypointMarker(r.waypoint); closeWaypointModal(); }
+            else alert(r.error || 'Failed to save waypoint');
+        };
+
+        // ---- rooms & shelves (structure markers + placement) ----
+        function addRoomMarker(r) {
+            if (r.map_x == null || r.map_y == null) return;
+            L.circleMarker(toLatLng(r.map_x, r.map_y), {
+                radius: 7, color: '#0e7490', weight: 2, fillColor: '#06b6d4', fillOpacity: 0.85,
+            }).bindTooltip('🚪 ' + (r.name || 'Room'), { direction: 'top' }).addTo(lmap);
+        }
+        function addShelfMarker(s) {
+            if (s.map_x == null || s.map_y == null) return;
+            L.circleMarker(toLatLng(s.map_x, s.map_y), {
+                radius: 6, color: '#7e22ce', weight: 2, fillColor: '#a855f7', fillOpacity: 0.85,
+            }).bindTooltip('📚 ' + (s.name || 'Shelf'), { direction: 'top' }).addTo(lmap);
+        }
+
+        window.openRoomPlace = function () {
+            document.getElementById('placeRoomName').value = '';
+            document.getElementById('placeRoomDesc').value = '';
+            document.getElementById('placeRoomModal').classList.remove('hidden');
+        };
+        window.closeRoomPlaceModal = function () {
+            document.getElementById('placeRoomModal').classList.add('hidden');
+        };
+        window.submitRoomPlace = async function () {
+            const name = document.getElementById('placeRoomName').value.trim();
+            if (!name) { alert('Room name is required'); return; }
+            if (!pending) return;
+            const r = await postData(URLS.addRoom, {
+                floor_plan_id: floorPlanId, name: name,
+                description: document.getElementById('placeRoomDesc').value.trim(),
+                map_x: pending.x, map_y: pending.y,
+            });
+            if (r.success) { window.location.reload(); }
+            else alert(r.error || 'Failed to save room');
+        };
+
+        window.openShelfPlace = function () {
+            const sel = document.getElementById('placeShelfRoom');
+            sel.innerHTML = '<option value="">Select a room…</option>';
+            (rooms || []).forEach(function (rm) {
+                const o = document.createElement('option');
+                o.value = rm.room_id; o.textContent = rm.name;
+                sel.appendChild(o);
+            });
+            document.getElementById('placeShelfName').value = '';
+            document.getElementById('placeShelfDesc').value = '';
+            document.getElementById('placeShelfModal').classList.remove('hidden');
+        };
+        window.closeShelfPlaceModal = function () {
+            document.getElementById('placeShelfModal').classList.add('hidden');
+        };
+        window.submitShelfPlace = async function () {
+            const roomId = document.getElementById('placeShelfRoom').value;
+            const name = document.getElementById('placeShelfName').value.trim();
+            if (!roomId) { alert('Place a room first, then pick it here.'); return; }
+            if (!name) { alert('Shelf name is required'); return; }
+            if (!pending) return;
+            const r = await postData(URLS.addShelf, {
+                room_id: roomId, name: name,
+                description: document.getElementById('placeShelfDesc').value.trim(),
+                map_x: pending.x, map_y: pending.y,
+            });
+            if (r.success) { window.location.reload(); }
+            else alert(r.error || 'Failed to save shelf');
+        };
+
+        function populateShelves(shelves) {
+            const sel = document.getElementById('waypointShelf');
+            if (!sel) return;
+            sel.innerHTML = '<option value="">No shelf</option>';
+            (shelves || []).forEach(function (s) {
+                const o = document.createElement('option');
+                o.value = s.shelf_id; o.textContent = s.name;
+                sel.appendChild(o);
+            });
+        }
+
+        async function initMapConfig() {
+            let data;
+            try {
+                const res = await fetch(URLS.mapData, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+                data = await res.json();
+            } catch (err) { return; }
+            if (!data.success) return;
+
+            floorPlanId = data.floor_plan_id;
+            imgW = data.image_width; imgH = data.image_height;
+            if (!imgW || !imgH) {
+                const dim = await loadImageSize(data.image_url);
+                imgW = dim.w; imgH = dim.h;
+            }
+            populateShelves(data.shelves);
+            rooms = data.rooms || [];
+
+            lmap = L.map('mapConfig', {
+                crs: L.CRS.Simple, minZoom: -5, maxZoom: 4,
+                zoomControl: true, attributionControl: false,
+            });
+            const bounds = [[0, 0], [imgH, imgW]];
+            if (data.image_url) L.imageOverlay(data.image_url, bounds).addTo(lmap);
+            lmap.fitBounds(bounds);
+            lmap.on('click', onMapClick);
+            setTimeout(function () { lmap.invalidateSize(); }, 200);
+
+            (data.rooms || []).forEach(addRoomMarker);
+            (data.shelves || []).forEach(addShelfMarker);
+            (data.beacons || []).forEach(addBeaconMarker);
+            (data.waypoints || []).forEach(addWaypointMarker);
+            (data.connections || []).forEach(addConnectionLine);
+        }
+
+        document.addEventListener('DOMContentLoaded', function () {
+            if (document.getElementById('mapConfig')) initMapConfig();
+        });
+
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape') { closeBeaconModal(); closeWaypointModal(); closeRoomPlaceModal(); closeShelfPlaceModal(); }
+        });
+        [['beaconModal', closeBeaconModal], ['waypointModal', closeWaypointModal], ['placeRoomModal', closeRoomPlaceModal], ['placeShelfModal', closeShelfPlaceModal]].forEach(function (pair) {
+            const el = document.getElementById(pair[0]);
+            if (el) el.addEventListener('click', function (e) { if (e.target === el) pair[1](); });
+        });
+    })();
     </script>
 
 </body>

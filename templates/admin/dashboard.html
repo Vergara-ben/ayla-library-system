@@ -598,7 +598,6 @@
             }
         }
     </style>
-    <script src="{% static 'js/supabase-config.js' %}"></script>
 </head>
 <body>
 
@@ -630,14 +629,6 @@
                         </div>
                     </a>
                 </li>
-                <li class="menu-item">
-                    <a href="{% url 'admin_qr_scanner' %}">
-                        <div class="menu-link-content">
-                            <span class="menu-icon">📷</span>
-                            <span>QR Scanner</span>
-                        </div>
-                    </a>
-                </li>
             </ul>
         </nav>
 
@@ -650,7 +641,7 @@
                             <span class="menu-icon">📋</span>
                             <span>Transactions</span>
                         </div>
-                        <span class="badge-count">12</span>
+                        <span class="badge-count">{{ pending_transactions_count }}</span>
                     </a>
                 </li>
                 <li class="menu-item">
