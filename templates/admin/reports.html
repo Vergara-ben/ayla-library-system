@@ -1,0 +1,252 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ayla Admin Panel - Reports</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@400;700&display=swap" rel="stylesheet">
+
+    <style>
+        :root {
+            --bg-main: #060d13;
+            --bg-sidebar: #0b151e;
+            --bg-card: #0d1b26;
+            --bg-modal: #0f2230;
+            --bg-input: #112535;
+            --text-primary: #e2e8f0;
+            --text-muted: #64748b;
+            --border-color: #1e293b;
+            --border-modal: #1d354a;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-main);
+            color: var(--text-primary);
+        }
+
+        .logo-text { font-family: 'Rowdies', sans-serif; }
+
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: var(--bg-main); }
+        ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
+
+        .mobile-menu-btn {
+            display: none; align-items: center; justify-content: center;
+            width: 2.5rem; height: 2.5rem; border-radius: 0.5rem;
+            background: var(--bg-card); border: 1px solid var(--border-color);
+            color: var(--text-primary); cursor: pointer; margin-right: 0.75rem;
+        }
+
+        @media (max-width: 1024px) {
+            aside { position: fixed; left: -100%; top: 0; height: 100vh; z-index: 50; transition: left 0.3s ease; }
+            aside.open { left: 0; }
+            .mobile-menu-btn { display: flex !important; }
+            main { padding: 1rem; }
+        }
+    </style>
+    <link rel="stylesheet" href="{% static 'css/admin-enhance.css' %}">
+    <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
+</head>
+<body class="flex h-screen overflow-hidden">
+
+    <aside class="w-64 flex-shrink-0 flex flex-col" style="background-color: var(--bg-sidebar); border-right: 1px solid var(--border-color);">
+        <div class="p-6 flex items-center gap-3" style="border-bottom: 1px solid var(--border-color);">
+            <div class="w-10 h-10 rounded-lg flex items-center justify-center text-xl font-bold text-cyan-400 bg-cyan-950/50 border border-cyan-800">
+                A
+            </div>
+            <div>
+                <h1 class="logo-text text-xl tracking-wider text-slate-100 leading-none">AYLA</h1>
+                <span class="text-xs tracking-widest text-slate-500 uppercase font-semibold">Admin Panel</span>
+            </div>
+        </div>
+
+        <nav class="flex-1 px-4 py-6 space-y-7 overflow-y-auto">
+            <div>
+                <p class="px-2 text-xs font-bold tracking-widest text-slate-500 uppercase mb-3">Overview</p>
+                <div class="space-y-1">
+                    <a href="{% url 'admin_dashboard' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                        <i class="fa-solid fa-chart-pie w-5 text-sm"></i>
+                        <span class="text-sm font-medium">Dashboard</span>
+                    </a>
+                    <a href="{% url 'admin_indoor_map' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                        <i class="fa-solid fa-map w-5 text-sm"></i>
+                        <span class="text-sm font-medium">Indoor Map</span>
+                    </a>
+                </div>
+            </div>
+
+            <div>
+                <p class="px-2 text-xs font-bold tracking-widest text-slate-500 uppercase mb-3">Management</p>
+                <div class="space-y-1">
+                    <a href="{% url 'admin_transaction' %}" class="flex items-center justify-between px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                        <div class="flex items-center gap-3">
+                            <i class="fa-solid fa-file-invoice w-5 text-sm"></i>
+                            <span class="text-sm font-medium">Transactions</span>
+                        </div>
+                        <span class="bg-rose-500/20 text-rose-400 text-xs px-2 py-0.5 rounded-full font-semibold">{{ pending_transactions_count }}</span>
+                    </a>
+                    <a href="{% url 'admin_log_management' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                        <i class="fa-solid fa-clipboard-list w-5 text-sm"></i>
+                        <span class="text-sm font-medium">Log Management</span>
+                    </a>
+                    <a href="{% url 'admin_management' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                        <i class="fa-solid fa-book w-5 text-sm"></i>
+                        <span class="text-sm font-medium">Manage Books</span>
+                    </a>
+                    <a href="{% url 'admin_manage_patron' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                        <i class="fa-solid fa-users w-5 text-sm"></i>
+                        <span class="text-sm font-medium">Manage Patrons</span>
+                    </a>
+                    <a href="{% url 'donation_management' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                        <i class="fa-solid fa-hand-holding-heart w-5 text-sm"></i>
+                        <span class="text-sm font-medium">Donations</span>
+                    </a>
+                    <a href="{% url 'announcement_management' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                        <i class="fa-solid fa-bullhorn w-5 text-sm"></i>
+                        <span class="text-sm font-medium">Announcements</span>
+                    </a>
+                    <a href="{% url 'floorplan_management' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                        <i class="fa-solid fa-layer-group w-5 text-sm"></i>
+                        <span class="text-sm font-medium">Floor Plans</span>
+                    </a>
+                    <a href="{% url 'shelf_manager' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                        <i class="fa-solid fa-folder-tree w-5 text-sm"></i>
+                        <span class="text-sm font-medium">Shelf Manager</span>
+                    </a>
+                    <a href="{% url 'admin_reports' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-800/50 text-cyan-400 font-medium border border-slate-700/50">
+                        <i class="fa-solid fa-chart-line w-5 text-sm"></i>
+                        <span class="text-sm">Reports</span>
+                    </a>
+                </div>
+            </div>
+        </nav>
+    </aside>
+
+    <div class="flex-1 flex flex-col overflow-hidden">
+
+        <header class="h-16 flex-shrink-0 flex items-center justify-between px-8" style="background-color: var(--bg-main);">
+            <div class="flex items-center">
+                <button class="mobile-menu-btn" onclick="toggleSidebar()">
+                    <i class="fa-solid fa-bars"></i>
+                </button>
+                <h2 class="logo-text text-lg tracking-wider text-slate-200 uppercase">Reports</h2>
+            </div>
+            <div class="flex items-center gap-4">
+                <span class="bg-cyan-950 text-cyan-400 text-xs px-2.5 py-1 rounded font-bold border border-cyan-800 tracking-wider">ADMIN</span>
+                <button class="relative text-slate-400 hover:text-slate-200 p-1">
+                    <i class="fa-solid fa-bell text-lg"></i>
+                    <span class="absolute top-1 right-1 w-2 h-2 bg-amber-500 rounded-full"></span>
+                </button>
+                <div class="w-8 h-8 rounded-full bg-cyan-900 border border-cyan-700 flex items-center justify-center text-xs font-bold text-cyan-200">
+                    AD
+                </div>
+            </div>
+        </header>
+
+        <main class="flex-1 overflow-y-auto p-8 space-y-6">
+
+            <!-- Filter / generate bar -->
+            <form method="get" action="{% url 'admin_reports' %}" class="rounded-xl border border-slate-800/80 p-5" style="background-color: var(--bg-card);">
+                <div class="flex flex-col lg:flex-row lg:items-end gap-4">
+                    <div class="flex-1 space-y-1.5">
+                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Report Type</label>
+                        <select name="type" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                            {% for value, label in report_types %}
+                            <option value="{{ value }}" {% if value == selected_type %}selected{% endif %}>{{ label }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="space-y-1.5">
+                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Start Date</label>
+                        <input type="date" name="start" value="{{ start_date }}" {% if is_snapshot %}disabled{% endif %} class="rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium disabled:opacity-40" style="background-color: var(--bg-input);">
+                    </div>
+                    <div class="space-y-1.5">
+                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">End Date</label>
+                        <input type="date" name="end" value="{{ end_date }}" {% if is_snapshot %}disabled{% endif %} class="rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium disabled:opacity-40" style="background-color: var(--bg-input);">
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button type="submit" class="bg-cyan-700/30 text-cyan-400 border border-cyan-800/80 hover:bg-cyan-700/50 text-xs font-bold px-4 py-2.5 rounded-lg flex items-center gap-2 transition-colors">
+                            <i class="fa-solid fa-arrows-rotate text-[11px]"></i> Generate
+                        </button>
+                        <button type="submit" formaction="{% url 'admin_report_excel' %}" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-emerald-500/90 text-xs font-bold px-4 py-2.5 rounded-lg flex items-center gap-2 transition-colors">
+                            <i class="fa-solid fa-file-excel text-[11px]"></i> Export Excel
+                        </button>
+                        <button type="submit" formaction="{% url 'admin_report_pdf' %}" class="bg-cyan-700 hover:bg-cyan-600 text-white text-xs font-bold px-4 py-2.5 rounded-lg flex items-center gap-2 transition-colors shadow-md">
+                            <i class="fa-solid fa-file-pdf text-[11px]"></i> Download PDF
+                        </button>
+                    </div>
+                </div>
+                {% if is_snapshot %}
+                <p class="text-[11px] text-slate-500 mt-3"><i class="fa-solid fa-circle-info mr-1"></i> This report is a real-time snapshot; the date range does not apply.</p>
+                {% endif %}
+            </form>
+
+            <!-- Report header + summary -->
+            <div>
+                <h3 class="text-xl font-bold text-slate-100">{{ report.title }}</h3>
+                <p class="text-sm text-slate-400">{{ report.subtitle }}</p>
+                <p class="text-xs text-cyan-400/80 mt-1 font-medium">{{ report.period_label }}</p>
+            </div>
+
+            <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+                {% for label, value in report.summary %}
+                <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
+                    <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">{{ label }}</p>
+                    <p class="text-3xl font-bold text-cyan-400 mt-2">{{ value }}</p>
+                </div>
+                {% endfor %}
+            </div>
+
+            <!-- Data table -->
+            <div class="rounded-xl border border-slate-800/80 overflow-hidden shadow-2xl flex flex-col" style="background-color: var(--bg-card);">
+                <div class="p-5 border-b border-slate-800 flex items-center gap-2">
+                    <i class="fa-solid fa-table text-cyan-600 text-xs"></i>
+                    <h4 class="text-sm font-bold text-slate-200 tracking-wide">{{ report.title }} Details</h4>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="border-b border-slate-800/80 text-[10px] font-bold tracking-wider text-slate-500 uppercase bg-slate-900/5">
+                                {% for col in report.columns %}
+                                <th class="py-3 px-6">{{ col }}</th>
+                                {% endfor %}
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-800/40 text-xs text-slate-300">
+                            {% for row in report.rows %}
+                            <tr class="hover:bg-slate-800/10 transition-colors">
+                                {% for cell in row %}
+                                <td class="py-3.5 px-6 {% if forloop.first %}font-semibold text-slate-200{% else %}text-slate-300{% endif %}">{{ cell }}</td>
+                                {% endfor %}
+                            </tr>
+                            {% empty %}
+                            <tr>
+                                <td colspan="{{ report.columns|length }}" class="py-10 text-center text-slate-500">No records found for this period.</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                <div class="px-5 py-4 border-t border-slate-800/60 text-xs text-slate-500 bg-slate-900/5">
+                    <span class="font-medium">Showing <span class="text-slate-400">{{ report.rows|length }}</span> record(s)</span>
+                </div>
+            </div>
+
+        </main>
+    </div>
+
+    <script>
+        function toggleSidebar() {
+            document.querySelector('aside').classList.toggle('open');
+        }
+    </script>
+
+    <script src="{% static 'js/admin-enhance.js' %}" defer></script>
+</body>
+</html>

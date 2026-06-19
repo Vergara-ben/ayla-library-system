@@ -120,6 +120,8 @@
             margin-right: 0.75rem;
         }
     </style>
+    <link rel="stylesheet" href="{% static 'css/admin-enhance.css' %}">
+    <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
 </head>
 <body class="flex h-screen overflow-hidden">
 
@@ -187,6 +189,9 @@
                         <i class="fa-solid fa-folder-tree w-5 text-sm"></i>
                         <span class="text-sm font-medium">Shelf Manager</span>
                     </a>
+                    <a href="{% url 'admin_reports' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                        <i class="fa-solid fa-chart-line w-5 text-sm"></i><span class="text-sm font-medium">Reports</span>
+                    </a>
                 </div>
             </div>
         </nav>
@@ -246,19 +251,8 @@
                             <i class="fa-solid fa-boxes-stacked text-amber-600 text-xs"></i>
                             <h4 class="text-sm font-bold text-slate-200 tracking-wide">Management</h4>
                         </div>
-                        <div class="flex items-center gap-1 bg-slate-900/50 rounded-lg p-1 border border-slate-800">
-                            <button onclick="switchTab('books')" id="tab-books" class="px-4 py-1.5 rounded-md text-[11px] font-semibold transition-colors bg-cyan-700/30 text-cyan-400 border border-cyan-800/50">
-                                Manage Books
-                            </button>
-                            <button onclick="switchTab('shelves')" id="tab-shelves" class="px-4 py-1.5 rounded-md text-[11px] font-semibold transition-colors text-slate-400 hover:text-slate-200 hover:bg-slate-800/40">
-                                Manage Shelves
-                            </button>
-                        </div>
                     </div>
                     <div class="flex items-center gap-2 self-end sm:self-auto" id="books-actions">
-                        <button class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-amber-500/90 text-[11px] font-semibold px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors">
-                            <i class="fa-solid fa-file-invoice"></i> Generate Report
-                        </button>
                         <a href="{% url 'download_book_template' %}" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-emerald-500/90 text-[11px] font-semibold px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors">
                             <i class="fa-solid fa-file-excel"></i> Download Template
                         </a>
@@ -277,27 +271,23 @@
                     <div class="px-5 py-3.5 bg-slate-900/20 border-b border-slate-800/60 flex flex-col lg:flex-row lg:items-center gap-3">
                         <div class="relative flex-1">
                             <i class="fa-solid fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-xs"></i>
-                            <input type="text" id="searchInput" placeholder="Search title, author, ISBN, call number..." class="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-4 py-2 text-xs text-slate-300 focus:outline-none focus:border-cyan-800 placeholder-slate-600 transition-colors">
+                            <input type="text" id="searchInput" value="{{ q }}" onkeydown="if(event.key==='Enter')applyBookFilters()" placeholder="Search title, author, ISBN, call number..." class="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-4 py-2 text-xs text-slate-300 focus:outline-none focus:border-cyan-800 placeholder-slate-600 transition-colors">
                         </div>
                         <button onclick="openQRScanner()" class="bg-cyan-700/30 text-cyan-400 border border-cyan-800/80 hover:bg-cyan-700/50 text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
                             <i class="fa-solid fa-qrcode text-[10px]"></i> Scan QR
                         </button>
                         <div class="flex items-center gap-2 self-end lg:self-auto">
                             <div class="relative">
-                                <select class="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-400 focus:outline-none pr-8 appearance-none min-w-[130px]">
-                                    <option>All Categories</option>
-                                    <option>CS / IT</option>
-                                    <option>Engineering</option>
-                                    <option>Literature</option>
+                                <select id="genreFilter" onchange="applyBookFilters()" class="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-400 focus:outline-none pr-8 appearance-none min-w-[130px]">
+                                    <option value="">All Categories</option>
+                                    {% for g in genres %}<option value="{{ g }}" {% if g == genre %}selected{% endif %}>{{ g }}</option>{% endfor %}
                                 </select>
                                 <i class="fa-solid fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-slate-600 text-[10px] pointer-events-none"></i>
                             </div>
                             <div class="relative">
-                                <select class="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-400 focus:outline-none pr-8 appearance-none min-w-[110px]">
-                                    <option>All Status</option>
-                                    <option>Available</option>
-                                    <option>Low Stock</option>
-                                    <option>Out of Stock</option>
+                                <select id="statusFilter" onchange="applyBookFilters()" class="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-400 focus:outline-none pr-8 appearance-none min-w-[110px]">
+                                    <option value="">All Status</option>
+                                    {% for s in status_choices %}<option value="{{ s }}" {% if s == status %}selected{% endif %}>{{ s }}</option>{% endfor %}
                                 </select>
                                 <i class="fa-solid fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-slate-600 text-[10px] pointer-events-none"></i>
                             </div>
@@ -365,25 +355,25 @@
                 </div>
 
                 <div class="px-5 py-4 border-t border-slate-800/60 flex items-center justify-between text-xs text-slate-500 bg-slate-900/5">
-                    <span class="font-medium">Showing <span class="text-slate-400">{{ books|length }}</span> of <span class="text-slate-400">{{ total_books }}</span> books</span>
+                    <span class="font-medium">Showing <span class="text-slate-400">{{ books|length }}</span> of <span class="text-slate-400">{{ paginator.count }}</span> books</span>
 
                     <div class="flex items-center gap-1">
-                        {% if paginator.has_previous %}
-                            <a href="?page={{ paginator.previous_page_number }}" class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors">&larr; Prev</a>
+                        {% if books.has_previous %}
+                            <a href="?page={{ books.previous_page_number }}{% if querystring %}&{{ querystring }}{% endif %}" class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors">&larr; Prev</a>
                         {% else %}
                             <button class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors cursor-not-allowed" disabled>&larr; Prev</button>
                         {% endif %}
-                        
+
                         {% for page_num in paginator.page_range %}
                             {% if page_num == books.number %}
                                 <button class="px-3 py-1.5 rounded bg-cyan-700/30 text-cyan-400 font-bold border border-cyan-800/50">{{ page_num }}</button>
                             {% else %}
-                                <a href="?page={{ page_num }}" class="px-3 py-1.5 rounded border border-slate-800 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors">{{ page_num }}</a>
+                                <a href="?page={{ page_num }}{% if querystring %}&{{ querystring }}{% endif %}" class="px-3 py-1.5 rounded border border-slate-800 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors">{{ page_num }}</a>
                             {% endif %}
                         {% endfor %}
-                        
-                        {% if paginator.has_next %}
-                            <a href="?page={{ paginator.next_page_number }}" class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors">Next &rarr;</a>
+
+                        {% if books.has_next %}
+                            <a href="?page={{ books.next_page_number }}{% if querystring %}&{{ querystring }}{% endif %}" class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors">Next &rarr;</a>
                         {% else %}
                             <button class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors cursor-not-allowed" disabled>Next &rarr;</button>
                         {% endif %}
@@ -391,47 +381,6 @@
                 </div>
                 </div>
 
-                <!-- Manage Shelves Section -->
-                <div id="shelves-section" class="hidden">
-                    <div class="px-5 py-3.5 bg-slate-900/20 border-b border-slate-800/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                        <div class="flex items-center gap-1 bg-slate-900/50 rounded-lg p-1 border border-slate-800">
-                            <button onclick="switchView('tree')" id="view-tree" class="px-4 py-1.5 rounded-md text-[11px] font-semibold transition-colors bg-cyan-700/30 text-cyan-400 border border-cyan-800/50">
-                                <i class="fa-solid fa-sitemap mr-1"></i> Tree
-                            </button>
-                            <button onclick="switchView('table')" id="view-table" class="px-4 py-1.5 rounded-md text-[11px] font-semibold transition-colors text-slate-400 hover:text-slate-200 hover:bg-slate-800/40">
-                                <i class="fa-solid fa-table mr-1"></i> Table
-                            </button>
-                        </div>
-                        <div class="relative" id="table-search-container" style="display: none;">
-                            <i class="fa-solid fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-xs"></i>
-                            <input type="text" id="shelfSearchInput" placeholder="Search location or label..." class="w-64 bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-4 py-2 text-xs text-slate-300 focus:outline-none focus:border-cyan-800 placeholder-slate-600 transition-colors">
-                        </div>
-                    </div>
-
-                    <!-- Tree View -->
-                    <div id="tree-view" class="p-5">
-                        <div id="shelf-tree" class="space-y-1"></div>
-                    </div>
-
-                    <!-- Table View -->
-                    <div id="table-view" class="hidden">
-                        <div class="overflow-x-auto">
-                            <table class="w-full text-left border-collapse">
-                                <thead>
-                                    <tr class="border-b border-slate-800/80 text-[10px] font-bold tracking-wider text-slate-500 uppercase bg-slate-900/5">
-                                        <th class="py-3 px-6">Location Path</th>
-                                        <th class="py-3 px-6">Shelf Level</th>
-                                        <th class="py-3 px-6 text-center">Book Count</th>
-                                        <th class="py-3 px-6 text-center">Active</th>
-                                        <th class="py-3 px-6 text-center">Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="shelf-table-body" class="divide-y divide-slate-800/40 text-xs text-slate-300">
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
 
             </div>
 
@@ -493,32 +442,6 @@
                             <option value="Being Read">Being Read</option>
                             <option value="Donated">Donated</option>
                         </select>
-                    </div>
-                </div>
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div class="space-y-1.5">
-                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Section</label>
-                        <div class="relative">
-                            <select name="section" id="addSection" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium appearance-none pr-10 cursor-pointer" style="background-color: var(--bg-input);">
-                                <option value="">Select section...</option>
-                                {% for section in sections %}
-                                    <option value="{{ section.section_id }}">{{ section.name }}</option>
-                                {% endfor %}
-                            </select>
-                            <i class="fa-solid fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 text-[10px] pointer-events-none"></i>
-                        </div>
-                    </div>
-                    <div class="space-y-1.5">
-                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Shelf Level</label>
-                        <div class="relative">
-                            <select name="shelf_level" id="addShelfLevel" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium appearance-none pr-10 cursor-pointer" style="background-color: var(--bg-input);">
-                                <option value="">Select shelf level...</option>
-                                {% for shelf_level in shelf_levels %}
-                                    <option value="{{ shelf_level.shelf_level_id }}">{{ shelf_level.label }}</option>
-                                {% endfor %}
-                            </select>
-                            <i class="fa-solid fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 text-[10px] pointer-events-none"></i>
-                        </div>
                     </div>
                 </div>
                 <div class="pt-4 flex items-center justify-end gap-3">
@@ -711,146 +634,6 @@
                     </div>
                 </div>
             </div>
-        </div>
-    </div>
-
-    <!-- Add Room Modal -->
-    <div id="addRoomModal" class="hidden absolute inset-0 bg-black/60 z-40 flex items-center justify-center p-4 overflow-y-auto">
-        <div class="w-full max-w-md rounded-2xl border p-6 flex flex-col gap-5 shadow-2xl relative my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color);">
-            <div class="flex items-center justify-between">
-                <h3 class="text-base font-bold text-slate-200 tracking-wide">Add Room</h3>
-                <button type="button" onclick="closeAddRoomModal()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40 transition-colors">
-                    <i class="fa-solid fa-xmark text-sm"></i>
-                </button>
-            </div>
-            <form id="addRoomForm" method="post" class="space-y-4 text-xs">
-                {% csrf_token %}
-                <input type="hidden" name="floor_plan_id" id="addRoomFloorPlanId">
-                <div class="space-y-1.5">
-                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Name</label>
-                    <input type="text" name="name" id="addRoomName" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" required>
-                </div>
-                <div class="grid grid-cols-2 gap-4">
-                    <div class="space-y-1.5">
-                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Map X</label>
-                        <input type="number" step="0.1" name="map_x" id="addRoomMapX" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" value="0">
-                    </div>
-                    <div class="space-y-1.5">
-                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Map Y</label>
-                        <input type="number" step="0.1" name="map_y" id="addRoomMapY" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" value="0">
-                    </div>
-                </div>
-                <div class="space-y-1.5">
-                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Description</label>
-                    <textarea name="description" id="addRoomDescription" rows="3" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);"></textarea>
-                </div>
-                <div class="pt-4 flex items-center justify-end gap-3">
-                    <button type="button" onclick="closeAddRoomModal()" class="px-5 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:text-slate-100 hover:bg-slate-800/40 font-semibold tracking-wide transition-colors">Cancel</button>
-                    <button type="submit" class="bg-cyan-700 hover:bg-cyan-600 text-white font-bold px-5 py-2.5 rounded-lg flex items-center gap-2 tracking-wide transition-colors shadow-md">
-                        <i class="fa-solid fa-check text-xs"></i> Add Room
-                    </button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <!-- Add Shelf Modal -->
-    <div id="addShelfModal" class="hidden absolute inset-0 bg-black/60 z-40 flex items-center justify-center p-4 overflow-y-auto">
-        <div class="w-full max-w-md rounded-2xl border p-6 flex flex-col gap-5 shadow-2xl relative my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color);">
-            <div class="flex items-center justify-between">
-                <h3 class="text-base font-bold text-slate-200 tracking-wide">Add Shelf</h3>
-                <button type="button" onclick="closeAddShelfModal()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40 transition-colors">
-                    <i class="fa-solid fa-xmark text-sm"></i>
-                </button>
-            </div>
-            <form id="addShelfForm" method="post" class="space-y-4 text-xs">
-                {% csrf_token %}
-                <input type="hidden" name="room_id" id="addShelfRoomId">
-                <div class="space-y-1.5">
-                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Name</label>
-                    <input type="text" name="name" id="addShelfName" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" required>
-                </div>
-                <div class="grid grid-cols-2 gap-4">
-                    <div class="space-y-1.5">
-                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Map X</label>
-                        <input type="number" step="0.1" name="map_x" id="addShelfMapX" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" value="0">
-                    </div>
-                    <div class="space-y-1.5">
-                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Map Y</label>
-                        <input type="number" step="0.1" name="map_y" id="addShelfMapY" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" value="0">
-                    </div>
-                </div>
-                <div class="space-y-1.5">
-                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Description</label>
-                    <textarea name="description" id="addShelfDescription" rows="3" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);"></textarea>
-                </div>
-                <div class="pt-4 flex items-center justify-end gap-3">
-                    <button type="button" onclick="closeAddShelfModal()" class="px-5 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:text-slate-100 hover:bg-slate-800/40 font-semibold tracking-wide transition-colors">Cancel</button>
-                    <button type="submit" class="bg-cyan-700 hover:bg-cyan-600 text-white font-bold px-5 py-2.5 rounded-lg flex items-center gap-2 tracking-wide transition-colors shadow-md">
-                        <i class="fa-solid fa-check text-xs"></i> Add Shelf
-                    </button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <!-- Add Section Modal -->
-    <div id="addSectionModal" class="hidden absolute inset-0 bg-black/60 z-40 flex items-center justify-center p-4 overflow-y-auto">
-        <div class="w-full max-w-md rounded-2xl border p-6 flex flex-col gap-5 shadow-2xl relative my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color);">
-            <div class="flex items-center justify-between">
-                <h3 class="text-base font-bold text-slate-200 tracking-wide">Add Section</h3>
-                <button type="button" onclick="closeAddSectionModal()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40 transition-colors">
-                    <i class="fa-solid fa-xmark text-sm"></i>
-                </button>
-            </div>
-            <form id="addSectionForm" method="post" class="space-y-4 text-xs">
-                {% csrf_token %}
-                <input type="hidden" name="shelf_id" id="addSectionShelfId">
-                <div class="space-y-1.5">
-                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Name</label>
-                    <input type="text" name="name" id="addSectionName" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" required>
-                </div>
-                <div class="space-y-1.5">
-                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Description</label>
-                    <textarea name="description" id="addSectionDescription" rows="3" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);"></textarea>
-                </div>
-                <div class="pt-4 flex items-center justify-end gap-3">
-                    <button type="button" onclick="closeAddSectionModal()" class="px-5 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:text-slate-100 hover:bg-slate-800/40 font-semibold tracking-wide transition-colors">Cancel</button>
-                    <button type="submit" class="bg-cyan-700 hover:bg-cyan-600 text-white font-bold px-5 py-2.5 rounded-lg flex items-center gap-2 tracking-wide transition-colors shadow-md">
-                        <i class="fa-solid fa-check text-xs"></i> Add Section
-                    </button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <!-- Add Shelf Level Modal -->
-    <div id="addShelfLevelModal" class="hidden absolute inset-0 bg-black/60 z-40 flex items-center justify-center p-4 overflow-y-auto">
-        <div class="w-full max-w-md rounded-2xl border p-6 flex flex-col gap-5 shadow-2xl relative my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color);">
-            <div class="flex items-center justify-between">
-                <h3 class="text-base font-bold text-slate-200 tracking-wide">Add Shelf Level</h3>
-                <button type="button" onclick="closeAddShelfLevelModal()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40 transition-colors">
-                    <i class="fa-solid fa-xmark text-sm"></i>
-                </button>
-            </div>
-            <form id="addShelfLevelForm" method="post" class="space-y-4 text-xs">
-                {% csrf_token %}
-                <input type="hidden" name="section_id" id="addShelfLevelSectionId">
-                <div class="space-y-1.5">
-                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Level Number</label>
-                    <input type="number" name="level_number" id="addShelfLevelNumber" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" required>
-                </div>
-                <div class="space-y-1.5">
-                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Label</label>
-                    <input type="text" name="label" id="addShelfLevelLabel" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
-                </div>
-                <div class="pt-4 flex items-center justify-end gap-3">
-                    <button type="button" onclick="closeAddShelfLevelModal()" class="px-5 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:text-slate-100 hover:bg-slate-800/40 font-semibold tracking-wide transition-colors">Cancel</button>
-                    <button type="submit" class="bg-cyan-700 hover:bg-cyan-600 text-white font-bold px-5 py-2.5 rounded-lg flex items-center gap-2 tracking-wide transition-colors shadow-md">
-                        <i class="fa-solid fa-check text-xs"></i> Add Shelf Level
-                    </button>
-                </div>
-            </form>
         </div>
     </div>
 
@@ -1119,529 +902,21 @@
             }
         }
 
-        // Shelf Management JavaScript
-        let shelfTreeData = [];
-        let shelfLevelsFlat = [];
-
-        function switchTab(tab) {
-            const booksSection = document.getElementById('books-section');
-            const shelvesSection = document.getElementById('shelves-section');
-            const booksTab = document.getElementById('tab-books');
-            const shelvesTab = document.getElementById('tab-shelves');
-            const booksActions = document.getElementById('books-actions');
-
-            if (tab === 'books') {
-                booksSection.classList.remove('hidden');
-                shelvesSection.classList.add('hidden');
-                booksTab.classList.add('bg-cyan-700/30', 'text-cyan-400', 'border', 'border-cyan-800/50');
-                booksTab.classList.remove('text-slate-400', 'hover:text-slate-200', 'hover:bg-slate-800/40');
-                shelvesTab.classList.remove('bg-cyan-700/30', 'text-cyan-400', 'border', 'border-cyan-800/50');
-                shelvesTab.classList.add('text-slate-400', 'hover:text-slate-200', 'hover:bg-slate-800/40');
-                booksActions.classList.remove('hidden');
-            } else {
-                booksSection.classList.add('hidden');
-                shelvesSection.classList.remove('hidden');
-                shelvesTab.classList.add('bg-cyan-700/30', 'text-cyan-400', 'border', 'border-cyan-800/50');
-                shelvesTab.classList.remove('text-slate-400', 'hover:text-slate-200', 'hover:bg-slate-800/40');
-                booksTab.classList.remove('bg-cyan-700/30', 'text-cyan-400', 'border', 'border-cyan-800/50');
-                booksTab.classList.add('text-slate-400', 'hover:text-slate-200', 'hover:bg-slate-800/40');
-                booksActions.classList.add('hidden');
-                loadShelfTree();
-                loadShelfLevelsFlat();
-            }
-        }
-
-        function switchView(view) {
-            const treeView = document.getElementById('tree-view');
-            const tableView = document.getElementById('table-view');
-            const treeBtn = document.getElementById('view-tree');
-            const tableBtn = document.getElementById('view-table');
-            const searchContainer = document.getElementById('table-search-container');
-
-            if (view === 'tree') {
-                treeView.classList.remove('hidden');
-                tableView.classList.add('hidden');
-                treeBtn.classList.add('bg-cyan-700/30', 'text-cyan-400', 'border', 'border-cyan-800/50');
-                treeBtn.classList.remove('text-slate-400', 'hover:text-slate-200', 'hover:bg-slate-800/40');
-                tableBtn.classList.remove('bg-cyan-700/30', 'text-cyan-400', 'border', 'border-cyan-800/50');
-                tableBtn.classList.add('text-slate-400', 'hover:text-slate-200', 'hover:bg-slate-800/40');
-                searchContainer.style.display = 'none';
-            } else {
-                treeView.classList.add('hidden');
-                tableView.classList.remove('hidden');
-                tableBtn.classList.add('bg-cyan-700/30', 'text-cyan-400', 'border', 'border-cyan-800/50');
-                tableBtn.classList.remove('text-slate-400', 'hover:text-slate-200', 'hover:bg-slate-800/40');
-                treeBtn.classList.remove('bg-cyan-700/30', 'text-cyan-400', 'border', 'border-cyan-800/50');
-                treeBtn.classList.add('text-slate-400', 'hover:text-slate-200', 'hover:bg-slate-800/40');
-                searchContainer.style.display = 'block';
-                renderShelfTable(shelfLevelsFlat);
-            }
-        }
-
-        async function loadShelfTree() {
-            try {
-                const response = await fetch('{% url "get_shelf_tree" %}');
-                const data = await response.json();
-                shelfTreeData = data.tree;
-                renderShelfTree(shelfTreeData);
-            } catch (error) {
-                console.error('Error loading shelf tree:', error);
-            }
-        }
-
-        function renderShelfTree(treeData) {
-            const container = document.getElementById('shelf-tree');
-            container.innerHTML = '';
-
-            treeData.forEach((node, index) => {
-                const nodeElement = createTreeNode(node, 0, true);
-                container.appendChild(nodeElement);
-            });
-        }
-
-        function createTreeNode(node, level, expanded = false) {
-            const div = document.createElement('div');
-            div.className = 'shelf-tree-node';
-            div.dataset.type = node.type;
-            div.dataset.id = node.id;
-            div.dataset.expanded = expanded;
-
-            const iconClass = getIconForType(node.type);
-            const opacityClass = node.is_active === false ? 'opacity-50' : '';
-
-            const row = document.createElement('div');
-            row.className = `flex items-center gap-2 py-2 px-3 rounded-lg hover:bg-slate-800/30 transition-colors ${opacityClass}`;
-            row.style.paddingLeft = `${level * 16 + 12}px`;
-
-            const chevron = document.createElement('button');
-            chevron.className = 'w-5 h-5 flex items-center justify-center text-slate-500 hover:text-slate-300 transition-colors';
-            chevron.innerHTML = `<i class="fa-solid fa-chevron-down text-[10px] transition-transform ${expanded ? 'rotate-0' : '-rotate-90'}"></i>`;
-            chevron.onclick = (e) => {
-                e.stopPropagation();
-                toggleNodeExpand(div);
-            };
-
-            const icon = document.createElement('div');
-            icon.className = 'w-6 h-6 rounded flex items-center justify-center text-xs';
-            icon.innerHTML = `<i class="${iconClass}"></i>`;
-            icon.style.backgroundColor = getBgColorForType(node.type);
-
-            const name = document.createElement('div');
-            name.className = 'flex-1 min-w-0';
-            name.innerHTML = `
-                <div class="text-xs font-medium text-slate-200 truncate">${node.name}</div>
-                <div class="text-[10px] text-slate-500 truncate">${getSubtitle(node)}</div>
-            `;
-
-            const actions = document.createElement('div');
-            actions.className = 'flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity';
-            actions.innerHTML = getActionsHtml(node);
-
-            const toggle = document.createElement('div');
-            toggle.className = 'ml-2';
-            if (node.type !== 'book' && node.type !== 'floorplan') {
-                toggle.innerHTML = `
-                    <button onclick="event.stopPropagation(); toggleItemActive('${node.type}', ${node.id})" 
-                            class="w-10 h-5 rounded-full relative transition-colors ${node.is_active ? 'bg-emerald-600' : 'bg-slate-700'}">
-                        <span class="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${node.is_active ? 'translate-x-5' : 'translate-x-0'}"></span>
-                    </button>
-                `;
-            }
-
-            row.appendChild(chevron);
-            row.appendChild(icon);
-            row.appendChild(name);
-            row.appendChild(actions);
-            row.appendChild(toggle);
-            div.appendChild(row);
-
-            if (node.children && node.children.length > 0) {
-                const childrenContainer = document.createElement('div');
-                childrenContainer.className = `shelf-tree-children ${expanded ? '' : 'hidden'}`;
-                node.children.forEach(child => {
-                    const childNode = createTreeNode(child, level + 1, false);
-                    childrenContainer.appendChild(childNode);
-                });
-                div.appendChild(childrenContainer);
-            }
-
-            return div;
-        }
-
-        function toggleNodeExpand(nodeDiv) {
-            const isExpanded = nodeDiv.dataset.expanded === 'true';
-            nodeDiv.dataset.expanded = !isExpanded;
-            const childrenContainer = nodeDiv.querySelector('.shelf-tree-children');
-            const chevron = nodeDiv.querySelector('.fa-chevron-down');
-            
-            if (childrenContainer) {
-                childrenContainer.classList.toggle('hidden');
-            }
-            if (chevron) {
-                chevron.classList.toggle('-rotate-90');
-            }
-        }
-
-        function getIconForType(type) {
-            const icons = {
-                'floorplan': 'fa-solid fa-map',
-                'room': 'fa-solid fa-door-open',
-                'shelf': 'fa-solid fa-box',
-                'section': 'fa-solid fa-layer-group',
-                'shelflevel': 'fa-solid fa-bars',
-                'book': 'fa-solid fa-book'
-            };
-            return icons[type] || 'fa-solid fa-circle';
-        }
-
-        function getBgColorForType(type) {
-            const colors = {
-                'floorplan': 'bg-purple-900/50 text-purple-400',
-                'room': 'bg-blue-900/50 text-blue-400',
-                'shelf': 'bg-amber-900/50 text-amber-400',
-                'section': 'bg-emerald-900/50 text-emerald-400',
-                'shelflevel': 'bg-cyan-900/50 text-cyan-400',
-                'book': 'bg-rose-900/50 text-rose-400'
-            };
-            return colors[type] || 'bg-slate-800 text-slate-400';
-        }
-
-        function getSubtitle(node) {
-            if (node.type === 'room' || node.type === 'shelf') {
-                return `X: ${node.map_x}, Y: ${node.map_y}`;
-            } else if (node.type === 'section') {
-                return `${node.children ? node.children.length : 0} levels`;
-            } else if (node.type === 'shelflevel') {
-                return `${node.book_count || 0} books`;
-            } else if (node.type === 'book') {
-                return `<span class="px-1.5 py-0.5 rounded text-[9px] font-bold ${getStatusBadgeClass(node.status)}">${node.status}</span>`;
-            }
-            return '';
-        }
-
-        function getStatusBadgeClass(status) {
-            const classes = {
-                'Available': 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20',
-                'Borrowed': 'bg-amber-500/10 text-amber-500 border border-amber-500/20',
-                'Overdue': 'bg-rose-500/10 text-rose-400 border border-rose-500/20',
-                'Lost': 'bg-slate-500/10 text-slate-400 border border-slate-500/20'
-            };
-            return classes[status] || 'bg-slate-500/10 text-slate-400 border border-slate-500/20';
-        }
-
-        function getActionsHtml(node) {
-            if (node.type === 'book') {
-                return `<button onclick="viewBook(${node.id})" class="w-6 h-6 rounded text-cyan-400 hover:text-cyan-200 hover:bg-slate-800/40 transition-colors"><i class="fa-solid fa-eye text-[10px]"></i></button>`;
-            }
-            return `
-                <button onclick="openAddModal('${node.type}', ${node.id})" class="w-6 h-6 rounded text-emerald-400 hover:text-emerald-200 hover:bg-slate-800/40 transition-colors"><i class="fa-solid fa-plus text-[10px]"></i></button>
-                <button onclick="openEditModal('${node.type}', ${node.id})" class="w-6 h-6 rounded text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 transition-colors"><i class="fa-solid fa-pencil text-[10px]"></i></button>
-                <button onclick="deleteItem('${node.type}', ${node.id})" class="w-6 h-6 rounded text-rose-500/70 hover:text-rose-400 hover:bg-rose-950/20 transition-colors"><i class="fa-solid fa-trash-can text-[10px]"></i></button>
-            `;
-        }
-
-        async function toggleItemActive(type, id) {
-            try {
-                const formData = new FormData();
-                formData.append('model_type', type);
-                formData.append('id', id);
-
-                const response = await fetch('{% url "toggle_active" %}', {
-                    method: 'POST',
-                    body: formData,
-                    headers: {
-                        'X-Requested-With': 'XMLHttpRequest'
-                    }
-                });
-
-                const data = await response.json();
-                if (data.success) {
-                    loadShelfTree();
-                    loadShelfLevelsFlat();
-                } else {
-                    alert(data.error || 'Failed to toggle active status');
-                }
-            } catch (error) {
-                console.error('Error toggling active:', error);
-                alert('An error occurred while toggling active status');
-            }
-        }
-
-        async function loadShelfLevelsFlat() {
-            try {
-                const response = await fetch('{% url "get_shelf_levels_flat" %}');
-                const data = await response.json();
-                shelfLevelsFlat = data.shelf_levels;
-                renderShelfTable(shelfLevelsFlat);
-            } catch (error) {
-                console.error('Error loading shelf levels:', error);
-            }
-        }
-
-        function renderShelfTable(data) {
-            const tbody = document.getElementById('shelf-table-body');
-            tbody.innerHTML = '';
-
-            data.forEach(item => {
-                const row = document.createElement('tr');
-                row.className = `hover:bg-slate-800/10 transition-colors ${item.is_active ? '' : 'opacity-50'}`;
-                row.innerHTML = `
-                    <td class="py-3 px-6 text-slate-300">${item.path}</td>
-                    <td class="py-3 px-6 text-slate-300">${item.label}</td>
-                    <td class="py-3 px-6 text-center font-semibold text-slate-400">${item.book_count}</td>
-                    <td class="py-3 px-6 text-center">
-                        <button onclick="toggleItemActive('shelflevel', ${item.id})" 
-                                class="w-10 h-5 rounded-full relative transition-colors ${item.is_active ? 'bg-emerald-600' : 'bg-slate-700'}">
-                            <span class="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${item.is_active ? 'translate-x-5' : 'translate-x-0'}"></span>
-                        </button>
-                    </td>
-                    <td class="py-3 px-6 text-center">
-                        <div class="flex items-center justify-center gap-1">
-                            <button onclick="jumpToTree(${item.id})" class="w-7 h-7 rounded border border-slate-800 text-cyan-400 hover:text-cyan-200 hover:bg-slate-800/40 transition-colors" title="Jump to tree">
-                                <i class="fa-solid fa-sitemap text-[10px]"></i>
-                            </button>
-                            <button onclick="openEditModal('shelflevel', ${item.id})" class="w-7 h-7 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 transition-colors">
-                                <i class="fa-solid fa-pencil text-[10px]"></i>
-                            </button>
-                            <button onclick="deleteItem('shelflevel', ${item.id})" class="w-7 h-7 rounded border border-slate-800 text-rose-500/70 hover:text-rose-400 hover:bg-rose-950/20 transition-colors">
-                                <i class="fa-solid fa-trash-can text-[10px]"></i>
-                            </button>
-                        </div>
-                    </td>
-                `;
-                tbody.appendChild(row);
-            });
-        }
-
-        function jumpToTree(shelfLevelId) {
-            switchView('tree');
-            // Find and expand the path to this shelf level
-            const item = shelfLevelsFlat.find(sl => sl.id === shelfLevelId);
-            if (item) {
-                // Switch to tree view and expand the path
-                setTimeout(() => {
-                    expandPathToShelfLevel(item);
-                }, 100);
-            }
-        }
-
-        function expandPathToShelfLevel(item) {
-            // This would need to traverse the tree and expand nodes
-            // For simplicity, we'll just load the tree and let the user navigate
-            loadShelfTree();
-        }
-
-        function viewBook(bookId) {
-            window.location.href = `{% url 'admin_edit_book' 0 %}`.replace('0', bookId);
-        }
-
-        // Search functionality for table view
-        document.getElementById('shelfSearchInput').addEventListener('input', function(e) {
-            const searchTerm = e.target.value.toLowerCase();
-            const filteredData = shelfLevelsFlat.filter(item => 
-                item.path.toLowerCase().includes(searchTerm) || 
-                item.label.toLowerCase().includes(searchTerm)
-            );
-            renderShelfTable(filteredData);
-        });
-
-        // Modal functions
-        function openAddModal(type, parentId) {
-            if (type === 'room') {
-                document.getElementById('addRoomFloorPlanId').value = parentId;
-                document.getElementById('addRoomModal').classList.remove('hidden');
-            } else if (type === 'shelf') {
-                document.getElementById('addShelfRoomId').value = parentId;
-                document.getElementById('addShelfModal').classList.remove('hidden');
-            } else if (type === 'section') {
-                document.getElementById('addSectionShelfId').value = parentId;
-                document.getElementById('addSectionModal').classList.remove('hidden');
-            } else if (type === 'shelflevel') {
-                document.getElementById('addShelfLevelSectionId').value = parentId;
-                document.getElementById('addShelfLevelModal').classList.remove('hidden');
-            }
-        }
-
-        function closeAddRoomModal() {
-            document.getElementById('addRoomModal').classList.add('hidden');
-            document.getElementById('addRoomForm').reset();
-        }
-
-        function closeAddShelfModal() {
-            document.getElementById('addShelfModal').classList.add('hidden');
-            document.getElementById('addShelfForm').reset();
-        }
-
-        function closeAddSectionModal() {
-            document.getElementById('addSectionModal').classList.add('hidden');
-            document.getElementById('addSectionForm').reset();
-        }
-
-        function closeAddShelfLevelModal() {
-            document.getElementById('addShelfLevelModal').classList.add('hidden');
-            document.getElementById('addShelfLevelForm').reset();
-        }
-
-        function openEditModal(type, id) {
-            alert(`Edit ${type} modal would open here.\nID: ${id}`);
-        }
-
-        async function deleteItem(type, id) {
-            if (confirm(`Are you sure you want to delete this ${type}?`)) {
-                try {
-                    const formData = new FormData();
-                    const urlMap = {
-                        'room': '{% url "delete_room" %}',
-                        'shelf': '{% url "delete_shelf" %}',
-                        'section': '{% url "delete_section" %}',
-                        'shelflevel': '{% url "delete_shelf_level" %}'
-                    };
-                    const idFieldMap = {
-                        'room': 'room_id',
-                        'shelf': 'shelf_id',
-                        'section': 'section_id',
-                        'shelflevel': 'shelf_level_id'
-                    };
-                    
-                    formData.append(idFieldMap[type], id);
-                    
-                    const response = await fetch(urlMap[type], {
-                        method: 'POST',
-                        body: formData,
-                        headers: {
-                            'X-Requested-With': 'XMLHttpRequest'
-                        }
-                    });
-
-                    const data = await response.json();
-                    if (data.success) {
-                        loadShelfTree();
-                        loadShelfLevelsFlat();
-                    } else {
-                        alert(data.error || 'Failed to delete item');
-                    }
-                } catch (error) {
-                    console.error('Error deleting item:', error);
-                    alert('An error occurred while deleting the item');
-                }
-            }
-        }
-
-        function getFieldsForType(type) {
-            const fields = {
-                'room': { name: 'Room Name', description: true, map_x: true, map_y: true },
-                'shelf': { name: 'Shelf Name', description: true, map_x: true, map_y: true },
-                'section': { name: 'Section Name', description: true },
-                'shelflevel': { name: 'Level Number', level_number: true, label: true }
-            };
-            return fields[type] || { name: 'Name' };
-        }
-
-        // Form submissions for shelf management
-        document.getElementById('addRoomForm').addEventListener('submit', async function(e) {
-            e.preventDefault();
-            const formData = new FormData(this);
-            
-            try {
-                const response = await fetch('{% url "add_room" %}', {
-                    method: 'POST',
-                    body: formData,
-                    headers: {
-                        'X-Requested-With': 'XMLHttpRequest'
-                    }
-                });
-                const data = await response.json();
-                if (data.success) {
-                    closeAddRoomModal();
-                    loadShelfTree();
-                    loadShelfLevelsFlat();
-                } else {
-                    alert(data.error || 'Failed to add room');
-                }
-            } catch (error) {
-                console.error('Error:', error);
-                alert('An error occurred while adding the room');
-            }
-        });
-
-        document.getElementById('addShelfForm').addEventListener('submit', async function(e) {
-            e.preventDefault();
-            const formData = new FormData(this);
-            
-            try {
-                const response = await fetch('{% url "add_shelf" %}', {
-                    method: 'POST',
-                    body: formData,
-                    headers: {
-                        'X-Requested-With': 'XMLHttpRequest'
-                    }
-                });
-                const data = await response.json();
-                if (data.success) {
-                    closeAddShelfModal();
-                    loadShelfTree();
-                    loadShelfLevelsFlat();
-                } else {
-                    alert(data.error || 'Failed to add shelf');
-                }
-            } catch (error) {
-                console.error('Error:', error);
-                alert('An error occurred while adding the shelf');
-            }
-        });
-
-        document.getElementById('addSectionForm').addEventListener('submit', async function(e) {
-            e.preventDefault();
-            const formData = new FormData(this);
-            
-            try {
-                const response = await fetch('{% url "add_section" %}', {
-                    method: 'POST',
-                    body: formData,
-                    headers: {
-                        'X-Requested-With': 'XMLHttpRequest'
-                    }
-                });
-                const data = await response.json();
-                if (data.success) {
-                    closeAddSectionModal();
-                    loadShelfTree();
-                    loadShelfLevelsFlat();
-                } else {
-                    alert(data.error || 'Failed to add section');
-                }
-            } catch (error) {
-                console.error('Error:', error);
-                alert('An error occurred while adding the section');
-            }
-        });
-
-        document.getElementById('addShelfLevelForm').addEventListener('submit', async function(e) {
-            e.preventDefault();
-            const formData = new FormData(this);
-            
-            try {
-                const response = await fetch('{% url "add_shelf_level" %}', {
-                    method: 'POST',
-                    body: formData,
-                    headers: {
-                        'X-Requested-With': 'XMLHttpRequest'
-                    }
-                });
-                const data = await response.json();
-                if (data.success) {
-                    closeAddShelfLevelModal();
-                    loadShelfTree();
-                    loadShelfLevelsFlat();
-                } else {
-                    alert(data.error || 'Failed to add shelf level');
-                }
-            } catch (error) {
-                console.error('Error:', error);
-                alert('An error occurred while adding the shelf level');
-            }
-        });
     </script>
 
+    <script>
+        function applyBookFilters() {
+            var p = new URLSearchParams();
+            var q = (document.getElementById('searchInput').value || '').trim();
+            var g = document.getElementById('genreFilter').value;
+            var s = document.getElementById('statusFilter').value;
+            if (q) p.set('q', q);
+            if (s) p.set('status', s);
+            if (g) p.set('genre', g);
+            var qs = p.toString();
+            location.href = "{% url 'admin_management' %}" + (qs ? '?' + qs : '');
+        }
+    </script>
+    <script src="{% static 'js/admin-enhance.js' %}" defer></script>
 </body>
 </html>

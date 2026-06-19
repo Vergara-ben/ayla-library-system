@@ -80,6 +80,8 @@
             }
         }
     </style>
+    <link rel="stylesheet" href="{% static 'css/admin-enhance.css' %}">
+    <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
 </head>
 <body class="flex h-screen overflow-hidden">
 
@@ -146,6 +148,9 @@
                     <a href="{% url 'shelf_manager' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
                         <i class="fa-solid fa-folder-tree w-5 text-sm"></i>
                         <span class="text-sm font-medium">Shelf Manager</span>
+                    </a>
+                    <a href="{% url 'admin_reports' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                        <i class="fa-solid fa-chart-line w-5 text-sm"></i><span class="text-sm font-medium">Reports</span>
                     </a>
                 </div>
             </div>
@@ -281,8 +286,8 @@
                     <span class="font-medium">Showing <span class="text-slate-400">{{ donations|length }}</span> of <span class="text-slate-400">{{ donations|length }}</span> donations</span>
                     
                     <div class="flex items-center gap-1">
-                        {% if paginator.has_previous %}
-                            <a href="?page={{ paginator.previous_page_number }}" class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors">&larr; Prev</a>
+                        {% if donations.has_previous %}
+                            <a href="?page={{ donations.previous_page_number }}" class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors">&larr; Prev</a>
                         {% else %}
                             <button class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors cursor-not-allowed" disabled>&larr; Prev</button>
                         {% endif %}
@@ -295,8 +300,8 @@
                             {% endif %}
                         {% endfor %}
                         
-                        {% if paginator.has_next %}
-                            <a href="?page={{ paginator.next_page_number }}" class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors">Next &rarr;</a>
+                        {% if donations.has_next %}
+                            <a href="?page={{ donations.next_page_number }}" class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors">Next &rarr;</a>
                         {% else %}
                             <button class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors cursor-not-allowed" disabled>Next &rarr;</button>
                         {% endif %}
@@ -431,5 +436,6 @@
         });
     </script>
 
+    <script src="{% static 'js/admin-enhance.js' %}" defer></script>
 </body>
 </html>

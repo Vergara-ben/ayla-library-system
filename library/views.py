@@ -22,7 +22,11 @@ from .auth_utils import (
     patron_login_required,
     admin_login_required,
 )
-from .models import Book, Patron, PatronLog, Transaction, User, Section, ShelfLevel, Donation, Announcement, FloorPlan, Shelf, Room, Waypoint, BLEBeacon, WaypointConnection
+from .audit import log_admin_action
+from .eligibility import check_patron_eligibility
+from .emails import announcement_email, borrow_confirmation_email, return_receipt_email
+from .reports import REPORT_TYPES, parse_date_range, build_report, render_report_pdf, render_report_excel
+from .models import Book, Patron, PatronLog, Transaction, User, Section, ShelfLevel, Donation, Announcement, FloorPlan, Shelf, Room, Waypoint, BLEBeacon, WaypointConnection, SystemLog
 
 # Patron views
 def patron_login(request):
@@ -270,6 +274,7 @@ def admin_login(request):
 
         request.session['admin_id'] = admin.admin_id
         request.session['admin_fullname'] = admin.fullname
+        log_admin_action(request, 'Login', 'Auth', admin.admin_id, f'{admin.fullname} logged in')
         return redirect('/admin-portal/dashboard/')
 
     return render(request, 'admin/signin.html')
@@ -337,21 +342,44 @@ def admin_signin(request):
 
 @admin_login_required
 def admin_management(request):
-    books_queryset = Book.objects.select_related('section', 'shelf_level').order_by('title')
-    total_books = books_queryset.count()
+    from urllib.parse import urlencode
+    q = (request.GET.get('q') or '').strip()
+    status = (request.GET.get('status') or '').strip()
+    genre = (request.GET.get('genre') or '').strip()
+
+    books_queryset = Book.objects.select_related('section', 'shelf_level')
+    if q:
+        books_queryset = books_queryset.filter(
+            Q(title__icontains=q) | Q(author__icontains=q) | Q(ISBN__icontains=q)
+        )
+    valid_status = [choice[0] for choice in Book.STATUS_CHOICES]
+    if status in valid_status:
+        books_queryset = books_queryset.filter(status=status)
+    if genre:
+        books_queryset = books_queryset.filter(genre=genre)
+    books_queryset = books_queryset.order_by('title')
+
+    # Global stats (independent of the filters above).
+    total_books = Book.objects.count()
     total_copies = total_books
-    available_count = books_queryset.filter(status='Available').count()
-    borrowed_count = books_queryset.filter(status='Borrowed').count()
+    available_count = Book.objects.filter(status='Available').count()
+    borrowed_count = Book.objects.filter(status='Borrowed').count()
     sections = Section.objects.all()
     shelf_levels = ShelfLevel.objects.all()
+    genres = list(
+        Book.objects.exclude(genre__isnull=True).exclude(genre='')
+        .order_by('genre').values_list('genre', flat=True).distinct()
+    )
 
-    # Pagination
-    page_number = request.GET.get('page', 1)
     paginator = Paginator(books_queryset, 15)  # 15 books per page
-    books = paginator.get_page(page_number)
+    books = paginator.get_page(request.GET.get('page', 1))
 
-    # Pending transactions count for badge
     pending_transactions_count = Transaction.objects.filter(transaction_type='Borrow', return_date__isnull=True).count()
+
+    params = {}
+    for key, value in (('q', q), ('status', status), ('genre', genre)):
+        if value:
+            params[key] = value
 
     context = {
         'books': books,
@@ -361,6 +389,12 @@ def admin_management(request):
         'borrowed_count': borrowed_count,
         'sections': sections,
         'shelf_levels': shelf_levels,
+        'genres': genres,
+        'status_choices': valid_status,
+        'q': q,
+        'status': status,
+        'genre': genre,
+        'querystring': urlencode(params),
         'pending_transactions_count': pending_transactions_count,
         'paginator': paginator,
     }
@@ -398,7 +432,7 @@ def admin_add_book(request):
 
             qr_code = str(uuid4())
 
-            Book.objects.create(
+            book = Book.objects.create(
                 title=title,
                 author=author,
                 ISBN=isbn,
@@ -410,6 +444,7 @@ def admin_add_book(request):
                 cover_img_url=cover_img_url if cover_img_url else None,
                 qr_code=qr_code
             )
+            log_admin_action(request, 'Create', 'Book', book.book_id, f'Added "{book.title}"')
 
             if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
                 from django.http import JsonResponse
@@ -467,7 +502,7 @@ def admin_add_patron(request):
             error = 'A patron with that email already exists.'
         else:
             hashed_password = hash_password(password)
-            Patron.objects.create(
+            patron = Patron.objects.create(
                 fullname=fullname,
                 email=email,
                 password_hash=hashed_password,
@@ -476,6 +511,7 @@ def admin_add_patron(request):
                 address=address,
                 account_status=account_status or 'Active',
             )
+            log_admin_action(request, 'Create', 'Patron', patron.patron_id, f'Added "{patron.fullname}"')
             return redirect('admin_manage_patron')
 
     # Get patron list context
@@ -549,20 +585,26 @@ def admin_manage_patron(request):
         ),
     ).order_by('-registration_date')
 
+    # Global stats (independent of the search filter below).
     total_patrons = patrons_queryset.count()
     active_patrons = Patron.objects.filter(account_status='Active').count()
-    
-    # Pagination
+    patrons_with_borrows = patrons_queryset.filter(active_borrows__gt=0).count()
+    patrons_overdue = patrons_queryset.filter(overdue_count__gt=0).count()
+
+    # Apply the search filter to the table list.
+    if search_query:
+        patrons_queryset = patrons_queryset.filter(
+            Q(fullname__icontains=search_query) | Q(email__icontains=search_query)
+        )
+
     page_number = request.GET.get('page', 1)
     paginator = Paginator(patrons_queryset, 15)  # 15 patrons per page
     patrons = paginator.get_page(page_number)
-    
-    patrons_with_borrows = patrons_queryset.filter(active_borrows__gt=0).count()
-    patrons_overdue = patrons_queryset.filter(overdue_count__gt=0).count()
 
     # Pending transactions count for badge
     pending_transactions_count = Transaction.objects.filter(transaction_type='Borrow', return_date__isnull=True).count()
 
+    from urllib.parse import urlencode
     context = {
         'patrons': patrons,
         'total_patrons': total_patrons,
@@ -571,6 +613,8 @@ def admin_manage_patron(request):
         'patrons_overdue': patrons_overdue,
         'pending_transactions_count': pending_transactions_count,
         'paginator': paginator,
+        'search_query': search_query,
+        'querystring': urlencode({'search': search_query}) if search_query else '',
     }
     return render(request, 'admin/managepatron.html', context)
 
@@ -615,6 +659,7 @@ def admin_edit_patron(request, patron_id):
             if password:
                 patron.password_hash = hash_password(password)
             patron.save()
+            log_admin_action(request, 'Update', 'Patron', patron.patron_id, f'Updated "{patron.fullname}"')
             success = 'Patron updated successfully.'
             initial.update({
                 'fullname': fullname,
@@ -664,7 +709,11 @@ def admin_edit_patron(request, patron_id):
 @admin_login_required
 def admin_delete_patron(request, patron_id):
     if request.method == 'POST':
-        Patron.objects.filter(patron_id=patron_id).delete()
+        patron = Patron.objects.filter(patron_id=patron_id).first()
+        if patron:
+            name = patron.fullname
+            patron.delete()
+            log_admin_action(request, 'Delete', 'Patron', patron_id, f'Deleted "{name}"')
     return redirect('admin_manage_patron')
 
 
@@ -717,6 +766,7 @@ def admin_edit_book(request, book_id):
             if shelf_level_id:
                 book.shelf_level = ShelfLevel.objects.filter(shelf_level_id=shelf_level_id).first()
             book.save()
+            log_admin_action(request, 'Update', 'Book', book.book_id, f'Updated "{book.title}"')
             success = 'Book details updated successfully.'
             initial.update({
                 'title': title,
@@ -761,7 +811,11 @@ def admin_edit_book(request, book_id):
 @admin_login_required
 def admin_delete_book(request, book_id):
     if request.method == 'POST':
-        Book.objects.filter(book_id=book_id).delete()
+        book = Book.objects.filter(book_id=book_id).first()
+        if book:
+            title = book.title
+            book.delete()
+            log_admin_action(request, 'Delete', 'Book', book_id, f'Deleted "{title}"')
     return redirect('admin_management')
 
 
@@ -769,7 +823,7 @@ def admin_delete_book(request, book_id):
 def admin_transaction_action(request, transaction_id):
     if request.method == 'POST':
         action = request.POST.get('action')
-        tx = Transaction.objects.select_related('book').filter(transaction_id=transaction_id).first()
+        tx = Transaction.objects.select_related('book', 'patron').filter(transaction_id=transaction_id).first()
         if tx and action == 'return' and tx.return_date is None:
             tx.return_date = timezone.localdate()
             tx.overdue_flag = bool(tx.due_date and tx.return_date > tx.due_date)
@@ -777,6 +831,11 @@ def admin_transaction_action(request, transaction_id):
             if tx.book and tx.transaction_type == 'Borrow':
                 tx.book.status = 'Available'
                 tx.book.save()
+            log_admin_action(request, 'Process', 'Transaction', tx.transaction_id,
+                             f'Returned "{tx.book.title if tx.book else ""}"')
+            # Email the patron a return receipt.
+            if tx.patron and tx.book:
+                return_receipt_email(tx.patron, [tx.book], had_overdue=tx.overdue_flag)
     return redirect('admin_transaction')
 
 
@@ -800,22 +859,53 @@ def admin_book_detail(request):
 
 @admin_login_required
 def admin_transaction(request):
-    transactions_queryset = Transaction.objects.select_related('patron', 'book').order_by('-transaction_date')
+    from datetime import datetime
+    from urllib.parse import urlencode
+
+    q = (request.GET.get('q') or '').strip()
+    status = (request.GET.get('status') or '').strip().lower()
+    date_from = (request.GET.get('date_from') or '').strip()
+    date_to = (request.GET.get('date_to') or '').strip()
+
+    transactions_queryset = Transaction.objects.select_related('patron', 'book')
+    if q:
+        transactions_queryset = transactions_queryset.filter(
+            Q(patron__fullname__icontains=q) | Q(book__title__icontains=q) | Q(book__ISBN__icontains=q)
+        )
+    if status == 'borrowed':
+        transactions_queryset = transactions_queryset.filter(transaction_type='Borrow', return_date__isnull=True)
+    elif status == 'returned':
+        transactions_queryset = transactions_queryset.filter(return_date__isnull=False)
+    elif status == 'overdue':
+        transactions_queryset = transactions_queryset.filter(overdue_flag=True)
+
+    def _parse_date(s):
+        try:
+            return datetime.strptime(s, '%Y-%m-%d').date()
+        except (ValueError, TypeError):
+            return None
+    df, dt = _parse_date(date_from), _parse_date(date_to)
+    if df:
+        transactions_queryset = transactions_queryset.filter(transaction_date__gte=df)
+    if dt:
+        transactions_queryset = transactions_queryset.filter(transaction_date__lte=dt)
+
+    transactions_queryset = transactions_queryset.order_by('-transaction_date')
 
     total_borrowed = Transaction.objects.filter(transaction_type='Borrow').count()
     total_returned = Transaction.objects.filter(transaction_type='Return').count()
     currently_out = Transaction.objects.filter(transaction_type='Borrow', return_date__isnull=True).count()
     overdue_count = Transaction.objects.filter(overdue_flag=True).count()
+    transaction_count = transactions_queryset.count()
 
-    transaction_count = Transaction.objects.count()
-    
-    # Pagination
-    page_number = request.GET.get('page', 1)
-    paginator = Paginator(transactions_queryset, 20)  # 20 transactions per page
-    transactions = paginator.get_page(page_number)
-    
-    # Pending transactions count for badge
-    pending_transactions_count = Transaction.objects.filter(transaction_type='Borrow', return_date__isnull=True).count()
+    paginator = Paginator(transactions_queryset, 20)
+    transactions = paginator.get_page(request.GET.get('page', 1))
+    pending_transactions_count = currently_out
+
+    params = {}
+    for key, value in (('q', q), ('status', status), ('date_from', date_from), ('date_to', date_to)):
+        if value:
+            params[key] = value
 
     context = {
         'transactions': transactions,
@@ -826,6 +916,11 @@ def admin_transaction(request):
         'transaction_count': transaction_count,
         'pending_transactions_count': pending_transactions_count,
         'paginator': paginator,
+        'q': q,
+        'status': status,
+        'date_from': date_from,
+        'date_to': date_to,
+        'querystring': urlencode(params),
     }
     return render(request, 'admin/transaction.html', context)
 
@@ -954,22 +1049,59 @@ def admin_indoor_map(request):
 
 @admin_login_required
 def admin_log_management(request):
+    from datetime import datetime
+    from urllib.parse import urlencode
+
     today = timezone.localdate()
-    logs_qs = PatronLog.objects.select_related('patron').filter(entry_time__date=today).order_by('-entry_time')
-    logs = logs_qs[:50]
-    todays_entries = logs_qs.count()
+    q = (request.GET.get('q') or '').strip()
+    status = (request.GET.get('status') or '').strip().lower()   # '', 'inside', 'completed'
+    date_str = (request.GET.get('date') or '').strip()
+    try:
+        sel_date = datetime.strptime(date_str, '%Y-%m-%d').date() if date_str else today
+    except ValueError:
+        sel_date = today
+
+    logs_qs = PatronLog.objects.select_related('patron').filter(entry_time__date=sel_date)
+    if q:
+        if q.isdigit():
+            logs_qs = logs_qs.filter(Q(patron__patron_id=int(q)) | Q(patron__fullname__icontains=q))
+        else:
+            logs_qs = logs_qs.filter(patron__fullname__icontains=q)
+    if status == 'inside':
+        logs_qs = logs_qs.filter(exit_time__isnull=True)
+    elif status == 'completed':
+        logs_qs = logs_qs.filter(exit_time__isnull=False)
+    logs_qs = logs_qs.order_by('-entry_time')
+
+    paginator = Paginator(logs_qs, 20)
+    logs = paginator.get_page(request.GET.get('page', 1))
+    log_count = paginator.count
+
+    # Stat cards reflect today's overall activity, independent of the table filters.
+    todays_entries = PatronLog.objects.filter(entry_time__date=today).count()
     todays_exits = PatronLog.objects.filter(exit_time__date=today).count()
-    # Open sessions (entered, no exit yet) = people currently inside.
     currently_inside = PatronLog.objects.filter(exit_time__isnull=True).count()
-    log_count = logs_qs.count()
+
+    params = {}
+    if q:
+        params['q'] = q
+    if status:
+        params['status'] = status
+    if date_str:
+        params['date'] = date_str
 
     context = {
         'logs': logs,
+        'paginator': paginator,
+        'log_count': log_count,
         'todays_entries': todays_entries,
         'todays_exits': todays_exits,
         'currently_inside': currently_inside,
-        'log_count': log_count,
         'today': today,
+        'sel_date': sel_date,
+        'q': q,
+        'status': status,
+        'querystring': urlencode(params),
         'patron_types': [choice[0] for choice in Patron.PATRON_TYPE_CHOICES],
     }
     return render(request, 'admin/logmanagement.html', context)
@@ -1388,10 +1520,25 @@ def process_transaction(request):
     # Get admin from session
     admin_id = request.session.get('admin_id')
     admin = User.objects.filter(admin_id=admin_id).first()
-    
+
+    # 3-point patron eligibility check before borrowing (overdue items,
+    # account suspension, outstanding lost-book penalty).
+    if transaction_type == 'Borrow':
+        eligible, violations = check_patron_eligibility(patron)
+        if not eligible:
+            return JsonResponse({
+                'success': False,
+                'error': f'{patron.fullname} is not eligible to borrow',
+                'errors': violations,
+            })
+
     # Validate books and process transaction
     errors = []
     processed_books = []
+    borrowed_books = []
+    borrow_due_date = None
+    returned_books = []
+    returned_overdue = False
     today = timezone.localdate()
     
     for book_id_str in book_ids:
@@ -1432,6 +1579,8 @@ def process_transaction(request):
                 transaction_type='Borrow',
                 due_date=due_date
             )
+            borrowed_books.append(book)
+            borrow_due_date = due_date
         elif transaction_type == 'Return':
             book.status = 'Available'
             book.save()
@@ -1445,6 +1594,9 @@ def process_transaction(request):
                 tx.return_date = today
                 tx.overdue_flag = bool(tx.due_date and today > tx.due_date)
                 tx.save()
+                if tx.overdue_flag:
+                    returned_overdue = True
+            returned_books.append(book)
         elif transaction_type == 'In-Library Reading':
             book.status = 'Being Read'
             book.save()
@@ -1457,7 +1609,7 @@ def process_transaction(request):
             )
         
         processed_books.append(book.title)
-    
+
     if errors:
         return JsonResponse({
             'success': False,
@@ -1465,7 +1617,21 @@ def process_transaction(request):
             'errors': errors,
             'processed': processed_books
         })
-    
+
+    patron_label = f' for {patron.fullname}' if patron else ''
+    log_admin_action(
+        request, 'Process', 'Transaction', None,
+        f'{transaction_type}: {len(processed_books)} book(s){patron_label}'
+    )
+
+    # Email the patron a borrowing confirmation with the due date.
+    if transaction_type == 'Borrow' and patron and borrowed_books:
+        borrow_confirmation_email(patron, borrowed_books, borrow_due_date)
+
+    # Email the patron a return receipt.
+    if transaction_type == 'Return' and patron and returned_books:
+        return_receipt_email(patron, returned_books, had_overdue=returned_overdue)
+
     return JsonResponse({
         'success': True,
         'message': f'Successfully processed {len(processed_books)} books',
@@ -1526,7 +1692,9 @@ def donation_management(request):
             date_donated=datetime.strptime(date_donated, '%Y-%m-%d').date() if date_donated else timezone.localdate(),
             status='Received'
         )
-        
+        log_admin_action(request, 'Create', 'Donation', donation.donation_id,
+                         f'"{book.title}" from {donor_name}')
+
         return redirect('donation_management')
     
     # Pagination
@@ -1550,12 +1718,14 @@ def update_donation_status(request):
         if donation:
             donation.status = status
             donation.save()
-            
+
             # If status is Shelved, update book status to Available
             if status == 'Shelved':
                 donation.book.status = 'Available'
                 donation.book.save()
-    
+            log_admin_action(request, 'Update', 'Donation', donation.donation_id,
+                             f'Status set to {status}')
+
     return redirect('donation_management')
 
 
@@ -1565,9 +1735,11 @@ def delete_donation(request):
         donation_id = request.POST.get('donation_id')
         donation = Donation.objects.filter(donation_id=donation_id).first()
         if donation:
+            detail = f'"{donation.book.title}" from {donation.donor_name}' if donation.book else donation.donor_name
             # Delete the book as well since it's linked
             donation.book.delete()
-    
+            log_admin_action(request, 'Delete', 'Donation', donation_id, detail)
+
     return redirect('donation_management')
 
 
@@ -1587,13 +1759,24 @@ def announcement_management(request):
         admin_id = request.session.get('admin_id')
         admin = User.objects.filter(admin_id=admin_id).first()
         
-        Announcement.objects.create(
+        announcement = Announcement.objects.create(
             posted_by=admin,
             title=title,
             message=message,
             is_active=True
         )
-        
+        log_admin_action(request, 'Create', 'Announcement', announcement.announcement_id, f'Posted "{title}"')
+
+        # Optionally email the announcement to all active patrons.
+        if request.POST.get('email_patrons'):
+            recipients = Patron.objects.filter(account_status='Active').exclude(email='')
+            sent = 0
+            for p in recipients:
+                if announcement_email(p, announcement):
+                    sent += 1
+            log_admin_action(request, 'Notify', 'Announcement', announcement.announcement_id,
+                             f'Emailed "{title}" to {sent} patron(s)')
+
         return redirect('announcement_management')
     
     # Pagination
@@ -1615,7 +1798,10 @@ def toggle_announcement(request):
         if announcement:
             announcement.is_active = not announcement.is_active
             announcement.save()
-    
+            state = 'activated' if announcement.is_active else 'deactivated'
+            log_admin_action(request, 'Update', 'Announcement', announcement.announcement_id,
+                             f'"{announcement.title}" {state}')
+
     return redirect('announcement_management')
 
 
@@ -1623,8 +1809,12 @@ def toggle_announcement(request):
 def delete_announcement(request):
     if request.method == 'POST':
         announcement_id = request.POST.get('announcement_id')
-        Announcement.objects.filter(announcement_id=announcement_id).delete()
-    
+        announcement = Announcement.objects.filter(announcement_id=announcement_id).first()
+        if announcement:
+            title = announcement.title
+            announcement.delete()
+            log_admin_action(request, 'Delete', 'Announcement', announcement_id, f'Deleted "{title}"')
+
     return redirect('announcement_management')
 
 
@@ -1815,37 +2005,6 @@ def import_transactions(request):
         return JsonResponse({'success': False, 'error': str(e)})
 
 
-@admin_login_required
-def export_transactions(request):
-    transactions = Transaction.objects.select_related('patron', 'book', 'processed_by').order_by('-transaction_date')
-    
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Transactions Export"
-    
-    headers = ['transaction_id', 'patron_id', 'patron_name', 'book_id', 'book_title', 'transaction_type', 'transaction_date', 'due_date', 'return_date', 'overdue_flag']
-    ws.append(headers)
-    
-    for tx in transactions:
-        ws.append([
-            tx.transaction_id,
-            tx.patron.patron_id if tx.patron else '',
-            tx.patron.fullname if tx.patron else 'In-Library User',
-            tx.book.book_id,
-            tx.book.title,
-            tx.transaction_type,
-            tx.transaction_date.strftime('%Y-%m-%d') if tx.transaction_date else '',
-            tx.due_date.strftime('%Y-%m-%d') if tx.due_date else '',
-            tx.return_date.strftime('%Y-%m-%d') if tx.return_date else '',
-            tx.overdue_flag
-        ])
-    
-    response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-    response['Content-Disposition'] = 'attachment; filename=transactions_export.xlsx'
-    wb.save(response)
-    return response
-
-
 # Log Import/Export
 @admin_login_required
 def download_log_template(request):
@@ -1925,31 +2084,70 @@ def import_logs(request):
         return JsonResponse({'success': False, 'error': str(e)})
 
 
+# ─── REPORTS VIEWS ───────────────────────────────────────────────
 @admin_login_required
-def export_logs(request):
-    logs = PatronLog.objects.select_related('patron').order_by('-entry_time')
+def admin_reports(request):
+    """Reports hub: on-screen preview of the selected report + date range."""
+    report_type = request.GET.get('type', 'transactions')
+    if report_type not in dict(REPORT_TYPES):
+        report_type = 'transactions'
+    start, end = parse_date_range(request.GET.get('start'), request.GET.get('end'))
+    report = build_report(report_type, start, end)
 
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Logs Export"
+    pending_transactions_count = Transaction.objects.filter(
+        transaction_type='Borrow', return_date__isnull=True
+    ).count()
 
-    headers = ['log_id', 'patron_id', 'patron_name', 'school', 'purpose_of_visit', 'entry_time', 'exit_time']
-    ws.append(headers)
+    context = {
+        'report': report,
+        'report_types': REPORT_TYPES,
+        'selected_type': report_type,
+        'start_date': start.strftime('%Y-%m-%d'),
+        'end_date': end.strftime('%Y-%m-%d'),
+        'is_snapshot': report_type in {'books', 'patrons'},
+        'pending_transactions_count': pending_transactions_count,
+    }
+    return render(request, 'admin/reports.html', context)
 
-    for log in logs:
-        ws.append([
-            log.log_id,
-            log.patron.patron_id,
-            log.patron.fullname,
-            log.school or '',
-            log.purpose_of_visit or '',
-            timezone.localtime(log.entry_time).strftime('%Y-%m-%d %H:%M:%S') if log.entry_time else '',
-            timezone.localtime(log.exit_time).strftime('%Y-%m-%d %H:%M:%S') if log.exit_time else '',
-        ])
-    
-    response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-    response['Content-Disposition'] = 'attachment; filename=logs_export.xlsx'
-    wb.save(response)
+
+@admin_login_required
+def admin_report_pdf(request):
+    """Download the selected report as a PDF."""
+    report_type = request.GET.get('type', 'transactions')
+    if report_type not in dict(REPORT_TYPES):
+        report_type = 'transactions'
+    start, end = parse_date_range(request.GET.get('start'), request.GET.get('end'))
+    report = build_report(report_type, start, end)
+
+    buf = render_report_pdf(report)
+    log_admin_action(request, 'Export', 'Report',
+                     detail=f"{report['title']} PDF ({report['period_label']})")
+
+    response = HttpResponse(buf, content_type='application/pdf')
+    filename = f"{report_type}_report_{start}_{end}.pdf"
+    response['Content-Disposition'] = f'attachment; filename={filename}'
+    return response
+
+
+@admin_login_required
+def admin_report_excel(request):
+    """Download the selected report as an Excel (.xlsx) file."""
+    report_type = request.GET.get('type', 'transactions')
+    if report_type not in dict(REPORT_TYPES):
+        report_type = 'transactions'
+    start, end = parse_date_range(request.GET.get('start'), request.GET.get('end'))
+    report = build_report(report_type, start, end)
+
+    buf = render_report_excel(report)
+    log_admin_action(request, 'Export', 'Report',
+                     detail=f"{report['title']} Excel ({report['period_label']})")
+
+    response = HttpResponse(
+        buf,
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
+    filename = f"{report_type}_report_{start}_{end}.xlsx"
+    response['Content-Disposition'] = f'attachment; filename={filename}'
     return response
 
 
@@ -1963,6 +2161,55 @@ def shelf_manager(request):
     return render(request, 'admin/shelfmanager.html', {
         'pending_transactions_count': pending_transactions_count,
     })
+
+
+@admin_login_required
+def get_books_for_placement(request):
+    """Searchable list of books for the shelf-level placement picker."""
+    q = (request.GET.get('q') or '').strip()
+    books = Book.objects.select_related('shelf_level').order_by('title')
+    if q:
+        books = books.filter(
+            Q(title__icontains=q) | Q(author__icontains=q) | Q(ISBN__icontains=q)
+        )
+    data = []
+    for b in books[:300]:
+        if b.shelf_level:
+            location = b.shelf_level.label or f'Level {b.shelf_level.level_number}'
+        else:
+            location = ''
+        data.append({
+            'book_id': b.book_id,
+            'title': b.title,
+            'author': b.author,
+            'status': b.status,
+            'shelf_level_id': b.shelf_level_id,
+            'location': location,
+        })
+    return JsonResponse({'success': True, 'books': data})
+
+
+@admin_login_required
+def assign_books_to_level(request):
+    """Place the selected books onto a shelf level (and its parent section)."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
+
+    level = ShelfLevel.objects.select_related('section').filter(
+        shelf_level_id=request.POST.get('shelf_level_id')
+    ).first()
+    if level is None:
+        return JsonResponse({'success': False, 'error': 'Shelf level not found'})
+
+    raw = request.POST.get('book_ids', '')
+    ids = [int(x) for x in raw.split(',') if x.strip().isdigit()]
+    if not ids:
+        return JsonResponse({'success': False, 'error': 'No books selected'})
+
+    updated = Book.objects.filter(book_id__in=ids).update(
+        shelf_level=level, section=level.section
+    )
+    return JsonResponse({'success': True, 'updated': updated})
 
 
 @admin_login_required

@@ -80,6 +80,8 @@
             }
         }
     </style>
+    <link rel="stylesheet" href="{% static 'css/admin-enhance.css' %}">
+    <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
 </head>
 <body class="flex h-screen overflow-hidden">
 
@@ -146,6 +148,9 @@
                     <a href="{% url 'shelf_manager' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
                         <i class="fa-solid fa-folder-tree w-5 text-sm"></i>
                         <span class="text-sm font-medium">Shelf Manager</span>
+                    </a>
+                    <a href="{% url 'admin_reports' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                        <i class="fa-solid fa-chart-line w-5 text-sm"></i><span class="text-sm font-medium">Reports</span>
                     </a>
                 </div>
             </div>
@@ -275,8 +280,8 @@
                     <span class="font-medium">Showing <span class="text-slate-400">{{ announcements|length }}</span> of <span class="text-slate-400">{{ announcements|length }}</span> announcements</span>
                     
                     <div class="flex items-center gap-1">
-                        {% if paginator.has_previous %}
-                            <a href="?page={{ paginator.previous_page_number }}" class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors">&larr; Prev</a>
+                        {% if announcements.has_previous %}
+                            <a href="?page={{ announcements.previous_page_number }}" class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors">&larr; Prev</a>
                         {% else %}
                             <button class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors cursor-not-allowed" disabled>&larr; Prev</button>
                         {% endif %}
@@ -289,8 +294,8 @@
                             {% endif %}
                         {% endfor %}
                         
-                        {% if paginator.has_next %}
-                            <a href="?page={{ paginator.next_page_number }}" class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors">Next &rarr;</a>
+                        {% if announcements.has_next %}
+                            <a href="?page={{ announcements.next_page_number }}" class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors">Next &rarr;</a>
                         {% else %}
                             <button class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors cursor-not-allowed" disabled>Next &rarr;</button>
                         {% endif %}
@@ -324,6 +329,10 @@
                     <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Message</label>
                     <textarea name="message" id="addMessage" rows="5" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium resize-none" style="background-color: var(--bg-input);" required></textarea>
                 </div>
+                <label class="flex items-center gap-2.5 cursor-pointer select-none">
+                    <input type="checkbox" name="email_patrons" value="1" class="w-4 h-4 rounded border-slate-600 bg-slate-900 text-cyan-600 focus:ring-cyan-700 focus:ring-offset-0">
+                    <span class="text-[11px] text-slate-300">Also email this announcement to all active patrons</span>
+                </label>
                 <div class="pt-4 flex items-center justify-end gap-3">
                     <button type="button" onclick="closeAddModal()" class="px-5 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:text-slate-100 hover:bg-slate-800/40 font-semibold tracking-wide transition-colors min-w-[100px]">
                         Cancel
@@ -394,5 +403,6 @@
         });
     </script>
 
+    <script src="{% static 'js/admin-enhance.js' %}" defer></script>
 </body>
 </html>

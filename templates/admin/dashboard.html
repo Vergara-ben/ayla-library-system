@@ -598,6 +598,8 @@
             }
         }
     </style>
+    <link rel="stylesheet" href="{% static 'css/admin-enhance.css' %}">
+    <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
 </head>
 <body>
 
@@ -689,6 +691,14 @@
                         <div class="menu-link-content">
                             <span class="menu-icon">🗺️</span>
                             <span>Floor Plans</span>
+                        </div>
+                    </a>
+                </li>
+                <li class="menu-item">
+                    <a href="{% url 'admin_reports' %}">
+                        <div class="menu-link-content">
+                            <span class="menu-icon">📈</span>
+                            <span>Reports</span>
                         </div>
                     </a>
                 </li>
@@ -861,5 +871,6 @@
         </main>
     </div>
 
+    <script src="{% static 'js/admin-enhance.js' %}" defer></script>
 </body>
 </html>

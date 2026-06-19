@@ -140,3 +140,25 @@ STATICFILES_DIRS = [
 ]
 
 STATIC_ROOT = BASE_DIR / 'staticfiles'
+
+
+# Email / SMTP configuration (env-driven)
+# https://docs.djangoproject.com/en/6.0/topics/email/
+LIBRARY_NAME = 'Ayla Public Library'
+EMAIL_HOST = os.environ.get('EMAIL_HOST', 'smtp.gmail.com')
+EMAIL_PORT = int(os.environ.get('EMAIL_PORT', '587'))
+EMAIL_USE_TLS = os.environ.get('EMAIL_USE_TLS', 'True').lower() in ('1', 'true', 'yes')
+EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', '')
+EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
+DEFAULT_FROM_EMAIL = os.environ.get(
+    'DEFAULT_FROM_EMAIL',
+    f'{LIBRARY_NAME} <{EMAIL_HOST_USER}>' if EMAIL_HOST_USER else 'noreply@aylalibrary.local'
+)
+EMAIL_TIMEOUT = 20
+
+# Use real SMTP only when credentials are present; otherwise print emails to the
+# console so the app runs in dev/demo without crashing on send.
+if EMAIL_HOST_USER and EMAIL_HOST_PASSWORD:
+    EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+else:
+    EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'

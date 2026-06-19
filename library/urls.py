@@ -71,22 +71,26 @@ urlpatterns = [
     path('admin-portal/add-shelf-level/', views.add_shelf_level, name='add_shelf_level'),
     path('admin-portal/edit-shelf-level/', views.edit_shelf_level, name='edit_shelf_level'),
     path('admin-portal/delete-shelf-level/', views.delete_shelf_level, name='delete_shelf_level'),
-    # Transaction Import/Export
+    # Transaction Import
     path('admin-portal/download-transaction-template/', views.download_transaction_template, name='download_transaction_template'),
     path('admin-portal/import-transactions/', views.import_transactions, name='import_transactions'),
-    path('admin-portal/export-transactions/', views.export_transactions, name='export_transactions'),
-    # Log Import/Export
+    # Log Import
     path('admin-portal/download-log-template/', views.download_log_template, name='download_log_template'),
     path('admin-portal/import-logs/', views.import_logs, name='import_logs'),
-    path('admin-portal/export-logs/', views.export_logs, name='export_logs'),
     # Entry/Exit visit logging (Log Management "New Log" modal)
     path('admin-portal/log-entry/', views.entry_log_start, name='entry_log_start'),
     path('admin-portal/log-exit/', views.entry_log_exit, name='entry_log_exit'),
     path('admin-portal/log-register/', views.entry_log_register, name='entry_log_register'),
     path('admin-portal/edit-log/', views.edit_patron_log, name='edit_patron_log'),
     path('admin-portal/delete-log/', views.delete_patron_log, name='delete_patron_log'),
+    # Reports
+    path('admin-portal/reports/', views.admin_reports, name='admin_reports'),
+    path('admin-portal/reports/pdf/', views.admin_report_pdf, name='admin_report_pdf'),
+    path('admin-portal/reports/excel/', views.admin_report_excel, name='admin_report_excel'),
     # Shelf Management
     path('admin-portal/shelf-manager/', views.shelf_manager, name='shelf_manager'),
+    path('admin-portal/books-for-placement/', views.get_books_for_placement, name='get_books_for_placement'),
+    path('admin-portal/assign-books-to-level/', views.assign_books_to_level, name='assign_books_to_level'),
     path('admin-portal/get-shelf-tree/', views.get_shelf_tree, name='get_shelf_tree'),
     path('admin-portal/get-shelf-levels-flat/', views.get_shelf_levels_flat, name='get_shelf_levels_flat'),
     path('admin-portal/toggle-active/', views.toggle_active, name='toggle_active'),

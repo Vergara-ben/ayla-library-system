@@ -413,3 +413,35 @@ class PatronLog(models.Model):
 
     def __str__(self):
         return f"{self.patron} — entry {self.entry_time}"
+
+
+# ─── 16. SYSTEM LOGS (ADMIN AUDIT TRAIL) ──────────────────────
+class SystemLog(models.Model):
+    """Audit trail of administrative actions performed in the system.
+
+    Powers the manuscript's System Log Report. ``admin`` is kept with
+    SET_NULL and ``admin_name`` stores a snapshot so the trail survives
+    even if the admin account is later deleted.
+    """
+
+    log_id = models.AutoField(primary_key=True)
+    admin = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        db_column='admin_id'
+    )
+    admin_name = models.CharField(max_length=255, blank=True, null=True)
+    action = models.CharField(max_length=50)          # Create, Update, Delete, Login, Process
+    entity_type = models.CharField(max_length=100)    # Book, Patron, Transaction, Donation, ...
+    entity_id = models.CharField(max_length=100, blank=True, null=True)
+    detail = models.CharField(max_length=500, blank=True, null=True)
+    timestamp = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        db_table = 'System_Logs'
+        ordering = ['-timestamp']
+
+    def __str__(self):
+        return f"{self.action} {self.entity_type} by {self.admin_name}"

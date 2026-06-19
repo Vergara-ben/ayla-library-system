@@ -61,6 +61,8 @@
         .sw input:checked + .tk { background: #0e7490; }
         .sw input:checked + .tk:before { transform: translateX(14px); background: #22d3ee; }
     </style>
+    <link rel="stylesheet" href="{% static 'css/admin-enhance.css' %}">
+    <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
 </head>
 <body class="flex h-screen overflow-hidden">
 
@@ -111,6 +113,9 @@
                     </a>
                     <a href="{% url 'shelf_manager' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-800/50 text-cyan-400 font-medium border border-slate-700/50">
                         <i class="fa-solid fa-folder-tree w-5 text-sm"></i><span class="text-sm">Shelf Manager</span>
+                    </a>
+                    <a href="{% url 'admin_reports' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                        <i class="fa-solid fa-chart-line w-5 text-sm"></i><span class="text-sm font-medium">Reports</span>
                     </a>
                 </div>
             </div>
@@ -251,6 +256,40 @@
         </div>
     </div>
 
+    <!-- Add Books to Shelf Level (cart-style picker) -->
+    <div id="placementModal" class="hidden absolute inset-0 bg-black/60 z-40 flex items-center justify-center p-4 overflow-y-auto">
+        <div class="w-full max-w-3xl rounded-2xl border p-6 flex flex-col gap-4 shadow-2xl my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color); max-height: 88vh;">
+            <div class="flex items-center justify-between">
+                <h3 class="text-base font-bold text-slate-200 tracking-wide">Add Books to <span id="placeLevelName" class="text-cyan-400">Level</span></h3>
+                <button type="button" onclick="closePlacement()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40"><i class="fa-solid fa-xmark text-sm"></i></button>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 min-h-0">
+                <!-- LEFT: cart -->
+                <div class="flex flex-col rounded-xl border border-slate-800 overflow-hidden" style="background-color: var(--bg-card);">
+                    <div class="px-4 py-2.5 border-b border-slate-800 flex items-center gap-2 text-xs font-bold text-slate-300">
+                        <i class="fa-solid fa-layer-group text-cyan-500 text-[11px]"></i> Selected to add <span id="placeCartCount" class="text-cyan-400">(0)</span>
+                    </div>
+                    <div id="placeCart" class="p-2 space-y-1.5 overflow-y-auto" style="max-height: 46vh; min-height: 180px;"></div>
+                </div>
+                <!-- RIGHT: all books -->
+                <div class="flex flex-col rounded-xl border border-slate-800 overflow-hidden" style="background-color: var(--bg-card);">
+                    <div class="px-3 py-2.5 border-b border-slate-800">
+                        <div class="relative">
+                            <i class="fa-solid fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-xs"></i>
+                            <input type="text" id="placeSearch" oninput="renderPlaceLists()" placeholder="Search all books..." class="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-3 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-cyan-800 placeholder-slate-600">
+                        </div>
+                    </div>
+                    <div id="placeList" class="p-2 space-y-1.5 overflow-y-auto" style="max-height: 46vh; min-height: 180px;"></div>
+                </div>
+            </div>
+            <div id="placeError" class="hidden rounded-lg border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-rose-100 text-[11px]"></div>
+            <div class="flex items-center justify-end gap-3">
+                <button type="button" onclick="closePlacement()" class="px-5 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:bg-slate-800/40 font-semibold text-xs min-w-[100px]">Cancel</button>
+                <button type="button" onclick="confirmPlacement()" class="bg-cyan-700 hover:bg-cyan-600 text-white font-bold px-5 py-2.5 rounded-lg flex items-center gap-2 text-xs"><i class="fa-solid fa-check text-xs"></i> Confirm <span id="placeConfirmCount"></span></button>
+            </div>
+        </div>
+    </div>
+
     <script>
         const CSRF = "{{ csrf_token }}";
         const U = {
@@ -264,6 +303,8 @@
             delRoom: "{% url 'delete_room' %}", delShelf: "{% url 'delete_shelf' %}",
             delSection: "{% url 'delete_section' %}", delLevel: "{% url 'delete_shelf_level' %}",
             bookBase: "/admin-portal/book-details/",
+            placementBooks: "{% url 'get_books_for_placement' %}",
+            assignBooks: "{% url 'assign_books_to_level' %}",
         };
         const TYPE = {
             floorplan: { icon: 'fa-layer-group', color: 'text-cyan-400', child: 'room' },
@@ -319,6 +360,7 @@
             } else {
                 let a = '';
                 if (t.child) a += '<button class="tbtn add" title="Add ' + childWord[t.child] + '" onclick="openAdd(\'' + node.type + '\',' + node.id + ')"><i class="fa-solid fa-plus"></i></button>';
+                if (node.type === 'shelflevel') a += '<button class="tbtn add" title="Add Books" onclick="openPlacement(' + node.id + ', this)"><i class="fa-solid fa-book-medical"></i></button>';
                 if (t.edit) a += '<button class="tbtn edit" title="Rename" onclick="openEdit(\'' + node.type + '\',' + node.id + ',this)"><i class="fa-solid fa-pen"></i></button>';
                 if (t.del) a += '<button class="tbtn del" title="Delete" onclick="delNode(\'' + node.type + '\',' + node.id + ')"><i class="fa-solid fa-trash-can"></i></button>';
                 let tog = '';
@@ -479,14 +521,84 @@
             if (!tree && !flatData.length) loadFlat();
         }
 
-        document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { closeModal('addModal'); closeModal('editModal'); closeModal('bookModal'); } });
-        ['addModal', 'editModal', 'bookModal'].forEach(function (id) {
+        document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { closeModal('addModal'); closeModal('editModal'); closeModal('bookModal'); closeModal('placementModal'); } });
+        ['addModal', 'editModal', 'bookModal', 'placementModal'].forEach(function (id) {
             const el = document.getElementById(id);
             el.addEventListener('click', function (e) { if (e.target === el) closeModal(id); });
         });
 
+        // ── Add Books to a shelf level (cart-style picker) ──
+        var placeLevelId = null;
+        var placeBooks = [];      // all fetched books
+        var placeCartIds = [];    // selected book ids, in click order
+
+        async function openPlacement(levelId, btn) {
+            placeLevelId = levelId;
+            placeCartIds = [];
+            var name = btn ? (btn.closest('.trow').getAttribute('data-name') || 'Level') : 'Level';
+            document.getElementById('placeLevelName').textContent = name;
+            document.getElementById('placeSearch').value = '';
+            document.getElementById('placeError').classList.add('hidden');
+            document.getElementById('placeList').innerHTML = '<div class="text-slate-500 text-xs p-3">Loading…</div>';
+            document.getElementById('placeCart').innerHTML = '';
+            openModal('placementModal');
+            var d = await getJSON(U.placementBooks);
+            placeBooks = (d && d.books) || [];
+            renderPlaceLists();
+        }
+        function closePlacement() { closeModal('placementModal'); }
+
+        function bookRowHtml(b, inCart) {
+            var btn = inCart
+                ? '<button class="tbtn del" title="Remove" onclick="removeFromCart(' + b.book_id + ')"><i class="fa-solid fa-minus"></i></button>'
+                : '<button class="tbtn add" title="Add" onclick="addToCart(' + b.book_id + ')"><i class="fa-solid fa-plus"></i></button>';
+            var sub = esc(b.author) + (b.location ? ' · 📍 ' + esc(b.location) : '');
+            return '<div class="flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg border border-slate-800 hover:border-slate-700 bg-slate-950/40">'
+                + '<div class="min-w-0"><span class="block text-xs font-medium text-slate-200 truncate">' + esc(b.title) + '</span>'
+                + '<span class="block text-[10px] text-slate-500 truncate">' + sub + '</span></div>'
+                + btn + '</div>';
+        }
+
+        function renderPlaceLists() {
+            var q = (document.getElementById('placeSearch').value || '').toLowerCase();
+            var inCart = {};
+            placeCartIds.forEach(function (id) { inCart[id] = true; });
+
+            // RIGHT: all books not yet in the cart, filtered by search
+            var rows = placeBooks.filter(function (b) {
+                return !inCart[b.book_id] && (!q || (b.title + ' ' + b.author).toLowerCase().indexOf(q) !== -1);
+            });
+            document.getElementById('placeList').innerHTML = rows.length
+                ? rows.map(function (b) { return bookRowHtml(b, false); }).join('')
+                : '<div class="text-slate-500 text-xs p-3">No books found.</div>';
+
+            // LEFT: cart, in selection order
+            var cartBooks = placeCartIds.map(function (id) {
+                return placeBooks.find(function (b) { return b.book_id === id; });
+            }).filter(Boolean);
+            document.getElementById('placeCart').innerHTML = cartBooks.length
+                ? cartBooks.map(function (b) { return bookRowHtml(b, true); }).join('')
+                : '<div class="text-slate-600 text-xs p-3 text-center">Click + on a book to add it here.</div>';
+
+            document.getElementById('placeCartCount').textContent = '(' + placeCartIds.length + ')';
+            document.getElementById('placeConfirmCount').textContent = placeCartIds.length ? ('(' + placeCartIds.length + ')') : '';
+        }
+
+        function addToCart(id) { if (placeCartIds.indexOf(id) === -1) placeCartIds.push(id); renderPlaceLists(); }
+        function removeFromCart(id) { placeCartIds = placeCartIds.filter(function (x) { return x !== id; }); renderPlaceLists(); }
+
+        async function confirmPlacement() {
+            var err = document.getElementById('placeError');
+            err.classList.add('hidden');
+            if (!placeCartIds.length) { err.textContent = 'Add at least one book first.'; err.classList.remove('hidden'); return; }
+            var r = await post(U.assignBooks, { shelf_level_id: placeLevelId, book_ids: placeCartIds.join(',') });
+            if (r.success !== false) { closePlacement(); loadTree(); }
+            else { err.textContent = r.error || 'Failed to add books.'; err.classList.remove('hidden'); }
+        }
+
         loadTree();
         loadFlat();
     </script>
+    <script src="{% static 'js/admin-enhance.js' %}" defer></script>
 </body>
 </html>

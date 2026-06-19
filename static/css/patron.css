@@ -1,0 +1,201 @@
+/* =====================================================================
+   patron.css — Premium polish layer for the AYLA Patron Module.
+
+   Presentation-only. Loaded LAST on every patron page (after each page's
+   own <style>), so it composes on top without changing any HTML structure,
+   IDs, classes, JavaScript behaviour, or Django bindings.
+
+   Strategy: re-tune the shared design tokens both token systems already
+   consume (--bg/--surface/--accent… and the login page's --green/--dark…),
+   then add depth, refined typography, consistent controls, premium
+   shadows, smooth micro-interactions, friendlier empty states, and a
+   polished mobile experience (44px touch targets, refined bottom nav).
+   ===================================================================== */
+
+/* ---- 1. Refined design tokens --------------------------------------- */
+:root {
+  --bg:        #0a140d;
+  --surface:   #101d14;
+  --surface2:  #16241a;
+  --border:    #20382a;
+  --accent:    #4ade80;
+  --accent2:   #fbbf24;
+  --text:      #eaf6ee;
+  --muted:     #88a594;
+  --danger:    #f87171;
+  --blue:      #60a5fa;
+
+  --p-radius:      18px;
+  --p-radius-sm:   12px;
+  --p-radius-pill: 999px;
+  --p-ring:        rgba(74, 222, 128, .30);
+  --p-shadow:      0 18px 44px -24px rgba(0, 0, 0, .85);
+  --p-shadow-lg:   0 30px 70px -28px rgba(0, 0, 0, .9);
+  --p-ease:        cubic-bezier(.22, .61, .36, 1);
+
+  /* Login page token system — harmonised to the same green */
+  --green:  #4ade80;
+  --green2: #22c55e;
+}
+
+/* ---- 2. Base canvas ------------------------------------------------- */
+html { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; scroll-behavior: smooth; }
+::selection { background: rgba(74, 222, 128, .25); color: #fff; }
+
+/* Soft ambient depth on solid-background (logged-in) pages only.
+   Auth pages paint their own photo background and are left untouched. */
+body { position: relative; }
+
+/* Custom scrollbars */
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-thumb { background: #24402f; border-radius: 8px; }
+*::-webkit-scrollbar-thumb:hover { background: #2d5239; }
+*::-webkit-scrollbar-track { background: transparent; }
+
+/* Accessible keyboard focus everywhere */
+a:focus-visible, button:focus-visible, input:focus-visible,
+select:focus-visible, textarea:focus-visible,
+.tab:focus-visible, .chip:focus-visible, .type-card:focus-visible,
+.book-card:focus-visible, .stat-card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ---- 2b. Unified typography (Syne display + DM Sans body) ---------- */
+body { font-family: 'DM Sans', sans-serif; }
+.logo h1, .title, .nav-title, .logo-text, .greeting h1, .stat-num,
+.card-title, .section-title, .detail-section-title, .modal-title,
+.header h1, .success-title, .book-main-title, .shelf-name, .ann-title,
+.notif-title, .profile-name, .nav-logo .logo-text {
+  font-family: 'Syne', sans-serif;
+}
+
+/* ---- 3. Top navigation -------------------------------------------- */
+.navbar {
+  background: rgba(10, 20, 13, .82) !important;
+  -webkit-backdrop-filter: blur(22px); backdrop-filter: blur(22px);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, .03), 0 10px 30px -22px rgba(0, 0, 0, .9);
+}
+.nav-title, .logo-text { letter-spacing: -.01em; }
+
+/* Round chrome buttons: comfortable touch targets + smooth feedback */
+.back-btn, .nav-btn, .save-btn, .edit-btn, .fl-btn {
+  transition: transform .18s var(--p-ease), border-color .18s var(--p-ease),
+              background-color .18s var(--p-ease), color .18s var(--p-ease);
+}
+.back-btn:hover, .nav-btn:hover, .save-btn:hover { transform: translateY(-1px); border-color: var(--accent); }
+.back-btn:active, .nav-btn:active { transform: scale(.94); }
+
+/* ---- 4. Cards & panels -------------------------------------------- */
+.card, .section, .detail-card, .ann-card, .notif-card, .profile-hero {
+  border-radius: var(--p-radius);
+  box-shadow: var(--p-shadow);
+  transition: transform .22s var(--p-ease), border-color .22s var(--p-ease),
+              box-shadow .22s var(--p-ease);
+}
+.card:hover, .section:hover, .detail-card:hover {
+  border-color: #2d6a4f;
+  box-shadow: var(--p-shadow-lg);
+}
+
+/* Stat cards — premium lift + glow */
+.stat-card { border-radius: var(--p-radius); box-shadow: var(--p-shadow); transition: transform .2s var(--p-ease), border-color .2s var(--p-ease), box-shadow .2s var(--p-ease); }
+.stat-card:hover { transform: translateY(-3px); box-shadow: var(--p-shadow-lg); }
+.stat-card::before { height: 4px !important; }
+
+/* ---- 5. Buttons & tappable controls ------------------------------- */
+.btn, .btn-primary, .btn-map, .btn-nav, .btn-enable, .save-changes,
+.q-btn, .tab, .chip, .type-card, .btn-renew, .btn-dl, .btn-reserve,
+.btn-layers, .btn-secondary, .btn-skip, .logout-btn {
+  transition: transform .18s var(--p-ease), box-shadow .18s var(--p-ease),
+              border-color .18s var(--p-ease), background-color .18s var(--p-ease),
+              color .18s var(--p-ease), filter .18s var(--p-ease);
+}
+/* Primary gradient buttons get a confident lift + brighten */
+.btn:hover, .btn-primary:hover, .btn-map:hover, .btn-nav:not(.disabled):hover,
+.btn-enable:hover, .save-changes:hover {
+  transform: translateY(-2px);
+  filter: brightness(1.05);
+}
+.btn:active, .btn-primary:active, .btn-map:active, .btn-nav:active,
+.btn-enable:active, .save-changes:active, .q-btn:active, .chip:active,
+.type-card:active, .tab:active { transform: translateY(0) scale(.985); }
+
+/* Quick-action tiles */
+.q-btn:hover { transform: translateY(-2px); }
+
+/* ---- 6. Forms ----------------------------------------------------- */
+input:not([type=checkbox]):not([type=radio]), select, textarea, .search-input {
+  transition: border-color .18s var(--p-ease), box-shadow .18s var(--p-ease),
+              background-color .18s var(--p-ease);
+}
+input:focus, select:focus, textarea:focus, .search-input:focus {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 4px var(--p-ring) !important;
+}
+
+/* ---- 7. Book cards (catalog) -------------------------------------- */
+.book-card { border-radius: var(--p-radius-sm); box-shadow: var(--p-shadow); }
+.book-card:hover { border-color: #2d6a4f; transform: translateY(-2px); box-shadow: var(--p-shadow-lg); }
+.book-cover, .book-cover-large, .loan-cover, .book-thumb { box-shadow: 0 8px 20px -10px rgba(0, 0, 0, .8); }
+
+/* Desktop: catalog becomes a comfortable two-column grid */
+@media (min-width: 760px) {
+  #bookList { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: start; }
+  #bookList .empty { grid-column: 1 / -1; }
+  .book-card { margin-bottom: 0 !important; }
+}
+
+/* ---- 8. Bottom navigation (mobile-first app bar) ------------------ */
+.bottom-nav {
+  background: rgba(10, 20, 13, .9) !important;
+  -webkit-backdrop-filter: blur(22px); backdrop-filter: blur(22px);
+  box-shadow: 0 -10px 30px -22px rgba(0, 0, 0, .95);
+}
+.nav-item { padding: 4px 0; min-height: 48px; justify-content: center; border-radius: 12px; position: relative; }
+.nav-item .nav-icon { transition: transform .2s var(--p-ease); }
+.nav-item.active .nav-icon { transform: translateY(-1px) scale(1.12); }
+/* Active pill indicator */
+.nav-item.active::before {
+  content: ''; position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+  width: 26px; height: 3px; border-radius: 3px; background: var(--accent);
+  box-shadow: 0 0 12px var(--accent);
+}
+
+/* ---- 9. Badges & status pills ------------------------------------- */
+.book-badge, .avail-badge, .loan-badge, .ann-tag, .status-badge,
+.book-item .book-badge { letter-spacing: .3px; }
+.status-badge { box-shadow: 0 6px 16px -10px rgba(0, 0, 0, .8); }
+
+/* ---- 10. Empty states -------------------------------------------- */
+.empty { padding: 64px 24px !important; }
+.empty .empty-icon { font-size: 56px !important; margin-bottom: 16px !important; opacity: .9; animation: pFloat 3s ease-in-out infinite; }
+.empty > div:not(.empty-icon) { font-size: 14px; }
+
+@keyframes pFloat { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+
+/* ---- 11. Modals --------------------------------------------------- */
+.modal, .modal-overlay .modal { border-radius: 22px; box-shadow: var(--p-shadow-lg); }
+
+/* ---- 12. Announcement / notification accents ---------------------- */
+.ann-card:hover, .notif-card:hover { border-color: #2d6a4f; transform: translateX(2px); }
+
+/* ---- 13. Touch-target hardening on small screens ----------------- */
+@media (max-width: 640px) {
+  .back-btn, .nav-btn, .save-btn { min-width: 42px; min-height: 42px; }
+  .chip { padding: 9px 16px !important; }
+  .tab { min-height: 46px; }
+  .btn, .btn-primary, .btn-map, .btn-nav, .btn-enable,
+  .save-changes, .q-btn, .btn-renew, .btn-dl { min-height: 44px; }
+  input, select, textarea, .search-input { font-size: 16px !important; } /* prevents iOS zoom-on-focus */
+}
+
+/* ---- 14. Honour reduced-motion ----------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

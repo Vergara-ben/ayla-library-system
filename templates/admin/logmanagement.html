@@ -111,6 +111,8 @@
             margin-right: 0.75rem;
         }
     </style>
+    <link rel="stylesheet" href="{% static 'css/admin-enhance.css' %}">
+    <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
 </head>
 <body class="flex h-screen overflow-hidden">
 
@@ -178,6 +180,9 @@
                         <i class="fa-solid fa-folder-tree w-5 text-sm"></i>
                         <span class="text-sm font-medium">Shelf Manager</span>
                     </a>
+                    <a href="{% url 'admin_reports' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                        <i class="fa-solid fa-chart-line w-5 text-sm"></i><span class="text-sm font-medium">Reports</span>
+                    </a>
                 </div>
             </div>
         </nav>
@@ -235,9 +240,6 @@
                         <button onclick="openNewLogModal()" class="bg-cyan-700/30 text-cyan-400 border border-cyan-800/80 hover:bg-cyan-700/50 text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
                             <i class="fa-solid fa-plus text-[10px]"></i> New Log
                         </button>
-                        <a href="{% url 'export_logs' %}" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-amber-500/90 text-[11px] font-semibold px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors">
-                            <i class="fa-solid fa-file-invoice"></i> Export
-                        </a>
                         <a href="{% url 'download_log_template' %}" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-emerald-500/90 text-[11px] font-semibold px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors">
                             <i class="fa-solid fa-file-excel"></i> Download Template
                         </a>
@@ -247,10 +249,10 @@
                         <input type="file" id="excelFileInput" accept=".xlsx" style="display: none;" onchange="uploadExcelFile(this)">
                         <span class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Date</span>
                         <div class="relative">
-                            <input type="text" value="12/10/2024" class="bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 pr-8 text-xs font-mono text-slate-300 w-32 focus:outline-none">
-                            <i class="fa-regular fa-calendar absolute right-3 top-1/2 -translate-y-1/2 text-slate-600 text-xs"></i>
+                            <input type="date" id="logDate" value="{{ sel_date|date:'Y-m-d' }}" onchange="applyLogFilters()" class="bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 pr-8 text-xs font-mono text-slate-300 w-36 focus:outline-none">
+                            <i class="fa-regular fa-calendar absolute right-3 top-1/2 -translate-y-1/2 text-slate-600 text-xs pointer-events-none"></i>
                         </div>
-                        <button class="bg-slate-950 border border-slate-800 hover:bg-slate-900 text-slate-300 text-xs px-3 py-1.5 rounded-lg font-medium transition-colors">
+                        <button onclick="location.href='{% url 'admin_log_management' %}'" class="bg-slate-950 border border-slate-800 hover:bg-slate-900 text-slate-300 text-xs px-3 py-1.5 rounded-lg font-medium transition-colors">
                             Today
                         </button>
                     </div>
@@ -259,12 +261,12 @@
                 <div class="px-5 py-3.5 bg-slate-900/20 border-b border-slate-800/60 flex items-center justify-between gap-4">
                     <div class="relative w-full max-w-sm">
                         <i class="fa-solid fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-xs"></i>
-                        <input type="text" placeholder="Search by name or ID number..." class="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-4 py-2 text-xs text-slate-300 focus:outline-none focus:border-cyan-800 placeholder-slate-600 transition-colors">
+                        <input type="text" id="logSearch" value="{{ q }}" onkeydown="if(event.key==='Enter')applyLogFilters()" placeholder="Search by name or ID number..." class="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-4 py-2 text-xs text-slate-300 focus:outline-none focus:border-cyan-800 placeholder-slate-600 transition-colors">
                     </div>
                     <div class="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800 flex-shrink-0">
-                        <button class="px-2.5 py-1 rounded text-[11px] font-semibold bg-cyan-700/30 text-cyan-400 border border-cyan-800/50">All</button>
-                        <button class="px-2.5 py-1 rounded text-[11px] font-semibold text-slate-500 hover:text-slate-300 transition-colors">Entry</button>
-                        <button class="px-2.5 py-1 rounded text-[11px] font-semibold text-slate-500 hover:text-slate-300 transition-colors">Exit</button>
+                        <button onclick="setLogStatus('')" class="px-2.5 py-1 rounded text-[11px] font-semibold {% if not status %}bg-cyan-700/30 text-cyan-400 border border-cyan-800/50{% else %}text-slate-500 hover:text-slate-300 transition-colors{% endif %}">All</button>
+                        <button onclick="setLogStatus('inside')" class="px-2.5 py-1 rounded text-[11px] font-semibold {% if status == 'inside' %}bg-cyan-700/30 text-cyan-400 border border-cyan-800/50{% else %}text-slate-500 hover:text-slate-300 transition-colors{% endif %}">Inside</button>
+                        <button onclick="setLogStatus('completed')" class="px-2.5 py-1 rounded text-[11px] font-semibold {% if status == 'completed' %}bg-cyan-700/30 text-cyan-400 border border-cyan-800/50{% else %}text-slate-500 hover:text-slate-300 transition-colors{% endif %}">Completed</button>
                     </div>
                 </div>
 
@@ -321,7 +323,7 @@
                                 </tr>
                             {% empty %}
                                 <tr>
-                                    <td colspan="8" class="py-6 px-6 text-center text-slate-500">No logs found for today.</td>
+                                    <td colspan="8" class="py-6 px-6 text-center text-slate-500">No logs found for {{ sel_date|date:"M j, Y" }}.</td>
                                 </tr>
                             {% endfor %}
                         </tbody>
@@ -329,15 +331,29 @@
                 </div>
 
                 <div class="px-5 py-4 border-t border-slate-800/60 flex items-center justify-between text-xs text-slate-500 bg-slate-900/5">
-                    <span class="font-medium">Showing <span class="text-slate-400">{{ logs|length }}</span> of <span class="text-slate-400">{{ log_count }}</span> logs for {{ today|date:"M j, Y" }}</span>
-                    
+                    <span class="font-medium">Showing <span class="text-slate-400">{{ logs|length }}</span> of <span class="text-slate-400">{{ log_count }}</span> logs for {{ sel_date|date:"M j, Y" }}</span>
+
+                    {% if paginator.num_pages > 1 %}
                     <div class="flex items-center gap-1">
-                        <button class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors cursor-not-allowed" disabled>&larr; Prev</button>
-                        <button class="px-3 py-1.5 rounded bg-cyan-700/30 text-cyan-400 font-bold border border-cyan-800/50">1</button>
-                        <button class="px-3 py-1.5 rounded border border-slate-800 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors">2</button>
-                        <button class="px-3 py-1.5 rounded border border-slate-800 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors">3</button>
-                        <button class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors">Next &rarr;</button>
+                        {% if logs.has_previous %}
+                            <a href="?page={{ logs.previous_page_number }}{% if querystring %}&{{ querystring }}{% endif %}" class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors">&larr; Prev</a>
+                        {% else %}
+                            <button class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors cursor-not-allowed" disabled>&larr; Prev</button>
+                        {% endif %}
+                        {% for page_num in paginator.page_range %}
+                            {% if page_num == logs.number %}
+                                <button class="px-3 py-1.5 rounded bg-cyan-700/30 text-cyan-400 font-bold border border-cyan-800/50">{{ page_num }}</button>
+                            {% else %}
+                                <a href="?page={{ page_num }}{% if querystring %}&{{ querystring }}{% endif %}" class="px-3 py-1.5 rounded border border-slate-800 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors">{{ page_num }}</a>
+                            {% endif %}
+                        {% endfor %}
+                        {% if logs.has_next %}
+                            <a href="?page={{ logs.next_page_number }}{% if querystring %}&{{ querystring }}{% endif %}" class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors">Next &rarr;</a>
+                        {% else %}
+                            <button class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors cursor-not-allowed" disabled>Next &rarr;</button>
+                        {% endif %}
                     </div>
+                    {% endif %}
                 </div>
 
             </div>
@@ -749,6 +765,21 @@
         document.addEventListener('keydown', function (e) {
             if (e.key === 'Escape') { closeNewLogModal(); closeEditLog(); }
         });
+
+        // ── Log Management filters (search / status / date) ──
+        var __logStatus = "{{ status }}";
+        function applyLogFilters() {
+            var q = (document.getElementById('logSearch').value || '').trim();
+            var date = document.getElementById('logDate').value;
+            var p = new URLSearchParams();
+            if (q) p.set('q', q);
+            if (__logStatus) p.set('status', __logStatus);
+            if (date) p.set('date', date);
+            var qs = p.toString();
+            location.href = "{% url 'admin_log_management' %}" + (qs ? '?' + qs : '');
+        }
+        function setLogStatus(s) { __logStatus = s; applyLogFilters(); }
     </script>
+    <script src="{% static 'js/admin-enhance.js' %}" defer></script>
 </body>
 </html>

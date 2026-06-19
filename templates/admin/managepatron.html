@@ -127,6 +127,8 @@
             margin-right: 0.75rem;
         }
     </style>
+    <link rel="stylesheet" href="{% static 'css/admin-enhance.css' %}">
+    <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
 </head>
 <body class="flex h-screen overflow-hidden">
 
@@ -194,6 +196,9 @@
                         <i class="fa-solid fa-folder-tree w-5 text-sm"></i>
                         <span class="text-sm font-medium">Shelf Manager</span>
                     </a>
+                    <a href="{% url 'admin_reports' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                        <i class="fa-solid fa-chart-line w-5 text-sm"></i><span class="text-sm font-medium">Reports</span>
+                    </a>
                 </div>
             </div>
         </nav>
@@ -253,9 +258,6 @@
                         <h4 class="text-sm font-bold text-slate-200 tracking-wide">Patron Directory</h4>
                     </div>
                     <div class="flex items-center gap-2 self-end sm:self-auto">
-                        <button class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-amber-500/90 text-[11px] font-semibold px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors">
-                            <i class="fa-solid fa-file-invoice"></i> Generate Report
-                        </button>
                         <a href="{% url 'download_patron_template' %}" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-emerald-500/90 text-[11px] font-semibold px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors">
                             <i class="fa-solid fa-file-excel"></i> Download Template
                         </a>
@@ -272,7 +274,7 @@
                 <div class="px-5 py-3.5 bg-slate-900/20 border-b border-slate-800/60 flex flex-col lg:flex-row lg:items-center gap-3">
                     <div class="relative flex-1">
                         <i class="fa-solid fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-xs"></i>
-                        <input type="text" placeholder="Search by name, student ID, email..." class="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-4 py-2 text-xs text-slate-300 focus:outline-none focus:border-cyan-800 placeholder-slate-600 transition-colors">
+                        <input type="text" id="patronSearch" value="{{ search_query }}" onkeydown="if(event.key==='Enter')applyPatronSearch()" placeholder="Search by name, student ID, email..." class="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-4 py-2 text-xs text-slate-300 focus:outline-none focus:border-cyan-800 placeholder-slate-600 transition-colors">
                     </div>
                     <div class="flex items-center gap-2 self-end lg:self-auto">
                         <div class="relative">
@@ -359,22 +361,22 @@
                     <span class="font-medium">Showing <span class="text-slate-400">{{ patrons|length }}</span> of <span class="text-slate-400">{{ total_patrons }}</span> patrons</span>
                     
                     <div class="flex items-center gap-1">
-                        {% if paginator.has_previous %}
-                            <a href="?page={{ paginator.previous_page_number }}" class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors">&larr; Prev</a>
+                        {% if patrons.has_previous %}
+                            <a href="?page={{ patrons.previous_page_number }}{% if querystring %}&{{ querystring }}{% endif %}" class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors">&larr; Prev</a>
                         {% else %}
                             <button class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors cursor-not-allowed" disabled>&larr; Prev</button>
                         {% endif %}
-                        
+
                         {% for page_num in paginator.page_range %}
                             {% if page_num == patrons.number %}
                                 <button class="px-3 py-1.5 rounded bg-cyan-700/30 text-cyan-400 font-bold border border-cyan-800/50">{{ page_num }}</button>
                             {% else %}
-                                <a href="?page={{ page_num }}" class="px-3 py-1.5 rounded border border-slate-800 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors">{{ page_num }}</a>
+                                <a href="?page={{ page_num }}{% if querystring %}&{{ querystring }}{% endif %}" class="px-3 py-1.5 rounded border border-slate-800 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors">{{ page_num }}</a>
                             {% endif %}
                         {% endfor %}
-                        
-                        {% if paginator.has_next %}
-                            <a href="?page={{ paginator.next_page_number }}" class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors">Next &rarr;</a>
+
+                        {% if patrons.has_next %}
+                            <a href="?page={{ patrons.next_page_number }}{% if querystring %}&{{ querystring }}{% endif %}" class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors">Next &rarr;</a>
                         {% else %}
                             <button class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors cursor-not-allowed" disabled>Next &rarr;</button>
                         {% endif %}
@@ -586,5 +588,12 @@
         {% endif %}
     </script>
 
+    <script>
+        function applyPatronSearch() {
+            var q = (document.getElementById('patronSearch').value || '').trim();
+            location.href = "{% url 'admin_manage_patron' %}" + (q ? ('?search=' + encodeURIComponent(q)) : '');
+        }
+    </script>
+    <script src="{% static 'js/admin-enhance.js' %}" defer></script>
 </body>
 </html>

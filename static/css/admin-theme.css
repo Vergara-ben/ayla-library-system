@@ -1,0 +1,153 @@
+/* =====================================================================
+   admin-theme.css — Professional visual refresh for the AYLA admin panel.
+
+   This is a PRESENTATION-ONLY layer. It changes no HTML structure, ids,
+   classes, or JavaScript, so every existing feature keeps working. It is
+   loaded last (after each page's <style> and admin-enhance.css) so it
+   composes cleanly on top.
+
+   Strategy:
+   - Re-tune the shared CSS variables (--bg-*, --border-*) that the pages
+     already consume via inline styles, so the whole base palette shifts
+     from one place.
+   - Add depth, refined typography, and consistent control styling on top.
+   ===================================================================== */
+
+/* ---- 1. Refined palette ------------------------------------------------ */
+:root {
+    --bg-main:      #070c15;
+    --bg-sidebar:   #0a1120;
+    --bg-card:      #0e1626;
+    --bg-modal:     #121d31;
+    --bg-input:     #0b1322;
+    --text-primary: #e9eef7;
+    --text-muted:   #74839c;
+    --border-color: #1b2740;
+    --border-modal: #233252;
+
+    --ayla-accent:  #22d3ee;
+    --ayla-accent2: #3b82f6;
+    --ayla-ring:    rgba(34, 211, 238, 0.35);
+}
+
+/* ---- 2. Base canvas: crisp text + soft ambient depth ------------------- */
+html { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+
+body {
+    background-color: var(--bg-main) !important;
+    background-image:
+        radial-gradient(1100px 560px at 82% -8%, rgba(34, 211, 238, 0.06), transparent 60%),
+        radial-gradient(820px 460px at -8% 108%, rgba(59, 130, 246, 0.05), transparent 58%) !important;
+    background-attachment: fixed;
+}
+
+h1, h2, h3, h4 { letter-spacing: -0.012em; }
+
+/* ---- 3. Sidebar -------------------------------------------------------- */
+aside nav a {
+    border-radius: 10px;
+    transition: background-color .18s ease, color .18s ease, transform .18s ease;
+}
+aside nav a:hover { transform: translateX(2px); }
+
+/* Active item (Tailwind active class or the aria-current set at runtime) */
+aside nav a[aria-current="page"],
+aside nav a.bg-slate-800\/50 {
+    background-image: linear-gradient(90deg, rgba(34, 211, 238, 0.16), rgba(34, 211, 238, 0.03)) !important;
+    border-color: rgba(34, 211, 238, 0.32) !important;
+    box-shadow: inset 2px 0 0 0 var(--ayla-accent);
+}
+
+/* Brand mark glow */
+aside .bg-cyan-950\/50 {
+    box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.16), 0 8px 18px -10px rgba(34, 211, 238, 0.5);
+}
+
+/* ---- 4. Cards & panels (elements carrying the card background) --------- */
+[style*="--bg-card"] {
+    border-radius: 16px;
+    box-shadow:
+        0 1px 0 0 rgba(255, 255, 255, 0.025) inset,
+        0 18px 40px -24px rgba(0, 0, 0, 0.85);
+    transition: border-color .2s ease, box-shadow .2s ease;
+}
+
+/* ---- 5. Inputs, selects, textareas — unified focus ------------------- */
+input:not([type=checkbox]):not([type=radio]):not([type=file]):focus,
+select:focus,
+textarea:focus {
+    border-color: var(--ayla-accent) !important;
+    box-shadow: 0 0 0 3px var(--ayla-ring) !important;
+}
+::placeholder { color: rgba(148, 163, 184, 0.5) !important; }
+
+/* ---- 6. Primary (cyan) buttons: gradient + lift ----------------------- */
+.bg-cyan-700, .bg-cyan-600 {
+    background-image: linear-gradient(180deg, #22a6c9, #0e7490) !important;
+    box-shadow: 0 8px 20px -10px rgba(34, 211, 238, 0.5);
+    transition: transform .15s ease, filter .15s ease, box-shadow .15s ease;
+}
+.bg-cyan-700:hover, .bg-cyan-600:hover { filter: brightness(1.08); transform: translateY(-1px); }
+
+/* Tinted secondary cyan chips/buttons get a subtle inner ring */
+.bg-cyan-700\/30 { box-shadow: inset 0 0 0 1px rgba(34, 211, 238, 0.14); }
+
+/* ---- 7. Tables -------------------------------------------------------- */
+table thead tr { background: rgba(255, 255, 255, 0.018) !important; }
+table thead th { letter-spacing: 0.08em; }
+table tbody tr { transition: background-color .12s ease; }
+table tbody tr:hover { background: rgba(34, 211, 238, 0.045) !important; }
+
+/* ---- 8. Modals: deeper, blurred backdrop ------------------------------ */
+.bg-black\/60 {
+    background: rgba(3, 7, 13, 0.66) !important;
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
+}
+[style*="--bg-modal"] {
+    border-radius: 20px;
+    box-shadow:
+        0 30px 70px -30px rgba(0, 0, 0, 0.92),
+        0 0 0 1px rgba(255, 255, 255, 0.03) inset;
+}
+
+/* ---- 9. Scrollbars ---------------------------------------------------- */
+::-webkit-scrollbar-thumb { background: #243352; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #2d3f5e; }
+
+/* ---- 10. Premium micro-interactions (parity with the patron polish) ---
+   Presentation-only: adds gentle motion/depth without touching markup,
+   classes, or behaviour. Accent stays cyan to keep the admin identity. */
+:root { --adm-ease: cubic-bezier(.22, .61, .36, 1); }
+
+/* Consistent, smooth transitions on interactive controls */
+button, a, .stat-card, [role="button"] {
+    transition: transform .18s var(--adm-ease), box-shadow .18s ease,
+                filter .18s ease, border-color .18s ease,
+                background-color .18s ease, color .18s ease;
+}
+
+/* Small stat / summary cards get a gentle hover lift (big table panels,
+   which have no `p-5`, are intentionally excluded so they stay still). */
+.stat-card:hover,
+.p-5.rounded-xl[style*="--bg-card"]:hover {
+    transform: translateY(-2px);
+    border-color: rgba(34, 211, 238, .30) !important;
+    box-shadow:
+        0 24px 56px -30px rgba(0, 0, 0, .9),
+        0 0 0 1px rgba(34, 211, 238, .06) inset;
+}
+
+/* Tactile press feedback on buttons */
+.bg-cyan-700:active, .bg-cyan-600:active,
+.bg-cyan-700\/30:active, button:active { transform: translateY(0) scale(.98); }
+
+/* Row action icon-buttons lift slightly on hover */
+td .w-7:hover, td .w-8:hover { transform: translateY(-1px); }
+
+/* Empty-state table rows: a touch more breathing room */
+td[colspan] { padding-top: 2.25rem !important; padding-bottom: 2.25rem !important; }
+
+/* Sidebar nav icons nudge on hover for a livelier feel */
+aside nav a .menu-icon, aside nav a i { transition: transform .18s var(--adm-ease); }
+aside nav a:hover .menu-icon, aside nav a:hover i { transform: scale(1.12); }
