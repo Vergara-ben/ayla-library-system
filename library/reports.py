@@ -1,6 +1,6 @@
 """Report generation for the AYLA admin panel.
 
-Builds the five manuscript-defined reports as plain data dictionaries
+Builds the manuscript-defined reports as plain data dictionaries
 (consumed by both the on-screen preview and the PDF exporter) and renders
 them to PDF with ReportLab (pure-Python, deploys on PythonAnywhere).
 
@@ -100,13 +100,14 @@ def _transactions(start, end):
             _fmt_date(tx.due_date),
             _fmt_date(tx.return_date),
             'Yes' if tx.overdue_flag else 'No',
+            f'{tx.fine_amount:.2f}' if tx.fine_amount else '—',
         ])
 
     return {
         'key': 'transactions',
         'title': 'Transactions Report',
         'subtitle': 'Borrowing, returning, and in-library reading transactions',
-        'columns': ['Date', 'Type', 'Book', 'Patron', 'Due Date', 'Returned', 'Overdue'],
+        'columns': ['Date', 'Type', 'Book', 'Patron', 'Due Date', 'Returned', 'Overdue', 'Fine'],
         'rows': rows,
         'summary': [
             ('Total Transactions', len(rows)),
@@ -155,7 +156,7 @@ def _patron_logs(start, end):
 
 def _books(start, end):
     # Real-time catalog snapshot.
-    books = Book.objects.select_related('section', 'shelf_level').order_by('title')
+    books = Book.objects.select_related('shelf_level__shelf').order_by('title')
     rows = []
     available = borrowed = 0
     for b in books:
@@ -164,9 +165,7 @@ def _books(start, end):
         elif b.status == 'Borrowed':
             borrowed += 1
         if b.shelf_level:
-            location = b.shelf_level.label or f'Level {b.shelf_level.level_number}'
-        elif b.section:
-            location = b.section.name
+            location = b.shelf_level.category or f'Level {b.shelf_level.level_number}'
         else:
             location = '—'
         rows.append([

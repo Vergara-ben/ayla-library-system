@@ -6,10 +6,10 @@ class ActiveLocationManager(models.Manager):
     """Manager that filters books to only include those in active locations"""
     def get_queryset(self):
         return super().get_queryset().filter(
-            section__shelf__room__floor_plan__is_active=True,
-            section__shelf__room__is_active=True,
-            section__shelf__is_active=True,
-            section__is_active=True
+            shelf_level__shelf__room__floor_plan__is_active=True,
+            shelf_level__shelf__room__is_active=True,
+            shelf_level__shelf__is_active=True,
+            shelf_level__is_active=True
         )
 
 
@@ -143,42 +143,23 @@ class WaypointConnection(models.Model):
         return f"Connection {self.waypoint_from_id} → {self.waypoint_to_id}"
 
 
-# ─── 7. SECTIONS ──────────────────────────────────────────────
-class Section(models.Model):
-    section_id = models.AutoField(primary_key=True)
+# ─── 7. SHELF LEVELS ──────────────────────────────────────────
+class ShelfLevel(models.Model):
+    shelf_level_id = models.AutoField(primary_key=True)
     shelf = models.ForeignKey(
         Shelf,
         on_delete=models.CASCADE,
         db_column='shelf_id'
     )
-    name = models.CharField(max_length=255)
-    description = models.TextField(blank=True, null=True)
-    is_active = models.BooleanField(default=True)
-
-    class Meta:
-        db_table = 'Sections'
-
-    def __str__(self):
-        return self.name
-
-
-# ─── 8. SHELF LEVELS ──────────────────────────────────────────
-class ShelfLevel(models.Model):
-    shelf_level_id = models.AutoField(primary_key=True)
-    section = models.ForeignKey(
-        Section,
-        on_delete=models.CASCADE,
-        db_column='section_id'
-    )
     level_number = models.IntegerField()
-    label = models.CharField(max_length=255, blank=True, null=True)
+    category = models.CharField(max_length=255, blank=True, null=True)
     is_active = models.BooleanField(default=True)
 
     class Meta:
         db_table = 'Shelf_Levels'
 
     def __str__(self):
-        return f"Level {self.level_number} - {self.label}"
+        return f"Level {self.level_number} - {self.category}"
 
 
 # ─── 9. BOOKS ─────────────────────────────────────────────────
@@ -194,13 +175,6 @@ class Book(models.Model):
     ]
 
     book_id = models.AutoField(primary_key=True)
-    section = models.ForeignKey(
-        Section,
-        on_delete=models.SET_NULL,
-        blank=True,
-        null=True,
-        db_column='section_id'
-    )
     shelf_level = models.ForeignKey(
         ShelfLevel,
         on_delete=models.SET_NULL,
@@ -270,10 +244,20 @@ class User(models.Model):
         ('Suspended', 'Suspended'),
     ]
 
+    ROLE_CHOICES = [
+        ('Admin', 'Admin'),
+        ('Staff', 'Library Staff'),
+    ]
+
     admin_id = models.AutoField(primary_key=True)
     fullname = models.CharField(max_length=255)
     email = models.EmailField(max_length=255, unique=True)
     password_hash = models.CharField(max_length=255)
+    role = models.CharField(
+        max_length=20,
+        choices=ROLE_CHOICES,
+        default='Admin'
+    )
     account_status = models.CharField(
         max_length=50,
         choices=STATUS_CHOICES,
@@ -318,9 +302,15 @@ class Patron(models.Model):
     ]
 
     STATUS_CHOICES = [
+        ('Pending', 'Pending'),
         ('Active', 'Active'),
         ('Suspended', 'Suspended'),
         ('Inactive', 'Inactive'),
+    ]
+
+    REGISTRATION_CHANNEL_CHOICES = [
+        ('Online', 'Online'),
+        ('On-site', 'On-site'),
     ]
 
     patron_id = models.AutoField(primary_key=True)
@@ -340,6 +330,21 @@ class Patron(models.Model):
     )
     password_hash = models.CharField(max_length=255)
     registration_date = models.DateField(auto_now_add=True)
+    # Identity QR — generated on approval (online) or on the spot (on-site).
+    qr_code = models.CharField(max_length=255, unique=True, blank=True, null=True)
+    # Transaction PIN — second factor scanned alongside the QR at the desk.
+    pin_hash = models.CharField(max_length=255, blank=True, null=True)
+    registration_channel = models.CharField(
+        max_length=20,
+        choices=REGISTRATION_CHANNEL_CHOICES,
+        default='On-site'
+    )
+    # Uploaded ID / proof of residency (media-relative path, online channel).
+    credential_document = models.CharField(max_length=255, blank=True, null=True)
+    # Email OTP for the online registration flow.
+    otp_code = models.CharField(max_length=6, blank=True, null=True)
+    otp_expires_at = models.DateTimeField(blank=True, null=True)
+    otp_verified = models.BooleanField(default=False)
 
     class Meta:
         db_table = 'Patron'
@@ -385,6 +390,7 @@ class Transaction(models.Model):
     due_date = models.DateField(blank=True, null=True)  # nullable for In-Library Reading
     return_date = models.DateField(blank=True, null=True)
     overdue_flag = models.BooleanField(default=False)
+    fine_amount = models.DecimalField(max_digits=8, decimal_places=2, default=0)
 
     class Meta:
         db_table = 'Transactions'
@@ -413,6 +419,44 @@ class PatronLog(models.Model):
 
     def __str__(self):
         return f"{self.patron} — entry {self.entry_time}"
+
+
+# ─── 17. BORROWING RULES (ADMIN-CONFIGURABLE) ─────────────────
+class BorrowingRule(models.Model):
+    """Library-wide borrowing policy. A single active row is used; edit it
+    through the admin Borrowing Rules page. Feeds due-date calculation,
+    the borrowing limit, and overdue penalty computation."""
+
+    rule_id = models.AutoField(primary_key=True)
+    loan_period_days = models.IntegerField(default=14)
+    max_books_per_patron = models.IntegerField(default=3)
+    fine_per_day = models.DecimalField(max_digits=8, decimal_places=2, default=0)
+    grace_period_days = models.IntegerField(default=0)
+    lost_book_fee = models.DecimalField(max_digits=8, decimal_places=2, default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'Borrowing_Rules'
+
+    def __str__(self):
+        return f"Borrowing Rule (loan {self.loan_period_days}d, fine {self.fine_per_day}/day)"
+
+    @classmethod
+    def current(cls):
+        """Return the active rule, creating defaults on first use."""
+        rule = cls.objects.first()
+        if rule is None:
+            rule = cls.objects.create()
+        return rule
+
+    def compute_fine(self, due_date, return_date):
+        """Penalty for returning on return_date against due_date (grace applied)."""
+        if not due_date or not return_date or return_date <= due_date:
+            return 0
+        days_late = (return_date - due_date).days - self.grace_period_days
+        if days_late <= 0:
+            return 0
+        return days_late * self.fine_per_day
 
 
 # ─── 16. SYSTEM LOGS (ADMIN AUDIT TRAIL) ──────────────────────

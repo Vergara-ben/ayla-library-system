@@ -12,14 +12,14 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@400;700&display=swap" rel="stylesheet">
     <style>
         :root {
-            --bg-main: #060d13;
-            --bg-sidebar: #0b151e;
-            --bg-card: #0d1b26;
-            --bg-modal: #0f2230;
-            --bg-input: #112535;
+            --bg-main: #0a0714;
+            --bg-sidebar: #130e20;
+            --bg-card: #161128;
+            --bg-modal: #1a1332;
+            --bg-input: #1a1436;
             --text-primary: #e2e8f0;
             --text-muted: #64748b;
-            --border-color: #1e293b;
+            --border-color: #2a2144;
         }
         body { font-family: 'Inter', sans-serif; background-color: var(--bg-main); color: var(--text-primary); }
         .logo-text { font-family: 'Rowdies', sans-serif; }
@@ -47,7 +47,7 @@
         .trow:hover .tactions { display: flex; }
         .spacer { margin-left: auto; }
         .tbtn { width: 24px; height: 24px; border-radius: 6px; border: 1px solid var(--border-color); display: flex; align-items: center; justify-content: center; font-size: 10px; cursor: pointer; background: transparent; }
-        .tbtn.add { color: #22d3ee; } .tbtn.add:hover { background: rgba(14,116,144,.18); }
+        .tbtn.add { color: #a78bfa; } .tbtn.add:hover { background: rgba(109,40,217,.18); }
         .tbtn.edit { color: #f59e0b; } .tbtn.edit:hover { background: rgba(180,83,9,.18); }
         .tbtn.del { color: #fb7185; } .tbtn.del:hover { background: rgba(159,18,34,.18); }
         .tbtn.view { color: #94a3b8; } .tbtn.view:hover { background: rgba(51,65,85,.3); }
@@ -58,15 +58,15 @@
         .sw input { opacity: 0; width: 0; height: 0; }
         .sw .tk { position: absolute; inset: 0; background: #334155; border-radius: 999px; cursor: pointer; transition: .2s; }
         .sw .tk:before { content: ''; position: absolute; width: 12px; height: 12px; left: 2px; top: 2px; background: #94a3b8; border-radius: 50%; transition: .2s; }
-        .sw input:checked + .tk { background: #0e7490; }
-        .sw input:checked + .tk:before { transform: translateX(14px); background: #22d3ee; }
+        .sw input:checked + .tk { background: #6d28d9; }
+        .sw input:checked + .tk:before { transform: translateX(14px); background: #a78bfa; }
     </style>
     <link rel="stylesheet" href="{% static 'css/admin-enhance.css' %}">
     <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
 </head>
 <body class="flex h-screen overflow-hidden">
 
-    {% include 'admin/_sidebar.html' with active='shelf' %}
+    {% include 'library_staff/_sidebar.html' with active='shelf' %}
 
     <div class="flex-1 flex flex-col overflow-hidden">
         <header class="h-16 flex-shrink-0 flex items-center justify-between px-8" style="background-color: var(--bg-main);">
@@ -75,8 +75,8 @@
                 <h2 class="logo-text text-lg tracking-wider text-slate-200 uppercase">Shelf Manager</h2>
             </div>
             <div class="flex items-center gap-4">
-                <span class="bg-cyan-950 text-cyan-400 text-xs px-2.5 py-1 rounded font-bold border border-cyan-800 tracking-wider">{% if request.session.admin_role == 'Staff' %}STAFF{% else %}ADMIN{% endif %}</span>
-                <div class="w-8 h-8 rounded-full bg-cyan-900 border border-cyan-700 flex items-center justify-center text-xs font-bold text-cyan-200">AD</div>
+                <span class="bg-violet-950 text-violet-400 text-xs px-2.5 py-1 rounded font-bold border border-violet-800 tracking-wider">{% if request.session.admin_role == 'Staff' %}STAFF{% else %}ADMIN{% endif %}</span>
+                <div class="w-8 h-8 rounded-full bg-violet-900 border border-violet-700 flex items-center justify-center text-xs font-bold text-violet-200">AD</div>
             </div>
         </header>
 
@@ -85,7 +85,7 @@
             <!-- View toggle -->
             <div class="flex items-center justify-between gap-4 flex-wrap">
                 <div class="flex items-center gap-2 p-1 rounded-lg border border-slate-800" style="background-color: var(--bg-card);">
-                    <button id="tabTree" onclick="switchView('tree')" class="px-3 py-1.5 rounded-md text-xs font-bold tracking-wide bg-cyan-700/30 text-cyan-400 border border-cyan-800/50 flex items-center gap-2"><i class="fa-solid fa-folder-tree text-[10px]"></i> Tree</button>
+                    <button id="tabTree" onclick="switchView('tree')" class="px-3 py-1.5 rounded-md text-xs font-bold tracking-wide bg-violet-700/30 text-violet-400 border border-violet-800/50 flex items-center gap-2"><i class="fa-solid fa-folder-tree text-[10px]"></i> Tree</button>
                     <button id="tabTable" onclick="switchView('table')" class="px-3 py-1.5 rounded-md text-xs font-bold tracking-wide text-slate-500 hover:text-slate-300 flex items-center gap-2"><i class="fa-solid fa-table-list text-[10px]"></i> Table</button>
                 </div>
                 <p class="text-[11px] text-slate-500">Toggle a switch to show/hide a location from patrons. Inactive items appear dimmed.</p>
@@ -94,10 +94,10 @@
             <!-- TREE VIEW -->
             <div id="treeView" class="rounded-xl border border-slate-800/80 shadow-2xl" style="background-color: var(--bg-card);">
                 <div class="p-4 border-b border-slate-800 flex items-center gap-2">
-                    <i class="fa-solid fa-sitemap text-cyan-600 text-xs"></i>
+                    <i class="fa-solid fa-sitemap text-violet-600 text-xs"></i>
                     <h4 class="text-sm font-bold text-slate-200 tracking-wide">Structure</h4>
                     <span class="text-[10px] text-slate-500">(active floor plan)</span>
-                    <button onclick="loadTree()" class="ml-auto text-[10px] text-slate-400 hover:text-cyan-400 flex items-center gap-1"><i class="fa-solid fa-rotate-right"></i> Refresh</button>
+                    <button onclick="loadTree()" class="ml-auto text-[10px] text-slate-400 hover:text-violet-400 flex items-center gap-1"><i class="fa-solid fa-rotate-right"></i> Refresh</button>
                 </div>
                 <div class="tree p-3" id="treeRoot">
                     <div class="text-slate-500 text-sm p-4">Loading…</div>
@@ -107,11 +107,11 @@
             <!-- TABLE VIEW -->
             <div id="tableView" class="hidden rounded-xl border border-slate-800/80 shadow-2xl" style="background-color: var(--bg-card);">
                 <div class="p-4 border-b border-slate-800 flex items-center gap-3 flex-wrap">
-                    <i class="fa-solid fa-table-list text-cyan-600 text-xs"></i>
+                    <i class="fa-solid fa-table-list text-violet-600 text-xs"></i>
                     <h4 class="text-sm font-bold text-slate-200 tracking-wide">All Shelf Levels</h4>
                     <div class="relative ml-auto w-full max-w-xs">
                         <i class="fa-solid fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-xs"></i>
-                        <input id="flatSearch" oninput="renderFlat()" type="text" placeholder="Filter by name or path…" class="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-3 py-2 text-xs text-slate-300 focus:outline-none focus:border-cyan-800 placeholder-slate-600">
+                        <input id="flatSearch" oninput="renderFlat()" type="text" placeholder="Filter by name or path…" class="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-3 py-2 text-xs text-slate-300 focus:outline-none focus:border-violet-800 placeholder-slate-600">
                     </div>
                 </div>
                 <div class="overflow-x-auto">
@@ -141,21 +141,21 @@
             <div class="space-y-4 text-xs">
                 <div id="addNameField" class="space-y-1.5">
                     <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Name</label>
-                    <input type="text" id="addName" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                    <input type="text" id="addName" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);">
                 </div>
                 <div id="addLevelFields" class="hidden grid grid-cols-2 gap-3">
                     <div class="space-y-1.5">
                         <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Level #</label>
-                        <input type="number" id="addLevelNum" min="1" value="1" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                        <input type="number" id="addLevelNum" min="1" value="1" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);">
                     </div>
                     <div class="space-y-1.5">
                         <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Category</label>
-                        <input type="text" id="addLabel" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                        <input type="text" id="addLabel" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);">
                     </div>
                 </div>
                 <div class="pt-2 flex items-center justify-end gap-3">
                     <button type="button" onclick="closeModal('addModal')" class="px-5 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:bg-slate-800/40 font-semibold min-w-[100px]">Cancel</button>
-                    <button type="button" onclick="submitAdd()" class="bg-cyan-700 hover:bg-cyan-600 text-white font-bold px-5 py-2.5 rounded-lg flex items-center gap-2"><i class="fa-solid fa-check text-xs"></i> Add</button>
+                    <button type="button" onclick="submitAdd()" class="bg-violet-700 hover:bg-violet-600 text-white font-bold px-5 py-2.5 rounded-lg flex items-center gap-2"><i class="fa-solid fa-check text-xs"></i> Add</button>
                 </div>
             </div>
         </div>
@@ -171,21 +171,21 @@
             <div class="space-y-4 text-xs">
                 <div id="editNameField" class="space-y-1.5">
                     <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Name</label>
-                    <input type="text" id="editName" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                    <input type="text" id="editName" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);">
                 </div>
                 <div id="editLevelFields" class="hidden grid grid-cols-2 gap-3">
                     <div class="space-y-1.5">
                         <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Level #</label>
-                        <input type="number" id="editLevelNum" min="1" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                        <input type="number" id="editLevelNum" min="1" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);">
                     </div>
                     <div class="space-y-1.5">
                         <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Category</label>
-                        <input type="text" id="editLabel" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                        <input type="text" id="editLabel" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);">
                     </div>
                 </div>
                 <div class="pt-2 flex items-center justify-end gap-3">
                     <button type="button" onclick="closeModal('editModal')" class="px-5 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:bg-slate-800/40 font-semibold min-w-[100px]">Cancel</button>
-                    <button type="button" onclick="submitEdit()" class="bg-cyan-700 hover:bg-cyan-600 text-white font-bold px-5 py-2.5 rounded-lg flex items-center gap-2"><i class="fa-solid fa-check text-xs"></i> Save</button>
+                    <button type="button" onclick="submitEdit()" class="bg-violet-700 hover:bg-violet-600 text-white font-bold px-5 py-2.5 rounded-lg flex items-center gap-2"><i class="fa-solid fa-check text-xs"></i> Save</button>
                 </div>
             </div>
         </div>
@@ -206,14 +206,14 @@
     <div id="placementModal" class="hidden absolute inset-0 bg-black/60 z-40 flex items-center justify-center p-4 overflow-y-auto">
         <div class="w-full max-w-3xl rounded-2xl border p-6 flex flex-col gap-4 shadow-2xl my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color); max-height: 88vh;">
             <div class="flex items-center justify-between">
-                <h3 class="text-base font-bold text-slate-200 tracking-wide">Add Books to <span id="placeLevelName" class="text-cyan-400">Level</span></h3>
+                <h3 class="text-base font-bold text-slate-200 tracking-wide">Add Books to <span id="placeLevelName" class="text-violet-400">Level</span></h3>
                 <button type="button" onclick="closePlacement()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40"><i class="fa-solid fa-xmark text-sm"></i></button>
             </div>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4 min-h-0">
                 <!-- LEFT: cart -->
                 <div class="flex flex-col rounded-xl border border-slate-800 overflow-hidden" style="background-color: var(--bg-card);">
                     <div class="px-4 py-2.5 border-b border-slate-800 flex items-center gap-2 text-xs font-bold text-slate-300">
-                        <i class="fa-solid fa-layer-group text-cyan-500 text-[11px]"></i> Selected to add <span id="placeCartCount" class="text-cyan-400">(0)</span>
+                        <i class="fa-solid fa-layer-group text-violet-500 text-[11px]"></i> Selected to add <span id="placeCartCount" class="text-violet-400">(0)</span>
                     </div>
                     <div id="placeCart" class="p-2 space-y-1.5 overflow-y-auto" style="max-height: 46vh; min-height: 180px;"></div>
                 </div>
@@ -222,7 +222,7 @@
                     <div class="px-3 py-2.5 border-b border-slate-800">
                         <div class="relative">
                             <i class="fa-solid fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-xs"></i>
-                            <input type="text" id="placeSearch" oninput="renderPlaceLists()" placeholder="Search all books..." class="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-3 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-cyan-800 placeholder-slate-600">
+                            <input type="text" id="placeSearch" oninput="renderPlaceLists()" placeholder="Search all books..." class="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-3 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-violet-800 placeholder-slate-600">
                         </div>
                     </div>
                     <div id="placeList" class="p-2 space-y-1.5 overflow-y-auto" style="max-height: 46vh; min-height: 180px;"></div>
@@ -231,7 +231,7 @@
             <div id="placeError" class="hidden rounded-lg border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-rose-100 text-[11px]"></div>
             <div class="flex items-center justify-end gap-3">
                 <button type="button" onclick="closePlacement()" class="px-5 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:bg-slate-800/40 font-semibold text-xs min-w-[100px]">Cancel</button>
-                <button type="button" onclick="confirmPlacement()" class="bg-cyan-700 hover:bg-cyan-600 text-white font-bold px-5 py-2.5 rounded-lg flex items-center gap-2 text-xs"><i class="fa-solid fa-check text-xs"></i> Confirm <span id="placeConfirmCount"></span></button>
+                <button type="button" onclick="confirmPlacement()" class="bg-violet-700 hover:bg-violet-600 text-white font-bold px-5 py-2.5 rounded-lg flex items-center gap-2 text-xs"><i class="fa-solid fa-check text-xs"></i> Confirm <span id="placeConfirmCount"></span></button>
             </div>
         </div>
     </div>
@@ -253,7 +253,7 @@
             assignBooks: "{% url 'assign_books_to_level' %}",
         };
         const TYPE = {
-            floorplan: { icon: 'fa-layer-group', color: 'text-cyan-400', child: 'room' },
+            floorplan: { icon: 'fa-layer-group', color: 'text-violet-400', child: 'room' },
             room:       { icon: 'fa-door-open',  color: 'text-amber-400', child: 'shelf',      toggle: 'room',       edit: U.editRoom,   del: U.delRoom,   idField: 'room_id',        word: 'Room' },
             shelf:      { icon: 'fa-box',         color: 'text-purple-400', child: 'shelflevel', toggle: 'shelf',      edit: U.editShelf,  del: U.delShelf,  idField: 'shelf_id',       word: 'Shelf' },
             shelflevel: { icon: 'fa-bars-staggered', color: 'text-blue-400', toggle: 'shelflevel', edit: U.editLevel, del: U.delLevel,  idField: 'shelf_level_id', word: 'Shelf Level' },
@@ -460,8 +460,8 @@
             const tree = v === 'tree';
             document.getElementById('treeView').classList.toggle('hidden', !tree);
             document.getElementById('tableView').classList.toggle('hidden', tree);
-            document.getElementById('tabTree').className = 'px-3 py-1.5 rounded-md text-xs font-bold tracking-wide flex items-center gap-2 ' + (tree ? 'bg-cyan-700/30 text-cyan-400 border border-cyan-800/50' : 'text-slate-500 hover:text-slate-300');
-            document.getElementById('tabTable').className = 'px-3 py-1.5 rounded-md text-xs font-bold tracking-wide flex items-center gap-2 ' + (!tree ? 'bg-cyan-700/30 text-cyan-400 border border-cyan-800/50' : 'text-slate-500 hover:text-slate-300');
+            document.getElementById('tabTree').className = 'px-3 py-1.5 rounded-md text-xs font-bold tracking-wide flex items-center gap-2 ' + (tree ? 'bg-violet-700/30 text-violet-400 border border-violet-800/50' : 'text-slate-500 hover:text-slate-300');
+            document.getElementById('tabTable').className = 'px-3 py-1.5 rounded-md text-xs font-bold tracking-wide flex items-center gap-2 ' + (!tree ? 'bg-violet-700/30 text-violet-400 border border-violet-800/50' : 'text-slate-500 hover:text-slate-300');
             if (!tree && !flatData.length) loadFlat();
         }
 

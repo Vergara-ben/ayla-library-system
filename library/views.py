@@ -1,10 +1,12 @@
 from django.shortcuts import redirect, render, get_object_or_404
+from django.contrib import messages
 from django.db.models import Count, Q
 from django.utils import timezone
 from django.http import HttpResponse, JsonResponse
 from django.conf import settings
 from django.core.paginator import Paginator
 from datetime import timedelta
+from decimal import Decimal, InvalidOperation
 from urllib.parse import quote
 import json
 
@@ -21,12 +23,40 @@ from .auth_utils import (
     hash_password,
     patron_login_required,
     admin_login_required,
+    admin_only_required,
+    staff_only_required,
 )
+
+# Map admin page-URL names to their Library Staff equivalents so that shared
+# action endpoints can return whichever portal the current user belongs to.
+STAFF_PORTAL_MAP = {
+    'admin_management': 'staff_manage_books',
+    'admin_book_detail': 'staff_book_detail',
+    'admin_transaction': 'staff_transaction',
+    'donation_management': 'staff_donations',
+    'admin_log_management': 'staff_logs',
+    'shelf_manager': 'staff_shelf',
+}
+
+
+def portal_redirect(request, name, *args, **kwargs):
+    """redirect() that keeps Library Staff inside the /library-staff/ portal."""
+    if request.session.get('admin_role') == 'Staff':
+        name = STAFF_PORTAL_MAP.get(name, name)
+    return redirect(name, *args, **kwargs)
 from .audit import log_admin_action
 from .eligibility import check_patron_eligibility
-from .emails import announcement_email, borrow_confirmation_email, return_receipt_email
+from .emails import (
+    announcement_email,
+    borrow_confirmation_email,
+    return_receipt_email,
+    lost_book_email,
+    otp_email,
+    registration_approved_email,
+    registration_rejected_email,
+)
 from .reports import REPORT_TYPES, parse_date_range, build_report, render_report_pdf, render_report_excel
-from .models import Book, Patron, PatronLog, Transaction, User, Section, ShelfLevel, Donation, Announcement, FloorPlan, Shelf, Room, Waypoint, BLEBeacon, WaypointConnection, SystemLog
+from .models import Book, Patron, PatronLog, Transaction, User, ShelfLevel, Donation, Announcement, FloorPlan, Shelf, Room, Waypoint, BLEBeacon, WaypointConnection, SystemLog, BorrowingRule
 
 # Patron views
 def patron_login(request):
@@ -38,6 +68,10 @@ def patron_login(request):
             patron = Patron.objects.get(email=email)
         except Patron.DoesNotExist:
             return render(request, 'patron/patronlogin.html', {'error': 'Invalid email or password'})
+
+        if patron.account_status == 'Pending':
+            return render(request, 'patron/patronlogin.html',
+                          {'error': 'Your registration is awaiting administrator approval. You will receive an email once it is approved.'})
 
         if patron.account_status != 'Active':
             return render(request, 'patron/patronlogin.html', {'error': 'Your account is suspended or inactive'})
@@ -100,50 +134,135 @@ def patron_dashboard(request):
     return render(request, 'patron/patrondashboard.html', context)
 
 
+def _new_otp():
+    """6-digit numeric one-time password."""
+    import random
+    return f'{random.randint(0, 999999):06d}'
+
+
+def _save_credential_document(uploaded, patron_email):
+    """Store an uploaded ID / proof-of-residency file under media/credentials/.
+
+    Returns the media-relative path, or None when nothing was uploaded."""
+    if not uploaded:
+        return None
+    ext = os.path.splitext(uploaded.name)[1].lower()
+    if ext not in ('.jpg', '.jpeg', '.png', '.pdf'):
+        raise ValueError('Credential must be a JPG, PNG, or PDF file.')
+    if uploaded.size > 5 * 1024 * 1024:
+        raise ValueError('Credential file must be 5 MB or smaller.')
+    cred_dir = os.path.join(settings.MEDIA_ROOT, 'credentials')
+    os.makedirs(cred_dir, exist_ok=True)
+    filename = f'credential_{uuid4().hex}{ext}'
+    with open(os.path.join(cred_dir, filename), 'wb') as fh:
+        for chunk in uploaded.chunks():
+            fh.write(chunk)
+    return f'credentials/{filename}'
+
+
 def patron_register(request):
-    if request.method == 'POST':
-        fullname = request.POST.get('fullname')
-        email = request.POST.get('email')
-        password = request.POST.get('password')
-        confirm_password = request.POST.get('confirm_password')
-        patron_type = request.POST.get('patron_type')
-        contact_number = request.POST.get('contact_number')
-        address = request.POST.get('address')
+    """Online registration: form → email OTP → pending Administrator approval.
 
-        # Validate all required fields are filled
-        if not all([fullname, email, password, confirm_password, patron_type, contact_number, address]):
+    The account stays 'Pending' (no login possible) until an Administrator
+    approves it in Manage Patrons, at which point the identity QR is
+    generated and the patron is emailed."""
+    if request.method != 'POST':
+        return render(request, 'patron/patronregister.html', {'stage': 'form'})
+
+    action = request.POST.get('action', 'register')
+
+    # ── Step 2: OTP verification ─────────────────────────────
+    if action == 'verify_otp':
+        email = (request.POST.get('email') or '').strip()
+        code = (request.POST.get('otp') or '').strip()
+        patron = Patron.objects.filter(
+            email__iexact=email, account_status='Pending', otp_verified=False
+        ).first()
+        if patron is None:
             return render(request, 'patron/patronregister.html',
-                         {'error': 'All fields are required'})
-
-        # Validate password match
-        if password != confirm_password:
+                          {'stage': 'form', 'error': 'No pending registration found for that email. Please register again.'})
+        if not patron.otp_code or not patron.otp_expires_at or timezone.now() > patron.otp_expires_at:
             return render(request, 'patron/patronregister.html',
-                         {'error': 'Passwords do not match'})
-
-        # Validate email doesn't exist
-        if Patron.objects.filter(email=email).exists():
+                          {'stage': 'otp', 'otp_email': email,
+                           'error': 'That code has expired. Click "Resend code" to get a new one.'})
+        if code != patron.otp_code:
             return render(request, 'patron/patronregister.html',
-                         {'error': 'Email already exists'})
+                          {'stage': 'otp', 'otp_email': email,
+                           'error': 'Incorrect code. Please try again.'})
+        patron.otp_verified = True
+        patron.otp_code = None
+        patron.otp_expires_at = None
+        patron.save(update_fields=['otp_verified', 'otp_code', 'otp_expires_at'])
+        return render(request, 'patron/patronregister.html', {'stage': 'pending'})
 
-        # Hash password and create patron
-        hashed_password = hash_password(password)
+    # ── Resend OTP ───────────────────────────────────────────
+    if action == 'resend_otp':
+        email = (request.POST.get('email') or '').strip()
+        patron = Patron.objects.filter(
+            email__iexact=email, account_status='Pending', otp_verified=False
+        ).first()
+        if patron is None:
+            return render(request, 'patron/patronregister.html',
+                          {'stage': 'form', 'error': 'No pending registration found for that email. Please register again.'})
+        patron.otp_code = _new_otp()
+        patron.otp_expires_at = timezone.now() + timedelta(minutes=10)
+        patron.save(update_fields=['otp_code', 'otp_expires_at'])
+        otp_email(patron.email, patron.fullname, patron.otp_code)
+        return render(request, 'patron/patronregister.html',
+                      {'stage': 'otp', 'otp_email': email,
+                       'info': 'A new code has been sent to your email.'})
 
-        patron = Patron.objects.create(
-            fullname=fullname,
-            email=email,
-            password_hash=hashed_password,
-            patron_type=patron_type,
-            contact_number=contact_number,
-            address=address,
-            account_status='Active'
-        )
+    # ── Step 1: submit the registration form ────────────────
+    fullname = (request.POST.get('fullname') or '').strip()
+    email = (request.POST.get('email') or '').strip()
+    password = request.POST.get('password')
+    confirm_password = request.POST.get('confirm_password')
+    patron_type = request.POST.get('patron_type')
+    contact_number = (request.POST.get('contact_number') or '').strip()
+    address = (request.POST.get('address') or '').strip()
+    pin = (request.POST.get('pin') or '').strip()
 
-        # Save to session and redirect
-        request.session['patron_id'] = patron.patron_id
-        request.session['patron_fullname'] = patron.fullname
-        return redirect('/patron/dashboard/')
+    def _form_error(msg):
+        return render(request, 'patron/patronregister.html', {'stage': 'form', 'error': msg})
 
-    return render(request, 'patron/patronregister.html')
+    if not all([fullname, email, password, confirm_password, patron_type, contact_number, address, pin]):
+        return _form_error('All fields are required')
+    if password != confirm_password:
+        return _form_error('Passwords do not match')
+    if not (pin.isdigit() and 4 <= len(pin) <= 6):
+        return _form_error('PIN must be 4 to 6 digits')
+
+    existing = Patron.objects.filter(email__iexact=email).first()
+    if existing is not None:
+        # A stale unverified application may be replaced; anything else is a duplicate.
+        if existing.account_status == 'Pending' and not existing.otp_verified:
+            existing.delete()
+        else:
+            return _form_error('Email already exists')
+
+    try:
+        credential_path = _save_credential_document(request.FILES.get('credential_document'), email)
+    except ValueError as exc:
+        return _form_error(str(exc))
+
+    patron = Patron.objects.create(
+        fullname=fullname,
+        email=email,
+        password_hash=hash_password(password),
+        pin_hash=hash_password(pin),
+        patron_type=patron_type,
+        contact_number=contact_number,
+        address=address,
+        account_status='Pending',
+        registration_channel='Online',
+        credential_document=credential_path,
+        otp_code=_new_otp(),
+        otp_expires_at=timezone.now() + timedelta(minutes=10),
+        otp_verified=False,
+    )
+    otp_email(patron.email, patron.fullname, patron.otp_code)
+    return render(request, 'patron/patronregister.html',
+                  {'stage': 'otp', 'otp_email': patron.email})
 
 
 
@@ -152,7 +271,7 @@ def patron_catalog(request):
     search_query = request.GET.get('search', '').strip()
 
     books = Book.objects.filter(status='Available').select_related(
-        'section', 'shelf_level'
+        'shelf_level', 'shelf_level__shelf'
     ).order_by('title')
 
     if search_query:
@@ -173,25 +292,23 @@ def patron_catalog(request):
 def patron_book_details(request, book_id):
     book = get_object_or_404(
         Book.objects.select_related(
-            'section',
-            'section__shelf',
-            'section__shelf__room',
-            'section__shelf__room__floor_plan',
             'shelf_level',
+            'shelf_level__shelf',
+            'shelf_level__shelf__room',
+            'shelf_level__shelf__room__floor_plan',
         ),
         book_id=book_id,
     )
 
-    # Walk the location hierarchy: Section -> Shelf -> Room -> FloorPlan
-    section = book.section
-    shelf = section.shelf if section else None
+    # Walk the location hierarchy: Shelf Level -> Shelf -> Room -> FloorPlan
+    shelf_level = book.shelf_level
+    shelf = shelf_level.shelf if shelf_level else None
     room = shelf.room if shelf else None
     floor_plan = room.floor_plan if room else None
 
     context = {
         'book': book,
-        'section': section,
-        'shelf_level': book.shelf_level,
+        'shelf_level': shelf_level,
         'shelf': shelf,
         'room': room,
         'floor_plan': floor_plan,
@@ -204,11 +321,11 @@ def patron_map(request):
     target = {}
     book_id = request.GET.get('book_id')
     if book_id:
-        book = Book.objects.select_related('section__shelf').filter(book_id=book_id).first()
+        book = Book.objects.select_related('shelf_level__shelf').filter(book_id=book_id).first()
         if book:
             target['book_id'] = book.book_id
             target['book_title'] = book.title
-            shelf = book.section.shelf if book.section else None
+            shelf = book.shelf_level.shelf if book.shelf_level else None
             if shelf:
                 target['shelf_id'] = shelf.shelf_id
                 target['shelf_name'] = shelf.name
@@ -255,6 +372,74 @@ def patron_account(request):
     }
     return render(request, 'patron/patronaccount.html', context)
 
+
+@patron_login_required
+def patron_update_profile(request):
+    """Save profile edits from the My Account page (AJAX)."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
+    patron = get_object_or_404(Patron, patron_id=request.session.get('patron_id'))
+
+    fullname = (request.POST.get('fullname') or '').strip()
+    email = (request.POST.get('email') or '').strip()
+    contact_number = (request.POST.get('contact_number') or '').strip()
+    address = (request.POST.get('address') or '').strip()
+
+    if not fullname or not email:
+        return JsonResponse({'success': False, 'error': 'Full name and email are required.'})
+    if Patron.objects.exclude(patron_id=patron.patron_id).filter(email__iexact=email).exists():
+        return JsonResponse({'success': False, 'error': 'That email is already in use by another account.'})
+
+    patron.fullname = fullname
+    patron.email = email
+    patron.contact_number = contact_number or None
+    patron.address = address or None
+    patron.save(update_fields=['fullname', 'email', 'contact_number', 'address'])
+    request.session['patron_fullname'] = patron.fullname
+    return JsonResponse({'success': True, 'message': 'Profile updated.'})
+
+
+@patron_login_required
+def patron_change_password(request):
+    """Change the login password (requires the current password)."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
+    patron = get_object_or_404(Patron, patron_id=request.session.get('patron_id'))
+
+    current = request.POST.get('current_password') or ''
+    new = request.POST.get('new_password') or ''
+    if len(new) < 8:
+        return JsonResponse({'success': False, 'error': 'New password must be at least 8 characters.'})
+    if not check_password(current, patron.password_hash):
+        return JsonResponse({'success': False, 'error': 'Current password is incorrect.'})
+
+    patron.password_hash = hash_password(new)
+    patron.save(update_fields=['password_hash'])
+    return JsonResponse({'success': True, 'message': 'Password changed.'})
+
+
+@patron_login_required
+def patron_change_pin(request):
+    """Set or change the transaction PIN.
+
+    When a PIN already exists the current PIN is required; patrons without
+    one (e.g. registered on-site at the desk) can set it directly."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
+    patron = get_object_or_404(Patron, patron_id=request.session.get('patron_id'))
+
+    current = (request.POST.get('current_pin') or '').strip()
+    new = (request.POST.get('new_pin') or '').strip()
+    if not (new.isdigit() and 4 <= len(new) <= 6):
+        return JsonResponse({'success': False, 'error': 'PIN must be 4 to 6 digits.'})
+    if patron.pin_hash and not check_password(current, patron.pin_hash):
+        return JsonResponse({'success': False, 'error': 'Current PIN is incorrect.'})
+
+    patron.pin_hash = hash_password(new)
+    patron.save(update_fields=['pin_hash'])
+    return JsonResponse({'success': True, 'message': 'PIN saved.'})
+
+
 # Admin views
 def admin_login(request):
     if request.method == 'POST':
@@ -272,9 +457,13 @@ def admin_login(request):
         if not check_password(password, admin.password_hash):
             return render(request, 'admin/signin.html', {'error': 'Invalid email or password'})
 
+        if admin.role != 'Admin':
+            return render(request, 'admin/signin.html', {'error': 'This is the administrator portal. Please use the Library Staff login.'})
+
         request.session['admin_id'] = admin.admin_id
         request.session['admin_fullname'] = admin.fullname
-        log_admin_action(request, 'Login', 'Auth', admin.admin_id, f'{admin.fullname} logged in')
+        request.session['admin_role'] = admin.role
+        log_admin_action(request, 'Login', 'Auth', admin.admin_id, f'{admin.fullname} (Admin) logged in')
         return redirect('/admin-portal/dashboard/')
 
     return render(request, 'admin/signin.html')
@@ -285,7 +474,41 @@ def admin_logout(request):
     return redirect('/admin-portal/login/')
 
 
-@admin_login_required
+# Library Staff portal authentication
+def staff_login(request):
+    if request.method == 'POST':
+        email = request.POST.get('email')
+        password = request.POST.get('password')
+
+        try:
+            user = User.objects.get(email=email)
+        except User.DoesNotExist:
+            return render(request, 'library_staff/signin.html', {'error': 'Invalid email or password'})
+
+        if user.account_status != 'Active':
+            return render(request, 'library_staff/signin.html', {'error': 'Your account is suspended or inactive'})
+
+        if not check_password(password, user.password_hash):
+            return render(request, 'library_staff/signin.html', {'error': 'Invalid email or password'})
+
+        if user.role != 'Staff':
+            return render(request, 'library_staff/signin.html', {'error': 'This portal is for library staff. Please use the administrator login.'})
+
+        request.session['admin_id'] = user.admin_id
+        request.session['admin_fullname'] = user.fullname
+        request.session['admin_role'] = user.role
+        log_admin_action(request, 'Login', 'Auth', user.admin_id, f'{user.fullname} (Staff) logged in')
+        return redirect('/library-staff/dashboard/')
+
+    return render(request, 'library_staff/signin.html')
+
+
+def staff_logout(request):
+    request.session.flush()
+    return redirect('/library-staff/login/')
+
+
+@admin_only_required
 def admin_dashboard(request):
     admin_id = request.session.get('admin_id')
     admin = User.objects.filter(admin_id=admin_id).first()
@@ -336,18 +559,46 @@ def admin_dashboard(request):
     return render(request, 'admin/dashboard.html', context)
 
 
+@staff_only_required
+def staff_dashboard(request):
+    """Scaled-down dashboard for Library Staff (book/transaction/visit metrics only)."""
+    admin_id = request.session.get('admin_id')
+    admin = User.objects.filter(admin_id=admin_id).first()
+    today = timezone.localdate()
+
+    books_available = Book.objects.filter(status='Available').count()
+    books_borrowed = Book.objects.filter(status='Borrowed').count()
+    books_overdue = Book.objects.filter(status='Overdue').count()
+    books_being_read = Book.objects.filter(status='Being Read').count()
+
+    recent_transactions = Transaction.objects.select_related('patron', 'book').order_by('-transaction_date')[:5]
+    visitors_today = PatronLog.objects.filter(entry_time__date=today).count()
+    pending_transactions_count = Transaction.objects.filter(transaction_type='Borrow', return_date__isnull=True).count()
+
+    context = {
+        'admin': admin,
+        'books_available': books_available,
+        'books_borrowed': books_borrowed,
+        'books_overdue': books_overdue,
+        'books_being_read': books_being_read,
+        'recent_transactions': recent_transactions,
+        'visitors_today': visitors_today,
+        'pending_transactions_count': pending_transactions_count,
+    }
+    return render(request, 'library_staff/dashboard.html', context)
+
+
 def admin_signin(request):
     return render(request, 'admin/signin.html')
 
 
-@admin_login_required
-def admin_management(request):
+def _books_page(request, template):
     from urllib.parse import urlencode
     q = (request.GET.get('q') or '').strip()
     status = (request.GET.get('status') or '').strip()
     genre = (request.GET.get('genre') or '').strip()
 
-    books_queryset = Book.objects.select_related('section', 'shelf_level')
+    books_queryset = Book.objects.select_related('shelf_level', 'shelf_level__shelf')
     if q:
         books_queryset = books_queryset.filter(
             Q(title__icontains=q) | Q(author__icontains=q) | Q(ISBN__icontains=q)
@@ -364,8 +615,7 @@ def admin_management(request):
     total_copies = total_books
     available_count = Book.objects.filter(status='Available').count()
     borrowed_count = Book.objects.filter(status='Borrowed').count()
-    sections = Section.objects.all()
-    shelf_levels = ShelfLevel.objects.all()
+    shelf_levels = ShelfLevel.objects.select_related('shelf').all()
     genres = list(
         Book.objects.exclude(genre__isnull=True).exclude(genre='')
         .order_by('genre').values_list('genre', flat=True).distinct()
@@ -387,7 +637,6 @@ def admin_management(request):
         'total_copies': total_copies,
         'available_count': available_count,
         'borrowed_count': borrowed_count,
-        'sections': sections,
         'shelf_levels': shelf_levels,
         'genres': genres,
         'status_choices': valid_status,
@@ -398,7 +647,17 @@ def admin_management(request):
         'pending_transactions_count': pending_transactions_count,
         'paginator': paginator,
     }
-    return render(request, 'admin/managebooks.html', context)
+    return render(request, template, context)
+
+
+@admin_only_required
+def admin_management(request):
+    return _books_page(request, 'admin/managebooks.html')
+
+
+@staff_only_required
+def staff_manage_books(request):
+    return _books_page(request, 'library_staff/managebooks.html')
 
 
 @admin_login_required
@@ -411,7 +670,6 @@ def admin_add_book(request):
         isbn = request.POST.get('ISBN', '').strip()
         genre = request.POST.get('genre', '').strip()
         status = request.POST.get('status', 'Available').strip()
-        section_id = request.POST.get('section', '').strip()
         shelf_level_id = request.POST.get('shelf_level', '').strip()
         publication_year = request.POST.get('publication_year', '').strip()
         cover_img_url = request.POST.get('cover_img_url', '').strip()
@@ -422,11 +680,8 @@ def admin_add_book(request):
                 from django.http import JsonResponse
                 return JsonResponse({'success': False, 'error': error})
         else:
-            section = None
             shelf_level = None
 
-            if section_id:
-                section = Section.objects.filter(section_id=section_id).first()
             if shelf_level_id:
                 shelf_level = ShelfLevel.objects.filter(shelf_level_id=shelf_level_id).first()
 
@@ -438,7 +693,6 @@ def admin_add_book(request):
                 ISBN=isbn,
                 genre=genre,
                 status=status or 'Available',
-                section=section,
                 shelf_level=shelf_level,
                 publication_year=int(publication_year) if publication_year else None,
                 cover_img_url=cover_img_url if cover_img_url else None,
@@ -449,16 +703,15 @@ def admin_add_book(request):
             if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
                 from django.http import JsonResponse
                 return JsonResponse({'success': True, 'message': 'Book added successfully.'})
-            return redirect('admin_management')
+            return portal_redirect(request, 'admin_management')
 
     # Get books list context for managebooks.html
-    books = Book.objects.select_related('section', 'shelf_level').order_by('title')
+    books = Book.objects.select_related('shelf_level', 'shelf_level__shelf').order_by('title')
     total_books = books.count()
     total_copies = total_books
     available_count = books.filter(status='Available').count()
     borrowed_count = books.filter(status='Borrowed').count()
-    sections = Section.objects.all()
-    shelf_levels = ShelfLevel.objects.all()
+    shelf_levels = ShelfLevel.objects.select_related('shelf').all()
 
     context = {
         'books': books,
@@ -466,14 +719,13 @@ def admin_add_book(request):
         'total_copies': total_copies,
         'available_count': available_count,
         'borrowed_count': borrowed_count,
-        'sections': sections,
         'shelf_levels': shelf_levels,
         'error': error,
     }
     return render(request, 'admin/managebooks.html', context)
 
 
-@admin_login_required
+@admin_only_required
 def admin_add_patron(request):
     error = None
     initial = {}
@@ -510,6 +762,9 @@ def admin_add_patron(request):
                 contact_number=contact_number,
                 address=address,
                 account_status=account_status or 'Active',
+                registration_channel='On-site',
+                qr_code=str(uuid4()),
+                otp_verified=True,
             )
             log_admin_action(request, 'Create', 'Patron', patron.patron_id, f'Added "{patron.fullname}"')
             return redirect('admin_manage_patron')
@@ -548,7 +803,54 @@ def admin_add_patron(request):
     return render(request, 'admin/managepatron.html', context)
 
 
-@admin_login_required
+@admin_only_required
+def approve_patron(request, patron_id):
+    """Approve a pending registration: activate, generate the identity QR, email."""
+    if request.method != 'POST':
+        return redirect('admin_manage_patron')
+    patron = Patron.objects.filter(patron_id=patron_id, account_status='Pending').first()
+    if patron is None:
+        messages.error(request, 'Pending patron not found.')
+        return redirect('admin_manage_patron')
+
+    patron.account_status = 'Active'
+    if not patron.qr_code:
+        patron.qr_code = str(uuid4())
+    patron.save(update_fields=['account_status', 'qr_code'])
+    log_admin_action(request, 'Update', 'Patron', patron.patron_id,
+                     f'Approved registration of "{patron.fullname}"')
+    registration_approved_email(patron)
+    messages.success(request, f'{patron.fullname} approved. Their QR code is now active.')
+    return redirect('admin_manage_patron')
+
+
+@admin_only_required
+def reject_patron(request, patron_id):
+    """Reject a pending registration: notify the applicant and remove the row."""
+    if request.method != 'POST':
+        return redirect('admin_manage_patron')
+    patron = Patron.objects.filter(patron_id=patron_id, account_status='Pending').first()
+    if patron is None:
+        messages.error(request, 'Pending patron not found.')
+        return redirect('admin_manage_patron')
+
+    reason = (request.POST.get('reason') or '').strip() or None
+    fullname, email = patron.fullname, patron.email
+    log_admin_action(request, 'Delete', 'Patron', patron.patron_id,
+                     f'Rejected registration of "{fullname}"' + (f' — {reason}' if reason else ''))
+    # Remove the uploaded credential file along with the application.
+    if patron.credential_document:
+        try:
+            os.remove(os.path.join(settings.MEDIA_ROOT, patron.credential_document))
+        except OSError:
+            pass
+    patron.delete()
+    registration_rejected_email(email, fullname, reason)
+    messages.success(request, f'Registration of {fullname} rejected.')
+    return redirect('admin_manage_patron')
+
+
+@admin_only_required
 def admin_manage_patron(request):
     search_query = request.GET.get('search', '').strip()
     
@@ -591,6 +893,9 @@ def admin_manage_patron(request):
     patrons_with_borrows = patrons_queryset.filter(active_borrows__gt=0).count()
     patrons_overdue = patrons_queryset.filter(overdue_count__gt=0).count()
 
+    # Online registrations awaiting Administrator approval.
+    pending_patrons = Patron.objects.filter(account_status='Pending').order_by('-registration_date')
+
     # Apply the search filter to the table list.
     if search_query:
         patrons_queryset = patrons_queryset.filter(
@@ -611,6 +916,7 @@ def admin_manage_patron(request):
         'active_patrons': active_patrons,
         'patrons_with_borrows': patrons_with_borrows,
         'patrons_overdue': patrons_overdue,
+        'pending_patrons': pending_patrons,
         'pending_transactions_count': pending_transactions_count,
         'paginator': paginator,
         'search_query': search_query,
@@ -619,7 +925,7 @@ def admin_manage_patron(request):
     return render(request, 'admin/managepatron.html', context)
 
 
-@admin_login_required
+@admin_only_required
 def admin_edit_patron(request, patron_id):
     patron = Patron.objects.filter(patron_id=patron_id).first()
     if patron is None:
@@ -706,7 +1012,7 @@ def admin_edit_patron(request, patron_id):
     return render(request, 'admin/managepatron.html', context)
 
 
-@admin_login_required
+@admin_only_required
 def admin_delete_patron(request, patron_id):
     if request.method == 'POST':
         patron = Patron.objects.filter(patron_id=patron_id).first()
@@ -721,7 +1027,7 @@ def admin_delete_patron(request, patron_id):
 def admin_edit_book(request, book_id):
     book = Book.objects.filter(book_id=book_id).first()
     if book is None:
-        return redirect('admin_management')
+        return portal_redirect(request, 'admin_management')
 
     error = None
     success = None
@@ -733,7 +1039,6 @@ def admin_edit_book(request, book_id):
         'genre': book.genre,
         'cover_img_url': book.cover_img_url,
         'status': book.status,
-        'section_id': book.section.section_id if book.section else '',
         'shelf_level_id': book.shelf_level.shelf_level_id if book.shelf_level else '',
     }
 
@@ -745,7 +1050,6 @@ def admin_edit_book(request, book_id):
         genre = request.POST.get('genre', '').strip()
         cover_img_url = request.POST.get('cover_img_url', '').strip()
         status = request.POST.get('status', '').strip()
-        section_id = request.POST.get('section', '').strip()
         shelf_level_id = request.POST.get('shelf_level', '').strip()
 
         if not title or not author:
@@ -761,8 +1065,6 @@ def admin_edit_book(request, book_id):
             book.genre = genre
             book.cover_img_url = cover_img_url if cover_img_url else None
             book.status = status or book.status
-            if section_id:
-                book.section = Section.objects.filter(section_id=section_id).first()
             if shelf_level_id:
                 book.shelf_level = ShelfLevel.objects.filter(shelf_level_id=shelf_level_id).first()
             book.save()
@@ -776,7 +1078,6 @@ def admin_edit_book(request, book_id):
                 'genre': genre,
                 'cover_img_url': cover_img_url,
                 'status': status,
-                'section_id': section_id,
                 'shelf_level_id': shelf_level_id,
             })
             if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
@@ -784,13 +1085,12 @@ def admin_edit_book(request, book_id):
                 return JsonResponse({'success': True, 'message': success})
 
     # Get books list context for managebooks.html
-    books = Book.objects.select_related('section', 'shelf_level').order_by('title')
+    books = Book.objects.select_related('shelf_level', 'shelf_level__shelf').order_by('title')
     total_books = books.count()
     total_copies = total_books
     available_count = books.filter(status='Available').count()
     borrowed_count = books.filter(status='Borrowed').count()
-    sections = Section.objects.all()
-    shelf_levels = ShelfLevel.objects.all()
+    shelf_levels = ShelfLevel.objects.select_related('shelf').all()
 
     context = {
         'books': books,
@@ -798,7 +1098,6 @@ def admin_edit_book(request, book_id):
         'total_copies': total_copies,
         'available_count': available_count,
         'borrowed_count': borrowed_count,
-        'sections': sections,
         'shelf_levels': shelf_levels,
         'book': book,
         'error': error,
@@ -816,7 +1115,7 @@ def admin_delete_book(request, book_id):
             title = book.title
             book.delete()
             log_admin_action(request, 'Delete', 'Book', book_id, f'Deleted "{title}"')
-    return redirect('admin_management')
+    return portal_redirect(request, 'admin_management')
 
 
 @admin_login_required
@@ -827,6 +1126,7 @@ def admin_transaction_action(request, transaction_id):
         if tx and action == 'return' and tx.return_date is None:
             tx.return_date = timezone.localdate()
             tx.overdue_flag = bool(tx.due_date and tx.return_date > tx.due_date)
+            tx.fine_amount = BorrowingRule.current().compute_fine(tx.due_date, tx.return_date)
             tx.save()
             if tx.book and tx.transaction_type == 'Borrow':
                 tx.book.status = 'Available'
@@ -836,12 +1136,25 @@ def admin_transaction_action(request, transaction_id):
             # Email the patron a return receipt.
             if tx.patron and tx.book:
                 return_receipt_email(tx.patron, [tx.book], had_overdue=tx.overdue_flag)
-    return redirect('admin_transaction')
+        elif tx and action == 'lost' and tx.return_date is None and tx.transaction_type == 'Borrow':
+            rule = BorrowingRule.current()
+            today = timezone.localdate()
+            # Total owed = any accrued overdue fine + the configured lost-book fee.
+            tx.overdue_flag = bool(tx.due_date and today > tx.due_date)
+            tx.fine_amount = rule.compute_fine(tx.due_date, today) + rule.lost_book_fee
+            tx.save()  # transaction stays open so it counts as an outstanding lost-book penalty
+            if tx.book:
+                tx.book.status = 'Lost'
+                tx.book.save()
+            log_admin_action(request, 'Process', 'Transaction', tx.transaction_id,
+                             f'Marked "{tx.book.title if tx.book else ""}" lost (fine {tx.fine_amount})')
+            if tx.patron and tx.book:
+                lost_book_email(tx.patron, tx.book, tx.fine_amount)
+    return portal_redirect(request, 'admin_transaction')
 
 
-@admin_login_required
-def admin_book_detail(request):
-    books = Book.objects.select_related('section', 'shelf_level').order_by('title')
+def _book_detail_page(request, template):
+    books = Book.objects.select_related('shelf_level', 'shelf_level__shelf').order_by('title')
     total_books = books.count()
     available_count = books.filter(status='Available').count()
     borrowed_count = books.filter(status='Borrowed').count()
@@ -854,11 +1167,20 @@ def admin_book_detail(request):
         'borrowed_count': borrowed_count,
         'overdue_count': overdue_count,
     }
-    return render(request, 'admin/bookdetail.html', context)
+    return render(request, template, context)
 
 
-@admin_login_required
-def admin_transaction(request):
+@admin_only_required
+def admin_book_detail(request):
+    return _book_detail_page(request, 'admin/bookdetail.html')
+
+
+@staff_only_required
+def staff_book_detail(request):
+    return _book_detail_page(request, 'library_staff/bookdetail.html')
+
+
+def _transaction_page(request, template):
     from datetime import datetime
     from urllib.parse import urlencode
 
@@ -922,10 +1244,20 @@ def admin_transaction(request):
         'date_to': date_to,
         'querystring': urlencode(params),
     }
-    return render(request, 'admin/transaction.html', context)
+    return render(request, template, context)
 
 
-@admin_login_required
+@admin_only_required
+def admin_transaction(request):
+    return _transaction_page(request, 'admin/transaction.html')
+
+
+@staff_only_required
+def staff_transaction(request):
+    return _transaction_page(request, 'library_staff/transaction.html')
+
+
+@admin_only_required
 def admin_indoor_map(request):
     # Fetch all floor plans for dropdown selector
     floorplans = FloorPlan.objects.all().order_by('-uploaded_at')
@@ -1047,8 +1379,7 @@ def admin_indoor_map(request):
     return render(request, 'admin/indoormap.html', context)
 
 
-@admin_login_required
-def admin_log_management(request):
+def _logs_page(request, template):
     from datetime import datetime
     from urllib.parse import urlencode
 
@@ -1104,16 +1435,26 @@ def admin_log_management(request):
         'querystring': urlencode(params),
         'patron_types': [choice[0] for choice in Patron.PATRON_TYPE_CHOICES],
     }
-    return render(request, 'admin/logmanagement.html', context)
+    return render(request, template, context)
+
+
+@admin_only_required
+def admin_log_management(request):
+    return _logs_page(request, 'admin/logmanagement.html')
+
+
+@staff_only_required
+def staff_logs(request):
+    return _logs_page(request, 'library_staff/logmanagement.html')
 
 
 @admin_login_required
 def admin_book_details_ajax(request, book_id):
     from django.http import JsonResponse
-    book = Book.objects.filter(book_id=book_id).select_related('section', 'shelf_level').first()
+    book = Book.objects.filter(book_id=book_id).select_related('shelf_level', 'shelf_level__shelf').first()
     if book is None:
         return JsonResponse({'success': False, 'error': 'Book not found'})
-    
+
     book_data = {
         'success': True,
         'book_id': book.book_id,
@@ -1125,8 +1466,9 @@ def admin_book_details_ajax(request, book_id):
         'status': book.status,
         'cover_img_url': book.cover_img_url,
         'qr_code': book.qr_code,
-        'section': book.section.name if book.section else 'N/A',
-        'shelf_level': book.shelf_level.label if book.shelf_level else 'N/A',
+        'category': book.shelf_level.category if book.shelf_level else 'N/A',
+        'shelf': book.shelf_level.shelf.name if (book.shelf_level and book.shelf_level.shelf) else 'N/A',
+        'shelf_level': (f'Level {book.shelf_level.level_number}' if book.shelf_level else 'N/A'),
         'copies': Book.objects.filter(title=book.title, author=book.author).count(),
     }
     return JsonResponse(book_data)
@@ -1138,10 +1480,10 @@ def search_book_by_qr(request):
     if not qr_code:
         return JsonResponse({'success': False, 'error': 'QR code is required'})
     
-    book = Book.objects.filter(qr_code=qr_code).select_related('section', 'shelf_level').first()
+    book = Book.objects.filter(qr_code=qr_code).select_related('shelf_level', 'shelf_level__shelf').first()
     if book is None:
         return JsonResponse({'success': False, 'error': 'Book not found'})
-    
+
     book_data = {
         'success': True,
         'book': {
@@ -1154,8 +1496,8 @@ def search_book_by_qr(request):
             'status': book.status,
             'cover_img_url': book.cover_img_url,
             'qr_code': book.qr_code,
-            'section': book.section.name if book.section else 'N/A',
-            'shelf_level': book.shelf_level.label if book.shelf_level else 'N/A',
+            'category': book.shelf_level.category if book.shelf_level else 'N/A',
+            'shelf_level': (f'Level {book.shelf_level.level_number}' if book.shelf_level else 'N/A'),
         }
     }
     return JsonResponse(book_data)
@@ -1167,7 +1509,7 @@ def download_book_template(request):
     ws = wb.active
     ws.title = "Book Import Template"
     
-    headers = ['title', 'author', 'publication_year', 'ISBN', 'genre', 'section_id', 'shelf_level_id']
+    headers = ['title', 'author', 'publication_year', 'ISBN', 'genre', 'shelf_level_id']
     ws.append(headers)
     
     response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
@@ -1202,31 +1544,25 @@ def import_books(request):
             publication_year = row[2].value
             isbn = row[3].value
             genre = row[4].value
-            section_id = row[5].value
-            shelf_level_id = row[6].value
-            
+            shelf_level_id = row[5].value
+
             if not title or not author:
                 continue
-            
+
             if isbn and Book.objects.filter(ISBN=isbn).exists():
                 skipped_count += 1
                 continue
-            
-            section = None
-            if section_id and str(section_id).strip() not in ['', 'N/A', 'n/a']:
-                section = Section.objects.filter(section_id=section_id).first()
-            
+
             shelf_level = None
             if shelf_level_id and str(shelf_level_id).strip() not in ['', 'N/A', 'n/a']:
                 shelf_level = ShelfLevel.objects.filter(shelf_level_id=shelf_level_id).first()
-            
+
             book = Book.objects.create(
                 title=title,
                 author=author,
                 publication_year=int(publication_year) if publication_year else None,
                 ISBN=isbn,
                 genre=genre,
-                section=section,
                 shelf_level=shelf_level,
                 status='Available'
             )
@@ -1257,7 +1593,7 @@ def import_books(request):
         return JsonResponse({'success': False, 'error': str(e)})
 
 
-@admin_login_required
+@admin_only_required
 def download_patron_template(request):
     wb = Workbook()
     ws = wb.active
@@ -1272,7 +1608,7 @@ def download_patron_template(request):
     return response
 
 
-@admin_login_required
+@admin_only_required
 def import_patrons(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
@@ -1314,7 +1650,10 @@ def import_patrons(request):
                 contact_number=contact_number,
                 address=address,
                 account_status=account_status if account_status else 'Active',
-                registration_date=timezone.now()
+                registration_date=timezone.now(),
+                registration_channel='On-site',
+                qr_code=str(uuid4()),
+                otp_verified=True,
             )
             
             imported_count += 1
@@ -1402,7 +1741,7 @@ def import_donations(request):
         return JsonResponse({'success': False, 'error': str(e)})
 
 
-@admin_login_required
+@admin_only_required
 def download_announcement_template(request):
     wb = Workbook()
     ws = wb.active
@@ -1417,7 +1756,7 @@ def download_announcement_template(request):
     return response
 
 
-@admin_login_required
+@admin_only_required
 def import_announcements(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
@@ -1521,6 +1860,9 @@ def process_transaction(request):
     admin_id = request.session.get('admin_id')
     admin = User.objects.filter(admin_id=admin_id).first()
 
+    # Active borrowing rule (loan period, limit, penalties).
+    rule = BorrowingRule.current()
+
     # 3-point patron eligibility check before borrowing (overdue items,
     # account suspension, outstanding lost-book penalty).
     if transaction_type == 'Borrow':
@@ -1530,6 +1872,20 @@ def process_transaction(request):
                 'success': False,
                 'error': f'{patron.fullname} is not eligible to borrow',
                 'errors': violations,
+            })
+
+        # Enforce the configured borrowing limit.
+        active_borrows = Transaction.objects.filter(
+            patron=patron, transaction_type='Borrow', return_date__isnull=True
+        ).count()
+        if active_borrows + len(book_ids) > rule.max_books_per_patron:
+            return JsonResponse({
+                'success': False,
+                'error': f'{patron.fullname} is not eligible to borrow',
+                'errors': [
+                    f'Borrowing limit is {rule.max_books_per_patron} book(s). '
+                    f'This patron already has {active_borrows} active borrow(s).'
+                ],
             })
 
     # Validate books and process transaction
@@ -1569,7 +1925,7 @@ def process_transaction(request):
         
         # Process transaction
         if transaction_type == 'Borrow':
-            due_date = today + timedelta(days=14)
+            due_date = today + timedelta(days=rule.loan_period_days)
             book.status = 'Borrowed'
             book.save()
             Transaction.objects.create(
@@ -1593,6 +1949,7 @@ def process_transaction(request):
             if tx:
                 tx.return_date = today
                 tx.overdue_flag = bool(tx.due_date and today > tx.due_date)
+                tx.fine_amount = rule.compute_fine(tx.due_date, today)
                 tx.save()
                 if tx.overdue_flag:
                     returned_overdue = True
@@ -1640,8 +1997,7 @@ def process_transaction(request):
 
 
 # Donation Management Views
-@admin_login_required
-def donation_management(request):
+def _donations_page(request, template):
     donations_queryset = Donation.objects.select_related('book').order_by('-date_donated')
     
     if request.method == 'POST':
@@ -1655,7 +2011,7 @@ def donation_management(request):
         
         if not all([donor_name, date_donated, title, author]):
             error = 'Donor name, date, title, and author are required.'
-            return render(request, 'admin/donationadmin.html', {'donations': donations_queryset, 'error': error})
+            return render(request, template, {'donations': donations_queryset, 'error': error})
         
         # Create book with status Donated
         book = Book.objects.create(
@@ -1695,17 +2051,27 @@ def donation_management(request):
         log_admin_action(request, 'Create', 'Donation', donation.donation_id,
                          f'"{book.title}" from {donor_name}')
 
-        return redirect('donation_management')
-    
+        return portal_redirect(request, 'donation_management')
+
     # Pagination
     page_number = request.GET.get('page', 1)
     paginator = Paginator(donations_queryset, 15)  # 15 donations per page
     donations = paginator.get_page(page_number)
-    
+
     # Pending transactions count for badge
     pending_transactions_count = Transaction.objects.filter(transaction_type='Borrow', return_date__isnull=True).count()
-    
-    return render(request, 'admin/donationadmin.html', {'donations': donations, 'paginator': paginator, 'pending_transactions_count': pending_transactions_count})
+
+    return render(request, template, {'donations': donations, 'paginator': paginator, 'pending_transactions_count': pending_transactions_count})
+
+
+@admin_only_required
+def donation_management(request):
+    return _donations_page(request, 'admin/donationadmin.html')
+
+
+@staff_only_required
+def staff_donations(request):
+    return _donations_page(request, 'library_staff/donationadmin.html')
 
 
 @admin_login_required
@@ -1726,7 +2092,7 @@ def update_donation_status(request):
             log_admin_action(request, 'Update', 'Donation', donation.donation_id,
                              f'Status set to {status}')
 
-    return redirect('donation_management')
+    return portal_redirect(request, 'donation_management')
 
 
 @admin_login_required
@@ -1740,11 +2106,11 @@ def delete_donation(request):
             donation.book.delete()
             log_admin_action(request, 'Delete', 'Donation', donation_id, detail)
 
-    return redirect('donation_management')
+    return portal_redirect(request, 'donation_management')
 
 
 # Announcement Management Views
-@admin_login_required
+@admin_only_required
 def announcement_management(request):
     announcements_queryset = Announcement.objects.select_related('posted_by').order_by('-created_at')
     
@@ -1790,7 +2156,7 @@ def announcement_management(request):
     return render(request, 'admin/announcementadmin.html', {'announcements': announcements, 'paginator': paginator, 'pending_transactions_count': pending_transactions_count})
 
 
-@admin_login_required
+@admin_only_required
 def toggle_announcement(request):
     if request.method == 'POST':
         announcement_id = request.POST.get('announcement_id')
@@ -1805,7 +2171,7 @@ def toggle_announcement(request):
     return redirect('announcement_management')
 
 
-@admin_login_required
+@admin_only_required
 def delete_announcement(request):
     if request.method == 'POST':
         announcement_id = request.POST.get('announcement_id')
@@ -1819,9 +2185,9 @@ def delete_announcement(request):
 
 
 # Floor Plan Management Views
-@admin_login_required
+@admin_only_required
 def floorplan_management(request):
-    floorplans = FloorPlan.objects.prefetch_related('room_set__shelf_set__section_set__shelflevel_set').order_by('-uploaded_at')
+    floorplans = FloorPlan.objects.prefetch_related('room_set__shelf_set__shelflevel_set').order_by('-uploaded_at')
     
     if request.method == 'POST':
         image = request.FILES.get('image')
@@ -1858,7 +2224,7 @@ def floorplan_management(request):
     return render(request, 'admin/floorplanadmin.html', {'floorplans': floorplans})
 
 
-@admin_login_required
+@admin_only_required
 def set_active_floorplan(request):
     if request.method == 'POST':
         floorplan_id = request.POST.get('floorplan_id')
@@ -1877,7 +2243,7 @@ def set_active_floorplan(request):
     return redirect('floorplan_management')
 
 
-@admin_login_required
+@admin_only_required
 def toggle_renovation(request):
     if request.method == 'POST':
         floorplan_id = request.POST.get('floorplan_id')
@@ -1893,7 +2259,7 @@ def toggle_renovation(request):
     return redirect('floorplan_management')
 
 
-@admin_login_required
+@admin_only_required
 def delete_floorplan(request):
     if request.method == 'POST':
         floorplan_id = request.POST.get('floorplan_id')
@@ -2085,7 +2451,7 @@ def import_logs(request):
 
 
 # ─── REPORTS VIEWS ───────────────────────────────────────────────
-@admin_login_required
+@admin_only_required
 def admin_reports(request):
     """Reports hub: on-screen preview of the selected report + date range."""
     report_type = request.GET.get('type', 'transactions')
@@ -2110,7 +2476,7 @@ def admin_reports(request):
     return render(request, 'admin/reports.html', context)
 
 
-@admin_login_required
+@admin_only_required
 def admin_report_pdf(request):
     """Download the selected report as a PDF."""
     report_type = request.GET.get('type', 'transactions')
@@ -2129,7 +2495,7 @@ def admin_report_pdf(request):
     return response
 
 
-@admin_login_required
+@admin_only_required
 def admin_report_excel(request):
     """Download the selected report as an Excel (.xlsx) file."""
     report_type = request.GET.get('type', 'transactions')
@@ -2151,16 +2517,69 @@ def admin_report_excel(request):
     return response
 
 
+# ─── BORROWING RULES (SETTINGS) ──────────────────────────────────
+@admin_only_required
+def admin_borrowing_rules(request):
+    """View/edit the library-wide borrowing policy."""
+    rule = BorrowingRule.current()
+    saved = False
+    error = None
+
+    if request.method == 'POST':
+        try:
+            loan = int(request.POST.get('loan_period_days', rule.loan_period_days))
+            maxb = int(request.POST.get('max_books_per_patron', rule.max_books_per_patron))
+            grace = int(request.POST.get('grace_period_days', rule.grace_period_days))
+            fine = Decimal(request.POST.get('fine_per_day') or '0')
+            lost = Decimal(request.POST.get('lost_book_fee') or '0')
+
+            if loan < 1 or maxb < 1:
+                error = 'Loan period and borrowing limit must be at least 1.'
+            elif grace < 0 or fine < 0 or lost < 0:
+                error = 'Grace period and fees cannot be negative.'
+            else:
+                rule.loan_period_days = loan
+                rule.max_books_per_patron = maxb
+                rule.grace_period_days = grace
+                rule.fine_per_day = fine
+                rule.lost_book_fee = lost
+                rule.save()
+                log_admin_action(request, 'Update', 'BorrowingRule', rule.rule_id,
+                                 f'loan {loan}d, max {maxb}, fine {fine}/day, grace {grace}d')
+                saved = True
+        except (ValueError, InvalidOperation):
+            error = 'Please enter valid numeric values.'
+
+    pending_transactions_count = Transaction.objects.filter(
+        transaction_type='Borrow', return_date__isnull=True
+    ).count()
+    return render(request, 'admin/borrowingrules.html', {
+        'rule': rule,
+        'saved': saved,
+        'error': error,
+        'pending_transactions_count': pending_transactions_count,
+    })
+
+
 # ─── SHELF MANAGEMENT VIEWS ──────────────────────────────────────
-@admin_login_required
-def shelf_manager(request):
+def _shelf_page(request, template):
     """IDE-style hierarchical manager for shelves, sections, levels and books."""
     pending_transactions_count = Transaction.objects.filter(
         transaction_type='Borrow', return_date__isnull=True
     ).count()
-    return render(request, 'admin/shelfmanager.html', {
+    return render(request, template, {
         'pending_transactions_count': pending_transactions_count,
     })
+
+
+@admin_only_required
+def shelf_manager(request):
+    return _shelf_page(request, 'admin/shelfmanager.html')
+
+
+@staff_only_required
+def staff_shelf(request):
+    return _shelf_page(request, 'library_staff/shelfmanager.html')
 
 
 @admin_login_required
@@ -2175,7 +2594,7 @@ def get_books_for_placement(request):
     data = []
     for b in books[:300]:
         if b.shelf_level:
-            location = b.shelf_level.label or f'Level {b.shelf_level.level_number}'
+            location = b.shelf_level.category or f'Level {b.shelf_level.level_number}'
         else:
             location = ''
         data.append({
@@ -2191,11 +2610,11 @@ def get_books_for_placement(request):
 
 @admin_login_required
 def assign_books_to_level(request):
-    """Place the selected books onto a shelf level (and its parent section)."""
+    """Place the selected books onto a shelf level."""
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
 
-    level = ShelfLevel.objects.select_related('section').filter(
+    level = ShelfLevel.objects.filter(
         shelf_level_id=request.POST.get('shelf_level_id')
     ).first()
     if level is None:
@@ -2206,17 +2625,15 @@ def assign_books_to_level(request):
     if not ids:
         return JsonResponse({'success': False, 'error': 'No books selected'})
 
-    updated = Book.objects.filter(book_id__in=ids).update(
-        shelf_level=level, section=level.section
-    )
+    updated = Book.objects.filter(book_id__in=ids).update(shelf_level=level)
     return JsonResponse({'success': True, 'updated': updated})
 
 
 @admin_login_required
 def get_shelf_tree(request):
-    """Returns full nested hierarchy FloorPlan > Room > Shelf > Section > ShelfLevel > Books"""
+    """Returns full nested hierarchy FloorPlan > Room > Shelf > ShelfLevel > Books"""
     floor_plans = FloorPlan.objects.filter(is_active=True).prefetch_related(
-        'room_set__shelf_set__section_set__shelflevel_set__book_set'
+        'room_set__shelf_set__shelflevel_set__book_set'
     )
     
     tree_data = []
@@ -2253,44 +2670,32 @@ def get_shelf_tree(request):
                     'children': []
                 }
                 
-                for section in shelf.section_set.all():
-                    section_node = {
-                        'type': 'section',
-                        'id': section.section_id,
-                        'name': section.name,
-                        'description': section.description,
-                        'is_active': section.is_active,
+                for shelf_level in shelf.shelflevel_set.all():
+                    books = shelf_level.book_set.all()
+                    book_count = books.count()
+                    shelf_level_node = {
+                        'type': 'shelflevel',
+                        'id': shelf_level.shelf_level_id,
+                        'name': f'Level {shelf_level.level_number}',
+                        'category': shelf_level.category or '',
+                        'level_number': shelf_level.level_number,
+                        'is_active': shelf_level.is_active,
+                        'book_count': book_count,
                         'children': []
                     }
-                    
-                    for shelf_level in section.shelflevel_set.all():
-                        books = shelf_level.book_set.all()
-                        book_count = books.count()
-                        shelf_level_node = {
-                            'type': 'shelflevel',
-                            'id': shelf_level.shelf_level_id,
-                            'name': f'Level {shelf_level.level_number}',
-                            'label': shelf_level.label or '',
-                            'level_number': shelf_level.level_number,
-                            'is_active': shelf_level.is_active,
-                            'book_count': book_count,
-                            'children': []
+
+                    for book in books:
+                        book_node = {
+                            'type': 'book',
+                            'id': book.book_id,
+                            'name': book.title,
+                            'author': book.author,
+                            'status': book.status
                         }
-                        
-                        for book in books:
-                            book_node = {
-                                'type': 'book',
-                                'id': book.book_id,
-                                'name': book.title,
-                                'author': book.author,
-                                'status': book.status
-                            }
-                            shelf_level_node['children'].append(book_node)
-                        
-                        section_node['children'].append(shelf_level_node)
-                    
-                    shelf_node['children'].append(section_node)
-                
+                        shelf_level_node['children'].append(book_node)
+
+                    shelf_node['children'].append(shelf_level_node)
+
                 room_node['children'].append(shelf_node)
             
             fp_node['children'].append(room_node)
@@ -2304,37 +2709,37 @@ def get_shelf_tree(request):
 def get_shelf_levels_flat(request):
     """Returns flattened list of all ShelfLevels with breadcrumb path"""
     shelf_levels = ShelfLevel.objects.select_related(
-        'section__shelf__room__floor_plan'
+        'shelf__room__floor_plan'
     ).all()
-    
+
     flat_data = []
     for sl in shelf_levels:
+        shelf = sl.shelf
+        room = shelf.room if shelf else None
+        floor_plan = room.floor_plan if room else None
         path_parts = []
-        if sl.section.shelf.room.floor_plan:
-            path_parts.append(f'Floor Plan {sl.section.shelf.room.floor_plan.floor_plan_id}')
-        if sl.section.shelf.room:
-            path_parts.append(sl.section.shelf.room.name)
-        if sl.section.shelf:
-            path_parts.append(sl.section.shelf.name)
-        if sl.section:
-            path_parts.append(sl.section.name)
-        
+        if floor_plan:
+            path_parts.append(f'Floor Plan {floor_plan.floor_plan_id}')
+        if room:
+            path_parts.append(room.name)
+        if shelf:
+            path_parts.append(shelf.name)
+
         path = ' / '.join(path_parts)
         book_count = sl.book_set.count()
-        
+
         flat_data.append({
             'id': sl.shelf_level_id,
             'path': path,
-            'label': sl.label or f'Level {sl.level_number}',
+            'category': sl.category or f'Level {sl.level_number}',
             'level_number': sl.level_number,
             'book_count': book_count,
             'is_active': sl.is_active,
-            'section_id': sl.section.section_id,
-            'shelf_id': sl.section.shelf.shelf_id,
-            'room_id': sl.section.shelf.room.room_id if sl.section.shelf.room else None,
-            'floor_plan_id': sl.section.shelf.room.floor_plan.floor_plan_id if sl.section.shelf.room and sl.section.shelf.room.floor_plan else None
+            'shelf_id': shelf.shelf_id if shelf else None,
+            'room_id': room.room_id if room else None,
+            'floor_plan_id': floor_plan.floor_plan_id if floor_plan else None
         })
-    
+
     return JsonResponse({'shelf_levels': flat_data})
 
 
@@ -2366,7 +2771,7 @@ def add_room(request):
         return JsonResponse({'success': False, 'error': 'Floor plan not found'})
 
 
-@admin_login_required
+@admin_only_required
 def edit_room(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
@@ -2396,7 +2801,7 @@ def edit_room(request):
         return JsonResponse({'success': False, 'error': 'Room not found'})
 
 
-@admin_login_required
+@admin_only_required
 def delete_room(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
@@ -2485,110 +2890,47 @@ def delete_shelf(request):
 
 
 @admin_login_required
-def add_section(request):
-    if request.method != 'POST':
-        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
-    
-    shelf_id = request.POST.get('shelf_id')
-    name = request.POST.get('name')
-    description = request.POST.get('description', '')
-    
-    if not shelf_id or not name:
-        return JsonResponse({'success': False, 'error': 'shelf_id and name are required'})
-    
-    try:
-        shelf = Shelf.objects.get(shelf_id=shelf_id)
-        section = Section.objects.create(
-            shelf=shelf,
-            name=name,
-            description=description
-        )
-        return JsonResponse({'success': True, 'section_id': section.section_id})
-    except Shelf.DoesNotExist:
-        return JsonResponse({'success': False, 'error': 'Shelf not found'})
-
-
-@admin_login_required
-def edit_section(request):
-    if request.method != 'POST':
-        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
-    
-    section_id = request.POST.get('section_id')
-    name = request.POST.get('name')
-    description = request.POST.get('description')
-    
-    if not section_id:
-        return JsonResponse({'success': False, 'error': 'section_id is required'})
-    
-    try:
-        section = Section.objects.get(section_id=section_id)
-        if name:
-            section.name = name
-        if description is not None:
-            section.description = description
-        section.save()
-        return JsonResponse({'success': True})
-    except Section.DoesNotExist:
-        return JsonResponse({'success': False, 'error': 'Section not found'})
-
-
-@admin_login_required
-def delete_section(request):
-    if request.method != 'POST':
-        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
-    
-    section_id = request.POST.get('section_id')
-    if not section_id:
-        return JsonResponse({'success': False, 'error': 'section_id is required'})
-    
-    Section.objects.filter(section_id=section_id).delete()
-    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-        return JsonResponse({'success': True})
-    return redirect('floorplan_management')
-
-
-@admin_login_required
 def add_shelf_level(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
-    
-    section_id = request.POST.get('section_id')
+
+    shelf_id = request.POST.get('shelf_id')
     level_number = request.POST.get('level_number')
-    label = request.POST.get('label', '')
-    
-    if not section_id or not level_number:
-        return JsonResponse({'success': False, 'error': 'section_id and level_number are required'})
-    
+    category = request.POST.get('category', '')
+
+    if not shelf_id or not level_number:
+        return JsonResponse({'success': False, 'error': 'shelf_id and level_number are required'})
+
     try:
-        section = Section.objects.get(section_id=section_id)
+        shelf = Shelf.objects.get(shelf_id=shelf_id)
         shelf_level = ShelfLevel.objects.create(
-            section=section,
+            shelf=shelf,
             level_number=int(level_number),
-            label=label
+            category=category
         )
         return JsonResponse({'success': True, 'shelf_level_id': shelf_level.shelf_level_id})
-    except Section.DoesNotExist:
-        return JsonResponse({'success': False, 'error': 'Section not found'})
+    except Shelf.DoesNotExist:
+        return JsonResponse({'success': False, 'error': 'Shelf not found'})
 
 
 @admin_login_required
 def edit_shelf_level(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
-    
+
     shelf_level_id = request.POST.get('shelf_level_id')
     level_number = request.POST.get('level_number')
-    label = request.POST.get('label')
-    
+    category = request.POST.get('category')
+
     if not shelf_level_id:
         return JsonResponse({'success': False, 'error': 'shelf_level_id is required'})
-    
+
     try:
         shelf_level = ShelfLevel.objects.get(shelf_level_id=shelf_level_id)
         if level_number:
             shelf_level.level_number = int(level_number)
-        if label is not None:
-            shelf_level.label = label
+        if category is not None:
+            shelf_level.category = category
         shelf_level.save()
         return JsonResponse({'success': True})
     except ShelfLevel.DoesNotExist:
@@ -2624,7 +2966,6 @@ def toggle_active(request):
     model_map = {
         'room': Room,
         'shelf': Shelf,
-        'section': Section,
         'shelflevel': ShelfLevel
     }
     
@@ -2666,7 +3007,7 @@ def _floorplan_image_size(floor_plan):
         return None, None
 
 
-@admin_login_required
+@admin_only_required
 def get_map_data(request):
     """Return the active floor plan plus all its beacons, waypoints, connections
     and the list of shelves (for the waypoint-link dropdown) as JSON."""
@@ -2740,7 +3081,7 @@ def get_map_data(request):
     })
 
 
-@admin_login_required
+@admin_only_required
 def add_beacon(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
@@ -2783,7 +3124,7 @@ def add_beacon(request):
     })
 
 
-@admin_login_required
+@admin_only_required
 def delete_beacon(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
@@ -2796,7 +3137,7 @@ def delete_beacon(request):
     return JsonResponse({'success': True})
 
 
-@admin_login_required
+@admin_only_required
 def add_waypoint(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
@@ -2844,7 +3185,7 @@ def add_waypoint(request):
     })
 
 
-@admin_login_required
+@admin_only_required
 def delete_waypoint(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
@@ -2861,7 +3202,7 @@ def delete_waypoint(request):
     return JsonResponse({'success': True})
 
 
-@admin_login_required
+@admin_only_required
 def add_waypoint_connection(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
@@ -2907,7 +3248,7 @@ def add_waypoint_connection(request):
     })
 
 
-@admin_login_required
+@admin_only_required
 def delete_waypoint_connection(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
@@ -3206,8 +3547,11 @@ def entry_log_register(request):
         contact_number=contact_number,
         address=address,
         patron_type=patron_type,
-        account_status='Active',
+        account_status='Active',   # desk staff verified identity on the spot
         password_hash=hash_password(None),  # unusable until set via the portal
+        registration_channel='On-site',
+        qr_code=str(uuid4()),
+        otp_verified=True,
     )
     log = PatronLog.objects.create(
         patron=patron,
@@ -3303,5 +3647,155 @@ def delete_patron_log(request):
     """Delete a visit log (form POST from the Log Management table)."""
     if request.method == 'POST':
         PatronLog.objects.filter(log_id=request.POST.get('log_id')).delete()
-    return redirect('admin_log_management')
+    return portal_redirect(request, 'admin_log_management')
+
+
+# ─── USER MANAGEMENT (Admin-only: manage Library Staff accounts) ───────────
+@admin_only_required
+def user_management(request):
+    """List all non-patron accounts (Admin + Library Staff)."""
+    q = (request.GET.get('q') or '').strip()
+    role = (request.GET.get('role') or '').strip()
+    status = (request.GET.get('status') or '').strip()
+
+    users = User.objects.all().order_by('fullname')
+    if q:
+        users = users.filter(Q(fullname__icontains=q) | Q(email__icontains=q))
+    if role in dict(User.ROLE_CHOICES):
+        users = users.filter(role=role)
+    if status in dict(User.STATUS_CHOICES):
+        users = users.filter(account_status=status)
+
+    context = {
+        'users': users,
+        'total_users': User.objects.count(),
+        'total_staff': User.objects.filter(role='Staff').count(),
+        'total_admins': User.objects.filter(role='Admin').count(),
+        'active_users': User.objects.filter(account_status='Active').count(),
+        'q': q,
+        'role_filter': role,
+        'status_filter': status,
+        'role_choices': User.ROLE_CHOICES,
+        'status_choices': User.STATUS_CHOICES,
+    }
+    return render(request, 'admin/usermanagement.html', context)
+
+
+@admin_only_required
+def create_staff(request):
+    """Create a new staff/admin account."""
+    if request.method != 'POST':
+        return redirect('user_management')
+
+    fullname = (request.POST.get('fullname') or '').strip()
+    email = (request.POST.get('email') or '').strip().lower()
+    password = request.POST.get('password') or ''
+    role = request.POST.get('role') or 'Staff'
+    status = request.POST.get('account_status') or 'Active'
+
+    if not fullname or not email or not password:
+        messages.error(request, 'Full name, email, and password are required.')
+        return redirect('user_management')
+    if role not in dict(User.ROLE_CHOICES):
+        role = 'Staff'
+    if status not in dict(User.STATUS_CHOICES):
+        status = 'Active'
+    if User.objects.filter(email=email).exists():
+        messages.error(request, 'An account with that email already exists.')
+        return redirect('user_management')
+
+    user = User.objects.create(
+        fullname=fullname,
+        email=email,
+        password_hash=hash_password(password),
+        role=role,
+        account_status=status,
+    )
+    log_admin_action(request, 'Create', 'User', user.admin_id, f'Created {role} account {email}')
+    messages.success(request, f'{role} account for {fullname} created.')
+    return redirect('user_management')
+
+
+@admin_only_required
+def edit_staff(request, user_id):
+    """Edit name/email/role/status of an existing account."""
+    user = get_object_or_404(User, admin_id=user_id)
+    if request.method != 'POST':
+        return redirect('user_management')
+
+    fullname = (request.POST.get('fullname') or '').strip()
+    email = (request.POST.get('email') or '').strip().lower()
+    role = request.POST.get('role') or user.role
+    status = request.POST.get('account_status') or user.account_status
+
+    if not fullname or not email:
+        messages.error(request, 'Full name and email are required.')
+        return redirect('user_management')
+    if role not in dict(User.ROLE_CHOICES):
+        role = user.role
+    if status not in dict(User.STATUS_CHOICES):
+        status = user.account_status
+    if User.objects.filter(email=email).exclude(admin_id=user.admin_id).exists():
+        messages.error(request, 'Another account already uses that email.')
+        return redirect('user_management')
+
+    # Guard: don't allow removing/deactivating the last active admin.
+    is_self = (user.admin_id == request.session.get('admin_id'))
+    demoting = (user.role == 'Admin' and (role != 'Admin' or status != 'Active'))
+    if demoting:
+        other_active_admins = User.objects.filter(role='Admin', account_status='Active').exclude(admin_id=user.admin_id).count()
+        if other_active_admins == 0:
+            messages.error(request, 'Cannot change this account — it is the last active administrator.')
+            return redirect('user_management')
+
+    user.fullname = fullname
+    user.email = email
+    user.role = role
+    user.account_status = status
+    user.save()
+    if is_self:
+        request.session['admin_role'] = user.role
+        request.session['admin_fullname'] = user.fullname
+    log_admin_action(request, 'Update', 'User', user.admin_id, f'Updated account {email} (role={role}, status={status})')
+    messages.success(request, f'Account for {fullname} updated.')
+    return redirect('user_management')
+
+
+@admin_only_required
+def reset_staff_password(request, user_id):
+    """Set a new password for an account."""
+    user = get_object_or_404(User, admin_id=user_id)
+    if request.method != 'POST':
+        return redirect('user_management')
+    password = request.POST.get('password') or ''
+    if len(password) < 6:
+        messages.error(request, 'Password must be at least 6 characters.')
+        return redirect('user_management')
+    user.password_hash = hash_password(password)
+    user.save(update_fields=['password_hash'])
+    log_admin_action(request, 'Update', 'User', user.admin_id, f'Reset password for {user.email}')
+    messages.success(request, f'Password reset for {user.fullname}.')
+    return redirect('user_management')
+
+
+@admin_only_required
+def toggle_staff_status(request, user_id):
+    """Activate / deactivate (Inactive) an account."""
+    user = get_object_or_404(User, admin_id=user_id)
+    if request.method != 'POST':
+        return redirect('user_management')
+
+    new_status = 'Inactive' if user.account_status == 'Active' else 'Active'
+    # Guard: never deactivate the last active admin (or yourself into lockout).
+    if new_status != 'Active' and user.role == 'Admin':
+        other_active_admins = User.objects.filter(role='Admin', account_status='Active').exclude(admin_id=user.admin_id).count()
+        if other_active_admins == 0:
+            messages.error(request, 'Cannot deactivate the last active administrator.')
+            return redirect('user_management')
+
+    user.account_status = new_status
+    user.save(update_fields=['account_status'])
+    log_admin_action(request, 'Update', 'User', user.admin_id, f'Set {user.email} status to {new_status}')
+    messages.success(request, f'{user.fullname} is now {new_status}.')
+    return redirect('user_management')
 

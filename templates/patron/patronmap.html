@@ -115,7 +115,6 @@
     <div class="legend-item"><div class="legend-dot l-target"></div>Target Shelf</div>
     <div class="legend-item"><div class="legend-dot l-shelf"></div>Shelf</div>
     <div class="legend-item"><div class="legend-dot l-patron"></div>Your Position</div>
-    <div class="legend-item"><div class="legend-dot l-exit"></div>Waypoint</div>
   </div>
 </div>
 
@@ -133,6 +132,7 @@
   </div>
   <div class="btn-row">
     <button class="btn-layers" onclick="toggleLayers()">🗂️ Layers</button>
+    <button class="btn-layers" id="simBtn" onclick="toggleSimulation()" title="Demo: simulate a continuously moving position">🎮 Simulate</button>
     <button class="btn-nav" id="navBtn" onclick="showBTModal()">📡 Enable Navigation</button>
   </div>
 </div>
@@ -167,11 +167,18 @@ let mapData = null;
 let patronPos = null;            // {x, y} in floor-plan pixels (top-left origin)
 let routeLine = null, patronMarker = null;
 const shelfLayer = L.layerGroup();
-const waypointLayer = L.layerGroup();
 const beaconLayer = L.layerGroup();
 let extrasVisible = true;
 let bleInterval = null;
 const rssiBuffers = {};          // beacon_uuid -> [rssi, ...] (moving-average window)
+
+// Position Threshold filtering state (stabilises the continuous position marker).
+let lastSmoothPos = null;        // smoothing baseline
+const POS_JUMP_MAX = 80;         // px: cap physically implausible jumps between cycles
+const POS_SMOOTHING = 0.4;       // exponential moving-average factor
+
+// Demo simulation state (drives a continuously moving position on any device).
+let simInterval = null, simPos = null;
 
 const NAV_DATA_URL = "{% url 'get_patron_map_data' %}";
 const NAV_ROUTE_URL = "{% url 'get_navigation_route' %}";
@@ -231,17 +238,8 @@ async function initMap() {
   });
   shelfLayer.addTo(map);
 
-  // Waypoint graph (faint)
-  const wpById = {};
-  data.waypoints.forEach((w) => { wpById[w.waypoint_id] = w; });
-  data.connections.forEach((c) => {
-    const a = wpById[c.from], b = wpById[c.to];
-    if (a && b) L.polyline([toLatLng(a.x, a.y), toLatLng(b.x, b.y)], { color: '#2d6a4f', weight: 1, opacity: 0.4, dashArray: '4,4' }).addTo(waypointLayer);
-  });
-  data.waypoints.forEach((w) => {
-    L.circleMarker(toLatLng(w.x, w.y), { radius: 3, color: '#9333ea', weight: 1, fillColor: '#9333ea', fillOpacity: 0.6 }).addTo(waypointLayer);
-  });
-  waypointLayer.addTo(map);
+  // Waypoint graph is intentionally NOT rendered for patrons — it is admin-only
+  // navigation infrastructure. Only the computed A* route (routeLine) is shown.
 
   // Beacons (faint blue)
   data.beacons.forEach((b) => {
@@ -262,7 +260,24 @@ async function initMap() {
   if (data.renovation_notice) setStatus('amber', data.renovation_notice);
 }
 
+// Position Threshold filtering: cap implausible jumps and apply an exponential
+// moving average so the continuous live position marker stays stable.
+function applyPositionThreshold(pos) {
+  if (!lastSmoothPos) { lastSmoothPos = pos; return pos; }
+  let dx = pos.x - lastSmoothPos.x, dy = pos.y - lastSmoothPos.y;
+  const dist = Math.hypot(dx, dy);
+  if (dist > POS_JUMP_MAX) { const k = POS_JUMP_MAX / dist; dx *= k; dy *= k; }
+  const smoothed = { x: lastSmoothPos.x + POS_SMOOTHING * dx, y: lastSmoothPos.y + POS_SMOOTHING * dy };
+  lastSmoothPos = smoothed;
+  return smoothed;
+}
+
 function setPatronPosition(pos, source) {
+  if (source === 'ble' || source === 'sim') {
+    pos = applyPositionThreshold(pos);   // continuous estimates → stable marker
+  } else {
+    lastSmoothPos = pos;                 // manual tap is exact; reset smoothing baseline
+  }
   patronPos = pos;
   const ll = toLatLng(pos.x, pos.y);
   if (!patronMarker) {
@@ -271,7 +286,9 @@ function setPatronPosition(pos, source) {
   } else {
     patronMarker.setLatLng(ll);
   }
-  setStatus(source === 'ble' ? 'green' : 'amber', source === 'ble' ? 'BLE: Active' : 'Location set (tap)');
+  if (source === 'ble') setStatus('green', 'BLE: Active');
+  else if (source === 'sim') setStatus('green', 'Simulating position');
+  else setStatus('amber', 'Location set (tap)');
   if (targetData.shelf_id) computeRoute();
 }
 
@@ -290,7 +307,55 @@ async function computeRoute() {
 
 function toggleLayers() {
   extrasVisible = !extrasVisible;
-  [waypointLayer, beaconLayer].forEach((lyr) => { extrasVisible ? lyr.addTo(map) : map.removeLayer(lyr); });
+  [beaconLayer].forEach((lyr) => { extrasVisible ? lyr.addTo(map) : map.removeLayer(lyr); });
+}
+
+// ---- Demo simulation ------------------------------------------------------
+// Continuously moves the position marker so navigation can be demonstrated on
+// any device, independent of the experimental Web Bluetooth scanning API.
+// This is a presentation aid; the real positioning path is BLE trilateration.
+function targetShelfXY() {
+  if (!mapData || !targetData.shelf_id) return null;
+  const s = (mapData.shelves || []).find((sh) => sh.shelf_id === targetData.shelf_id);
+  return s ? { x: s.x, y: s.y } : null;
+}
+
+function toggleSimulation() {
+  if (simInterval) { stopSimulation(); return; }
+  if (bleInterval) { clearInterval(bleInterval); bleInterval = null; }  // mutually exclusive with live BLE
+  lastSmoothPos = null;
+  const start = (mapData && mapData.beacons && mapData.beacons[0])
+    ? { x: mapData.beacons[0].x, y: mapData.beacons[0].y }
+    : { x: imgW * 0.15, y: imgH * 0.85 };
+  simPos = { x: start.x, y: start.y };
+  setPatronPosition(simPos, 'sim');
+  const b = document.getElementById('simBtn'); if (b) b.textContent = '⏹ Stop';
+  simInterval = setInterval(simStep, 1200);
+}
+
+function simStep() {
+  const tgt = targetShelfXY();
+  if (tgt) {
+    const dx = tgt.x - simPos.x, dy = tgt.y - simPos.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist < 14) { setStatus('green', 'Arrived at shelf'); stopSimulation(); return; }
+    const step = Math.min(40, dist);
+    simPos = {
+      x: simPos.x + (dx / dist) * step + (Math.random() - 0.5) * 12,   // small wobble mimics BLE noise
+      y: simPos.y + (dy / dist) * step + (Math.random() - 0.5) * 12,
+    };
+  } else {
+    simPos = {
+      x: Math.max(0, Math.min(imgW, simPos.x + (Math.random() - 0.5) * 32)),
+      y: Math.max(0, Math.min(imgH, simPos.y + (Math.random() - 0.5) * 32)),
+    };
+  }
+  setPatronPosition(simPos, 'sim');
+}
+
+function stopSimulation() {
+  if (simInterval) { clearInterval(simInterval); simInterval = null; }
+  const b = document.getElementById('simBtn'); if (b) b.textContent = '🎮 Simulate';
 }
 
 // ---- Bluetooth Low Energy positioning (best-effort, with manual fallback) ----
@@ -346,6 +411,7 @@ function trilaterate() {
 
 async function enableBLE() {
   closeBTModal();
+  if (simInterval) stopSimulation();   // live BLE and the demo simulation are mutually exclusive
   if (!('bluetooth' in navigator) || !navigator.bluetooth.requestLEScan) {
     setStatus('amber', 'BLE unavailable — tap to locate');
     alert('Live Bluetooth positioning is not available in this browser. Tap anywhere on the map to set your location manually (fallback navigation).');

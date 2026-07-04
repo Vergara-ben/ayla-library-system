@@ -1,7 +1,7 @@
 from django.contrib import admin
 from .models import (
     FloorPlan, BLEBeacon, Room, Shelf, Waypoint, WaypointConnection,
-    Section, ShelfLevel, Book, Donation, User, Announcement,
+    ShelfLevel, Book, Donation, User, Announcement,
     Patron, Transaction, PatronLog
 )
 
@@ -52,28 +52,20 @@ class WaypointConnectionAdmin(admin.ModelAdmin):
     raw_id_fields = ('waypoint_from', 'waypoint_to')
 
 
-@admin.register(Section)
-class SectionAdmin(admin.ModelAdmin):
-    list_display = ('section_id', 'name', 'shelf')
-    list_filter = ('shelf',)
-    search_fields = ('name', 'description')
-    raw_id_fields = ('shelf',)
-
-
 @admin.register(ShelfLevel)
 class ShelfLevelAdmin(admin.ModelAdmin):
-    list_display = ('shelf_level_id', 'level_number', 'label', 'section')
-    list_filter = ('section', 'level_number')
-    search_fields = ('label',)
-    raw_id_fields = ('section',)
+    list_display = ('shelf_level_id', 'level_number', 'category', 'shelf')
+    list_filter = ('shelf', 'level_number')
+    search_fields = ('category',)
+    raw_id_fields = ('shelf',)
 
 
 @admin.register(Book)
 class BookAdmin(admin.ModelAdmin):
-    list_display = ('book_id', 'title', 'author', 'ISBN', 'status', 'section', 'shelf_level')
-    list_filter = ('status', 'genre', 'section', 'shelf_level')
+    list_display = ('book_id', 'title', 'author', 'ISBN', 'status', 'shelf_level')
+    list_filter = ('status', 'genre', 'shelf_level')
     search_fields = ('title', 'author', 'ISBN', 'genre')
-    raw_id_fields = ('section', 'shelf_level')
+    raw_id_fields = ('shelf_level',)
 
 
 @admin.register(Donation)

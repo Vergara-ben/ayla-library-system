@@ -4,20 +4,20 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Ayla - Library Admin Control Panel</title>
+    <title>Ayla - Library Staff Portal</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600&family=Playfair+Display:ital,wght@0,600;1,600&display=swap" rel="stylesheet">
     <style>
         :root {
-            --bg-dark: #070f18;
-            --bg-card: #0c1925;
-            --bg-sidebar: #0a141d;
+            --bg-dark: #0b0817;
+            --bg-card: #151027;
+            --bg-sidebar: #120d1f;
             --text-main: #ffffff;
             --text-muted: #64748b;
-            --accent-blue: #38bdf8;
-            --border-color: #1e293b;
-            --input-bg: #0f1c2a;
+            --accent-blue: #a78bfa;
+            --border-color: #2a2144;
+            --input-bg: #181230;
         }
 
         * {
@@ -42,7 +42,7 @@
             position: absolute;
             width: 400px;
             height: 400px;
-            background: radial-gradient(circle, rgba(56, 189, 248, 0.08) 0%, rgba(0,0,0,0) 70%);
+            background: radial-gradient(circle, rgba(167, 139, 250, 0.08) 0%, rgba(0,0,0,0) 70%);
             top: -100px;
             left: -100px;
             pointer-events: none;
@@ -53,7 +53,7 @@
             position: absolute;
             width: 500px;
             height: 500px;
-            background: radial-gradient(circle, rgba(56, 189, 248, 0.05) 0%, rgba(0,0,0,0) 70%);
+            background: radial-gradient(circle, rgba(167, 139, 250, 0.05) 0%, rgba(0,0,0,0) 70%);
             bottom: -100px;
             left: 30%;
             pointer-events: none;
@@ -87,7 +87,7 @@
             color: var(--accent-blue);
             font-weight: 700;
             font-size: 18px;
-            box-shadow: 0 0 15px rgba(56, 189, 248, 0.2);
+            box-shadow: 0 0 15px rgba(167, 139, 250, 0.2);
         }
 
         .brand-text {
@@ -109,7 +109,7 @@
             display: inline-flex;
             align-items: center;
             gap: 6px;
-            background-color: rgba(56, 189, 248, 0.1);
+            background-color: rgba(167, 139, 250, 0.1);
             color: var(--accent-blue);
             padding: 6px 14px;
             border-radius: 20px;
@@ -119,7 +119,7 @@
             text-transform: uppercase;
             width: fit-content;
             margin-bottom: 24px;
-            border: 1px solid rgba(56, 189, 248, 0.15);
+            border: 1px solid rgba(167, 139, 250, 0.15);
         }
 
         .badge::before {
@@ -170,7 +170,7 @@
         }
 
         .feature-card:hover {
-            border-color: rgba(56, 189, 248, 0.3);
+            border-color: rgba(167, 139, 250, 0.3);
         }
 
         .feature-icon {
@@ -267,7 +267,7 @@
         }
 
         .form-input:focus {
-            border-color: rgba(56, 189, 248, 0.5);
+            border-color: rgba(167, 139, 250, 0.5);
         }
 
         .form-options {
@@ -322,7 +322,7 @@
 
         .btn-primary {
             background-color: #1e3a53;
-            border: 1px solid rgba(56, 189, 248, 0.2);
+            border: 1px solid rgba(167, 139, 250, 0.2);
             color: var(--text-main);
         }
 
@@ -396,7 +396,6 @@
             }
         }
     </style>
-    <script src="{% static 'js/button-handlers.js' %}"></script>
     <link rel="stylesheet" href="{% static 'css/admin-enhance.css' %}">
     <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
 </head>
@@ -407,41 +406,42 @@
             <div class="logo-icon">A</div>
             <div class="brand-text">
                 Ayla
-                <span>Admin Panel</span>
+                <span>Staff Panel</span>
             </div>
         </div>
 
-        <div class="badge">Admin Access Only</div>
+        <div class="badge">Library Staff Access</div>
 
         <h1 class="main-title">
-            Library Admin
-            <span>Control Panel</span>
+            Library Staff
+            <span>Operations Portal</span>
         </h1>
 
         <p class="main-description">
-            Manage books, patrons, transactions, and library access logs — all in one place.
+            Handle the library&rsquo;s daily operations &mdash; book catalog, borrowing and returns,
+            entry logs, donations, and shelf placement &mdash; all in one place.
         </p>
 
         <div class="features-grid">
             <div class="feature-card">
                 <span class="feature-icon">📚</span>
                 <h3 class="feature-title">Manage Books</h3>
-                <p class="feature-desc">Full inventory control</p>
-            </div>
-            <div class="feature-card">
-                <span class="feature-icon">👥</span>
-                <h3 class="feature-title">Manage Patrons</h3>
-                <p class="feature-desc">User directory & roles</p>
+                <p class="feature-desc">Catalog &amp; book records</p>
             </div>
             <div class="feature-card">
                 <span class="feature-icon">📋</span>
                 <h3 class="feature-title">Transactions</h3>
-                <p class="feature-desc">Borrow & return logs</p>
+                <p class="feature-desc">Borrow, return &amp; in-library</p>
             </div>
             <div class="feature-card">
                 <span class="feature-icon">🚪</span>
                 <h3 class="feature-title">Entry / Exit Logs</h3>
-                <p class="feature-desc">Daily access records</p>
+                <p class="feature-desc">Daily visit records</p>
+            </div>
+            <div class="feature-card">
+                <span class="feature-icon">🗂️</span>
+                <h3 class="feature-title">Shelf Manager</h3>
+                <p class="feature-desc">Shelves &amp; book placement</p>
             </div>
         </div>
     </main>
@@ -450,21 +450,21 @@
         <div class="sidebar-top">
             <div class="brand-logo">
                 <div class="logo-icon">A</div>
-                <div class="brand-text">Ayla - Admin</div>
+                <div class="brand-text">Ayla - Staff</div>
             </div>
 
-            <h2 class="signin-title">Admin Sign In</h2>
-            <p class="signin-subtitle">Enter your admin credentials to continue</p>
+            <h2 class="signin-title">Staff Sign In</h2>
+            <p class="signin-subtitle">Enter your library staff credentials to continue</p>
 
-            <form id="signinForm" method="POST" action="{% url 'admin_login' %}">
+            <form id="signinForm" method="POST" action="{% url 'staff_login' %}">
                 {% csrf_token %}
                 <div class="form-group">
-                    <label class="form-label" for="admin-id">Admin ID or Email</label>
+                    <label class="form-label" for="staff-email">Staff Email</label>
                     <div class="input-wrapper">
                         <span class="input-wrapper-icon input-icon">
                             👤
                         </span>
-                        <input type="email" id="admin-id" name="email" class="form-input" placeholder="admin@school.edu.ph" required>
+                        <input type="email" id="staff-email" name="email" class="form-input" placeholder="staff@school.edu.ph" required>
                     </div>
                 </div>
 
@@ -472,7 +472,7 @@
                     <label class="form-label" for="password">Password</label>
                     <div class="input-wrapper">
                         <span class="input-icon">🔒</span>
-                        <input type="password" id="password" name="password" class="form-input" placeholder="Enter admin password" required>
+                        <input type="password" id="password" name="password" class="form-input" placeholder="Enter your password" required>
                     </div>
                 </div>
 
@@ -485,11 +485,7 @@
                 </div>
 
                 <button type="submit" class="btn btn-primary">
-                    Sign In to Admin Panel &rarr;
-                </button>
-                
-                <button type="button" class="btn btn-secondary">
-                    Sign In with Institution SSO
+                    Sign In to Staff Panel &rarr;
                 </button>
             </form>
 
@@ -497,8 +493,8 @@
                 {{ error }}
             </div>
 
-            <p class="switch-portal">Library staff? <a href="{% url 'staff_login' %}">Go to staff login &rarr;</a></p>
-            <p class="switch-portal">Not an admin? <a href="{% url 'patron_login' %}">Go to patron login &rarr;</a></p>
+            <p class="switch-portal">Administrator? <a href="{% url 'admin_login' %}">Go to admin login &rarr;</a></p>
+            <p class="switch-portal">Library patron? <a href="{% url 'patron_login' %}">Go to patron login &rarr;</a></p>
         </div>
 
         <div class="notice-box">
@@ -509,6 +505,5 @@
         </div>
     </aside>
 
-    <script src="{% static 'js/admin-enhance.js' %}" defer></script>
 </body>
 </html>

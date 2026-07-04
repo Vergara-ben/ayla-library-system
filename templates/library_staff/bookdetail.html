@@ -13,17 +13,17 @@
     
     <style>
         :root {
-            --bg-main: #060d13;
-            --bg-sidebar: #0b151e;
-            --bg-card: #0d1b26;
-            --bg-input: #112535;
+            --bg-main: #0a0714;
+            --bg-sidebar: #130e20;
+            --bg-card: #161128;
+            --bg-input: #1a1436;
             --text-primary: #e2e8f0;
             --text-muted: #64748b;
-            --accent-blue: #0e7490;
+            --accent-blue: #6d28d9;
             --accent-green: #15803d;
             --accent-orange: #b45309;
             --accent-yellow: #a16207;
-            --border-color: #1e293b;
+            --border-color: #2a2144;
         }
 
         body {
@@ -95,7 +95,7 @@
             header .flex.items-center.gap-4 {
                 gap: 0.5rem;
             }
-            header span.bg-cyan-950 {
+            header span.bg-violet-950 {
                 display: none;
             }
         }
@@ -119,7 +119,7 @@
 </head>
 <body class="flex h-screen overflow-hidden">
 
-    {% include 'admin/_sidebar.html' with active='books' %}
+    {% include 'library_staff/_sidebar.html' with active='books' %}
 
     <div class="flex-1 flex flex-col overflow-hidden">
         
@@ -131,12 +131,12 @@
                 <h2 class="logo-text text-lg tracking-wider text-slate-200 uppercase">Book Details</h2>
             </div>
             <div class="flex items-center gap-4">
-                <span class="bg-cyan-950 text-cyan-400 text-xs px-2.5 py-1 rounded font-bold border border-cyan-800 tracking-wider">{% if request.session.admin_role == 'Staff' %}STAFF{% else %}ADMIN{% endif %}</span>
+                <span class="bg-violet-950 text-violet-400 text-xs px-2.5 py-1 rounded font-bold border border-violet-800 tracking-wider">{% if request.session.admin_role == 'Staff' %}STAFF{% else %}ADMIN{% endif %}</span>
                 <button class="relative text-slate-400 hover:text-slate-200 p-1">
                     <i class="fa-solid fa-bell text-lg"></i>
                     <span class="absolute top-1 right-1 w-2 h-2 bg-amber-500 rounded-full"></span>
                 </button>
-                <div class="w-8 h-8 rounded-full bg-cyan-900 border border-cyan-700 flex items-center justify-center text-xs font-bold text-cyan-200">
+                <div class="w-8 h-8 rounded-full bg-violet-900 border border-violet-700 flex items-center justify-center text-xs font-bold text-violet-200">
                     AD
                 </div>
             </div>
@@ -147,13 +147,13 @@
                 
                 <div class="lg:col-span-4 flex flex-col gap-4">
                     <div class="aspect-[3/4] w-full rounded-2xl flex flex-col items-center justify-center p-6 text-center shadow-lg relative overflow-hidden group border border-slate-800" style="background: linear-gradient(135deg, #0e2233 0%, #07131d 100%);">
-                        <div class="absolute inset-0 bg-cyan-500/5 opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                        <i class="fa-solid fa-book-bookmark text-4xl text-cyan-600/40 mb-4"></i>
+                        <div class="absolute inset-0 bg-violet-500/5 opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                        <i class="fa-solid fa-book-bookmark text-4xl text-violet-600/40 mb-4"></i>
                         <h3 class="text-xl font-bold tracking-tight text-slate-200 px-4">{{ books.0.title|default:'Manage Books' }}</h3>
                     </div>
 
                     <div class="flex flex-col gap-3 mt-2">
-                        <button class="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl font-medium text-sm transition-all bg-cyan-700 hover:bg-cyan-600 text-white shadow-lg shadow-cyan-950/50">
+                        <button class="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl font-medium text-sm transition-all bg-violet-700 hover:bg-violet-600 text-white shadow-lg shadow-violet-950/50">
                             <i class="fa-solid fa-map-location-dot"></i> Locate on Map
                         </button>
                         {% if books|length > 0 %}

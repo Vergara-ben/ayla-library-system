@@ -10,7 +10,7 @@ Use --dry-run to preview without sending email or changing data.
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
-from library.models import Transaction
+from library.models import Transaction, BorrowingRule
 from library.emails import overdue_email
 
 
@@ -27,6 +27,7 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         dry_run = options['dry_run']
         today = timezone.localdate()
+        rule = BorrowingRule.current()
 
         overdue_txns = (Transaction.objects
                         .select_related('patron', 'book')
@@ -39,9 +40,10 @@ class Command(BaseCommand):
         for tx in overdue_txns:
             flagged += 1
             if not dry_run:
-                if not tx.overdue_flag:
-                    tx.overdue_flag = True
-                    tx.save(update_fields=['overdue_flag'])
+                tx.overdue_flag = True
+                # Accrued penalty to date (finalised on actual return).
+                tx.fine_amount = rule.compute_fine(tx.due_date, today)
+                tx.save(update_fields=['overdue_flag', 'fine_amount'])
                 if tx.book and tx.book.status != 'Overdue':
                     tx.book.status = 'Overdue'
                     tx.book.save(update_fields=['status'])

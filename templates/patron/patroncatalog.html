@@ -169,7 +169,7 @@
       <div class="book-author">{{ book.author }}{% if book.publication_year %} · {{ book.publication_year }}{% endif %}</div>
       <div class="book-meta">
         {% if book.genre %}<span class="meta-tag">{{ book.genre }}</span>{% endif %}
-        {% if book.section %}<span class="meta-tag">📍 {{ book.section.name }}{% if book.shelf_level %} · {{ book.shelf_level.label|default:book.shelf_level.level_number }}{% endif %}</span>{% endif %}
+        {% if book.shelf_level %}<span class="meta-tag">📍 {% if book.shelf_level.shelf %}{{ book.shelf_level.shelf.name }} · {% endif %}{{ book.shelf_level.category|default:book.shelf_level.level_number }}</span>{% endif %}
       </div>
     </div>
   </a>

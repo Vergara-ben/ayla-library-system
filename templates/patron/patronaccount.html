@@ -130,6 +130,23 @@
     </div>
   </div>
 
+  <!-- MY QR CODE -->
+  {% if patron.qr_code %}
+  <div class="section" style="animation-delay:0.05s">
+    <div class="section-title" style="margin-bottom:14px">🎫 My Library QR Code</div>
+    <div class="qr-section">
+      <div class="qr-mini" style="width:110px;height:110px;padding:6px;">
+        <img id="patronQrImg" src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={{ patron.qr_code|urlencode }}" alt="My QR Code" style="width:100%;height:100%;">
+      </div>
+      <div class="qr-info">
+        <div class="qr-title">Present this at the library desk</div>
+        <div class="qr-sub">Staff scan it (with your PIN) for borrowing, returning, and entry logging.</div>
+      </div>
+      <a class="btn-dl" href="https://api.qrserver.com/v1/create-qr-code/?size=400x400&data={{ patron.qr_code|urlencode }}" download="ayla_qr_{{ patron.patron_id }}.png" target="_blank" style="text-decoration:none;">⬇ Save</a>
+    </div>
+  </div>
+  {% endif %}
+
   <!-- ACTIVE LOANS -->
   <div class="section" style="animation-delay:0.1s">
     <div class="section-header">
@@ -146,6 +163,12 @@
           <span class="due-label">Due:</span>
           <span class="due-date {% if tx.overdue_flag %}red{% else %}green{% endif %}">{{ tx.due_date|date:"M j, Y"|default:"—" }}</span>
         </div>
+        {% if tx.fine_amount %}
+        <div class="loan-due">
+          <span class="due-label">Fine:</span>
+          <span class="due-date red">₱{{ tx.fine_amount }}</span>
+        </div>
+        {% endif %}
       </div>
       {% if tx.overdue_flag %}
       <div class="loan-badge" style="background:#f8717120;color:var(--danger)">OVERDUE</div>
@@ -169,7 +192,7 @@
       <div class="hist-icon">📗</div>
       <div class="hist-info">
         <div class="hist-title">{{ tx.book.title }}</div>
-        <div class="hist-dates">Borrowed {{ tx.transaction_date|date:"M j" }} → Returned {{ tx.return_date|date:"M j, Y" }}</div>
+        <div class="hist-dates">Borrowed {{ tx.transaction_date|date:"M j" }} → Returned {{ tx.return_date|date:"M j, Y" }}{% if tx.fine_amount %} · <span style="color:var(--danger);font-weight:700">Fine ₱{{ tx.fine_amount }}</span>{% endif %}</div>
       </div>
       <div style="font-size:10px;padding:3px 8px;border-radius:5px;background:#22c55e20;color:var(--accent);font-weight:700">Returned</div>
     </div>
@@ -206,6 +229,27 @@
     <button class="save-changes" id="saveBtn" style="display:none" onclick="saveChanges()">Save Changes</button>
   </div>
 
+  <!-- SECURITY -->
+  <div class="section" style="animation-delay:0.25s">
+    <div class="section-title" style="margin-bottom:16px">🔐 Security</div>
+
+    <div class="form-group">
+      <label>Change Transaction PIN {% if not patron.pin_hash %}(not set yet){% endif %}</label>
+      {% if patron.pin_hash %}
+      <input type="password" id="currentPin" inputmode="numeric" maxlength="6" placeholder="Current PIN" style="margin-bottom:8px">
+      {% endif %}
+      <input type="password" id="newPin" inputmode="numeric" maxlength="6" placeholder="New PIN (4–6 digits)">
+    </div>
+    <button class="save-changes" style="background:linear-gradient(135deg,#16a34a,#15803d);margin-bottom:20px" onclick="changePin()">{% if patron.pin_hash %}Update PIN{% else %}Set PIN{% endif %}</button>
+
+    <div class="form-group">
+      <label>Change Password</label>
+      <input type="password" id="currentPassword" placeholder="Current password" style="margin-bottom:8px">
+      <input type="password" id="newPassword" placeholder="New password (min. 8 characters)">
+    </div>
+    <button class="save-changes" style="background:linear-gradient(135deg,#16a34a,#15803d)" onclick="changePassword()">Update Password</button>
+  </div>
+
   <!-- LOGOUT -->
   <button class="logout-btn" onclick="if(confirm('Log out of AYLA?'))window.location.href='{% url 'patron_login' %}'">
     🚪 Logout
@@ -219,29 +263,76 @@
   <a href="{% url 'patron_account' %}" class="nav-item active"><div class="nav-icon">👤</div><div class="nav-label">Account</div></a>
 </nav>
 
+<form id="csrfForm" style="display:none">{% csrf_token %}</form>
 <script>
+const CSRF = document.querySelector('#csrfForm [name=csrfmiddlewaretoken]').value;
+
+function toast(msg, ok=true){
+  const t = document.createElement('div');
+  t.textContent = msg;
+  t.style.cssText = 'position:fixed;bottom:90px;left:50%;transform:translateX(-50%);background:'+(ok?'#22c55e':'#f87171')+';color:#0d1a0f;padding:10px 20px;border-radius:10px;font-weight:700;font-size:13px;z-index:999;animation:fadeUp 0.3s ease;';
+  document.body.appendChild(t);
+  setTimeout(()=>t.remove(), 2500);
+}
+
+function postForm(url, data){
+  const body = new URLSearchParams(data);
+  return fetch(url, {
+    method:'POST',
+    headers:{'X-CSRFToken':CSRF,'Content-Type':'application/x-www-form-urlencoded'},
+    body
+  }).then(r=>r.json());
+}
+
 let editing = false;
+// 'lastName' holds the patron type — not self-editable, so it stays disabled.
+const EDITABLE = ['firstName','email','phone','address'];
 function toggleEdit(){
   editing = !editing;
-  ['firstName','lastName','email','phone','address'].forEach(id=>{
-    document.getElementById(id).disabled = !editing;
-  });
+  EDITABLE.forEach(id=>{ document.getElementById(id).disabled = !editing; });
   document.querySelector('.edit-btn').textContent = editing ? '✕ Cancel' : '✏️ Edit';
   document.getElementById('saveBtn').style.display = editing ? 'block' : 'none';
 }
 function saveChanges(){
-  editing = false;
-  ['firstName','lastName','email','phone','address'].forEach(id=>{
-    document.getElementById(id).disabled = true;
-  });
-  document.querySelector('.edit-btn').textContent = '✏️ Edit';
-  document.getElementById('saveBtn').style.display = 'none';
-  // Show a brief success toast
-  const toast = document.createElement('div');
-  toast.textContent = '✅ Changes saved!';
-  toast.style.cssText = 'position:fixed;bottom:90px;left:50%;transform:translateX(-50%);background:#22c55e;color:#0d1a0f;padding:10px 20px;border-radius:10px;font-weight:700;font-size:13px;z-index:999;animation:fadeUp 0.3s ease;';
-  document.body.appendChild(toast);
-  setTimeout(()=>toast.remove(), 2500);
+  postForm('{% url 'patron_update_profile' %}', {
+    fullname: document.getElementById('firstName').value.trim(),
+    email: document.getElementById('email').value.trim(),
+    contact_number: document.getElementById('phone').value.trim(),
+    address: document.getElementById('address').value.trim(),
+  }).then(res=>{
+    if(!res.success){ toast('⚠️ '+res.error, false); return; }
+    editing = false;
+    EDITABLE.forEach(id=>{ document.getElementById(id).disabled = true; });
+    document.querySelector('.edit-btn').textContent = '✏️ Edit';
+    document.getElementById('saveBtn').style.display = 'none';
+    toast('✅ Changes saved!');
+  }).catch(()=>toast('⚠️ Could not save changes.', false));
+}
+
+function changePin(){
+  const currentEl = document.getElementById('currentPin');
+  const newPin = document.getElementById('newPin').value.trim();
+  postForm('{% url 'patron_change_pin' %}', {
+    current_pin: currentEl ? currentEl.value.trim() : '',
+    new_pin: newPin,
+  }).then(res=>{
+    if(!res.success){ toast('⚠️ '+res.error, false); return; }
+    toast('✅ PIN saved!');
+    if(currentEl) currentEl.value='';
+    document.getElementById('newPin').value='';
+  }).catch(()=>toast('⚠️ Could not save PIN.', false));
+}
+
+function changePassword(){
+  postForm('{% url 'patron_change_password' %}', {
+    current_password: document.getElementById('currentPassword').value,
+    new_password: document.getElementById('newPassword').value,
+  }).then(res=>{
+    if(!res.success){ toast('⚠️ '+res.error, false); return; }
+    toast('✅ Password changed!');
+    document.getElementById('currentPassword').value='';
+    document.getElementById('newPassword').value='';
+  }).catch(()=>toast('⚠️ Could not change password.', false));
 }
 </script>
 </body>

@@ -152,11 +152,10 @@
     <div class="detail-row">
       <div class="detail-key">Location</div>
       <div class="detail-val">
-        {% if shelf or section or shelf_level %}
+        {% if shelf or shelf_level %}
         <div class="shelf-path">
           {% if shelf %}<span class="shelf-step">{{ shelf.name }}</span>{% endif %}
-          {% if section %}{% if shelf %}<span class="shelf-arrow">→</span>{% endif %}<span class="shelf-step">{{ section.name }}</span>{% endif %}
-          {% if shelf_level %}{% if shelf or section %}<span class="shelf-arrow">→</span>{% endif %}<span class="shelf-step">{{ shelf_level.label|default:shelf_level.level_number }}</span>{% endif %}
+          {% if shelf_level %}{% if shelf %}<span class="shelf-arrow">→</span>{% endif %}<span class="shelf-step">{{ shelf_level.category|default:shelf_level.level_number }}</span>{% endif %}
         </div>
         {% else %}Not assigned{% endif %}
       </div>

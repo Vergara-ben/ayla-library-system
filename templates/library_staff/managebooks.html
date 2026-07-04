@@ -14,15 +14,15 @@
     
     <style>
         :root {
-            --bg-main: #060d13;
-            --bg-sidebar: #0b151e;
-            --bg-card: #0d1b26;
-            --bg-modal: #0f2230;
-            --bg-input: #112535;
+            --bg-main: #0a0714;
+            --bg-sidebar: #130e20;
+            --bg-card: #161128;
+            --bg-modal: #1a1332;
+            --bg-input: #1a1436;
             --text-primary: #e2e8f0;
             --text-muted: #64748b;
-            --border-color: #1e293b;
-            --border-modal: #1d354a;
+            --border-color: #2a2144;
+            --border-modal: #342a52;
         }
 
         body {
@@ -87,7 +87,7 @@
             header .flex.items-center.gap-4 {
                 gap: 0.5rem;
             }
-            header span.bg-cyan-950 {
+            header span.bg-violet-950 {
                 display: none;
             }
             .flex.flex-col.sm\:flex-row {
@@ -125,7 +125,7 @@
 </head>
 <body class="flex h-screen overflow-hidden">
 
-    {% include 'admin/_sidebar.html' with active='books' %}
+    {% include 'library_staff/_sidebar.html' with active='books' %}
 
     <div class="flex-1 flex flex-col overflow-hidden">
         
@@ -137,12 +137,12 @@
                 <h2 class="logo-text text-lg tracking-wider text-slate-200 uppercase">Manage Books</h2>
             </div>
             <div class="flex items-center gap-4">
-                <span class="bg-cyan-950 text-cyan-400 text-xs px-2.5 py-1 rounded font-bold border border-cyan-800 tracking-wider">{% if request.session.admin_role == 'Staff' %}STAFF{% else %}ADMIN{% endif %}</span>
+                <span class="bg-violet-950 text-violet-400 text-xs px-2.5 py-1 rounded font-bold border border-violet-800 tracking-wider">{% if request.session.admin_role == 'Staff' %}STAFF{% else %}ADMIN{% endif %}</span>
                 <button class="relative text-slate-400 hover:text-slate-200 p-1">
                     <i class="fa-solid fa-bell text-lg"></i>
                     <span class="absolute top-1 right-1 w-2 h-2 bg-amber-500 rounded-full"></span>
                 </button>
-                <div class="w-8 h-8 rounded-full bg-cyan-900 border border-cyan-700 flex items-center justify-center text-xs font-bold text-cyan-200">
+                <div class="w-8 h-8 rounded-full bg-violet-900 border border-violet-700 flex items-center justify-center text-xs font-bold text-violet-200">
                     AD
                 </div>
             </div>
@@ -158,7 +158,7 @@
                 </div>
                 <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
                     <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Total Copies</p>
-                    <p class="text-3xl font-bold text-cyan-400 mt-2">{{ total_copies }}</p>
+                    <p class="text-3xl font-bold text-violet-400 mt-2">{{ total_copies }}</p>
                     <p class="text-[10px] text-slate-500 mt-1">Physical copies</p>
                 </div>
                 <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
@@ -186,11 +186,11 @@
                         <a href="{% url 'download_book_template' %}" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-emerald-500/90 text-[11px] font-semibold px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors">
                             <i class="fa-solid fa-file-excel"></i> Download Template
                         </a>
-                        <button onclick="document.getElementById('excelFileInput').click()" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-cyan-500/90 text-[11px] font-semibold px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors">
+                        <button onclick="document.getElementById('excelFileInput').click()" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-violet-500/90 text-[11px] font-semibold px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors">
                             <i class="fa-solid fa-upload"></i> Import Excel
                         </button>
                         <input type="file" id="excelFileInput" accept=".xlsx" style="display: none;" onchange="uploadExcelFile(this)">
-                        <button onclick="openAddModal()" class="bg-cyan-700/30 text-cyan-400 border border-cyan-800/80 hover:bg-cyan-700/50 text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
+                        <button onclick="openAddModal()" class="bg-violet-700/30 text-violet-400 border border-violet-800/80 hover:bg-violet-700/50 text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
                             <i class="fa-solid fa-plus text-[10px]"></i> Add Book
                         </button>
                     </div>
@@ -201,9 +201,9 @@
                     <div class="px-5 py-3.5 bg-slate-900/20 border-b border-slate-800/60 flex flex-col lg:flex-row lg:items-center gap-3">
                         <div class="relative flex-1">
                             <i class="fa-solid fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-xs"></i>
-                            <input type="text" id="searchInput" value="{{ q }}" onkeydown="if(event.key==='Enter')applyBookFilters()" placeholder="Search title, author, ISBN, call number..." class="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-4 py-2 text-xs text-slate-300 focus:outline-none focus:border-cyan-800 placeholder-slate-600 transition-colors">
+                            <input type="text" id="searchInput" value="{{ q }}" onkeydown="if(event.key==='Enter')applyBookFilters()" placeholder="Search title, author, ISBN, call number..." class="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-4 py-2 text-xs text-slate-300 focus:outline-none focus:border-violet-800 placeholder-slate-600 transition-colors">
                         </div>
-                        <button onclick="openQRScanner()" class="bg-cyan-700/30 text-cyan-400 border border-cyan-800/80 hover:bg-cyan-700/50 text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
+                        <button onclick="openQRScanner()" class="bg-violet-700/30 text-violet-400 border border-violet-800/80 hover:bg-violet-700/50 text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
                             <i class="fa-solid fa-qrcode text-[10px]"></i> Scan QR
                         </button>
                         <div class="flex items-center gap-2 self-end lg:self-auto">
@@ -242,7 +242,7 @@
                             {% for book in books %}
                             <tr class="hover:bg-slate-800/10 transition-colors">
                                 <td class="py-4 px-6 flex items-start gap-3">
-                                    <div class="w-8 h-10 rounded bg-cyan-950/40 border border-cyan-900/30 flex-shrink-0 flex items-center justify-center text-[10px] font-medium text-cyan-700 select-none"></div>
+                                    <div class="w-8 h-10 rounded bg-violet-950/40 border border-violet-900/30 flex-shrink-0 flex items-center justify-center text-[10px] font-medium text-violet-700 select-none"></div>
                                     <div>
                                         <div class="font-bold text-slate-200">{{ book.title }}</div>
                                         <div class="text-[10px] text-slate-500 mt-0.5">{{ book.genre|default:"" }}</div>
@@ -252,7 +252,7 @@
                                 <td class="py-4 px-6 font-mono text-slate-400">{{ book.ISBN|default:"-" }}</td>
                                 <td class="py-4 px-6 font-mono text-slate-400">{% if book.shelf_level %}{% if book.shelf_level.shelf %}{{ book.shelf_level.shelf.name }} · {% endif %}{{ book.shelf_level.category|default:book.shelf_level.level_number }}{% else %}-{% endif %}</td>
                                 <td class="py-4 px-6">
-                                    <span class="bg-cyan-950/60 text-cyan-400 border border-cyan-900/40 px-1.5 py-0.5 rounded text-[9px] font-bold tracking-wide uppercase">{{ book.genre|default:"General" }}</span>
+                                    <span class="bg-violet-950/60 text-violet-400 border border-violet-900/40 px-1.5 py-0.5 rounded text-[9px] font-bold tracking-wide uppercase">{{ book.genre|default:"General" }}</span>
                                 </td>
                                 <td class="py-4 px-6 text-center font-semibold text-slate-400">{{ book.copies|default:1 }}</td>
                                 <td class="py-4 px-6 text-center">
@@ -266,7 +266,7 @@
                                 </td>
                                 <td class="py-4 px-6 text-center">
                                     <div class="flex items-center justify-center gap-1.5">
-                                        <button onclick="viewBookDetails({{ book.book_id }})" class="w-7 h-7 rounded border border-slate-800 text-cyan-400 hover:text-cyan-200 hover:bg-slate-800/40 transition-colors"><i class="fa-solid fa-eye text-[10px]"></i></button>
+                                        <button onclick="viewBookDetails({{ book.book_id }})" class="w-7 h-7 rounded border border-slate-800 text-violet-400 hover:text-violet-200 hover:bg-slate-800/40 transition-colors"><i class="fa-solid fa-eye text-[10px]"></i></button>
                                         <a href="{% url 'admin_edit_book' book.book_id %}" class="w-7 h-7 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 transition-colors"><i class="fa-solid fa-pencil text-[10px]"></i></a>
                                         <form method="post" action="{% url 'admin_delete_book' book.book_id %}" class="inline">
                                             {% csrf_token %}
@@ -296,7 +296,7 @@
 
                         {% for page_num in paginator.page_range %}
                             {% if page_num == books.number %}
-                                <button class="px-3 py-1.5 rounded bg-cyan-700/30 text-cyan-400 font-bold border border-cyan-800/50">{{ page_num }}</button>
+                                <button class="px-3 py-1.5 rounded bg-violet-700/30 text-violet-400 font-bold border border-violet-800/50">{{ page_num }}</button>
                             {% else %}
                                 <a href="?page={{ page_num }}{% if querystring %}&{{ querystring }}{% endif %}" class="px-3 py-1.5 rounded border border-slate-800 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors">{{ page_num }}</a>
                             {% endif %}
@@ -334,37 +334,37 @@
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div class="space-y-1.5">
                         <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Title</label>
-                        <input type="text" name="title" id="addTitle" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" required>
+                        <input type="text" name="title" id="addTitle" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);" required>
                     </div>
                     <div class="space-y-1.5">
                         <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Author</label>
-                        <input type="text" name="author" id="addAuthor" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" required>
+                        <input type="text" name="author" id="addAuthor" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);" required>
                     </div>
                 </div>
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div class="space-y-1.5">
                         <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Publication Year</label>
-                        <input type="number" name="publication_year" id="addPublicationYear" min="1000" max="2099" placeholder="e.g. 2023" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                        <input type="number" name="publication_year" id="addPublicationYear" min="1000" max="2099" placeholder="e.g. 2023" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);">
                     </div>
                     <div class="space-y-1.5">
                         <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">ISBN</label>
-                        <input type="text" name="ISBN" id="addIsbn" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                        <input type="text" name="ISBN" id="addIsbn" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);">
                     </div>
                 </div>
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div class="space-y-1.5">
                         <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Genre</label>
-                        <input type="text" name="genre" id="addGenre" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                        <input type="text" name="genre" id="addGenre" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);">
                     </div>
                     <div class="space-y-1.5">
                         <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Cover Image URL</label>
-                        <input type="text" name="cover_img_url" id="addCoverImgUrl" placeholder="https://example.com/image.jpg" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                        <input type="text" name="cover_img_url" id="addCoverImgUrl" placeholder="https://example.com/image.jpg" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);">
                     </div>
                 </div>
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div class="space-y-1.5">
                         <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Status</label>
-                        <select name="status" id="addStatus" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium appearance-none pr-10 cursor-pointer" style="background-color: var(--bg-input);">
+                        <select name="status" id="addStatus" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium appearance-none pr-10 cursor-pointer" style="background-color: var(--bg-input);">
                             <option value="Available">Available</option>
                             <option value="Borrowed">Borrowed</option>
                             <option value="Overdue">Overdue</option>
@@ -378,7 +378,7 @@
                     <button type="button" onclick="closeAddModal()" class="px-5 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:text-slate-100 hover:bg-slate-800/40 font-semibold tracking-wide transition-colors min-w-[100px]">
                         Cancel
                     </button>
-                    <button type="submit" class="bg-cyan-700 hover:bg-cyan-600 text-white font-bold px-5 py-2.5 rounded-lg flex items-center gap-2 tracking-wide transition-colors shadow-md">
+                    <button type="submit" class="bg-violet-700 hover:bg-violet-600 text-white font-bold px-5 py-2.5 rounded-lg flex items-center gap-2 tracking-wide transition-colors shadow-md">
                         <i class="fa-solid fa-check text-xs"></i> Add Book
                     </button>
                 </div>
@@ -406,37 +406,37 @@
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div class="space-y-1.5">
                         <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Title</label>
-                        <input type="text" name="title" id="editTitle" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" required>
+                        <input type="text" name="title" id="editTitle" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);" required>
                     </div>
                     <div class="space-y-1.5">
                         <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Author</label>
-                        <input type="text" name="author" id="editAuthor" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" required>
+                        <input type="text" name="author" id="editAuthor" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);" required>
                     </div>
                 </div>
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div class="space-y-1.5">
                         <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Publication Year</label>
-                        <input type="number" name="publication_year" id="editPublicationYear" min="1000" max="2099" placeholder="e.g. 2023" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                        <input type="number" name="publication_year" id="editPublicationYear" min="1000" max="2099" placeholder="e.g. 2023" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);">
                     </div>
                     <div class="space-y-1.5">
                         <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">ISBN</label>
-                        <input type="text" name="ISBN" id="editIsbn" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                        <input type="text" name="ISBN" id="editIsbn" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);">
                     </div>
                 </div>
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div class="space-y-1.5">
                         <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Genre</label>
-                        <input type="text" name="genre" id="editGenre" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                        <input type="text" name="genre" id="editGenre" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);">
                     </div>
                     <div class="space-y-1.5">
                         <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Cover Image URL</label>
-                        <input type="text" name="cover_img_url" id="editCoverImgUrl" placeholder="https://example.com/image.jpg" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                        <input type="text" name="cover_img_url" id="editCoverImgUrl" placeholder="https://example.com/image.jpg" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);">
                     </div>
                 </div>
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div class="space-y-1.5">
                         <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Status</label>
-                        <select name="status" id="editStatus" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium appearance-none pr-10 cursor-pointer" style="background-color: var(--bg-input);">
+                        <select name="status" id="editStatus" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium appearance-none pr-10 cursor-pointer" style="background-color: var(--bg-input);">
                             <option value="Available">Available</option>
                             <option value="Borrowed">Borrowed</option>
                             <option value="Overdue">Overdue</option>
@@ -448,7 +448,7 @@
                     <div class="space-y-1.5">
                         <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Shelf Level</label>
                         <div class="relative">
-                            <select name="shelf_level" id="editShelfLevel" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium appearance-none pr-10 cursor-pointer" style="background-color: var(--bg-input);">
+                            <select name="shelf_level" id="editShelfLevel" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium appearance-none pr-10 cursor-pointer" style="background-color: var(--bg-input);">
                                 <option value="">Select shelf level...</option>
                                 {% for shelf_level in shelf_levels %}
                                     <option value="{{ shelf_level.shelf_level_id }}">{% if shelf_level.shelf %}{{ shelf_level.shelf.name }} · {% endif %}Level {{ shelf_level.level_number }}{% if shelf_level.category %} ({{ shelf_level.category }}){% endif %}</option>
@@ -462,7 +462,7 @@
                     <button type="button" onclick="closeEditModal()" class="px-5 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:text-slate-100 hover:bg-slate-800/40 font-semibold tracking-wide transition-colors min-w-[100px]">
                         Cancel
                     </button>
-                    <button type="submit" class="bg-cyan-700 hover:bg-cyan-600 text-white font-bold px-5 py-2.5 rounded-lg flex items-center gap-2 tracking-wide transition-colors shadow-md">
+                    <button type="submit" class="bg-violet-700 hover:bg-violet-600 text-white font-bold px-5 py-2.5 rounded-lg flex items-center gap-2 tracking-wide transition-colors shadow-md">
                         <i class="fa-solid fa-check text-xs"></i> Save Book
                     </button>
                 </div>
@@ -484,7 +484,7 @@
                 <p class="text-xs text-slate-500 text-center">Point your camera at a book's QR code to search for it</p>
                 <div id="scanResult" class="hidden p-4 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
                     <p class="text-xs text-slate-500 mb-2">Scanned QR Code:</p>
-                    <p id="scannedQRCode" class="text-sm font-mono text-cyan-400 break-all"></p>
+                    <p id="scannedQRCode" class="text-sm font-mono text-violet-400 break-all"></p>
                 </div>
             </div>
         </div>
@@ -502,7 +502,7 @@
             <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <div class="lg:col-span-1 flex flex-col gap-4">
                     <div class="aspect-[3/4] w-full rounded-2xl flex flex-col items-center justify-center p-6 text-center shadow-lg relative overflow-hidden border border-slate-800" style="background: linear-gradient(135deg, #0e2233 0%, #07131d 100%);">
-                        <i class="fa-solid fa-book-bookmark text-4xl text-cyan-600/40 mb-4"></i>
+                        <i class="fa-solid fa-book-bookmark text-4xl text-violet-600/40 mb-4"></i>
                         <h3 id="detailTitle" class="text-xl font-bold tracking-tight text-slate-200 px-4">Book Title</h3>
                     </div>
                     <div class="flex flex-col gap-3 mt-2">
@@ -566,7 +566,7 @@
         }
 
         function closeEditModal() {
-            window.location.href = '{% url 'admin_management' %}';
+            window.location.href = '{% url 'staff_manage_books' %}';
         }
 
         function viewBookDetails(bookId) {
@@ -723,7 +723,7 @@
             .then(response => response.json())
             .then(data => {
                 if (data.success) {
-                    window.location.href = '{% url 'admin_management' %}';
+                    window.location.href = '{% url 'staff_manage_books' %}';
                 } else {
                     alert(data.error || 'An error occurred');
                 }
@@ -749,7 +749,7 @@
             .then(response => response.json())
             .then(data => {
                 if (data.success) {
-                    window.location.href = '{% url 'admin_management' %}';
+                    window.location.href = '{% url 'staff_manage_books' %}';
                 } else {
                     alert(data.error || 'An error occurred');
                 }
@@ -807,7 +807,7 @@
                 .then(data => {
                     if (data.success) {
                         alert(data.message);
-                        window.location.href = '{% url 'admin_management' %}';
+                        window.location.href = '{% url 'staff_manage_books' %}';
                     } else {
                         alert(data.error || 'An error occurred during import');
                     }
@@ -831,7 +831,7 @@
             if (s) p.set('status', s);
             if (g) p.set('genre', g);
             var qs = p.toString();
-            location.href = "{% url 'admin_management' %}" + (qs ? '?' + qs : '');
+            location.href = "{% url 'staff_manage_books' %}" + (qs ? '?' + qs : '');
         }
     </script>
     <script src="{% static 'js/admin-enhance.js' %}" defer></script>

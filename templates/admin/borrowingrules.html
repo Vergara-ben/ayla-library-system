@@ -1,0 +1,130 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ayla Admin Panel - Borrowing Rules</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@400;700&display=swap" rel="stylesheet">
+
+    <style>
+        :root {
+            --bg-main: #060d13;
+            --bg-sidebar: #0b151e;
+            --bg-card: #0d1b26;
+            --bg-modal: #0f2230;
+            --bg-input: #112535;
+            --text-primary: #e2e8f0;
+            --text-muted: #64748b;
+            --border-color: #1e293b;
+            --border-modal: #1d354a;
+        }
+        body { font-family: 'Inter', sans-serif; background-color: var(--bg-main); color: var(--text-primary); }
+        .logo-text { font-family: 'Rowdies', sans-serif; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: var(--bg-main); }
+        ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
+        .mobile-menu-btn {
+            display: none; align-items: center; justify-content: center;
+            width: 2.5rem; height: 2.5rem; border-radius: 0.5rem;
+            background: var(--bg-card); border: 1px solid var(--border-color);
+            color: var(--text-primary); cursor: pointer; margin-right: 0.75rem;
+        }
+        @media (max-width: 1024px) {
+            aside { position: fixed; left: -100%; top: 0; height: 100vh; z-index: 50; transition: left 0.3s ease; }
+            aside.open { left: 0; }
+            .mobile-menu-btn { display: flex !important; }
+            main { padding: 1rem; }
+        }
+    </style>
+    <link rel="stylesheet" href="{% static 'css/admin-enhance.css' %}">
+    <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
+</head>
+<body class="flex h-screen overflow-hidden">
+
+    {% include 'admin/_sidebar.html' with active='borrowing_rules' %}
+
+    <div class="flex-1 flex flex-col overflow-hidden">
+        <header class="h-16 flex-shrink-0 flex items-center justify-between px-8" style="background-color: var(--bg-main);">
+            <div class="flex items-center">
+                <button class="mobile-menu-btn" onclick="toggleSidebar()"><i class="fa-solid fa-bars"></i></button>
+                <h2 class="logo-text text-lg tracking-wider text-slate-200 uppercase">Borrowing Rules</h2>
+            </div>
+            <div class="flex items-center gap-4">
+                <span class="bg-cyan-950 text-cyan-400 text-xs px-2.5 py-1 rounded font-bold border border-cyan-800 tracking-wider">ADMIN</span>
+                <div class="w-8 h-8 rounded-full bg-cyan-900 border border-cyan-700 flex items-center justify-center text-xs font-bold text-cyan-200">AD</div>
+            </div>
+        </header>
+
+        <main class="flex-1 overflow-y-auto p-8">
+            <div class="max-w-2xl mx-auto space-y-6">
+
+                {% if saved %}
+                <div class="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200 flex items-center gap-2">
+                    <i class="fa-solid fa-circle-check"></i> Borrowing rules saved successfully.
+                </div>
+                {% endif %}
+                {% if error %}
+                <div class="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-100 flex items-center gap-2">
+                    <i class="fa-solid fa-triangle-exclamation"></i> {{ error }}
+                </div>
+                {% endif %}
+
+                <div class="rounded-xl border border-slate-800/80 overflow-hidden shadow-2xl" style="background-color: var(--bg-card);">
+                    <div class="p-5 border-b border-slate-800 flex items-center gap-2">
+                        <i class="fa-solid fa-gears text-cyan-600 text-xs"></i>
+                        <h4 class="text-sm font-bold text-slate-200 tracking-wide">Library Borrowing Policy</h4>
+                    </div>
+
+                    <form method="post" class="p-6 space-y-5">
+                        {% csrf_token %}
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                            <div class="space-y-1.5">
+                                <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Loan Period (days)</label>
+                                <input type="number" name="loan_period_days" min="1" value="{{ rule.loan_period_days }}" required class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                                <p class="text-[10px] text-slate-500">How many days a book can be borrowed before it is due.</p>
+                            </div>
+                            <div class="space-y-1.5">
+                                <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Borrowing Limit (books)</label>
+                                <input type="number" name="max_books_per_patron" min="1" value="{{ rule.max_books_per_patron }}" required class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                                <p class="text-[10px] text-slate-500">Maximum active borrows allowed per patron.</p>
+                            </div>
+                            <div class="space-y-1.5">
+                                <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Fine per Day (₱)</label>
+                                <input type="number" name="fine_per_day" min="0" step="0.01" value="{{ rule.fine_per_day }}" required class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                                <p class="text-[10px] text-slate-500">Penalty charged for each day a book is overdue.</p>
+                            </div>
+                            <div class="space-y-1.5">
+                                <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Grace Period (days)</label>
+                                <input type="number" name="grace_period_days" min="0" value="{{ rule.grace_period_days }}" required class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                                <p class="text-[10px] text-slate-500">Days after the due date before fines start accruing.</p>
+                            </div>
+                            <div class="space-y-1.5 sm:col-span-2">
+                                <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Lost Book Fee (₱)</label>
+                                <input type="number" name="lost_book_fee" min="0" step="0.01" value="{{ rule.lost_book_fee }}" required class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                                <p class="text-[10px] text-slate-500">Flat fee applied when a borrowed book is marked Lost.</p>
+                            </div>
+                        </div>
+
+                        <div class="pt-2 flex items-center justify-between">
+                            <span class="text-[10px] text-slate-500">Last updated: {{ rule.updated_at|date:"M j, Y g:i A" }}</span>
+                            <button type="submit" class="bg-cyan-700 hover:bg-cyan-600 text-white font-bold px-5 py-2.5 rounded-lg flex items-center gap-2 tracking-wide transition-colors shadow-md">
+                                <i class="fa-solid fa-check text-xs"></i> Save Rules
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        function toggleSidebar() { document.querySelector('aside').classList.toggle('open'); }
+    </script>
+    <script src="{% static 'js/admin-enhance.js' %}" defer></script>
+</body>
+</html>

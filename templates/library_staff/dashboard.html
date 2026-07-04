@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Ayla - Admin Dashboard</title>
+    <title>Ayla - Staff Dashboard</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@0,600;1,400&display=swap" rel="stylesheet">
@@ -17,14 +17,14 @@
     </style>
     <style>
         :root {
-            --bg-darker: #050b11;
-            --bg-dark: #070f18;
-            --bg-sidebar: #060d14;
-            --bg-card: #0c1925;
-            --bg-input: #0f1c2a;
-            --accent-blue: #38bdf8;
-            --accent-cyan: #06b6d4;
-            --border-color: #162535;
+            --bg-darker: #070511;
+            --bg-dark: #0b0817;
+            --bg-sidebar: #0b0816;
+            --bg-card: #151027;
+            --bg-input: #181230;
+            --accent-blue: #a78bfa;
+            --accent-violet: #8b5cf6;
+            --border-color: #251c3e;
             --text-main: #ffffff;
             --text-muted: #64748b;
             
@@ -81,7 +81,7 @@
             color: var(--accent-blue);
             font-weight: 700;
             font-size: 18px;
-            box-shadow: 0 0 15px rgba(56, 189, 248, 0.15);
+            box-shadow: 0 0 15px rgba(167, 139, 250, 0.15);
         }
 
         .brand-text {
@@ -138,7 +138,7 @@
         }
 
         .menu-item.active a {
-            color: var(--accent-cyan);
+            color: var(--accent-violet);
             background-color: rgba(6, 182, 212, 0.06);
             border: 1px solid rgba(6, 182, 212, 0.15);
             font-weight: 600;
@@ -199,7 +199,7 @@
         .badge-admin-tag {
             background-color: rgba(6, 182, 212, 0.1);
             border: 1px solid rgba(6, 182, 212, 0.2);
-            color: var(--accent-cyan);
+            color: var(--accent-violet);
             font-size: 10px;
             font-weight: 700;
             padding: 4px 10px;
@@ -235,7 +235,7 @@
         .user-avatar {
             width: 32px;
             height: 32px;
-            background-color: #1e293b;
+            background-color: #2a2144;
             border-radius: 50%;
             display: flex;
             align-items: center;
@@ -270,7 +270,7 @@
         .hero-welcome-tag {
             font-size: 11px;
             font-weight: 700;
-            color: var(--accent-cyan);
+            color: var(--accent-violet);
             text-transform: uppercase;
             letter-spacing: 1px;
             margin-bottom: 6px;
@@ -292,7 +292,7 @@
         }
 
         .hero-subtitle span {
-            color: var(--accent-cyan);
+            color: var(--accent-violet);
             font-weight: 500;
         }
 
@@ -324,7 +324,7 @@
 
         .btn-filled {
             background-color: #1e3a53;
-            border: 1px solid rgba(56, 189, 248, 0.2);
+            border: 1px solid rgba(167, 139, 250, 0.2);
             color: var(--text-main);
         }
 
@@ -364,7 +364,7 @@
             margin-bottom: 6px;
         }
 
-        .stat-card:nth-child(1) .stat-value { color: #38bdf8; }
+        .stat-card:nth-child(1) .stat-value { color: #a78bfa; }
         .stat-card:nth-child(2) .stat-value { color: #f59e0b; }
         .stat-card:nth-child(3) .stat-value { color: #ef4444; }
         .stat-card:nth-child(4) .stat-value { color: #ffffff; }
@@ -531,10 +531,11 @@
             gap: 8px;
             cursor: pointer;
             transition: all 0.2s ease;
+            text-decoration: none;
         }
 
         .action-card:hover {
-            border-color: rgba(56, 189, 248, 0.2);
+            border-color: rgba(167, 139, 250, 0.2);
             background-color: rgba(255,255,255,0.02);
         }
 
@@ -576,8 +577,8 @@
             font-weight: 600;
         }
         
-        .log-stat-row:nth-child(1) .log-stat-val { color: #38bdf8; }
-        .log-stat-row:nth-child(2) .log-stat-val { color: #38bdf8; }
+        .log-stat-row:nth-child(1) .log-stat-val { color: #a78bfa; }
+        .log-stat-row:nth-child(2) .log-stat-val { color: #a78bfa; }
         .log-stat-row:nth-child(3) .log-stat-val { color: #f59e0b; }
 
 
@@ -610,31 +611,31 @@
 </head>
 <body>
 
-    {% include 'admin/_sidebar.html' with active='dashboard' %}
+    {% include 'library_staff/_sidebar.html' with active='dashboard' %}
 
     <div class="main-content">
         
         <header class="top-navbar">
             <h2 class="page-title">Dashboard</h2>
-            
+
             <div class="navbar-actions">
-                <span class="badge-admin-tag">ADMIN</span>
+                <span class="badge-admin-tag">STAFF</span>
                 <button class="icon-btn" title="Notifications">🔔</button>
-                <div class="user-avatar" title="Admin User">AD</div>
+                <div class="user-avatar" title="{{ admin.fullname }}">{{ admin.fullname|slice:":2"|upper }}</div>
             </div>
         </header>
 
         <main class="dashboard-view">
-            
+
             <section class="hero-banner">
                 <div>
-                    <span class="hero-welcome-tag">Admin Dashboard</span>
-                    <h1 class="hero-title">Good morning, Admin 👋</h1>
-                    <p class="hero-subtitle">Monday, December 10, 2024 • <span>{{ visitors_today }} patrons currently in the library</span></p>
+                    <span class="hero-welcome-tag">Staff Dashboard</span>
+                    <h1 class="hero-title">Welcome back, {{ admin.fullname|default:"Staff" }} 👋</h1>
+                    <p class="hero-subtitle"><span>{{ visitors_today }} patron{{ visitors_today|pluralize }} logged in today</span></p>
                 </div>
                 <div class="hero-actions">
                     <a href="{% url 'admin_management' %}" class="btn btn-outline">Manage Books</a>
-                    <a href="{% url 'admin_manage_patron' %}" class="btn btn-filled">Manage Patrons</a>
+                    <a href="{% url 'admin_transaction' %}" class="btn btn-filled">Transactions</a>
                 </div>
             </section>
 
@@ -655,32 +656,9 @@
                     <div class="stat-indicator down">Overdue right now</div>
                 </div>
                 <div class="stat-card">
-                    <h4 class="stat-label">Total Patrons</h4>
-                    <div class="stat-value">{{ total_patrons }}</div>
-                    <div class="stat-indicator">Registered users</div>
-                </div>
-            </section>
-
-            <section class="stats-grid">
-                <div class="stat-card">
-                    <h4 class="stat-label">Books Lost</h4>
-                    <div class="stat-value">{{ books_lost }}</div>
-                    <div class="stat-indicator down">Lost items</div>
-                </div>
-                <div class="stat-card">
-                    <h4 class="stat-label">Books Donated</h4>
-                    <div class="stat-value">{{ books_donated }}</div>
-                    <div class="stat-indicator">Donated items</div>
-                </div>
-                <div class="stat-card">
                     <h4 class="stat-label">Being Read</h4>
                     <div class="stat-value">{{ books_being_read }}</div>
                     <div class="stat-indicator">In-library reading</div>
-                </div>
-                <div class="stat-card">
-                    <h4 class="stat-label">Active Patrons</h4>
-                    <div class="stat-value">{{ patrons_active }}</div>
-                    <div class="stat-indicator up">Active accounts</div>
                 </div>
             </section>
 
@@ -731,42 +709,42 @@
                             <h3 class="panel-title">⚡ Quick Actions</h3>
                         </div>
                         <div class="quick-actions-grid">
-                            <div class="action-card">
+                            <a href="{% url 'admin_management' %}" class="action-card">
                                 <span class="action-icon">📚</span>
                                 <span class="action-label">Books</span>
-                            </div>
-                            <div class="action-card">
-                                <span class="action-icon">👥</span>
-                                <span class="action-label">Patrons</span>
-                            </div>
-                            <div class="action-card">
+                            </a>
+                            <a href="{% url 'admin_transaction' %}" class="action-card">
                                 <span class="action-icon">📋</span>
                                 <span class="action-label">Transactions</span>
-                            </div>
-                            <div class="action-card">
+                            </a>
+                            <a href="{% url 'admin_log_management' %}" class="action-card">
                                 <span class="action-icon">🚪</span>
                                 <span class="action-label">Entry Logs</span>
-                            </div>
+                            </a>
+                            <a href="{% url 'shelf_manager' %}" class="action-card">
+                                <span class="action-icon">🗂️</span>
+                                <span class="action-label">Shelves</span>
+                            </a>
                         </div>
                     </section>
 
                     <section class="panel">
                         <div class="panel-header">
-                            <h3 class="panel-title">🚪 Today's Entry Log</h3>
+                            <h3 class="panel-title">🚪 Today at a Glance</h3>
                             <a href="{% url 'admin_log_management' %}" class="btn-view-all">View &rarr;</a>
                         </div>
                         <div class="log-stats-list">
                             <div class="log-stat-row">
-                                <span class="log-stat-label">Total entries</span>
+                                <span class="log-stat-label">Entries today</span>
                                 <span class="log-stat-val">{{ visitors_today }}</span>
                             </div>
                             <div class="log-stat-row">
-                                <span class="log-stat-label">Suspended patrons</span>
-                                <span class="log-stat-val">{{ patrons_suspended }}</span>
+                                <span class="log-stat-label">Pending returns</span>
+                                <span class="log-stat-val">{{ pending_transactions_count }}</span>
                             </div>
                             <div class="log-stat-row">
-                                <span class="log-stat-label">Inactive patrons</span>
-                                <span class="log-stat-val">{{ patrons_inactive }}</span>
+                                <span class="log-stat-label">Overdue books</span>
+                                <span class="log-stat-val">{{ books_overdue }}</span>
                             </div>
                         </div>
                     </section>

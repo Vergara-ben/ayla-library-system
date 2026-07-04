@@ -205,6 +205,56 @@
     <p>Register as a new library patron</p>
   </div>
 
+  {% if stage == 'otp' %}
+  <!-- ── OTP VERIFICATION STAGE ─────────────────────────── -->
+  {% if error %}<p class="error-text">{{ error }}</p>{% endif %}
+  {% if info %}<p style="font-size:13px;color:#4ade80;text-align:center;margin-bottom:12px;">{{ info }}</p>{% endif %}
+  <div class="card" id="otpCard">
+    <div class="section-title">📧 Verify Your Email</div>
+    <p style="font-size:13px;color:#a3c2a6;margin-bottom:20px;">
+      We sent a 6-digit code to <strong style="color:#e8f5e9">{{ otp_email }}</strong>.
+      Enter it below to verify your email address.
+    </p>
+    <form method="POST" action="{% url 'patron_register' %}">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="verify_otp">
+      <input type="hidden" name="email" value="{{ otp_email }}">
+      <div class="form-group" style="margin-bottom:20px">
+        <label>Verification Code</label>
+        <input type="text" id="otpInput" name="otp" inputmode="numeric" pattern="[0-9]{6}" maxlength="6"
+               placeholder="6-digit code" required
+               style="text-align:center;font-size:22px;letter-spacing:8px;font-weight:700;">
+      </div>
+      <div class="btn-row">
+        <button type="submit" class="btn-primary" style="width:100%">Verify ✓</button>
+      </div>
+    </form>
+    <form method="POST" action="{% url 'patron_register' %}" style="margin-top:14px;text-align:center;">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="resend_otp">
+      <input type="hidden" name="email" value="{{ otp_email }}">
+      <button type="submit" style="background:none;border:none;color:#4ade80;font-size:13px;cursor:pointer;text-decoration:underline;">
+        Resend code
+      </button>
+    </form>
+  </div>
+
+  {% elif stage == 'pending' %}
+  <!-- ── AWAITING APPROVAL STAGE ────────────────────────── -->
+  <div class="card success-screen show" id="pendingCard">
+    <div class="success-icon">⏳</div>
+    <div class="success-title">Email Verified!</div>
+    <div class="success-sub">
+      Your registration is now awaiting administrator approval.<br>
+      You will receive an email with your personal QR code once your account is approved.
+    </div>
+    <div class="action-btns">
+      <button class="btn-dl primary" onclick="window.location.href='{% url 'patron_login' %}'">Back to Login →</button>
+    </div>
+  </div>
+
+  {% else %}
+  <!-- ── REGISTRATION FORM STAGE ────────────────────────── -->
   <div class="step-indicator">
     <div class="step active" id="s1"></div>
     <div class="step" id="s2"></div>
@@ -215,8 +265,9 @@
   <p class="error-text">{{ error }}</p>
   {% endif %}
 
-  <form method="POST" action="{% url 'patron_register' %}">
+  <form method="POST" action="{% url 'patron_register' %}" enctype="multipart/form-data">
     {% csrf_token %}
+    <input type="hidden" name="action" value="register">
     <input type="hidden" name="patron_type" id="patron_type_input" value="">
 
     <div class="card" id="formCard">
@@ -261,17 +312,27 @@
       </div>
 
       <div id="step3" style="display:none">
-        <div class="section-title">🔐 Set Password</div>
+        <div class="section-title">🔐 Security &amp; Verification</div>
         <div class="form-group" style="margin-bottom:16px">
           <label>Password</label>
           <input type="password" id="password" name="password" placeholder="At least 8 characters" required>
         </div>
-        <div class="form-group" style="margin-bottom:24px">
+        <div class="form-group" style="margin-bottom:16px">
           <label>Confirm Password</label>
           <input type="password" id="confirmPassword" name="confirm_password" placeholder="Repeat password" required>
         </div>
+        <div class="form-group" style="margin-bottom:16px">
+          <label>Transaction PIN (4–6 digits)</label>
+          <input type="password" id="pin" name="pin" inputmode="numeric" pattern="[0-9]{4,6}" maxlength="6" placeholder="Used when borrowing at the desk" required>
+        </div>
+        <div class="form-group" style="margin-bottom:24px">
+          <label>Valid ID / Proof of Residency</label>
+          <input type="file" id="credentialDocument" name="credential_document" accept=".jpg,.jpeg,.png,.pdf" style="padding:9px 14px;" required>
+          <div style="font-size:11px;color:#a3c2a6;margin-top:6px;">JPG, PNG, or PDF — max 5 MB. Reviewed by the library administrator.</div>
+        </div>
         <div style="font-size:12px;color:#a3c2a6;background:rgba(13, 26, 15, 0.8);border-radius:10px;padding:12px 14px;border:1px solid rgba(255,255,255,0.1);margin-bottom:8px">
           📋 By registering, you agree to the library's borrowing policy and terms of use.
+          After email verification, your account will be reviewed by an administrator before activation.
         </div>
         <div class="btn-row">
           <button type="button" class="btn-secondary" onclick="goStep(2)">← Back</button>
@@ -289,6 +350,7 @@
       <button class="btn-dl primary" onclick="window.location.href='{% url 'patron_login' %}'">Login →</button>
     </div>
   </div>
+  {% endif %}
 </div>
 
 <script>
@@ -306,13 +368,6 @@ function selectType(el) {
   document.querySelectorAll('.type-card').forEach(c=>c.classList.remove('selected'));
   el.classList.add('selected');
   document.getElementById('patron_type_input').value = el.querySelector('.type-label').innerText;
-}
-function showSuccess() {
-  const fullName = document.getElementById('fullName').value.trim() || "MARIA SANTOS";
-  document.getElementById('display_name').innerText = fullName.toUpperCase();
-  
-  document.getElementById('formCard').style.display='none';
-  document.getElementById('successCard').classList.add('show');
 }
 </script>
 </body>

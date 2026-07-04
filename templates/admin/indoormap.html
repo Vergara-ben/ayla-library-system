@@ -8,6 +8,13 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@0,600;1,400&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        .logo-text { font-family: 'Rowdies', sans-serif; }
+        aside.w-64 { font-family: 'Inter', sans-serif; }
+    </style>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
@@ -542,108 +549,7 @@
 </head>
 <body>
 
-    <aside class="sidebar">
-        <div class="brand-logo">
-            <div class="logo-icon">A</div>
-            <div class="brand-text">
-                Ayla
-                <span>Admin Panel</span>
-            </div>
-        </div>
-
-        <nav class="menu-section">
-            <h4 class="menu-label">Overview</h4>
-            <ul class="menu-list">
-                <li class="menu-item">
-                    <a href="{% url 'admin_dashboard' %}">
-                        <div class="menu-link-content">
-                            <span class="menu-icon">🏠</span>
-                            <span>Dashboard</span>
-                        </div>
-                    </a>
-                </li>
-                <li class="menu-item active">
-                    <a href="{% url 'admin_indoor_map' %}">
-                        <div class="menu-link-content">
-                            <span class="menu-icon">🗺️</span>
-                            <span>Indoor Map</span>
-                        </div>
-                    </a>
-                </li>
-            </ul>
-        </nav>
-
-        <nav class="menu-section">
-            <h4 class="menu-label">Management</h4>
-            <ul class="menu-list">
-                <li class="menu-item">
-                    <a href="{% url 'admin_transaction' %}">
-                        <div class="menu-link-content">
-                            <span class="menu-icon">📋</span>
-                            <span>Transactions</span>
-                        </div>
-                        <span class="badge-count">{{ pending_transactions_count }}</span>
-                    </a>
-                </li>
-                <li class="menu-item">
-                    <a href="{% url 'admin_log_management' %}">
-                        <div class="menu-link-content">
-                            <span class="menu-icon">📊</span>
-                            <span>Log Management</span>
-                        </div>
-                    </a>
-                </li>
-                <li class="menu-item">
-                    <a href="{% url 'admin_management' %}">
-                        <div class="menu-link-content">
-                            <span class="menu-icon">📚</span>
-                            <span>Manage Books</span>
-                        </div>
-                    </a>
-                </li>
-                <li class="menu-item">
-                    <a href="{% url 'admin_manage_patron' %}">
-                        <div class="menu-link-content">
-                            <span class="menu-icon">👥</span>
-                            <span>Manage Patrons</span>
-                        </div>
-                    </a>
-                </li>
-                <li class="menu-item">
-                    <a href="{% url 'donation_management' %}">
-                        <div class="menu-link-content">
-                            <span class="menu-icon">🤝</span>
-                            <span>Donations</span>
-                        </div>
-                    </a>
-                </li>
-                <li class="menu-item">
-                    <a href="{% url 'announcement_management' %}">
-                        <div class="menu-link-content">
-                            <span class="menu-icon">📢</span>
-                            <span>Announcements</span>
-                        </div>
-                    </a>
-                </li>
-                <li class="menu-item">
-                    <a href="{% url 'floorplan_management' %}">
-                        <div class="menu-link-content">
-                            <span class="menu-icon">🗺️</span>
-                            <span>Floor Plans</span>
-                        </div>
-                    </a>
-                </li>
-                <li class="menu-item">
-                    <a href="{% url 'admin_reports' %}">
-                        <div class="menu-link-content">
-                            <span class="menu-icon">📈</span>
-                            <span>Reports</span>
-                        </div>
-                    </a>
-                </li>
-            </ul>
-        </nav>
-    </aside>
+    {% include 'admin/_sidebar.html' with active='indoor_map' %}
 
     <div class="main-content">
         <header class="top-navbar">

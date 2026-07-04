@@ -136,77 +136,7 @@
 </head>
 <body class="flex h-screen overflow-hidden">
 
-    <aside class="w-64 flex-shrink-0 flex flex-col" style="background-color: var(--bg-sidebar); border-right: 1px solid var(--border-color);">
-        <div class="p-6 flex items-center gap-3" style="border-bottom: 1px solid var(--border-color);">
-            <div class="w-10 h-10 rounded-lg flex items-center justify-center text-xl font-bold text-cyan-400 bg-cyan-950/50 border border-cyan-800">
-                A
-            </div>
-            <div>
-                <h1 class="logo-text text-xl tracking-wider text-slate-100 leading-none">AYLA</h1>
-                <span class="text-xs tracking-widest text-slate-500 uppercase font-semibold">Admin Panel</span>
-            </div>
-        </div>
-
-        <nav class="flex-1 px-4 py-6 space-y-7 overflow-y-auto">
-            <div>
-                <p class="px-2 text-xs font-bold tracking-widest text-slate-500 uppercase mb-3">Overview</p>
-                <div class="space-y-1">
-                    <a href="{% url 'admin_dashboard' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
-                        <i class="fa-solid fa-chart-pie w-5 text-sm"></i>
-                        <span class="text-sm font-medium">Dashboard</span>
-                    </a>
-                    <a href="{% url 'admin_indoor_map' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
-                        <i class="fa-solid fa-map w-5 text-sm"></i>
-                        <span class="text-sm font-medium">Indoor Map</span>
-                    </a>
-                </div>
-            </div>
-
-            <div>
-                <p class="px-2 text-xs font-bold tracking-widest text-slate-500 uppercase mb-3">Management</p>
-                <div class="space-y-1">
-                    <a href="{% url 'admin_transaction' %}" class="flex items-center justify-between px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
-                        <div class="flex items-center gap-3">
-                            <i class="fa-solid fa-file-invoice w-5 text-sm"></i>
-                            <span class="text-sm font-medium">Transactions</span>
-                        </div>
-                        <span class="bg-rose-500/20 text-rose-400 text-xs px-2 py-0.5 rounded-full font-semibold">12</span>
-                    </a>
-                    <a href="{% url 'admin_log_management' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
-                        <i class="fa-solid fa-clipboard-list w-5 text-sm"></i>
-                        <span class="text-sm font-medium">Log Management</span>
-                    </a>
-                    <a href="{% url 'admin_management' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
-                        <i class="fa-solid fa-book w-5 text-sm"></i>
-                        <span class="text-sm font-medium">Manage Books</span>
-                    </a>
-                    <a href="{% url 'admin_manage_patron' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
-                        <i class="fa-solid fa-users w-5 text-sm"></i>
-                        <span class="text-sm font-medium">Manage Patrons</span>
-                    </a>
-                    <a href="{% url 'donation_management' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
-                        <i class="fa-solid fa-hand-holding-heart w-5 text-sm"></i>
-                        <span class="text-sm font-medium">Donations</span>
-                    </a>
-                    <a href="{% url 'announcement_management' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
-                        <i class="fa-solid fa-bullhorn w-5 text-sm"></i>
-                        <span class="text-sm font-medium">Announcements</span>
-                    </a>
-                    <a href="{% url 'floorplan_management' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-800/50 text-cyan-400 font-medium border border-slate-700/50">
-                        <i class="fa-solid fa-layer-group w-5 text-sm"></i>
-                        <span class="text-sm">Floor Plans</span>
-                    </a>
-                    <a href="{% url 'shelf_manager' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
-                        <i class="fa-solid fa-folder-tree w-5 text-sm"></i>
-                        <span class="text-sm font-medium">Shelf Manager</span>
-                    </a>
-                    <a href="{% url 'admin_reports' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
-                        <i class="fa-solid fa-chart-line w-5 text-sm"></i><span class="text-sm font-medium">Reports</span>
-                    </a>
-                </div>
-            </div>
-        </nav>
-    </aside>
+    {% include 'admin/_sidebar.html' with active='floorplans' %}
 
     <div class="flex-1 flex flex-col overflow-hidden">
         
@@ -440,7 +370,7 @@
                                     <span class="text-[10px] text-slate-500">({{ shelf.map_x }}, {{ shelf.map_y }})</span>
                                     <span class="text-[10px] text-slate-500">Room: {{ room.name }}</span>
                                 </div>
-                                <form method="post" action="{% url 'delete_shelf' %}" class="inline" onsubmit="return confirm('Delete this shelf and all its sections?');">
+                                <form method="post" action="{% url 'delete_shelf' %}" class="inline" onsubmit="return confirm('Delete this shelf and all its shelf levels?');">
                                     {% csrf_token %}
                                     <input type="hidden" name="shelf_id" value="{{ shelf.shelf_id }}">
                                     <button type="submit" class="text-rose-500/70 hover:text-rose-400 text-xs">
@@ -455,37 +385,6 @@
                     </div>
                 </div>
 
-                <!-- Sections -->
-                <div class="p-5 border-b border-slate-800/50">
-                    <div class="flex items-center justify-between mb-4">
-                        <h5 class="text-xs font-bold text-slate-400 uppercase tracking-wider">Sections</h5>
-                    </div>
-                    <div class="space-y-2">
-                        {% for room in floorplan.room_set.all %}
-                            {% for shelf in room.shelf_set.all %}
-                                {% for section in shelf.section_set.all %}
-                                <div class="flex items-center justify-between p-3 rounded-lg border border-slate-800/60 bg-slate-900/20">
-                                    <div class="flex items-center gap-3">
-                                        <i class="fa-solid fa-folder text-slate-500 text-xs"></i>
-                                        <span class="text-xs font-medium text-slate-300">{{ section.name }}</span>
-                                        <span class="text-[10px] text-slate-500">Shelf: {{ shelf.name }}</span>
-                                    </div>
-                                    <form method="post" action="{% url 'delete_section' %}" class="inline" onsubmit="return confirm('Delete this section and all its shelf levels?');">
-                                        {% csrf_token %}
-                                        <input type="hidden" name="section_id" value="{{ section.section_id }}">
-                                        <button type="submit" class="text-rose-500/70 hover:text-rose-400 text-xs">
-                                            <i class="fa-solid fa-trash-can"></i>
-                                        </button>
-                                    </form>
-                                </div>
-                                {% endfor %}
-                            {% endfor %}
-                        {% empty %}
-                        <p class="text-xs text-slate-500">No sections added.</p>
-                        {% endfor %}
-                    </div>
-                </div>
-
                 <!-- Shelf Levels -->
                 <div class="p-5">
                     <div class="flex items-center justify-between mb-4">
@@ -494,23 +393,21 @@
                     <div class="space-y-2">
                         {% for room in floorplan.room_set.all %}
                             {% for shelf in room.shelf_set.all %}
-                                {% for section in shelf.section_set.all %}
-                                    {% for level in section.shelflevel_set.all %}
-                                    <div class="flex items-center justify-between p-3 rounded-lg border border-slate-800/60 bg-slate-900/20">
-                                        <div class="flex items-center gap-3">
-                                            <i class="fa-solid fa-layer-group text-slate-500 text-xs"></i>
-                                            <span class="text-xs font-medium text-slate-300">{{ level.label|default:level.level_number }}</span>
-                                            <span class="text-[10px] text-slate-500">Level {{ level.level_number }} - Section: {{ section.name }}</span>
-                                        </div>
-                                        <form method="post" action="{% url 'delete_shelf_level' %}" class="inline" onsubmit="return confirm('Delete this shelf level?');">
-                                            {% csrf_token %}
-                                            <input type="hidden" name="shelf_level_id" value="{{ level.shelf_level_id }}">
-                                            <button type="submit" class="text-rose-500/70 hover:text-rose-400 text-xs">
-                                                <i class="fa-solid fa-trash-can"></i>
-                                            </button>
-                                        </form>
+                                {% for level in shelf.shelflevel_set.all %}
+                                <div class="flex items-center justify-between p-3 rounded-lg border border-slate-800/60 bg-slate-900/20">
+                                    <div class="flex items-center gap-3">
+                                        <i class="fa-solid fa-layer-group text-slate-500 text-xs"></i>
+                                        <span class="text-xs font-medium text-slate-300">{{ level.category|default:level.level_number }}</span>
+                                        <span class="text-[10px] text-slate-500">Level {{ level.level_number }} · Shelf: {{ shelf.name }}</span>
                                     </div>
-                                    {% endfor %}
+                                    <form method="post" action="{% url 'delete_shelf_level' %}" class="inline" onsubmit="return confirm('Delete this shelf level?');">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="shelf_level_id" value="{{ level.shelf_level_id }}">
+                                        <button type="submit" class="text-rose-500/70 hover:text-rose-400 text-xs">
+                                            <i class="fa-solid fa-trash-can"></i>
+                                        </button>
+                                    </form>
+                                </div>
                                 {% endfor %}
                             {% endfor %}
                         {% empty %}
@@ -683,38 +580,6 @@
         </div>
     </div>
 
-    <!-- Add Section Modal -->
-    <div id="addSectionModal" class="hidden absolute inset-0 bg-black/60 z-40 flex items-center justify-center p-4 overflow-y-auto">
-        <div class="w-full max-w-lg rounded-2xl border p-6 flex flex-col gap-5 shadow-2xl relative my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color);">
-            <div class="flex items-center justify-between">
-                <h3 class="text-base font-bold text-slate-200 tracking-wide">Add Section</h3>
-                <button type="button" onclick="closeAddSectionModal()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40 transition-colors">
-                    <i class="fa-solid fa-xmark text-sm"></i>
-                </button>
-            </div>
-            <form method="post" action="{% url 'add_section' %}" class="space-y-4 text-xs">
-                {% csrf_token %}
-                <input type="hidden" name="shelf_id" id="sectionShelfId">
-                <div class="space-y-1.5">
-                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Section Name</label>
-                    <input type="text" name="name" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" required>
-                </div>
-                <div class="space-y-1.5">
-                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Description</label>
-                    <textarea name="description" rows="2" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);"></textarea>
-                </div>
-                <div class="pt-4 flex items-center justify-end gap-3">
-                    <button type="button" onclick="closeAddSectionModal()" class="px-5 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:text-slate-100 hover:bg-slate-800/40 font-semibold tracking-wide transition-colors min-w-[100px]">
-                        Cancel
-                    </button>
-                    <button type="submit" class="bg-cyan-700 hover:bg-cyan-600 text-white font-bold px-5 py-2.5 rounded-lg flex items-center gap-2 tracking-wide transition-colors shadow-md">
-                        <i class="fa-solid fa-check text-xs"></i> Add Section
-                    </button>
-                </div>
-            </form>
-        </div>
-    </div>
-
     <!-- Add Shelf Level Modal -->
     <div id="addShelfLevelModal" class="hidden absolute inset-0 bg-black/60 z-40 flex items-center justify-center p-4 overflow-y-auto">
         <div class="w-full max-w-lg rounded-2xl border p-6 flex flex-col gap-5 shadow-2xl relative my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color);">
@@ -726,14 +591,14 @@
             </div>
             <form method="post" action="{% url 'add_shelf_level' %}" class="space-y-4 text-xs">
                 {% csrf_token %}
-                <input type="hidden" name="section_id" id="shelfLevelSectionId">
+                <input type="hidden" name="shelf_id" id="shelfLevelShelfId">
                 <div class="space-y-1.5">
                     <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Level Number</label>
                     <input type="number" name="level_number" value="1" min="1" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" required>
                 </div>
                 <div class="space-y-1.5">
-                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Label</label>
-                    <input type="text" name="label" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Category</label>
+                    <input type="text" name="category" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" placeholder="e.g. Fiction, Economics">
                 </div>
                 <div class="pt-4 flex items-center justify-end gap-3">
                     <button type="button" onclick="closeAddShelfLevelModal()" class="px-5 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:text-slate-100 hover:bg-slate-800/40 font-semibold tracking-wide transition-colors min-w-[100px]">
@@ -926,19 +791,8 @@
             document.body.style.overflow = 'auto';
         }
 
-        function openAddSectionModal(shelfId) {
-            document.getElementById('sectionShelfId').value = shelfId;
-            document.getElementById('addSectionModal').classList.remove('hidden');
-            document.body.style.overflow = 'hidden';
-        }
-
-        function closeAddSectionModal() {
-            document.getElementById('addSectionModal').classList.add('hidden');
-            document.body.style.overflow = 'auto';
-        }
-
-        function openAddShelfLevelModal(sectionId) {
-            document.getElementById('shelfLevelSectionId').value = sectionId;
+        function openAddShelfLevelModal(shelfId) {
+            document.getElementById('shelfLevelShelfId').value = shelfId;
             document.getElementById('addShelfLevelModal').classList.remove('hidden');
             document.body.style.overflow = 'hidden';
         }
@@ -979,21 +833,21 @@
                 closeAddRoomModal();
                 closeEditRoomModal();
                 closeAddShelfModal();
-                closeAddSectionModal();
                 closeAddShelfLevelModal();
                 closeRenovationModal();
             }
         });
 
         // Close modals when clicking outside
-        ['addFloorPlanModal', 'addRoomModal', 'editRoomModal', 'addShelfModal', 'addSectionModal', 'addShelfLevelModal', 'renovationModal'].forEach(modalId => {
-            document.getElementById(modalId).addEventListener('click', function(e) {
+        ['addFloorPlanModal', 'addRoomModal', 'editRoomModal', 'addShelfModal', 'addShelfLevelModal', 'renovationModal'].forEach(modalId => {
+            const el = document.getElementById(modalId);
+            if (!el) return;
+            el.addEventListener('click', function(e) {
                 if (e.target === this) {
                     if (modalId === 'addFloorPlanModal') closeAddModal();
                     else if (modalId === 'addRoomModal') closeAddRoomModal();
                     else if (modalId === 'editRoomModal') closeEditRoomModal();
                     else if (modalId === 'addShelfModal') closeAddShelfModal();
-                    else if (modalId === 'addSectionModal') closeAddSectionModal();
                     else if (modalId === 'addShelfLevelModal') closeAddShelfLevelModal();
                     else if (modalId === 'renovationModal') closeRenovationModal();
                 }

@@ -101,6 +101,69 @@ def return_receipt_email(patron, books, had_overdue=False):
     return send_email(f"[{lib}] Return Receipt", "\n".join(lines), patron.email)
 
 
+def lost_book_email(patron, book, fine_amount):
+    """Notify a patron that a borrowed book was marked lost and the fee owed."""
+    lib = _library_name()
+    title = book.title if hasattr(book, 'title') else str(book)
+    body = (
+        f"Dear {patron.fullname},\n\n"
+        f"The following borrowed item has been marked as lost:\n\n"
+        f"  - {title}\n\n"
+        f"An outstanding charge of ₱{fine_amount} now applies to your account. "
+        f"Please settle this with the library; borrowing is suspended until it is resolved.\n\n"
+        f"Thank you,\n{lib}"
+    )
+    return send_email(f"[{lib}] Lost Book Notice", body, patron.email)
+
+
+def otp_email(email, fullname, code):
+    """Email the one-time password for online registration verification."""
+    lib = _library_name()
+    body = (
+        f"Dear {fullname},\n\n"
+        f"Your verification code for your {lib} registration is:\n\n"
+        f"    {code}\n\n"
+        f"This code expires in 10 minutes. If you did not register, you can\n"
+        f"safely ignore this email.\n\n"
+        f"Thank you,\n{lib}"
+    )
+    return send_email(f"[{lib}] Your Verification Code", body, email)
+
+
+def registration_approved_email(patron):
+    """Notify a patron that their registration was approved (QR now active)."""
+    lib = _library_name()
+    body = (
+        f"Dear {patron.fullname},\n\n"
+        f"Good news — your {lib} registration has been approved!\n\n"
+        f"Your personal QR code is now active. Log in to your account and open\n"
+        f"the My Account page to view and download it. Present this QR code at\n"
+        f"the library desk when borrowing or returning books.\n\n"
+        f"Welcome aboard,\n{lib}"
+    )
+    return send_email(f"[{lib}] Registration Approved", body, patron.email)
+
+
+def registration_rejected_email(email, fullname, reason=None):
+    """Notify an applicant that their registration was rejected."""
+    lib = _library_name()
+    lines = [
+        f"Dear {fullname},",
+        "",
+        f"We are sorry to inform you that your {lib} registration could not be approved.",
+    ]
+    if reason:
+        lines += ["", f"Reason: {reason}"]
+    lines += [
+        "",
+        "You may register again with corrected details, or visit the library",
+        "in person for assistance.",
+        "",
+        f"Thank you,\n{lib}",
+    ]
+    return send_email(f"[{lib}] Registration Update", "\n".join(lines), email)
+
+
 def announcement_email(patron, announcement):
     """Email a patron a single library announcement."""
     lib = _library_name()

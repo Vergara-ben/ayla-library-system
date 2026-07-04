@@ -1,0 +1,334 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ayla Admin Panel - User Management</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@400;700&display=swap" rel="stylesheet">
+
+    <style>
+        :root {
+            --bg-main: #060d13;
+            --bg-sidebar: #0b151e;
+            --bg-card: #0d1b26;
+            --bg-modal: #0f2230;
+            --bg-input: #112535;
+            --text-primary: #e2e8f0;
+            --text-muted: #64748b;
+            --border-color: #1e293b;
+            --border-modal: #1d354a;
+        }
+        body { font-family: 'Inter', sans-serif; background-color: var(--bg-main); color: var(--text-primary); }
+        .logo-text { font-family: 'Rowdies', sans-serif; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: var(--bg-main); }
+        ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
+        .modal-overlay { background: rgba(3, 8, 13, 0.75); }
+        @media (max-width: 1024px) {
+            aside { position: fixed; left: -100%; top: 0; height: 100vh; z-index: 50; transition: left 0.3s ease; }
+            aside.open { left: 0; }
+            .mobile-menu-btn { display: flex !important; }
+            main { padding: 1rem; }
+        }
+        .mobile-menu-btn {
+            display: none; align-items: center; justify-content: center; width: 2.5rem; height: 2.5rem;
+            border-radius: 0.5rem; background: var(--bg-card); border: 1px solid var(--border-color);
+            color: var(--text-primary); cursor: pointer; margin-right: 0.75rem;
+        }
+        .field-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); margin-bottom: 6px; display: block; }
+        .field-input {
+            width: 100%; background: var(--bg-input); border: 1px solid var(--border-modal); border-radius: 8px;
+            padding: 9px 12px; font-size: 13px; color: var(--text-primary); outline: none;
+        }
+        .field-input:focus { border-color: #0e7490; }
+    </style>
+    <link rel="stylesheet" href="{% static 'css/admin-enhance.css' %}">
+    <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
+</head>
+<body class="flex h-screen overflow-hidden">
+
+    {% include 'admin/_sidebar.html' with active='users' %}
+
+    <div class="flex-1 flex flex-col overflow-hidden">
+
+        <header class="h-16 flex-shrink-0 flex items-center justify-between px-8" style="background-color: var(--bg-main);">
+            <div class="flex items-center">
+                <button class="mobile-menu-btn" onclick="toggleSidebar()"><i class="fa-solid fa-bars"></i></button>
+                <h2 class="logo-text text-lg tracking-wider text-slate-200 uppercase">User Management</h2>
+            </div>
+            <div class="flex items-center gap-4">
+                <span class="bg-cyan-950 text-cyan-400 text-xs px-2.5 py-1 rounded font-bold border border-cyan-800 tracking-wider">{% if request.session.admin_role == 'Staff' %}STAFF{% else %}ADMIN{% endif %}</span>
+                <button class="relative text-slate-400 hover:text-slate-200 p-1">
+                    <i class="fa-solid fa-bell text-lg"></i>
+                    <span class="absolute top-1 right-1 w-2 h-2 bg-amber-500 rounded-full"></span>
+                </button>
+                <div class="w-8 h-8 rounded-full bg-cyan-900 border border-cyan-700 flex items-center justify-center text-xs font-bold text-cyan-200">AD</div>
+            </div>
+        </header>
+
+        <main class="flex-1 overflow-y-auto p-8 space-y-6">
+
+            {% if messages %}
+            <div class="space-y-2">
+                {% for message in messages %}
+                <div class="text-xs px-4 py-3 rounded-lg border flex items-center gap-2
+                    {% if message.tags == 'error' %}bg-rose-950/40 border-rose-800/60 text-rose-300{% else %}bg-emerald-950/40 border-emerald-800/60 text-emerald-300{% endif %}">
+                    <i class="fa-solid {% if message.tags == 'error' %}fa-circle-exclamation{% else %}fa-circle-check{% endif %}"></i>
+                    <span>{{ message }}</span>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            <!-- Stat cards -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
+                    <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Total Accounts</p>
+                    <p class="text-3xl font-bold text-slate-300 mt-2">{{ total_users }}</p>
+                    <p class="text-[10px] text-slate-500 mt-1">Non-patron users</p>
+                </div>
+                <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
+                    <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Library Staff</p>
+                    <p class="text-3xl font-bold text-cyan-400 mt-2">{{ total_staff }}</p>
+                    <p class="text-[10px] text-slate-500 mt-1">Staff accounts</p>
+                </div>
+                <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
+                    <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Administrators</p>
+                    <p class="text-3xl font-bold text-blue-400 mt-2">{{ total_admins }}</p>
+                    <p class="text-[10px] text-slate-500 mt-1">Admin accounts</p>
+                </div>
+                <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
+                    <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Active</p>
+                    <p class="text-3xl font-bold text-emerald-400 mt-2">{{ active_users }}</p>
+                    <p class="text-[10px] text-slate-500 mt-1">Can sign in</p>
+                </div>
+            </div>
+
+            <!-- Management card -->
+            <div class="rounded-xl border border-slate-800/80 overflow-hidden shadow-2xl flex flex-col" style="background-color: var(--bg-card);">
+
+                <div class="p-5 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div class="flex items-center gap-2">
+                        <i class="fa-solid fa-user-gear text-amber-600 text-xs"></i>
+                        <h4 class="text-sm font-bold text-slate-200 tracking-wide">Staff &amp; Admin Accounts</h4>
+                    </div>
+                    <div class="flex items-center gap-2 self-end sm:self-auto">
+                        <button onclick="openCreate()" class="bg-cyan-700/30 text-cyan-400 border border-cyan-800/80 hover:bg-cyan-700/50 text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
+                            <i class="fa-solid fa-plus text-[10px]"></i> Add Staff
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Filters -->
+                <form method="get" class="px-5 py-3.5 bg-slate-900/20 border-b border-slate-800/60 flex flex-col lg:flex-row lg:items-center gap-3">
+                    <div class="relative flex-1">
+                        <i class="fa-solid fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-xs"></i>
+                        <input type="text" name="q" value="{{ q }}" placeholder="Search name or email..." class="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-4 py-2 text-xs text-slate-300 focus:outline-none focus:border-cyan-800 placeholder-slate-600 transition-colors">
+                    </div>
+                    <div class="flex items-center gap-2 self-end lg:self-auto">
+                        <div class="relative">
+                            <select name="role" onchange="this.form.submit()" class="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-400 focus:outline-none pr-8 appearance-none min-w-[130px]">
+                                <option value="">All Roles</option>
+                                {% for value, label in role_choices %}<option value="{{ value }}" {% if value == role_filter %}selected{% endif %}>{{ label }}</option>{% endfor %}
+                            </select>
+                            <i class="fa-solid fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-slate-600 text-[10px] pointer-events-none"></i>
+                        </div>
+                        <div class="relative">
+                            <select name="status" onchange="this.form.submit()" class="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-400 focus:outline-none pr-8 appearance-none min-w-[110px]">
+                                <option value="">All Status</option>
+                                {% for value, label in status_choices %}<option value="{{ value }}" {% if value == status_filter %}selected{% endif %}>{{ label }}</option>{% endfor %}
+                            </select>
+                            <i class="fa-solid fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-slate-600 text-[10px] pointer-events-none"></i>
+                        </div>
+                        <button type="submit" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-slate-300 text-[11px] font-semibold px-3 py-2 rounded-lg transition-colors">Filter</button>
+                    </div>
+                </form>
+
+                <!-- Table -->
+                <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="border-b border-slate-800/80 text-[10px] font-bold tracking-wider text-slate-500 uppercase bg-slate-900/5">
+                            <th class="py-3 px-6">Name</th>
+                            <th class="py-3 px-6">Email</th>
+                            <th class="py-3 px-6 w-32">Role</th>
+                            <th class="py-3 px-6 w-28">Status</th>
+                            <th class="py-3 px-6 text-center w-40">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-800/40 text-xs text-slate-300">
+                        {% for u in users %}
+                        <tr class="hover:bg-slate-800/10 transition-colors">
+                            <td class="py-4 px-6">
+                                <div class="flex items-center gap-3">
+                                    <div class="w-8 h-8 rounded-full bg-cyan-950/50 border border-cyan-900/40 flex items-center justify-center text-[11px] font-bold text-cyan-300">{{ u.fullname|slice:":2"|upper }}</div>
+                                    <span class="font-bold text-slate-200">{{ u.fullname }}</span>
+                                </div>
+                            </td>
+                            <td class="py-4 px-6 text-slate-400">{{ u.email }}</td>
+                            <td class="py-4 px-6">
+                                {% if u.role == 'Admin' %}
+                                    <span class="text-[10px] font-bold px-2.5 py-1 rounded-full bg-blue-950/50 text-blue-300 border border-blue-800/50">Administrator</span>
+                                {% else %}
+                                    <span class="text-[10px] font-bold px-2.5 py-1 rounded-full bg-cyan-950/50 text-cyan-300 border border-cyan-800/50">Library Staff</span>
+                                {% endif %}
+                            </td>
+                            <td class="py-4 px-6">
+                                {% if u.account_status == 'Active' %}
+                                    <span class="text-[10px] font-bold px-2.5 py-1 rounded-full bg-emerald-950/50 text-emerald-300 border border-emerald-800/50">Active</span>
+                                {% elif u.account_status == 'Suspended' %}
+                                    <span class="text-[10px] font-bold px-2.5 py-1 rounded-full bg-amber-950/50 text-amber-300 border border-amber-800/50">Suspended</span>
+                                {% else %}
+                                    <span class="text-[10px] font-bold px-2.5 py-1 rounded-full bg-slate-800/60 text-slate-400 border border-slate-700/50">Inactive</span>
+                                {% endif %}
+                            </td>
+                            <td class="py-4 px-6">
+                                <div class="flex items-center justify-center gap-2">
+                                    <button title="Edit"
+                                        data-id="{{ u.admin_id }}" data-fullname="{{ u.fullname }}" data-email="{{ u.email }}"
+                                        data-role="{{ u.role }}" data-status="{{ u.account_status }}"
+                                        onclick="openEdit(this)"
+                                        class="text-slate-400 hover:text-cyan-400 transition-colors p-1.5"><i class="fa-solid fa-pen-to-square"></i></button>
+                                    <button title="Reset password"
+                                        data-id="{{ u.admin_id }}" data-fullname="{{ u.fullname }}"
+                                        onclick="openReset(this)"
+                                        class="text-slate-400 hover:text-amber-400 transition-colors p-1.5"><i class="fa-solid fa-key"></i></button>
+                                    <form method="post" action="{% url 'toggle_staff_status' u.admin_id %}" onsubmit="return confirm('{% if u.account_status == 'Active' %}Deactivate{% else %}Activate{% endif %} {{ u.fullname }}?');">
+                                        {% csrf_token %}
+                                        {% if u.account_status == 'Active' %}
+                                        <button title="Deactivate" class="text-slate-400 hover:text-rose-400 transition-colors p-1.5"><i class="fa-solid fa-user-slash"></i></button>
+                                        {% else %}
+                                        <button title="Activate" class="text-slate-400 hover:text-emerald-400 transition-colors p-1.5"><i class="fa-solid fa-user-check"></i></button>
+                                        {% endif %}
+                                    </form>
+                                </div>
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="5" class="py-10 text-center text-slate-500 text-xs">No accounts found.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Create / Edit modal -->
+    <div id="userModal" class="fixed inset-0 z-[60] hidden items-center justify-center modal-overlay p-4">
+        <div class="w-full max-w-md rounded-2xl border shadow-2xl" style="background-color: var(--bg-modal); border-color: var(--border-modal);">
+            <div class="flex items-center justify-between px-6 py-4 border-b" style="border-color: var(--border-modal);">
+                <h3 id="userModalTitle" class="text-sm font-bold text-slate-200 tracking-wide">Add Staff</h3>
+                <button onclick="closeModal('userModal')" class="text-slate-500 hover:text-slate-300"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <form id="userForm" method="post" action="{% url 'create_staff' %}" class="px-6 py-5 space-y-4">
+                {% csrf_token %}
+                <div>
+                    <label class="field-label">Full Name</label>
+                    <input type="text" name="fullname" id="f_fullname" class="field-input" required>
+                </div>
+                <div>
+                    <label class="field-label">Email</label>
+                    <input type="email" name="email" id="f_email" class="field-input" required>
+                </div>
+                <div id="passwordWrap">
+                    <label class="field-label">Password</label>
+                    <input type="text" name="password" id="f_password" class="field-input" placeholder="Min. 6 characters">
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="field-label">Role</label>
+                        <select name="role" id="f_role" class="field-input">
+                            {% for value, label in role_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+                        </select>
+                    </div>
+                    <div>
+                        <label class="field-label">Status</label>
+                        <select name="account_status" id="f_status" class="field-input">
+                            {% for value, label in status_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+                        </select>
+                    </div>
+                </div>
+                <div class="flex items-center justify-end gap-2 pt-2">
+                    <button type="button" onclick="closeModal('userModal')" class="text-xs font-semibold px-4 py-2 rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800/50">Cancel</button>
+                    <button type="submit" class="text-xs font-bold px-4 py-2 rounded-lg bg-cyan-700/40 text-cyan-300 border border-cyan-700/60 hover:bg-cyan-700/60">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Reset password modal -->
+    <div id="resetModal" class="fixed inset-0 z-[60] hidden items-center justify-center modal-overlay p-4">
+        <div class="w-full max-w-md rounded-2xl border shadow-2xl" style="background-color: var(--bg-modal); border-color: var(--border-modal);">
+            <div class="flex items-center justify-between px-6 py-4 border-b" style="border-color: var(--border-modal);">
+                <h3 class="text-sm font-bold text-slate-200 tracking-wide">Reset Password</h3>
+                <button onclick="closeModal('resetModal')" class="text-slate-500 hover:text-slate-300"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <form id="resetForm" method="post" class="px-6 py-5 space-y-4">
+                {% csrf_token %}
+                <p class="text-xs text-slate-400">Set a new password for <span id="resetName" class="text-slate-200 font-semibold"></span>.</p>
+                <div>
+                    <label class="field-label">New Password</label>
+                    <input type="text" name="password" id="r_password" class="field-input" placeholder="Min. 6 characters" required>
+                </div>
+                <div class="flex items-center justify-end gap-2 pt-2">
+                    <button type="button" onclick="closeModal('resetModal')" class="text-xs font-semibold px-4 py-2 rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800/50">Cancel</button>
+                    <button type="submit" class="text-xs font-bold px-4 py-2 rounded-lg bg-amber-700/40 text-amber-300 border border-amber-700/60 hover:bg-amber-700/60">Reset Password</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        function toggleSidebar() { document.querySelector('aside')?.classList.toggle('open'); }
+        function show(id) { const m = document.getElementById(id); m.classList.remove('hidden'); m.classList.add('flex'); }
+        function closeModal(id) { const m = document.getElementById(id); m.classList.add('hidden'); m.classList.remove('flex'); }
+
+        const createUrl = "{% url 'create_staff' %}";
+        const editUrlTpl = "{% url 'edit_staff' 0 %}";       // .../users/0/edit/
+        const resetUrlTpl = "{% url 'reset_staff_password' 0 %}";
+
+        function openCreate() {
+            const f = document.getElementById('userForm');
+            f.action = createUrl;
+            f.reset();
+            document.getElementById('userModalTitle').textContent = 'Add Staff';
+            document.getElementById('passwordWrap').style.display = '';
+            document.getElementById('f_password').setAttribute('required', 'required');
+            show('userModal');
+        }
+
+        function openEdit(btn) {
+            const f = document.getElementById('userForm');
+            f.action = editUrlTpl.replace('/0/', '/' + btn.dataset.id + '/');
+            document.getElementById('userModalTitle').textContent = 'Edit Account';
+            document.getElementById('f_fullname').value = btn.dataset.fullname;
+            document.getElementById('f_email').value = btn.dataset.email;
+            document.getElementById('f_role').value = btn.dataset.role;
+            document.getElementById('f_status').value = btn.dataset.status;
+            // No password field on edit (use Reset Password instead)
+            document.getElementById('passwordWrap').style.display = 'none';
+            document.getElementById('f_password').removeAttribute('required');
+            show('userModal');
+        }
+
+        function openReset(btn) {
+            const f = document.getElementById('resetForm');
+            f.action = resetUrlTpl.replace('/0/', '/' + btn.dataset.id + '/');
+            document.getElementById('resetName').textContent = btn.dataset.fullname;
+            document.getElementById('r_password').value = '';
+            show('resetModal');
+        }
+
+        // Close on overlay click
+        document.querySelectorAll('.modal-overlay').forEach(function (m) {
+            m.addEventListener('click', function (e) { if (e.target === m) closeModal(m.id); });
+        });
+    </script>
+</body>
+</html>

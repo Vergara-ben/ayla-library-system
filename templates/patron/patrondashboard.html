@@ -321,7 +321,7 @@
           {% for tx in overdue_loans %}
           <div class="overdue-item">
             <div style="font-weight:600;font-size:12px;">{{ tx.book.title }}</div>
-            <div class="overdue-days">Due {{ tx.due_date|date:"M j" }}</div>
+            <div class="overdue-days">Due {{ tx.due_date|date:"M j" }}{% if tx.fine_amount %} · Fine ₱{{ tx.fine_amount }}{% endif %}</div>
           </div>
           {% endfor %}
         </div>

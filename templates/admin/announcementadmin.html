@@ -85,77 +85,7 @@
 </head>
 <body class="flex h-screen overflow-hidden">
 
-    <aside class="w-64 flex-shrink-0 flex flex-col" style="background-color: var(--bg-sidebar); border-right: 1px solid var(--border-color);">
-        <div class="p-6 flex items-center gap-3" style="border-bottom: 1px solid var(--border-color);">
-            <div class="w-10 h-10 rounded-lg flex items-center justify-center text-xl font-bold text-cyan-400 bg-cyan-950/50 border border-cyan-800">
-                A
-            </div>
-            <div>
-                <h1 class="logo-text text-xl tracking-wider text-slate-100 leading-none">AYLA</h1>
-                <span class="text-xs tracking-widest text-slate-500 uppercase font-semibold">Admin Panel</span>
-            </div>
-        </div>
-
-        <nav class="flex-1 px-4 py-6 space-y-7 overflow-y-auto">
-            <div>
-                <p class="px-2 text-xs font-bold tracking-widest text-slate-500 uppercase mb-3">Overview</p>
-                <div class="space-y-1">
-                    <a href="{% url 'admin_dashboard' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
-                        <i class="fa-solid fa-chart-pie w-5 text-sm"></i>
-                        <span class="text-sm font-medium">Dashboard</span>
-                    </a>
-                    <a href="{% url 'admin_indoor_map' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
-                        <i class="fa-solid fa-map w-5 text-sm"></i>
-                        <span class="text-sm font-medium">Indoor Map</span>
-                    </a>
-                </div>
-            </div>
-
-            <div>
-                <p class="px-2 text-xs font-bold tracking-widest text-slate-500 uppercase mb-3">Management</p>
-                <div class="space-y-1">
-                    <a href="{% url 'admin_transaction' %}" class="flex items-center justify-between px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
-                        <div class="flex items-center gap-3">
-                            <i class="fa-solid fa-file-invoice w-5 text-sm"></i>
-                            <span class="text-sm font-medium">Transactions</span>
-                        </div>
-                        <span class="bg-rose-500/20 text-rose-400 text-xs px-2 py-0.5 rounded-full font-semibold">{{ pending_transactions_count }}</span>
-                    </a>
-                    <a href="{% url 'admin_log_management' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
-                        <i class="fa-solid fa-clipboard-list w-5 text-sm"></i>
-                        <span class="text-sm font-medium">Log Management</span>
-                    </a>
-                    <a href="{% url 'admin_management' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
-                        <i class="fa-solid fa-book w-5 text-sm"></i>
-                        <span class="text-sm font-medium">Manage Books</span>
-                    </a>
-                    <a href="{% url 'admin_manage_patron' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
-                        <i class="fa-solid fa-users w-5 text-sm"></i>
-                        <span class="text-sm font-medium">Manage Patrons</span>
-                    </a>
-                    <a href="{% url 'donation_management' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
-                        <i class="fa-solid fa-hand-holding-heart w-5 text-sm"></i>
-                        <span class="text-sm font-medium">Donations</span>
-                    </a>
-                    <a href="{% url 'announcement_management' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-800/50 text-cyan-400 font-medium border border-slate-700/50">
-                        <i class="fa-solid fa-bullhorn w-5 text-sm"></i>
-                        <span class="text-sm">Announcements</span>
-                    </a>
-                    <a href="{% url 'floorplan_management' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
-                        <i class="fa-solid fa-layer-group w-5 text-sm"></i>
-                        <span class="text-sm font-medium">Floor Plans</span>
-                    </a>
-                    <a href="{% url 'shelf_manager' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
-                        <i class="fa-solid fa-folder-tree w-5 text-sm"></i>
-                        <span class="text-sm font-medium">Shelf Manager</span>
-                    </a>
-                    <a href="{% url 'admin_reports' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
-                        <i class="fa-solid fa-chart-line w-5 text-sm"></i><span class="text-sm font-medium">Reports</span>
-                    </a>
-                </div>
-            </div>
-        </nav>
-    </aside>
+    {% include 'admin/_sidebar.html' with active='announcements' %}
 
     <div class="flex-1 flex flex-col overflow-hidden">
         
