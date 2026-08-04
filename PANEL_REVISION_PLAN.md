@@ -9,6 +9,13 @@ Two decisions were confirmed with you and are locked into this plan:
 - **Inventory Management is Administrator-only** — no Library Staff access, despite the manuscript's Ch.1 prose suggesting Staff gets stock-receiving rights. Prior role-access notes win.
 - **Reports become 7 types**: Transactions, Patron Logs, Books, Patrons, (Book) Donations, **Stock Levels**, **Stock Movement** — System Log Report is dropped from the Reports page; Inventory is represented as two distinct reports (matching Fig. 77/78 in the manuscript's activity diagrams), not one combined "Inventory" report.
 
+> **Superseded 2026-08-04 — the transaction PIN was dropped.** Every PIN item below (the
+> `Patron.pin_hash` field and `patron_change_pin` view in Phase 1, the PIN half of Phase 2,
+> and the QR+PIN click-through in Phase 6) no longer applies. Patron identity at the desk is
+> the QR scan alone; `pin_hash` was removed by migration `0017_remove_patron_pin_hash`. The
+> QR requirements in those phases stand unchanged. Ch.1 ¶260 and Fig. 5 still describe the
+> PIN and need manuscript-side edits.
+
 ---
 
 ## Phase 0 — Cleanup (do this first)

@@ -370,20 +370,52 @@
                         </div>
                     </div>
 
-                    <!-- Patron Search -->
+                    <!-- Patron identification: manual search OR identity-QR scan -->
                     <div id="patron-search-section">
                         <label class="block text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider">Select Patron</label>
-                        <div class="relative">
-                            <i class="fa-solid fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-xs"></i>
-                            <input type="text" id="patron-search" placeholder="Search patron by name or email..." class="w-full bg-slate-950/80 border border-slate-800 rounded-lg pl-9 pr-4 py-2 text-xs text-slate-300 focus:outline-none focus:border-violet-800 placeholder-slate-600 transition-colors">
-                            <div id="patron-dropdown" class="absolute z-10 w-full mt-1 bg-slate-900 border border-slate-800 rounded-lg shadow-xl max-h-48 overflow-y-auto hidden">
-                                <!-- Patron options will be populated here -->
+
+                        <!-- Method tabs -->
+                        <div class="flex items-center gap-1 bg-slate-900/50 rounded-lg p-1 border border-slate-800 mb-3 w-max">
+                            <button type="button" id="tab-patron-search-btn" onclick="switchPatronTab('search')" class="px-4 py-1.5 rounded-md text-[11px] font-semibold transition-colors bg-violet-700/30 text-violet-400 border border-violet-800/50">
+                                <i class="fa-solid fa-magnifying-glass mr-1"></i> Search
+                            </button>
+                            <button type="button" id="tab-patron-scan-btn" onclick="switchPatronTab('scan')" class="px-4 py-1.5 rounded-md text-[11px] font-semibold transition-colors text-slate-400 hover:text-slate-200 hover:bg-slate-800/40">
+                                <i class="fa-solid fa-qrcode mr-1"></i> Scan Patron QR
+                            </button>
+                        </div>
+
+                        <!-- Manual search panel -->
+                        <div id="patron-search-panel">
+                            <div class="relative">
+                                <i class="fa-solid fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-xs"></i>
+                                <input type="text" id="patron-search" placeholder="Search patron by name or email..." class="w-full bg-slate-950/80 border border-slate-800 rounded-lg pl-9 pr-4 py-2 text-xs text-slate-300 focus:outline-none focus:border-violet-800 placeholder-slate-600 transition-colors">
+                                <div id="patron-dropdown" class="absolute z-10 w-full mt-1 bg-slate-900 border border-slate-800 rounded-lg shadow-xl max-h-48 overflow-y-auto hidden">
+                                    <!-- Patron options will be populated here -->
+                                </div>
                             </div>
                         </div>
+
+                        <!-- Identity QR scan panel -->
+                        <div id="patron-scan-panel" class="hidden">
+                            <div class="relative aspect-video bg-slate-900 rounded-lg overflow-hidden mb-3">
+                                <video id="patron-qr-video" class="w-full h-full object-cover" autoplay playsinline></video>
+                                <canvas id="patron-qr-canvas" class="hidden"></canvas>
+                                <div id="patron-scanner-loading" class="absolute inset-0 flex items-center justify-center text-slate-400 text-xs">
+                                    <i class="fa-solid fa-spinner fa-spin mr-2"></i>
+                                    Starting camera...
+                                </div>
+                            </div>
+                            <div id="patron-scan-status" class="text-center text-xs text-slate-400">
+                                Position the patron's QR code within the camera view
+                            </div>
+                        </div>
+
                         <input type="hidden" id="selected-patron-id" value="">
+                        <input type="hidden" id="scanned-patron-qr" value="">
                         <div id="selected-patron-display" class="mt-2 text-xs text-slate-400 hidden">
                             Selected: <span id="patron-name" class="text-violet-400 font-medium"></span>
                         </div>
+                        <div id="patron-eligibility-note" class="mt-2 text-[10px] text-amber-400 hidden"></div>
                     </div>
 
                     <!-- Books to Process: manual search OR QR scan -->
@@ -478,12 +510,14 @@
 
         function openTransactionModal() {
             transactionModal.classList.remove('hidden');
-            switchBookTab('search');   // default to manual search; camera starts only on the Scan tab
+            switchBookTab('search');     // default to manual search; camera starts only on the Scan tab
+            switchPatronTab('search');
         }
 
         function closeTransactionModal() {
             transactionModal.classList.add('hidden');
             stopCamera();
+            stopPatronCamera();
         }
 
         // Switch between manual search and QR scan for adding books.
@@ -495,6 +529,8 @@
             const activeCls = ['bg-violet-700/30', 'text-violet-400', 'border', 'border-violet-800/50'];
             const idleCls = ['text-slate-400', 'hover:text-slate-200', 'hover:bg-slate-800/40'];
             if (tab === 'scan') {
+                // Only one camera at a time — drop the patron scanner if it is running.
+                switchPatronTab('search');
                 scanPanel.classList.remove('hidden');
                 searchPanel.classList.add('hidden');
                 scanBtn.classList.add(...activeCls); scanBtn.classList.remove(...idleCls);
@@ -509,10 +545,39 @@
             }
         }
 
+        // Switch between manual search and identity-QR scan for the patron.
+        function switchPatronTab(tab) {
+            const searchPanel = document.getElementById('patron-search-panel');
+            const scanPanel = document.getElementById('patron-scan-panel');
+            const searchBtn = document.getElementById('tab-patron-search-btn');
+            const scanBtn = document.getElementById('tab-patron-scan-btn');
+            const activeCls = ['bg-violet-700/30', 'text-violet-400', 'border', 'border-violet-800/50'];
+            const idleCls = ['text-slate-400', 'hover:text-slate-200', 'hover:bg-slate-800/40'];
+            if (tab === 'scan') {
+                // Only one camera at a time — drop the book scanner if it is running.
+                switchBookTab('search');
+                scanPanel.classList.remove('hidden');
+                searchPanel.classList.add('hidden');
+                scanBtn.classList.add(...activeCls); scanBtn.classList.remove(...idleCls);
+                searchBtn.classList.remove(...activeCls); searchBtn.classList.add(...idleCls);
+                startPatronCamera();
+            } else {
+                searchPanel.classList.remove('hidden');
+                scanPanel.classList.add('hidden');
+                searchBtn.classList.add(...activeCls); searchBtn.classList.remove(...idleCls);
+                scanBtn.classList.remove(...activeCls); scanBtn.classList.add(...idleCls);
+                stopPatronCamera();
+            }
+        }
+
         // Transaction Processing JavaScript
         let scannedBooks = [];
         let videoStream = null;
         let scanInterval = null;
+        let patronVideoStream = null;
+        let patronScanInterval = null;
+        let patronScanBusy = false;
+        let lastPatronQr = '';
 
         // Transaction type change handler
         document.querySelectorAll('input[name="transaction_type"]').forEach(radio => {
@@ -521,9 +586,10 @@
                 const selectedType = this.value;
                 
                 if (selectedType === 'In-Library Reading') {
+                    // No patron on an in-library read — drop any scan already captured.
                     patronSection.classList.add('hidden');
-                    document.getElementById('selected-patron-id').value = '';
-                    document.getElementById('selected-patron-display').classList.add('hidden');
+                    switchPatronTab('search');
+                    clearPatronSelection();
                 } else {
                     patronSection.classList.remove('hidden');
                 }
@@ -601,6 +667,151 @@
             document.getElementById('selected-patron-display').classList.remove('hidden');
             document.getElementById('patron-search').value = fullname;
             patronDropdown.classList.add('hidden');
+            // Picking by name/email is the fallback path — clear any earlier scan.
+            document.getElementById('scanned-patron-qr').value = '';
+            document.getElementById('patron-eligibility-note').classList.add('hidden');
+        }
+
+        function clearPatronSelection() {
+            document.getElementById('selected-patron-id').value = '';
+            document.getElementById('scanned-patron-qr').value = '';
+            document.getElementById('patron-search').value = '';
+            document.getElementById('selected-patron-display').classList.add('hidden');
+            document.getElementById('patron-eligibility-note').classList.add('hidden');
+            patronScanBusy = false;
+            lastPatronQr = '';
+        }
+
+        // Patron identity QR scanner — staff-operated, mirrors the book scanner below.
+        const patronVideo = document.getElementById('patron-qr-video');
+        const patronCanvas = document.getElementById('patron-qr-canvas');
+        const patronScannerLoading = document.getElementById('patron-scanner-loading');
+        const patronScanStatus = document.getElementById('patron-scan-status');
+
+        async function startPatronCamera() {
+            try {
+                patronScanBusy = false;
+                lastPatronQr = '';
+                patronScannerLoading.classList.remove('hidden');
+                patronScannerLoading.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i>Starting camera...';
+                patronScanStatus.textContent = 'Starting camera...';
+
+                patronVideoStream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'environment' }
+                });
+                patronVideo.srcObject = patronVideoStream;
+
+                patronVideo.onloadedmetadata = () => {
+                    patronScannerLoading.classList.add('hidden');
+                    patronScanStatus.textContent = "Position the patron's QR code within the camera view";
+                    startPatronScanning();
+                };
+            } catch (error) {
+                console.error('Error accessing camera:', error);
+                patronScannerLoading.innerHTML = '<i class="fa-solid fa-exclamation-triangle mr-2"></i>Camera access denied';
+                patronScanStatus.textContent = 'Please allow camera access to scan the patron QR code';
+            }
+        }
+
+        function stopPatronCamera() {
+            if (patronScanInterval) {
+                clearInterval(patronScanInterval);
+                patronScanInterval = null;
+            }
+            if (patronVideoStream) {
+                patronVideoStream.getTracks().forEach(track => track.stop());
+                patronVideoStream = null;
+            }
+            patronVideo.srcObject = null;
+        }
+
+        function startPatronScanning() {
+            const ctx = patronCanvas.getContext('2d');
+
+            patronScanInterval = setInterval(() => {
+                if (patronScanBusy) return;
+                if (patronVideo.readyState === patronVideo.HAVE_ENOUGH_DATA) {
+                    patronCanvas.width = patronVideo.videoWidth;
+                    patronCanvas.height = patronVideo.videoHeight;
+                    ctx.drawImage(patronVideo, 0, 0, patronCanvas.width, patronCanvas.height);
+
+                    const imageData = ctx.getImageData(0, 0, patronCanvas.width, patronCanvas.height);
+                    const code = jsQR(imageData.data, imageData.width, imageData.height);
+
+                    if (code) {
+                        handlePatronQRCode(code.data);
+                    }
+                }
+            }, 100);
+        }
+
+        function handlePatronQRCode(qrData) {
+            const qrCode = qrData.trim();
+
+            if (!qrCode) {
+                patronScanStatus.textContent = 'Invalid QR code';
+                return;
+            }
+
+            // The frame loop keeps re-reading whatever is in front of the lens —
+            // don't hammer the endpoint with a code that was already resolved or
+            // already rejected (e.g. a book QR held up by mistake).
+            if (qrCode === lastPatronQr) {
+                return;
+            }
+            lastPatronQr = qrCode;
+
+            // One patron per transaction: freeze the loop while this one resolves.
+            patronScanBusy = true;
+            patronScanStatus.textContent = 'QR code detected! Verifying patron...';
+
+            fetch(`/admin-portal/search-patron-by-qr/?qr_code=${encodeURIComponent(qrCode)}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        applyScannedPatron(qrCode, data.patron);
+                    } else {
+                        patronScanStatus.textContent = `Error: ${data.error}`;
+                        patronScanBusy = false;
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching patron:', error);
+                    patronScanStatus.textContent = 'Error verifying patron';
+                    patronScanBusy = false;
+                });
+        }
+
+        function applyScannedPatron(qrCode, patron) {
+            document.getElementById('selected-patron-id').value = patron.patron_id;
+            document.getElementById('scanned-patron-qr').value = qrCode;
+            document.getElementById('patron-name').textContent =
+                `${patron.fullname} (${patron.email}) — ${patron.account_status}`;
+            document.getElementById('selected-patron-display').classList.remove('hidden');
+            document.getElementById('patron-search').value = patron.fullname;
+
+            const note = document.getElementById('patron-eligibility-note');
+            if (patron.violations && patron.violations.length > 0) {
+                note.textContent = `Not eligible to borrow: ${patron.violations.join(', ')}`;
+                note.classList.remove('hidden');
+            } else {
+                note.classList.add('hidden');
+            }
+
+            patronScanStatus.textContent = `${patron.fullname} identified.`;
+
+            // One patron per transaction — release the camera and show the result
+            // in its place rather than leaving a dead video element on screen.
+            stopPatronCamera();
+            patronScannerLoading.innerHTML =
+                '<div class="text-center">' +
+                '<i class="fa-solid fa-circle-check text-2xl text-emerald-400"></i>' +
+                '<div class="mt-2 text-slate-300" data-scanned-name></div>' +
+                '<div class="text-[10px] text-slate-500">Switch to Search and back to scan a different patron</div>' +
+                '</div>';
+            // textContent, not interpolation — the name is patron-supplied.
+            patronScannerLoading.querySelector('[data-scanned-name]').textContent = patron.fullname;
+            patronScannerLoading.classList.remove('hidden');
         }
 
         // Book search functionality (manual alternative to QR scanning)
@@ -815,27 +1026,31 @@
         function processTransaction() {
             const transactionType = document.querySelector('input[name="transaction_type"]:checked')?.value;
             const patronId = document.getElementById('selected-patron-id').value;
-            
+            const patronQr = document.getElementById('scanned-patron-qr').value;
+
             // Validation
             if (!transactionType) {
                 showMessage('Please select a transaction type', 'error');
                 return;
             }
-            
+
             if (transactionType !== 'In-Library Reading' && !patronId) {
-                showMessage('Please select a patron', 'error');
+                showMessage('Please select or scan a patron', 'error');
                 return;
             }
-            
+
             if (scannedBooks.length === 0) {
                 showMessage('Please scan at least one book', 'error');
                 return;
             }
-            
+
             // Prepare form data
             const formData = new FormData();
             formData.append('transaction_type', transactionType);
             formData.append('patron_id', patronId);
+            // When present, the server re-resolves the QR — the scan, not the
+            // browser's patron_id, is what commits.
+            formData.append('patron_qr', patronQr);
             scannedBooks.forEach(book => {
                 formData.append('book_ids', book.book_id);
             });
@@ -859,9 +1074,10 @@
             .then(data => {
                 if (data.success) {
                     showMessage(data.message, 'success');
-                    // Clear scanned books
+                    // Clear scanned books and the captured identity
                     scannedBooks = [];
                     updateScannedBooksList();
+                    clearPatronSelection();
                     // Close the modal, then reload to show the updated transaction history
                     setTimeout(() => {
                         closeTransactionModal();

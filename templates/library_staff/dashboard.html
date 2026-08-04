@@ -622,8 +622,9 @@
                     <p class="hero-subtitle"><span>{{ visitors_today }} patron{{ visitors_today|pluralize }} logged in today</span></p>
                 </div>
                 <div class="hero-actions">
-                    <a href="{% url 'admin_management' %}" class="btn btn-outline">Manage Books</a>
-                    <a href="{% url 'admin_transaction' %}" class="btn btn-filled">Transactions</a>
+                    {# Staff routes, and only the modules this account was granted. #}
+                    {% if 'books' in allowed_modules %}<a href="{% url 'staff_manage_books' %}" class="btn btn-outline">Manage Books</a>{% endif %}
+                    {% if 'transactions' in allowed_modules %}<a href="{% url 'staff_transaction' %}" class="btn btn-filled">Transactions</a>{% endif %}
                 </div>
             </section>
 
@@ -697,22 +698,33 @@
                             <h3 class="panel-title">⚡ Quick Actions</h3>
                         </div>
                         <div class="quick-actions-grid">
+                            {% if 'books' in allowed_modules %}
                             <a href="{% url 'staff_manage_books' %}" class="action-card">
                                 <span class="action-icon">📚</span>
                                 <span class="action-label">Books</span>
                             </a>
+                            {% endif %}
+                            {% if 'transactions' in allowed_modules %}
                             <a href="{% url 'staff_transaction' %}" class="action-card">
                                 <span class="action-icon">📋</span>
                                 <span class="action-label">Transactions</span>
                             </a>
+                            {% endif %}
+                            {% if 'logs' in allowed_modules %}
                             <a href="{% url 'staff_logs' %}" class="action-card">
                                 <span class="action-icon">🚪</span>
                                 <span class="action-label">Entry Logs</span>
                             </a>
+                            {% endif %}
+                            {% if 'shelf' in allowed_modules %}
                             <a href="{% url 'staff_shelf' %}" class="action-card">
                                 <span class="action-icon">🗂️</span>
                                 <span class="action-label">Shelves</span>
                             </a>
+                            {% endif %}
+                            {% if not allowed_modules %}
+                            <p class="text-xs" style="color:var(--text-muted)">No modules have been granted to this account yet.</p>
+                            {% endif %}
                         </div>
                     </section>
 

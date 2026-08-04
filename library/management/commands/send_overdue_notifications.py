@@ -11,7 +11,7 @@ from django.core.management.base import BaseCommand
 from django.utils import timezone
 
 from library.models import Transaction, BorrowingRule
-from library.emails import overdue_email
+from library.emails import bulk_connection, overdue_email
 
 
 class Command(BaseCommand):
@@ -51,15 +51,24 @@ class Command(BaseCommand):
                 by_patron.setdefault(tx.patron, []).append(tx)
 
         sent = failed = 0
-        for patron, txns in by_patron.items():
-            if dry_run:
-                self.stdout.write(
-                    f"[dry-run] {patron.email or '(no email)'}: {len(txns)} overdue item(s)")
-                continue
-            if patron.email and overdue_email(patron, txns):
-                sent += 1
-            else:
-                failed += 1
+        # One SMTP connection for the whole run rather than one per patron.
+        connection = None if dry_run else bulk_connection()
+        try:
+            for patron, txns in by_patron.items():
+                if dry_run:
+                    self.stdout.write(
+                        f"[dry-run] {patron.email or '(no email)'}: {len(txns)} overdue item(s)")
+                    continue
+                if patron.email and overdue_email(patron, txns, connection=connection):
+                    sent += 1
+                else:
+                    failed += 1
+        finally:
+            if connection is not None:
+                try:
+                    connection.close()
+                except Exception:
+                    pass
 
         self.stdout.write(self.style.SUCCESS(
             f"Overdue items: {flagged} | patrons notified: {sent} | "

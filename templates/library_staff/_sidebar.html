@@ -22,9 +22,12 @@ active keys: dashboard, transactions, logs, books, donations, shelf, indoor_map
             </div>
         </div>
 
+        {# Only the modules an Administrator granted this account are listed. #}
+        {% if allowed_modules %}
         <div>
             <p class="px-2 text-xs font-bold tracking-widest text-slate-500 uppercase mb-3">Daily Operations</p>
             <div class="space-y-1">
+                {% if 'transactions' in allowed_modules %}
                 <a href="{% url 'staff_transaction' %}" class="flex items-center justify-between px-3 py-2 rounded-lg {% if active == 'transactions' %}bg-slate-800/50 text-violet-400 font-medium border border-slate-700/50{% else %}text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors{% endif %}">
                     <div class="flex items-center gap-3">
                         <i class="fa-solid fa-file-invoice w-5 text-sm"></i>
@@ -32,28 +35,40 @@ active keys: dashboard, transactions, logs, books, donations, shelf, indoor_map
                     </div>
                     {% if pending_transactions_count %}<span class="bg-rose-500/20 text-rose-400 text-xs px-2 py-0.5 rounded-full font-semibold">{{ pending_transactions_count }}</span>{% endif %}
                 </a>
+                {% endif %}
+                {% if 'logs' in allowed_modules %}
                 <a href="{% url 'staff_logs' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg {% if active == 'logs' %}bg-slate-800/50 text-violet-400 font-medium border border-slate-700/50{% else %}text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors{% endif %}">
                     <i class="fa-solid fa-clipboard-list w-5 text-sm"></i>
                     <span class="text-sm {% if active != 'logs' %}font-medium{% endif %}">Log Management</span>
                 </a>
+                {% endif %}
+                {% if 'books' in allowed_modules %}
                 <a href="{% url 'staff_manage_books' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg {% if active == 'books' %}bg-slate-800/50 text-violet-400 font-medium border border-slate-700/50{% else %}text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors{% endif %}">
                     <i class="fa-solid fa-book w-5 text-sm"></i>
                     <span class="text-sm {% if active != 'books' %}font-medium{% endif %}">Manage Books</span>
                 </a>
+                {% endif %}
+                {% if 'donations' in allowed_modules %}
                 <a href="{% url 'staff_donations' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg {% if active == 'donations' %}bg-slate-800/50 text-violet-400 font-medium border border-slate-700/50{% else %}text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors{% endif %}">
                     <i class="fa-solid fa-hand-holding-heart w-5 text-sm"></i>
                     <span class="text-sm {% if active != 'donations' %}font-medium{% endif %}">Donations</span>
                 </a>
+                {% endif %}
+                {% if 'shelf' in allowed_modules %}
                 <a href="{% url 'staff_shelf' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg {% if active == 'shelf' %}bg-slate-800/50 text-violet-400 font-medium border border-slate-700/50{% else %}text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors{% endif %}">
                     <i class="fa-solid fa-folder-tree w-5 text-sm"></i>
                     <span class="text-sm {% if active != 'shelf' %}font-medium{% endif %}">Shelf Manager</span>
                 </a>
+                {% endif %}
+                {% if 'indoor_map' in allowed_modules %}
                 <a href="{% url 'staff_indoor_map' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg {% if active == 'indoor_map' %}bg-slate-800/50 text-violet-400 font-medium border border-slate-700/50{% else %}text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors{% endif %}">
                     <i class="fa-solid fa-map w-5 text-sm"></i>
                     <span class="text-sm {% if active != 'indoor_map' %}font-medium{% endif %}">Indoor Map</span>
                 </a>
+                {% endif %}
             </div>
         </div>
+        {% endif %}
 
         <div>
             <p class="px-2 text-xs font-bold tracking-widest text-slate-500 uppercase mb-3">Account</p>

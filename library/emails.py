@@ -4,17 +4,44 @@ Covers the manuscript's automated alerts: overdue reminders and
 announcement emails. All sends are best-effort and never raise to the
 caller; the configured backend is real SMTP when credentials are set,
 otherwise the console backend (see settings).
+
+Failures are logged to the 'library.emails' logger rather than discarded, so a
+bad App Password or a Gmail block shows up in the server log instead of looking
+like a mail that simply never arrived.
+
+For anything that mails more than one person (announcement broadcasts, the
+overdue command), open one connection with bulk_connection() and pass it in —
+Gmail costs roughly a second per connection, so a per-recipient connection turns
+a 100-patron broadcast into a request that times out.
 """
 
+import logging
+
 from django.conf import settings
-from django.core.mail import send_mail
+from django.core.mail import get_connection, send_mail
+
+logger = logging.getLogger(__name__)
 
 
 def _library_name():
     return getattr(settings, 'LIBRARY_NAME', 'Ayla Public Library')
 
 
-def send_email(subject, message, recipient):
+def bulk_connection():
+    """A single reusable SMTP connection for multi-recipient sends.
+
+    Returned unopened; use it as a context manager, or pass it to the *_email
+    helpers and close it when done. Returns None if the connection cannot even
+    be constructed, in which case callers fall back to per-message connections.
+    """
+    try:
+        return get_connection(fail_silently=False)
+    except Exception:
+        logger.exception('Could not create an email connection')
+        return None
+
+
+def send_email(subject, message, recipient, connection=None):
     """Send a single plain-text email. Returns True on success, False otherwise."""
     if not recipient:
         return False
@@ -25,13 +52,16 @@ def send_email(subject, message, recipient):
             getattr(settings, 'DEFAULT_FROM_EMAIL', None),
             [recipient],
             fail_silently=False,
+            connection=connection,
         )
         return bool(sent)
     except Exception:
+        # Best-effort by contract — never raise into a request — but never silent.
+        logger.exception('Email to %s failed (subject=%r)', recipient, subject)
         return False
 
 
-def overdue_email(patron, transactions):
+def overdue_email(patron, transactions, connection=None):
     """Email a patron a reminder listing their overdue book(s)."""
     lib = _library_name()
     lines = [
@@ -51,7 +81,8 @@ def overdue_email(patron, transactions):
         "Thank you,",
         lib,
     ]
-    return send_email(f"[{lib}] Overdue Book Reminder", "\n".join(lines), patron.email)
+    return send_email(f"[{lib}] Overdue Book Reminder", "\n".join(lines), patron.email,
+                      connection=connection)
 
 
 def borrow_confirmation_email(patron, books, due_date):
@@ -164,7 +195,7 @@ def registration_rejected_email(email, fullname, reason=None):
     return send_email(f"[{lib}] Registration Update", "\n".join(lines), email)
 
 
-def announcement_email(patron, announcement):
+def announcement_email(patron, announcement, connection=None):
     """Email a patron a single library announcement."""
     lib = _library_name()
     body = (
@@ -173,4 +204,21 @@ def announcement_email(patron, announcement):
         f"{announcement.message}\n\n"
         f"— {lib}"
     )
-    return send_email(f"[{lib}] {announcement.title}", body, patron.email)
+    return send_email(f"[{lib}] {announcement.title}", body, patron.email,
+                      connection=connection)
+
+
+def password_reset_otp_email(email, fullname, code, role_label='account'):
+    """Email a one-time password for a forgot-password reset."""
+    lib = _library_name()
+    body = (
+        f"Dear {fullname},\n\n"
+        f"We received a request to reset the password for your {lib} {role_label}.\n\n"
+        f"Your verification code is:\n\n"
+        f"    {code}\n\n"
+        f"This code expires in 10 minutes and can be used once. If you did not\n"
+        f"request a password reset, you can safely ignore this email — your\n"
+        f"password will not change.\n\n"
+        f"Thank you,\n{lib}"
+    )
+    return send_email(f"[{lib}] Password Reset Code", body, email)

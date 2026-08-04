@@ -413,7 +413,6 @@
         <div class="sidebar-top">
             <div class="brand-logo">
                 <img src="{% static 'images/ayla-logo.png' %}" data-logo-light="{% static 'images/ayla-logo.png' %}" data-logo-dark="{% static 'images/ayla-logo-dark.png' %}" alt="AYLA" class="logo-icon ayla-logo">
-                <div class="brand-text">Admin</div>
             </div>
 
             <h2 class="signin-title">Admin Sign In</h2>
@@ -444,7 +443,7 @@
                         <input type="checkbox" id="rememberDevice" checked>
                         Remember device
                     </label>
-                    <a href="#" class="forgot-link">Forgot password?</a>
+                    <a href="{% url 'admin_forgot_password' %}" class="forgot-link">Forgot password?</a>
                 </div>
 
                 <button type="submit" class="btn btn-primary">

@@ -99,7 +99,15 @@
         </header>
 
         <main class="flex-1 overflow-y-auto p-8 space-y-6">
-            
+
+            {% if messages %}
+                {% for message in messages %}
+                <div class="px-4 py-3 rounded-lg border text-xs font-semibold {% if message.tags == 'error' %}bg-rose-950/40 border-rose-800/60 text-rose-300{% elif message.tags == 'warning' %}bg-amber-950/40 border-amber-800/60 text-amber-300{% else %}bg-emerald-950/40 border-emerald-800/60 text-emerald-300{% endif %}">
+                    {{ message }}
+                </div>
+                {% endfor %}
+            {% endif %}
+
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
                     <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Total Announcements</p>

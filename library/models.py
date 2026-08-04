@@ -1,6 +1,8 @@
 from django.db import models
 from django.utils import timezone
 
+from .modules import MODULE_KEYS, MODULE_LABELS, clean_module_keys
+
 
 class ActiveLocationManager(models.Manager):
     """Manager that filters books to only include those in active locations"""
@@ -311,12 +313,29 @@ class User(models.Model):
         choices=STATUS_CHOICES,
         default='Active'
     )
+    # Modules this Staff account may open, as comma-separated keys from
+    # library/modules.py. Ignored for Admins, who always have every module.
+    modules = models.TextField(blank=True, default='')
 
     class Meta:
         db_table = 'Users'
 
     def __str__(self):
         return self.fullname
+
+    @property
+    def module_keys(self):
+        """The modules this account may open (every module for an Admin)."""
+        if self.role != 'Staff':
+            return list(MODULE_KEYS)
+        return clean_module_keys(self.modules)
+
+    @property
+    def module_labels(self):
+        return [MODULE_LABELS[key] for key in self.module_keys]
+
+    def has_module(self, key):
+        return key in self.module_keys
 
 
 # ─── 12. ANNOUNCEMENTS ────────────────────────────────────────
@@ -380,8 +399,6 @@ class Patron(models.Model):
     registration_date = models.DateField(auto_now_add=True)
     # Identity QR — generated on approval (online) or on the spot (on-site).
     qr_code = models.CharField(max_length=255, unique=True, blank=True, null=True)
-    # Transaction PIN — second factor scanned alongside the QR at the desk.
-    pin_hash = models.CharField(max_length=255, blank=True, null=True)
     registration_channel = models.CharField(
         max_length=20,
         choices=REGISTRATION_CHANNEL_CHOICES,
@@ -537,3 +554,47 @@ class SystemLog(models.Model):
 
     def __str__(self):
         return f"{self.action} {self.entity_type} by {self.admin_name}"
+
+# ─── 16. PASSWORD RESET OTP ───────────────────────────────────
+class PasswordResetOTP(models.Model):
+    """A one-time code emailed for a forgot-password reset.
+
+    Covers all three portals: patrons resolve against Patron, Library Staff and
+    Administrators against User (kept apart by `account_type` plus the role the
+    portal view looks up), so a code issued at the staff login cannot be spent
+    at the admin login.
+    """
+
+    ACCOUNT_TYPE_CHOICES = [
+        ('Patron', 'Patron'),
+        ('Staff', 'Library Staff'),
+        ('Admin', 'Administrator'),
+    ]
+
+    MAX_ATTEMPTS = 5
+
+    reset_id = models.AutoField(primary_key=True)
+    account_type = models.CharField(max_length=20, choices=ACCOUNT_TYPE_CHOICES)
+    email = models.EmailField(max_length=255)
+    code = models.CharField(max_length=6)
+    created_at = models.DateTimeField(default=timezone.now)
+    expires_at = models.DateTimeField()
+    attempts = models.PositiveIntegerField(default=0)
+    used_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        db_table = 'Password_Reset_OTP'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.account_type} reset for {self.email}"
+
+    @property
+    def is_expired(self):
+        return timezone.now() > self.expires_at
+
+    @property
+    def is_usable(self):
+        return (self.used_at is None
+                and not self.is_expired
+                and self.attempts < self.MAX_ATTEMPTS)

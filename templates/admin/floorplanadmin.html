@@ -136,6 +136,79 @@
         .map-popup-title { font-weight: 700; font-size: 12px; }
         .map-popup-sub { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
 
+        /* ---- Docked properties panel -------------------------------------
+           Editing happens here rather than in a popup anchored to the click,
+           so the canvas is never covered and the panel can stay open while a
+           shape is being dragged. */
+        .map-workspace {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 260px;
+            gap: 14px;
+            align-items: start;
+        }
+        @media (max-width: 1100px) {
+            .map-workspace { grid-template-columns: minmax(0, 1fr); }
+        }
+        .map-inspector {
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            background: var(--bg-card);
+            overflow: hidden;
+            position: sticky;
+            top: 12px;
+        }
+        .map-inspector-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            padding: 9px 12px;
+            border-bottom: 1px solid var(--border-color);
+            background: var(--bg-subtle);
+        }
+        .map-inspector-kind {
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: .09em;
+            text-transform: uppercase;
+            color: var(--text-muted);
+        }
+        .map-inspector-close {
+            background: none; border: none; cursor: pointer;
+            color: var(--text-muted); font-size: 12px; padding: 0 2px;
+        }
+        .map-inspector-close:hover { color: var(--danger); }
+        .map-inspector-body { padding: 12px; }
+        .map-inspector-empty { font-size: 11px; color: var(--text-muted); line-height: 1.55; }
+        .map-inspector-title {
+            font-size: 13px; font-weight: 700; color: var(--text-primary);
+            margin-bottom: 10px; word-break: break-word;
+        }
+        .insp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+        .insp-field label {
+            display: block; font-size: 9px; font-weight: 700; letter-spacing: .07em;
+            text-transform: uppercase; color: var(--text-muted); margin-bottom: 3px;
+        }
+        .insp-field input {
+            width: 100%; background: var(--bg-input); border: 1px solid var(--border-color);
+            border-radius: 6px; padding: 6px 8px; font-size: 12px; font-family: inherit;
+            color: var(--text-primary); outline: none;
+        }
+        .insp-field input:focus { border-color: var(--accent); }
+        .insp-field input[readonly] { opacity: .65; cursor: not-allowed; }
+        /* Rotation is a first-class control here, not a hidden drag handle. */
+        .insp-rot-row { display: flex; gap: 4px; margin-bottom: 10px; }
+        .insp-rot-btn {
+            flex: 1; padding: 5px 0; border-radius: 6px; cursor: pointer;
+            font-size: 10px; font-weight: 700;
+            border: 1px solid var(--border-color); background: var(--bg-subtle);
+            color: var(--text-muted);
+        }
+        .insp-rot-btn:hover { border-color: var(--accent); color: var(--accent); }
+        .insp-rot-btn.active { background: var(--tint-accent); color: var(--accent); border-color: var(--accent); }
+        .insp-note { font-size: 10px; color: var(--text-muted); line-height: 1.5; margin-top: 8px; }
+        .insp-saved { font-size: 10px; font-weight: 700; color: var(--success); margin-top: 8px; min-height: 13px; }
+
         /* Bounding-box resize handles — drag a side or a corner to scale the
            whole room, the way a shape behaves in a design tool. */
         .geo-handle {
@@ -345,7 +418,7 @@
                     <div id="mapModeHint" class="text-[11px] text-slate-500 mb-3">
                         <strong class="text-slate-400">Draw Room</strong> traces a room shape on the blank canvas &mdash; click each corner, then click the first point again to close it.
                         <strong class="text-slate-400">Edit Rooms</strong> lets you drag a room's corners to reshape it; each room is independent, so reshaping one never disturbs the others.
-                        For shelves, beacons and waypoints, pick a placement mode then click the map. Left-click two waypoints in turn to connect them. Right-click any marker for delete / disconnect options.
+                        For shelves, beacons and waypoints, pick a placement mode then click the map. Left-click two waypoints in turn to connect them. Click anything on the map to open it in the properties panel on the right, where you can set its position, size and rotation — changes save as you make them.
                     </div>
                     <div class="flex flex-wrap items-center gap-4 mb-3 text-[10px] text-slate-400">
                         <span class="flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded-full" style="background:var(--info)"></span> Beacon</span>
@@ -371,7 +444,25 @@
                     </div>
                 </div>
                 <div class="px-5 pb-5">
-                    <div id="mapConfig"></div>
+                    <!-- Map on the left, properties panel docked on the right.
+                         The panel replaces the old click-anchored popups: it
+                         never covers the canvas and stays open while dragging. -->
+                    <div class="map-workspace">
+                        <div id="mapConfig"></div>
+                        <aside id="mapInspector" class="map-inspector">
+                            <div class="map-inspector-head">
+                                <span id="inspectorKind" class="map-inspector-kind">Nothing selected</span>
+                                <button type="button" id="inspectorClose" class="map-inspector-close hidden" onclick="clearInspector()" title="Deselect">
+                                    <i class="fa-solid fa-xmark"></i>
+                                </button>
+                            </div>
+                            <div id="inspectorBody" class="map-inspector-body">
+                                <p class="map-inspector-empty">
+                                    Click a room, shelf, waypoint, beacon or door on the map to edit it here.
+                                </p>
+                            </div>
+                        </aside>
+                    </div>
                 </div>
             </div>
             {% endif %}
@@ -1217,7 +1308,6 @@
                 const el = document.getElementById('mapConfig');
                 if (el) el.style.cursor = '';
                 const pos = { x: e.latlng.lng, y: imgH - e.latlng.lat };
-                if (!confirm('Place this shelf here?')) return;
                 const r = await postData(URLS.placeShelf, { shelf_id: id, map_x: pos.x, map_y: pos.y });
                 if (r.success) window.location.reload();
                 else alert(r.error || 'Failed to place the shelf');
@@ -1248,30 +1338,104 @@
                 icon: L.divIcon({ className: 'map-dot beacon', iconSize: [16, 16], iconAnchor: [8, 8] }),
             }).addTo(lmap);
             m.bindTooltip('📡 ' + (b.label || 'Beacon') + ' — ' + b.beacon_uuid, { direction: 'top' });
-            m.on('contextmenu', function (e) { L.DomEvent.stop(e); openBeaconPopup(b.beacon_id, e.latlng); });
+            m.on('contextmenu', function (e) { L.DomEvent.stop(e); showBeaconInspector(b.beacon_id); });
+            m.on('click', function (e) { L.DomEvent.stop(e); showBeaconInspector(b.beacon_id); });
 
             let dragStartLatLng = null;
             m.on('dragstart', function () { dragStartLatLng = m.getLatLng(); });
             m.on('dragend', async function () {
                 const pos = canvasXY(m.getLatLng());
-                if (!confirm('Move "' + (b.label || 'this beacon') + '" here?')) { m.setLatLng(dragStartLatLng); return; }
                 const r = await postData(URLS.moveBeacon, { beacon_id: b.beacon_id, map_x: pos.x, map_y: pos.y });
-                if (r.success) { b.map_x = r.map_x; b.map_y = r.map_y; }
+                if (r.success) { b.map_x = r.map_x; b.map_y = r.map_y; refreshInspector(); inspectorSaved('Beacon moved.'); }
                 else { alert(r.error || 'Failed to move the beacon'); m.setLatLng(dragStartLatLng); }
             });
             beaconMarkers[b.beacon_id] = { marker: m, data: b };
         }
 
-        function openBeaconPopup(id, latlng) {
+        // ================= Docked properties panel =========================
+        // Everything that used to open a click-anchored popup now renders here.
+        // The panel is modeless: it stays put while a shape is dragged, so the
+        // numbers update live instead of the canvas being covered by a bubble.
+        let inspectorSel = null;   // { kind: 'room'|'shelf'|'waypoint'|'beacon'|'door', id }
+
+        function setInspectorHead(label, showClose) {
+            const kindEl = document.getElementById('inspectorKind');
+            const closeEl = document.getElementById('inspectorClose');
+            if (kindEl) kindEl.textContent = label;
+            if (closeEl) closeEl.classList.toggle('hidden', !showClose);
+        }
+
+        function renderInspector(kind, kindLabel, id, title, bodyHtml) {
+            inspectorSel = { kind: kind, id: id };
+            setInspectorHead(kindLabel, true);
+            const body = document.getElementById('inspectorBody');
+            if (body) {
+                body.innerHTML = '<div class="map-inspector-title">' + title + '</div>'
+                    + bodyHtml + '<div class="insp-saved" id="inspSaved"></div>';
+            }
+        }
+
+        function clearInspector() {
+            inspectorSel = null;
+            setInspectorHead('Nothing selected', false);
+            const body = document.getElementById('inspectorBody');
+            if (body) {
+                body.innerHTML = '<p class="map-inspector-empty">'
+                    + 'Click a room, shelf, waypoint, beacon or door on the map to edit it here.</p>';
+            }
+            if (typeof selectedShelfId !== 'undefined' && selectedShelfId !== null) deselectShelf();
+        }
+        window.clearInspector = clearInspector;
+
+        // Replaces the old confirm() on every drag: the save already happened,
+        // this just says so without interrupting the next drag.
+        function inspectorSaved(text) {
+            const el = document.getElementById('inspSaved');
+            if (!el) return;
+            el.textContent = text || 'Saved.';
+            clearTimeout(el._t);
+            el._t = setTimeout(function () { el.textContent = ''; }, 2000);
+        }
+        window.inspectorSaved = inspectorSaved;
+
+        // Re-render whatever is selected, e.g. after a drag moves it.
+        function refreshInspector() {
+            if (!inspectorSel) return;
+            const { kind, id } = inspectorSel;
+            if (kind === 'shelf') showShelfInspector(id);
+            else if (kind === 'room') showRoomInspector(id);
+            else if (kind === 'waypoint') showWaypointInspector(id);
+            else if (kind === 'beacon') showBeaconInspector(id);
+            else if (kind === 'door') showDoorInspector(id);
+        }
+        window.refreshInspector = refreshInspector;
+
+        function field(label, inputId, value, opts) {
+            opts = opts || {};
+            return '<div class="insp-field"><label for="' + inputId + '">' + label + '</label>'
+                + '<input id="' + inputId + '" type="' + (opts.type || 'number') + '" value="' + value + '"'
+                + (opts.readonly ? ' readonly' : '') + (opts.step ? ' step="' + opts.step + '"' : '')
+                + '></div>';
+        }
+        function numVal(id) { return parseFloat(document.getElementById(id).value); }
+
+        function showBeaconInspector(id) {
             const b = beaconMarkers[id]; if (!b) return;
             const d = b.data;
-            const html = '<div style="min-width:170px">'
-                + '<div style="font-weight:700">' + esc(d.label || 'Beacon') + '</div>'
-                + '<div style="font-size:11px;color:var(--text-muted)">UUID: ' + esc(d.beacon_uuid) + '</div>'
-                + '<button class="map-action-btn danger" onclick="mapDeleteBeacon(' + id + ')">Delete</button>'
-                + '</div>';
-            L.popup().setLatLng(latlng).setContent(html).openOn(lmap);
+            renderInspector('beacon', 'BLE Beacon', id, esc(d.label || 'Beacon'),
+                '<div class="insp-grid">'
+                + field('X', 'inspBeaconX', Math.round(d.map_x), { readonly: true })
+                + field('Y', 'inspBeaconY', Math.round(d.map_y), { readonly: true })
+                + '</div>'
+                + '<p class="insp-note">UUID: ' + esc(d.beacon_uuid) + '</p>'
+                + '<div class="map-actions">'
+                + '<button class="map-action-btn danger" onclick="mapDeleteBeacon(' + id + ')"><i class="fa-solid fa-trash"></i> Delete beacon</button>'
+                + '</div>'
+                + '<p class="insp-note">Drag the dot on the map to reposition it — it saves as you drop it.</p>');
         }
+        window.showBeaconInspector = showBeaconInspector;
+
+        function openBeaconPopup(id) { showBeaconInspector(id); }
 
         window.mapDeleteBeacon = async function (id) {
             if (!confirm('Delete this beacon?')) return;
@@ -1311,18 +1475,17 @@
                 : '🟢 ' + (w.label || 'Waypoint');
             m.bindTooltip(tip, { direction: 'top' });
             m.on('click', function (e) { L.DomEvent.stop(e); onWaypointClick(w.waypoint_id); });
-            m.on('contextmenu', function (e) { L.DomEvent.stop(e); openWaypointPopup(w.waypoint_id, e.latlng); });
+            // Left-click on a waypoint is reserved for connecting two of them,
+            // so only right-click opens it in the panel.
+            m.on('contextmenu', function (e) { L.DomEvent.stop(e); showWaypointInspector(w.waypoint_id); });
 
             let dragStartLatLng = null;
             m.on('dragstart', function () { dragStartLatLng = m.getLatLng(); });
             m.on('drag', function () { redrawConnectionsFor(w.waypoint_id); });
             m.on('dragend', async function () {
                 const pos = canvasXY(m.getLatLng());
-                if (!confirm('Move "' + (w.label || 'this waypoint') + '" here?')) {
-                    m.setLatLng(dragStartLatLng); redrawConnectionsFor(w.waypoint_id); return;
-                }
                 const r = await postData(URLS.moveWaypoint, { waypoint_id: w.waypoint_id, map_x: pos.x, map_y: pos.y });
-                if (r.success) { waypointMarkers[w.waypoint_id].x = r.map_x; waypointMarkers[w.waypoint_id].y = r.map_y; }
+                if (r.success) { waypointMarkers[w.waypoint_id].x = r.map_x; waypointMarkers[w.waypoint_id].y = r.map_y; inspectorSaved('Waypoint moved.'); }
                 else { alert(r.error || 'Failed to move the waypoint'); m.setLatLng(dragStartLatLng); }
                 redrawConnectionsFor(w.waypoint_id);
             });
@@ -1352,7 +1515,7 @@
             }
         }
 
-        function openWaypointPopup(id, latlng) {
+        function showWaypointInspector(id) {
             const w = waypointMarkers[id]; if (!w) return;
             let connHtml = '';
             Object.keys(connections).forEach(function (cid) {
@@ -1361,19 +1524,23 @@
                     const otherId = (c.from == id) ? c.to : c.from;
                     const other = waypointMarkers[otherId];
                     const oname = other ? (other.label || ('WP #' + otherId)) : ('WP #' + otherId);
-                    connHtml += '<div style="margin-top:4px;font-size:11px;color:var(--text-muted)">↔ ' + esc(oname)
-                        + ' <button class="map-action-btn subtle" onclick="mapDisconnect(' + cid + ')">Disconnect</button></div>';
+                    connHtml += '<button class="map-action-btn" onclick="mapDisconnect(' + cid + ')">'
+                        + '<i class="fa-solid fa-link-slash"></i> ' + esc(oname) + '</button>';
                 }
             });
-            const html = '<div style="min-width:185px">'
-                + '<div style="font-weight:700">' + esc(w.label || 'Waypoint') + '</div>'
-                + (w.shelf ? '<div style="font-size:11px;color:var(--text-muted)">Shelf: ' + esc(w.shelf) + '</div>' : '')
-                + '<button class="map-action-btn danger" onclick="mapDeleteWaypoint(' + id + ')">Delete</button>'
-                + '<div style="margin-top:8px;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted)">Connections</div>'
-                + (connHtml || '<div style="font-size:11px;color:var(--text-muted)">None</div>')
-                + '</div>';
-            L.popup().setLatLng(latlng).setContent(html).openOn(lmap);
+            renderInspector('waypoint', 'Waypoint', id, esc(w.label || 'Waypoint'),
+                (w.shelf ? '<p class="insp-note">Linked shelf: ' + esc(w.shelf) + '</p>' : '')
+                + '<div class="map-actions">'
+                + '<button class="map-action-btn danger" onclick="mapDeleteWaypoint(' + id + ')"><i class="fa-solid fa-trash"></i> Delete waypoint</button>'
+                + '</div>'
+                + '<p class="insp-note" style="margin-top:12px;text-transform:uppercase;letter-spacing:.07em;font-weight:700">Connections</p>'
+                + (connHtml
+                    ? '<div class="map-actions">' + connHtml + '</div>'
+                    : '<p class="insp-note">None yet — left-click this waypoint then another to connect them.</p>'));
         }
+        window.showWaypointInspector = showWaypointInspector;
+
+        function openWaypointPopup(id) { showWaypointInspector(id); }
 
         window.mapDeleteWaypoint = async function (id) {
             if (!confirm('Delete this waypoint and all its connections?')) return;
@@ -1479,7 +1646,8 @@
             poly._aylaRoomName = r.name;
             // Persist a reshape only after the Administrator confirms it.
             poly.on('pm:update', function (e) { confirmRoomReshape(e.target); });
-            poly.on('contextmenu', function (e) { L.DomEvent.stop(e); openRoomPopup(r.room_id, e.latlng); });
+            poly.on('contextmenu', function (e) { L.DomEvent.stop(e); showRoomInspector(r.room_id); });
+            poly.on('click', function (e) { if (mode) return; L.DomEvent.stop(e); showRoomInspector(r.room_id); });
             roomShapes[r.room_id] = poly;
 
             // Drag the body to move the whole room. Only live while this
@@ -1502,14 +1670,13 @@
             });
         }
 
-        function openRoomPopup(id, latlng) {
+        function showRoomInspector(id) {
             const poly = roomShapes[id]; if (!poly) return;
             const editingPoints = roomEditingId === id;
             const resizing = resizeRoomId === id;
             const name = esc(poly._aylaRoomName || 'Room');
-            const html = '<div style="min-width:186px">'
-                + '<div class="map-popup-title">' + name + '</div>'
-                + '<div class="map-popup-sub">Room #' + id + '</div>'
+            renderInspector('room', 'Room', id, name,
+                '<p class="insp-note">Room #' + id + '</p>'
                 + '<div class="map-actions">'
                 + (resizing
                     ? '<button class="map-action-btn" onclick="stopRoomResize()"><i class="fa-solid fa-check"></i> Done resizing</button>'
@@ -1519,10 +1686,12 @@
                     : '<button class="map-action-btn" onclick="startReshapeRoom(' + id + ')"><i class="fa-solid fa-draw-polygon"></i> Edit points</button>')
                 + '<button class="map-action-btn" onclick="startAddDoor(' + id + ', \'' + name.replace(/'/g, '') + '\')"><i class="fa-solid fa-door-open"></i> Add door</button>'
                 + '<button class="map-action-btn" onclick="renameRoom(' + id + ')"><i class="fa-solid fa-pen"></i> Rename</button>'
-                + '<button class="map-action-btn danger" onclick="deleteRoomShape(' + id + ')"><i class="fa-solid fa-trash"></i> Delete</button>'
-                + '</div></div>';
-            L.popup().setLatLng(latlng).setContent(html).openOn(lmap);
+                + '<button class="map-action-btn danger" onclick="deleteRoomShape(' + id + ')"><i class="fa-solid fa-trash"></i> Delete room</button>'
+                + '</div>');
         }
+        window.showRoomInspector = showRoomInspector;
+
+        function openRoomPopup(id) { showRoomInspector(id); }
 
         window.renameRoom = async function (id) {
             const poly = roomShapes[id]; if (!poly) return;
@@ -1545,10 +1714,6 @@
         async function confirmRoomReshape(poly) {
             const original = poly._aylaOriginal;
             const geometry = latLngsToGeometry(poly.getLatLngs());
-            if (!confirm('Save the new shape for "' + (poly._aylaRoomName || 'this room') + '"?')) {
-                if (original) poly.setLatLngs(original);   // cancel → shape unchanged
-                return;
-            }
             const r = await postData(URLS.editRoom, {
                 room_id: poly._aylaRoomId,
                 geometry: JSON.stringify(geometry),
@@ -1635,7 +1800,8 @@
             }).addTo(lmap);
 
             [jamb, sweep].forEach(function (layer) {
-                layer.on('contextmenu', function (e) { L.DomEvent.stop(e); openDoorPopup(d.door_id, e.latlng); });
+                layer.on('contextmenu', function (e) { L.DomEvent.stop(e); showDoorInspector(d.door_id); });
+                layer.on('click', function (e) { if (mode) return; L.DomEvent.stop(e); showDoorInspector(d.door_id); });
             });
             doorShapes[d.door_id] = { layers: [opening, jamb, sweep], data: d };
 
@@ -1655,13 +1821,8 @@
                     redrawDoorShape(doorShapes[d.door_id]);
                 },
                 onEnd: async function () {
-                    if (!confirm('Move this door here?')) {
-                        d.x = dragOrigin.x; d.y = dragOrigin.y;
-                        redrawDoorShape(doorShapes[d.door_id]);
-                        return;
-                    }
                     const r = await postData(URLS.moveDoor, { door_id: d.door_id, map_x: d.x, map_y: d.y });
-                    if (r.success) { d.x = r.x; d.y = r.y; d.rotation = r.rotation; }
+                    if (r.success) { d.x = r.x; d.y = r.y; d.rotation = r.rotation; refreshInspector(); inspectorSaved('Door moved.'); }
                     else { alert(r.error || 'Failed to move the door'); d.x = dragOrigin.x; d.y = dragOrigin.y; }
                     redrawDoorShape(doorShapes[d.door_id]);
                 },
@@ -1682,17 +1843,23 @@
             });
         }
 
-        function openDoorPopup(id, latlng) {
+        function showDoorInspector(id) {
             const entry = doorShapes[id]; if (!entry) return;
-            const html = '<div style="min-width:160px">'
-                + '<div class="map-popup-title">' + esc(entry.data.label || 'Door') + '</div>'
-                + '<div class="map-popup-sub">Width ' + Math.round(entry.data.width || 28) + '</div>'
+            const d = entry.data;
+            renderInspector('door', 'Door', id, esc(d.label || 'Door'),
+                '<div class="insp-grid">'
+                + field('Width', 'inspDoorW', Math.round(d.width || 28), { readonly: true })
+                + field('Angle', 'inspDoorRot', Math.round(d.rotation || 0), { readonly: true })
+                + '</div>'
                 + '<div class="map-actions">'
                 + '<button class="map-action-btn" onclick="flipDoor(' + id + ')"><i class="fa-solid fa-right-left"></i> Flip swing</button>'
-                + '<button class="map-action-btn danger" onclick="removeDoor(' + id + ')"><i class="fa-solid fa-trash"></i> Delete</button>'
-                + '</div></div>';
-            L.popup().setLatLng(latlng).setContent(html).openOn(lmap);
+                + '<button class="map-action-btn danger" onclick="removeDoor(' + id + ')"><i class="fa-solid fa-trash"></i> Delete door</button>'
+                + '</div>'
+                + '<p class="insp-note">Drag the door along the wall to move it; the angle follows the wall automatically.</p>');
         }
+        window.showDoorInspector = showDoorInspector;
+
+        function openDoorPopup(id) { showDoorInspector(id); }
 
         window.flipDoor = async function (id) {
             const entry = doorShapes[id]; if (!entry) return;
@@ -1852,13 +2019,6 @@
             const id = resizeRoomId;
             const poly = roomShapes[id]; if (!poly) return;
             const geometry = scaledGeometry();
-            if (!confirm('Save the new size for "' + (poly._aylaRoomName || 'this room') + '"?')) {
-                if (poly._aylaOriginal) poly.setLatLngs(poly._aylaOriginal);
-                resizeBox = Object.assign({}, resizeBase.box);
-                positionHandles();
-                showResizeSize();
-                return;
-            }
             const r = await postData(URLS.editRoom, {
                 room_id: id, geometry: JSON.stringify(geometry),
             });
@@ -1921,7 +2081,8 @@
                 color: AylaTheme.color('--cover-3'), weight: 2,
                 fillColor: AylaTheme.color('--cover-3'), fillOpacity: 0.55,
             }).bindTooltip(shelfTooltip(s), { direction: 'top', sticky: true }).addTo(lmap);
-            poly.on('contextmenu', function (e) { L.DomEvent.stop(e); openShelfPopup(s.shelf_id, e.latlng); });
+            poly.on('contextmenu', function (e) { L.DomEvent.stop(e); showShelfInspector(s.shelf_id); });
+            poly.on('click', function (e) { if (mode) return; L.DomEvent.stop(e); showShelfInspector(s.shelf_id); });
             shelfShapes[s.shelf_id] = { poly: poly, data: s };
 
             // Drag the body to move the shelf — live only while selected
@@ -1936,7 +2097,6 @@
                     redrawShelfLive();
                 },
                 onEnd: async function () {
-                    if (!confirm('Move "' + (shelfLive.name || 'this shelf') + '" here?')) { cancelShelfEdit(); return; }
                     const r = await postData(URLS.moveShelf, { shelf_id: s.shelf_id, map_x: shelfLive.map_x, map_y: shelfLive.map_y });
                     if (r.success) { Object.assign(s, { map_x: r.map_x, map_y: r.map_y }); commitShelfEdit(s.shelf_id); }
                     else { alert(r.error || 'Failed to move the shelf'); cancelShelfEdit(); }
@@ -1944,25 +2104,86 @@
             });
         }
 
-        function openShelfPopup(id, latlng) {
+        function showShelfInspector(id) {
             const entry = shelfShapes[id]; if (!entry) return;
             const s = entry.data;
             const editing = selectedShelfId === id;
-            const html = '<div style="min-width:186px">'
-                + '<div class="map-popup-title">' + esc(s.name || 'Shelf') + '</div>'
-                + '<div class="map-popup-sub">'
-                + Math.round(s.width || SHELF_W) + ' × ' + Math.round(s.depth || SHELF_D)
-                + ' · ' + Math.round(s.rotation || 0) + '°</div>'
+            const rot = Math.round(s.rotation || 0);
+            const quick = [0, 90, 180, 270].map(function (deg) {
+                return '<button type="button" class="insp-rot-btn' + (rot === deg ? ' active' : '') + '" '
+                    + 'onclick="setShelfRotation(' + id + ',' + deg + ')">' + deg + '&deg;</button>';
+            }).join('');
+
+            renderInspector('shelf', 'Shelf', id, esc(s.name || 'Shelf'),
+                '<div class="insp-grid">'
+                + field('X', 'inspShelfX', Math.round(s.map_x))
+                + field('Y', 'inspShelfY', Math.round(s.map_y))
+                + field('Width', 'inspShelfW', Math.round(s.width || SHELF_W))
+                + field('Depth', 'inspShelfD', Math.round(s.depth || SHELF_D))
+                + '</div>'
+                + '<div class="insp-field" style="margin-bottom:6px">'
+                + '<label for="inspShelfRot">Rotation (degrees)</label>'
+                + '<input id="inspShelfRot" type="number" min="0" max="359" value="' + rot + '">'
+                + '</div>'
+                + '<div class="insp-rot-row">' + quick + '</div>'
                 + '<div class="map-actions">'
+                + '<button class="map-action-btn" onclick="applyShelfInspector(' + id + ')"><i class="fa-solid fa-check"></i> Apply changes</button>'
                 + (editing
-                    ? '<button class="map-action-btn" onclick="deselectShelf()"><i class="fa-solid fa-check"></i> Done editing</button>'
-                    : '<button class="map-action-btn" onclick="selectShelf(' + id + ')"><i class="fa-solid fa-arrows-up-down-left-right"></i> Edit shape</button>')
-                + '<button class="map-action-btn" onclick="startResizeShelf(' + id + ')"><i class="fa-solid fa-ruler"></i> Set exact size &amp; angle</button>'
+                    ? '<button class="map-action-btn" onclick="deselectShelf()"><i class="fa-solid fa-xmark"></i> Hide drag handles</button>'
+                    : '<button class="map-action-btn" onclick="selectShelf(' + id + ')"><i class="fa-solid fa-arrows-up-down-left-right"></i> Show drag handles</button>')
                 + '<button class="map-action-btn" onclick="renameShelf(' + id + ')"><i class="fa-solid fa-pen"></i> Rename</button>'
                 + '<button class="map-action-btn danger" onclick="unplaceShelf(' + id + ')"><i class="fa-solid fa-eye-slash"></i> Unplace</button>'
-                + '</div></div>';
-            L.popup().setLatLng(latlng).setContent(html).openOn(lmap);
+                + '</div>');
         }
+        window.showShelfInspector = showShelfInspector;
+
+        // Quick 0/90/180/270 buttons — the common case, one click.
+        window.setShelfRotation = async function (id, deg) {
+            const entry = shelfShapes[id]; if (!entry) return;
+            const r = await postData(URLS.rotateShelf, { shelf_id: id, rotation: deg });
+            if (!r.success) { alert(r.error || 'Failed to rotate the shelf'); return; }
+            entry.data.rotation = r.rotation;
+            redrawShelf(entry);
+            if (selectedShelfId === id) commitShelfEdit(id);
+            showShelfInspector(id);
+            inspectorSaved('Rotated to ' + Math.round(r.rotation) + '°.');
+        };
+
+        // Apply position / size / rotation typed into the panel in one go.
+        window.applyShelfInspector = async function (id) {
+            const entry = shelfShapes[id]; if (!entry) return;
+            const x = numVal('inspShelfX'), y = numVal('inspShelfY');
+            const w = numVal('inspShelfW'), d = numVal('inspShelfD');
+            let rot = numVal('inspShelfRot');
+            if ([x, y, w, d, rot].some(isNaN)) { alert('Every field must be a number.'); return; }
+            if (w < MIN_SHELF_SIZE || d < MIN_SHELF_SIZE) {
+                alert('Width and depth must both be at least ' + MIN_SHELF_SIZE + '.'); return;
+            }
+            rot = ((rot % 360) + 360) % 360;
+
+            const changes = [];
+            const cur = entry.data;
+            if (Math.round(x) !== Math.round(cur.map_x) || Math.round(y) !== Math.round(cur.map_y)
+                || Math.round(w) !== Math.round(cur.width) || Math.round(d) !== Math.round(cur.depth)) {
+                const r = await postData(URLS.resizeShelf,
+                    { shelf_id: id, width: w, depth: d, map_x: x, map_y: y });
+                if (!r.success) { alert(r.error || 'Failed to save the shelf size'); return; }
+                Object.assign(cur, { width: r.width, depth: r.depth, map_x: r.map_x, map_y: r.map_y });
+                changes.push('position & size');
+            }
+            if (Math.round(rot) !== Math.round(cur.rotation || 0)) {
+                const r2 = await postData(URLS.rotateShelf, { shelf_id: id, rotation: rot });
+                if (!r2.success) { alert(r2.error || 'Failed to save the rotation'); return; }
+                cur.rotation = r2.rotation;
+                changes.push('rotation');
+            }
+            redrawShelf(shelfShapes[id]);
+            if (selectedShelfId === id) commitShelfEdit(id);
+            showShelfInspector(id);
+            inspectorSaved(changes.length ? 'Saved ' + changes.join(' and ') + '.' : 'Nothing changed.');
+        };
+
+        function openShelfPopup(id) { showShelfInspector(id); }
 
         // ---- Unified "selected" editing: resize handles + rotate handle +
         // body-drag all live at once, like a shape selected in a design tool.
@@ -2071,7 +2292,6 @@
                     redrawShelfLive();
                 });
                 marker.on('dragend', async function () {
-                    if (!confirm('Save the new size for "' + (shelfLive.name || 'this shelf') + '"?')) { cancelShelfEdit(); return; }
                     const r = await postData(URLS.resizeShelf, {
                         shelf_id: id, width: shelfLive.width, depth: shelfLive.depth,
                         map_x: shelfLive.map_x, map_y: shelfLive.map_y,
@@ -2104,7 +2324,6 @@
                 redrawShelfLive();
             });
             rotMarker.on('dragend', async function () {
-                if (!confirm('Rotate "' + (shelfLive.name || 'this shelf') + '" to ' + Math.round(shelfLive.rotation) + '°?')) { cancelShelfEdit(); return; }
                 const r = await postData(URLS.rotateShelf, { shelf_id: id, rotation: shelfLive.rotation });
                 if (r.success) { shelfShapes[id].data.rotation = r.rotation; commitShelfEdit(id); }
                 else { alert(r.error || 'Failed to rotate the shelf'); cancelShelfEdit(); }
@@ -2126,6 +2345,11 @@
             shelfLive = Object.assign({}, shelfShapes[id].data);
             redrawShelfLive();
             defaultShelfEditHint();
+            // Keep the docked panel's numbers in step with the drag that just saved.
+            if (inspectorSel && inspectorSel.kind === 'shelf' && inspectorSel.id === id) {
+                showShelfInspector(id);
+                inspectorSaved('Saved.');
+            }
         }
         // Roll the live shape back to last-saved on cancel or a failed save.
         function cancelShelfEdit() {

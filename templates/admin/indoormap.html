@@ -528,6 +528,15 @@
                                 <span class="emoji">📍</span> Waypoints
                             </label>
                         </div>
+                        {% if show_beacons %}
+                        {# Administrator-only: beacon positions are infrastructure, never shown to patrons. #}
+                        <div class="filter-item">
+                            <input type="checkbox" id="show-beacons" checked>
+                            <label for="show-beacons">
+                                <span class="emoji">📡</span> BLE Beacons
+                            </label>
+                        </div>
+                        {% endif %}
                     </div>
                 </section>
                 {% endif %}
@@ -558,6 +567,7 @@
         const roomsData = {{ rooms|safe }};
         const shelvesData = {{ shelves|safe }};
         const waypointsData = {{ waypoints|safe }};
+        const beaconsData = {{ beacons|safe }};
         const floorplansList = {{ floorplans|safe }};
         const targetShelf = {{ target_shelf|safe }};
 
@@ -566,6 +576,7 @@
         let roomMarkers = [];
         let shelfMarkers = [];
         let waypointMarkers = [];
+        let beaconMarkers = [];
         let targetShelfPoly = null;
 
         // Initialize map when DOM is ready
@@ -718,6 +729,28 @@
                     marker.addTo(map);
                 });
             }
+
+            // BLE beacons — Administrator view only; the server sends an empty
+            // list to the staff map and nothing at all to patrons.
+            if (beaconsData && beaconsData.length > 0) {
+                beaconsData.forEach(beacon => {
+                    const marker = createEmojiMarker(
+                        beacon.x, beacon.y, '📡',
+                        beacon.label || 'BLE Beacon',
+                        beacon.uuid ? 'UUID: ' + beacon.uuid : '',
+                        'var(--accent-blue)');
+                    beaconMarkers.push(marker);
+                    marker.addTo(map);
+                });
+            }
+        }
+
+        // Stored coordinates use a top-left origin; Leaflet's CRS.Simple counts
+        // from the bottom. Every layer on this map must go through this, or it
+        // lands mirrored against the ones that do (rooms, shelves, doors).
+        function toLatLng(x, y) {
+            const canvasHeight = (floorplanData && floorplanData.canvas_height) || 800;
+            return [canvasHeight - y, x];
         }
 
         function createEmojiMarker(x, y, emoji, title, description, color) {
@@ -732,7 +765,7 @@
                 iconAnchor: [15, 15]
             });
 
-            const marker = L.marker([y, x], { icon: icon });
+            const marker = L.marker(toLatLng(x, y), { icon: icon });
 
             if (title || description) {
                 const popupContent = `
@@ -749,10 +782,12 @@
             roomMarkers.forEach(marker => map.removeLayer(marker));
             shelfMarkers.forEach(marker => map.removeLayer(marker));
             waypointMarkers.forEach(marker => map.removeLayer(marker));
-            
+            beaconMarkers.forEach(marker => map.removeLayer(marker));
+
             roomMarkers = [];
             shelfMarkers = [];
             waypointMarkers = [];
+            beaconMarkers = [];
         }
 
         function populateFloorplanSelector() {
@@ -811,6 +846,19 @@
             if (showWaypoints) {
                 showWaypoints.addEventListener('change', function() {
                     waypointMarkers.forEach(marker => {
+                        if (this.checked) {
+                            marker.addTo(map);
+                        } else {
+                            map.removeLayer(marker);
+                        }
+                    });
+                });
+            }
+
+            const showBeacons = document.getElementById('show-beacons');
+            if (showBeacons) {
+                showBeacons.addEventListener('change', function() {
+                    beaconMarkers.forEach(marker => {
                         if (this.checked) {
                             marker.addTo(map);
                         } else {

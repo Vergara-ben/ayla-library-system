@@ -24,7 +24,9 @@ from .auth_utils import (
     admin_login_required,
     admin_only_required,
     staff_only_required,
+    module_required,
 )
+from .modules import STAFF_MODULES, clean_module_keys
 
 # Map admin page-URL names to their Library Staff equivalents so that shared
 # action endpoints can return whichever portal the current user belongs to.
@@ -48,14 +50,16 @@ from .eligibility import check_patron_eligibility
 from .emails import (
     announcement_email,
     borrow_confirmation_email,
+    bulk_connection,
     return_receipt_email,
     lost_book_email,
     otp_email,
+    password_reset_otp_email,
     registration_approved_email,
     registration_rejected_email,
 )
 from .reports import REPORT_TYPES, parse_date_range, build_report, render_report_pdf, render_report_excel
-from .models import Book, Patron, PatronLog, Transaction, User, ShelfLevel, Donation, Announcement, FloorPlan, Shelf, Room, Door, Waypoint, BLEBeacon, WaypointConnection, SystemLog, BorrowingRule
+from .models import Book, Patron, PatronLog, Transaction, User, ShelfLevel, Donation, Announcement, FloorPlan, Shelf, Room, Door, Waypoint, BLEBeacon, WaypointConnection, SystemLog, BorrowingRule, PasswordResetOTP
 
 # Patron views
 def patron_login(request):
@@ -206,7 +210,11 @@ def patron_register(request):
         patron.otp_code = _new_otp()
         patron.otp_expires_at = timezone.now() + timedelta(minutes=10)
         patron.save(update_fields=['otp_code', 'otp_expires_at'])
-        otp_email(patron.email, patron.fullname, patron.otp_code)
+        if not otp_email(patron.email, patron.fullname, patron.otp_code):
+            return render(request, 'patron/patronregister.html',
+                          {'stage': 'otp', 'otp_email': email,
+                           'error': 'We could not send the code right now. '
+                                    'Please try again in a moment or contact the library.'})
         return render(request, 'patron/patronregister.html',
                       {'stage': 'otp', 'otp_email': email,
                        'info': 'A new code has been sent to your email.'})
@@ -219,17 +227,14 @@ def patron_register(request):
     patron_type = request.POST.get('patron_type')
     contact_number = (request.POST.get('contact_number') or '').strip()
     address = (request.POST.get('address') or '').strip()
-    pin = (request.POST.get('pin') or '').strip()
 
     def _form_error(msg):
         return render(request, 'patron/patronregister.html', {'stage': 'form', 'error': msg})
 
-    if not all([fullname, email, password, confirm_password, patron_type, contact_number, address, pin]):
+    if not all([fullname, email, password, confirm_password, patron_type, contact_number, address]):
         return _form_error('All fields are required')
     if password != confirm_password:
         return _form_error('Passwords do not match')
-    if not (pin.isdigit() and 4 <= len(pin) <= 6):
-        return _form_error('PIN must be 4 to 6 digits')
 
     existing = Patron.objects.filter(email__iexact=email).first()
     if existing is not None:
@@ -248,7 +253,6 @@ def patron_register(request):
         fullname=fullname,
         email=email,
         password_hash=hash_password(password),
-        pin_hash=hash_password(pin),
         patron_type=patron_type,
         contact_number=contact_number,
         address=address,
@@ -259,7 +263,13 @@ def patron_register(request):
         otp_expires_at=timezone.now() + timedelta(minutes=10),
         otp_verified=False,
     )
-    otp_email(patron.email, patron.fullname, patron.otp_code)
+    if not otp_email(patron.email, patron.fullname, patron.otp_code):
+        # The account exists but the code never left the building — say so
+        # instead of parking the applicant on a code screen forever.
+        return render(request, 'patron/patronregister.html',
+                      {'stage': 'otp', 'otp_email': patron.email,
+                       'error': 'Your details were saved, but we could not email your '
+                                'verification code. Click "Resend code" to try again.'})
     return render(request, 'patron/patronregister.html',
                   {'stage': 'otp', 'otp_email': patron.email})
 
@@ -417,28 +427,6 @@ def patron_change_password(request):
     return JsonResponse({'success': True, 'message': 'Password changed.'})
 
 
-@patron_login_required
-def patron_change_pin(request):
-    """Set or change the transaction PIN.
-
-    When a PIN already exists the current PIN is required; patrons without
-    one (e.g. registered on-site at the desk) can set it directly."""
-    if request.method != 'POST':
-        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
-    patron = get_object_or_404(Patron, patron_id=request.session.get('patron_id'))
-
-    current = (request.POST.get('current_pin') or '').strip()
-    new = (request.POST.get('new_pin') or '').strip()
-    if not (new.isdigit() and 4 <= len(new) <= 6):
-        return JsonResponse({'success': False, 'error': 'PIN must be 4 to 6 digits.'})
-    if patron.pin_hash and not check_password(current, patron.pin_hash):
-        return JsonResponse({'success': False, 'error': 'Current PIN is incorrect.'})
-
-    patron.pin_hash = hash_password(new)
-    patron.save(update_fields=['pin_hash'])
-    return JsonResponse({'success': True, 'message': 'PIN saved.'})
-
-
 # Admin views
 def admin_login(request):
     if request.method == 'POST':
@@ -505,6 +493,165 @@ def staff_login(request):
 def staff_logout(request):
     request.session.flush()
     return redirect('/library-staff/login/')
+
+
+# ─── FORGOT PASSWORD (OTP) — all three portals ────────────────────────────
+# One implementation, three thin entry points. The portal decides which table
+# and which role the email is resolved against, so a code issued at the staff
+# login cannot be spent at the admin login or vice versa.
+
+PASSWORD_RESET_PORTALS = {
+    'patron': {
+        'account_type': 'Patron',
+        'template': 'patron/patronforgotpassword.html',
+        'login_url': 'patron_login',
+        'reset_url': 'patron_forgot_password',
+        'role_label': 'patron account',
+    },
+    'staff': {
+        'account_type': 'Staff',
+        'template': 'library_staff/forgotpassword.html',
+        'login_url': 'staff_login',
+        'reset_url': 'staff_forgot_password',
+        'role_label': 'library staff account',
+    },
+    'admin': {
+        'account_type': 'Admin',
+        'template': 'admin/forgotpassword.html',
+        'login_url': 'admin_login',
+        'reset_url': 'admin_forgot_password',
+        'role_label': 'administrator account',
+    },
+}
+
+# Deliberately identical whether or not the email matched an account, so the
+# form cannot be used to discover which addresses are registered.
+_RESET_SENT_NOTE = ('If an account exists for that email, a 6-digit code is on its way. '
+                    'The code expires in 10 minutes.')
+
+
+def _find_reset_account(account_type, email):
+    """The Patron or User row this reset applies to, or None."""
+    if not email:
+        return None
+    if account_type == 'Patron':
+        return Patron.objects.filter(email__iexact=email).first()
+    return User.objects.filter(email__iexact=email, role=account_type).first()
+
+
+def _issue_reset_code(account_type, email, fullname, role_label):
+    """Invalidate any outstanding codes, mint a new one, and email it."""
+    PasswordResetOTP.objects.filter(
+        account_type=account_type, email__iexact=email, used_at__isnull=True
+    ).update(used_at=timezone.now())
+
+    reset = PasswordResetOTP.objects.create(
+        account_type=account_type,
+        email=email,
+        code=_new_otp(),
+        expires_at=timezone.now() + timedelta(minutes=10),
+    )
+    return password_reset_otp_email(email, fullname, reset.code, role_label)
+
+
+def _password_reset_view(request, portal):
+    cfg = PASSWORD_RESET_PORTALS[portal]
+    template = cfg['template']
+    account_type = cfg['account_type']
+
+    def _render(stage, **extra):
+        context = {'stage': stage, 'portal': portal,
+                   'login_url_name': cfg['login_url'], 'reset_url_name': cfg['reset_url']}
+        context.update(extra)
+        return render(request, template, context)
+
+    if request.method != 'POST':
+        return _render('request')
+
+    action = (request.POST.get('action') or '').strip()
+    email = (request.POST.get('email') or '').strip()
+
+    # ── Ask for a code ───────────────────────────────────────
+    if action in ('request', 'resend'):
+        if not email:
+            return _render('request', error='Enter the email address on your account.')
+
+        account = _find_reset_account(account_type, email)
+        if account is not None:
+            fullname = getattr(account, 'fullname', '') or 'there'
+            if not _issue_reset_code(account_type, email, fullname, cfg['role_label']):
+                return _render('request', email=email,
+                               error='We could not send the code right now. '
+                                     'Please try again in a moment.')
+        # No account: fall through and show the same screen anyway.
+        note = ('A new code has been sent if the account exists.'
+                if action == 'resend' else _RESET_SENT_NOTE)
+        return _render('otp', email=email, info=note)
+
+    # ── Submit the code and the new password ─────────────────
+    if action == 'reset':
+        code = (request.POST.get('code') or '').strip()
+        new_password = request.POST.get('new_password') or ''
+        confirm_password = request.POST.get('confirm_password') or ''
+
+        if not code:
+            return _render('otp', email=email, error='Enter the 6-digit code from your email.')
+        if new_password != confirm_password:
+            return _render('otp', email=email, error='The two passwords do not match.')
+        if len(new_password) < 8:
+            return _render('otp', email=email, error='New password must be at least 8 characters.')
+
+        reset = (PasswordResetOTP.objects
+                 .filter(account_type=account_type, email__iexact=email, used_at__isnull=True)
+                 .order_by('-created_at').first())
+        if reset is None or not reset.is_usable:
+            return _render('otp', email=email,
+                           error='That code is no longer valid. Request a new one.')
+
+        if code != reset.code:
+            reset.attempts += 1
+            reset.save(update_fields=['attempts'])
+            remaining = PasswordResetOTP.MAX_ATTEMPTS - reset.attempts
+            if remaining <= 0:
+                return _render('request',
+                               error='Too many incorrect codes. Request a new one to try again.')
+            return _render('otp', email=email,
+                           error=f'Incorrect code. {remaining} attempt(s) left.')
+
+        account = _find_reset_account(account_type, email)
+        if account is None:
+            # The account disappeared between issuing and redeeming the code.
+            reset.used_at = timezone.now()
+            reset.save(update_fields=['used_at'])
+            return _render('request', error='That account is no longer available.')
+
+        account.password_hash = hash_password(new_password)
+        account.save(update_fields=['password_hash'])
+        reset.used_at = timezone.now()
+        reset.save(update_fields=['used_at'])
+
+        if account_type == 'Patron':
+            log_admin_action(request, 'Update', 'Patron', account.patron_id,
+                             f'Self-service password reset via OTP for {account.email}')
+        else:
+            log_admin_action(request, 'Update', 'User', account.admin_id,
+                             f'Self-service password reset via OTP for {account.email}')
+
+        return _render('done')
+
+    return _render('request')
+
+
+def patron_forgot_password(request):
+    return _password_reset_view(request, 'patron')
+
+
+def staff_forgot_password(request):
+    return _password_reset_view(request, 'staff')
+
+
+def admin_forgot_password(request):
+    return _password_reset_view(request, 'admin')
 
 
 @admin_only_required
@@ -654,7 +801,7 @@ def admin_management(request):
     return _books_page(request, 'admin/managebooks.html')
 
 
-@staff_only_required
+@module_required('books')
 def staff_manage_books(request):
     return _books_page(request, 'library_staff/managebooks.html')
 
@@ -1174,7 +1321,7 @@ def admin_book_detail(request):
     return _book_detail_page(request, 'admin/bookdetail.html')
 
 
-@staff_only_required
+@module_required('books')
 def staff_book_detail(request):
     return _book_detail_page(request, 'library_staff/bookdetail.html')
 
@@ -1251,12 +1398,12 @@ def admin_transaction(request):
     return _transaction_page(request, 'admin/transaction.html')
 
 
-@staff_only_required
+@module_required('transactions')
 def staff_transaction(request):
     return _transaction_page(request, 'library_staff/transaction.html')
 
 
-def _indoor_map_page(request, template):
+def _indoor_map_page(request, template, is_admin_view=False):
     # Fetch all floor plans for dropdown selector
     floorplans = FloorPlan.objects.all().order_by('-uploaded_at')
     
@@ -1287,7 +1434,8 @@ def _indoor_map_page(request, template):
     rooms_data = []
     shelves_data = []
     waypoints_data = []
-    
+    beacons_data = []
+
     if floorplan and not no_floorplans:
         # Serialize rooms with coordinates
         rooms = Room.objects.filter(floor_plan=floorplan, is_active=True)
@@ -1333,7 +1481,21 @@ def _indoor_map_page(request, template):
                     'y': waypoint.map_y,
                     'linked_shelf_id': waypoint.linked_shelf.shelf_id if waypoint.linked_shelf else None
                 })
-    
+
+        # Beacon positions are infrastructure, not patron-facing: they are only
+        # serialised for the Administrator's map (see `show_beacons` below) and
+        # never reach patron/patronmap.html.
+        if is_admin_view:
+            for beacon in BLEBeacon.objects.filter(floor_plan=floorplan):
+                if beacon.map_x is not None and beacon.map_y is not None:
+                    beacons_data.append({
+                        'id': beacon.beacon_id,
+                        'label': beacon.label or '',
+                        'uuid': beacon.beacon_uuid,
+                        'x': beacon.map_x,
+                        'y': beacon.map_y,
+                    })
+
     # Serialize floor plan for JavaScript
     floorplan_data = None
     if floorplan:
@@ -1382,6 +1544,8 @@ def _indoor_map_page(request, template):
         'rooms': json.dumps(rooms_data),
         'shelves': json.dumps(shelves_data),
         'waypoints': json.dumps(waypoints_data),
+        'beacons': json.dumps(beacons_data),
+        'show_beacons': is_admin_view,
         'no_floorplans': no_floorplans,
         'pending_transactions_count': pending_transactions_count,
         'target_shelf': json.dumps(target_shelf) if target_shelf else 'null',
@@ -1392,10 +1556,10 @@ def _indoor_map_page(request, template):
 
 @admin_only_required
 def admin_indoor_map(request):
-    return _indoor_map_page(request, 'admin/indoormap.html')
+    return _indoor_map_page(request, 'admin/indoormap.html', is_admin_view=True)
 
 
-@staff_only_required
+@module_required('indoor_map')
 def staff_indoor_map(request):
     return _indoor_map_page(request, 'library_staff/indoormap.html')
 
@@ -1464,7 +1628,7 @@ def admin_log_management(request):
     return _logs_page(request, 'admin/logmanagement.html')
 
 
-@staff_only_required
+@module_required('logs')
 def staff_logs(request):
     return _logs_page(request, 'library_staff/logmanagement.html')
 
@@ -1523,6 +1687,43 @@ def search_book_by_qr(request):
         }
     }
     return JsonResponse(book_data)
+
+
+@admin_login_required
+def search_patron_by_qr(request):
+    """Resolve a scanned patron identity QR to a patron record.
+
+    Desk-side counterpart of search_book_by_qr: Library Staff / the Administrator
+    scan the QR printed on the patron's card, never the patron themselves. The
+    payload is the Patron.qr_code UUID minted on approval (approve_patron) — the
+    same value patronaccount.html renders as the patron's QR image.
+    """
+    qr_code = request.GET.get('qr_code', '').strip()
+    if not qr_code:
+        return JsonResponse({'success': False, 'error': 'QR code is required'})
+
+    patron = Patron.objects.filter(qr_code=qr_code).first()
+    if patron is None:
+        return JsonResponse({'success': False, 'error': 'No patron matches that QR code'})
+
+    active_borrows = Transaction.objects.filter(
+        patron=patron, transaction_type='Borrow', return_date__isnull=True
+    ).count()
+    eligible, violations = check_patron_eligibility(patron)
+
+    return JsonResponse({
+        'success': True,
+        'patron': {
+            'patron_id': patron.patron_id,
+            'fullname': patron.fullname,
+            'email': patron.email,
+            'patron_type': patron.patron_type,
+            'account_status': patron.account_status,
+            'active_borrows': active_borrows,
+            'eligible': eligible,
+            'violations': violations,
+        }
+    })
 
 
 @admin_login_required
@@ -1854,6 +2055,8 @@ def process_transaction(request):
     
     transaction_type = request.POST.get('transaction_type', '').strip()
     patron_id = request.POST.get('patron_id', '').strip()
+    # Identity from the Scan Patron QR tab.
+    patron_qr = request.POST.get('patron_qr', '').strip()
     book_ids = request.POST.getlist('book_ids')
     
     if not transaction_type:
@@ -1867,17 +2070,26 @@ def process_transaction(request):
     
     # Validate patron for Borrow and Return transactions
     patron = None
+    verification = ''
     if transaction_type in ['Borrow', 'Return']:
-        if not patron_id:
-            return JsonResponse({'success': False, 'error': 'patron_id is required for this transaction type'})
-        try:
-            patron_id_int = int(patron_id)
-            patron = Patron.objects.filter(patron_id=patron_id_int).first()
+        if patron_qr:
+            # Scanned identity: the QR is re-resolved here rather than trusting the
+            # patron_id the browser sent, so the scan is what actually commits.
+            patron = Patron.objects.filter(qr_code=patron_qr).first()
             if patron is None:
-                return JsonResponse({'success': False, 'error': 'Patron not found'})
-        except ValueError:
-            return JsonResponse({'success': False, 'error': 'Invalid patron_id format'})
-    
+                return JsonResponse({'success': False, 'error': 'No patron matches that QR code'})
+            verification = ' [QR verified]'
+        elif patron_id:
+            try:
+                patron_id_int = int(patron_id)
+                patron = Patron.objects.filter(patron_id=patron_id_int).first()
+                if patron is None:
+                    return JsonResponse({'success': False, 'error': 'Patron not found'})
+            except ValueError:
+                return JsonResponse({'success': False, 'error': 'Invalid patron_id format'})
+        else:
+            return JsonResponse({'success': False, 'error': 'patron_id is required for this transaction type'})
+
     # Get admin from session
     admin_id = request.session.get('admin_id')
     admin = User.objects.filter(admin_id=admin_id).first()
@@ -2000,7 +2212,7 @@ def process_transaction(request):
     patron_label = f' for {patron.fullname}' if patron else ''
     log_admin_action(
         request, 'Process', 'Transaction', None,
-        f'{transaction_type}: {len(processed_books)} book(s){patron_label}'
+        f'{transaction_type}: {len(processed_books)} book(s){patron_label}{verification}'
     )
 
     # Email the patron a borrowing confirmation with the due date.
@@ -2091,7 +2303,7 @@ def donation_management(request):
     return _donations_page(request, 'admin/donationadmin.html')
 
 
-@staff_only_required
+@module_required('donations')
 def staff_donations(request):
     return _donations_page(request, 'library_staff/donationadmin.html')
 
@@ -2155,15 +2367,41 @@ def announcement_management(request):
         )
         log_admin_action(request, 'Create', 'Announcement', announcement.announcement_id, f'Posted "{title}"')
 
-        # Optionally email the announcement to all active patrons.
+        # Optionally email the announcement to all active patrons. One SMTP
+        # connection for the whole broadcast — reconnecting per patron costs
+        # about a second each and would stall the request.
         if request.POST.get('email_patrons'):
-            recipients = Patron.objects.filter(account_status='Active').exclude(email='')
+            recipients = list(
+                Patron.objects.filter(account_status='Active').exclude(email='')
+            )
             sent = 0
-            for p in recipients:
-                if announcement_email(p, announcement):
-                    sent += 1
+            connection = bulk_connection()
+            try:
+                for p in recipients:
+                    if announcement_email(p, announcement, connection=connection):
+                        sent += 1
+            finally:
+                if connection is not None:
+                    try:
+                        connection.close()
+                    except Exception:
+                        pass
+
+            failed = len(recipients) - sent
             log_admin_action(request, 'Notify', 'Announcement', announcement.announcement_id,
-                             f'Emailed "{title}" to {sent} patron(s)')
+                             f'Emailed "{title}" to {sent} of {len(recipients)} patron(s)')
+            if not recipients:
+                messages.warning(request, 'Announcement posted. No active patrons had an email address.')
+            elif failed:
+                messages.warning(
+                    request,
+                    f'Announcement posted and emailed to {sent} of {len(recipients)} patron(s) — '
+                    f'{failed} failed to send. Check the server log for the reason.'
+                )
+            else:
+                messages.success(request, f'Announcement posted and emailed to {sent} patron(s).')
+        else:
+            messages.success(request, 'Announcement posted.')
 
         return redirect('announcement_management')
     
@@ -2614,7 +2852,7 @@ def shelf_manager(request):
     return _shelf_page(request, 'admin/shelfmanager.html')
 
 
-@staff_only_required
+@module_required('shelf')
 def staff_shelf(request):
     return _shelf_page(request, 'library_staff/shelfmanager.html')
 
@@ -4187,6 +4425,7 @@ def user_management(request):
         'status_filter': status,
         'role_choices': User.ROLE_CHOICES,
         'status_choices': User.STATUS_CHOICES,
+        'staff_module_choices': STAFF_MODULES,
     }
     return render(request, 'admin/usermanagement.html', context)
 
@@ -4214,14 +4453,24 @@ def create_staff(request):
         messages.error(request, 'An account with that email already exists.')
         return redirect('user_management')
 
+    # Module grants apply to Staff only — Admins always have every module.
+    module_keys = clean_module_keys(request.POST.get('modules', '')) if role == 'Staff' else []
+    if role == 'Staff' and not module_keys:
+        messages.error(request, 'Select at least one module for this staff account.')
+        return redirect('user_management')
+
     user = User.objects.create(
         fullname=fullname,
         email=email,
         password_hash=hash_password(password),
         role=role,
         account_status=status,
+        modules=','.join(module_keys),
     )
-    log_admin_action(request, 'Create', 'User', user.admin_id, f'Created {role} account {email}')
+    detail = f'Created {role} account {email}'
+    if role == 'Staff':
+        detail += f' with modules: {", ".join(user.module_labels)}'
+    log_admin_action(request, 'Create', 'User', user.admin_id, detail)
     messages.success(request, f'{role} account for {fullname} created.')
     return redirect('user_management')
 
@@ -4258,15 +4507,24 @@ def edit_staff(request, user_id):
             messages.error(request, 'Cannot change this account — it is the last active administrator.')
             return redirect('user_management')
 
+    module_keys = clean_module_keys(request.POST.get('modules', '')) if role == 'Staff' else []
+    if role == 'Staff' and not module_keys:
+        messages.error(request, 'Select at least one module for this staff account.')
+        return redirect('user_management')
+
     user.fullname = fullname
     user.email = email
     user.role = role
     user.account_status = status
+    user.modules = ','.join(module_keys)
     user.save()
     if is_self:
         request.session['admin_role'] = user.role
         request.session['admin_fullname'] = user.fullname
-    log_admin_action(request, 'Update', 'User', user.admin_id, f'Updated account {email} (role={role}, status={status})')
+    detail = f'Updated account {email} (role={role}, status={status})'
+    if role == 'Staff':
+        detail += f' modules: {", ".join(user.module_labels)}'
+    log_admin_action(request, 'Update', 'User', user.admin_id, detail)
     messages.success(request, f'Account for {fullname} updated.')
     return redirect('user_management')
 

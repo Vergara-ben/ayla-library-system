@@ -39,6 +39,10 @@
             padding: 9px 12px; font-size: 13px; color: var(--text-primary); outline: none;
         }
         .field-input:focus { border-color: var(--accent-strong); }
+        /* Row +/- buttons — same treatment as the shelf-placement picker. */
+        .tbtn { width: 24px; height: 24px; border-radius: 6px; border: 1px solid var(--border-color); display: flex; align-items: center; justify-content: center; font-size: 10px; cursor: pointer; background: transparent; flex-shrink: 0; }
+        .tbtn.add { color: var(--accent); } .tbtn.add:hover { background: var(--tint-accent); }
+        .tbtn.del { color: var(--danger); } .tbtn.del:hover { background: var(--tint-danger); }
     </style>
     <link rel="stylesheet" href="{% static 'css/admin-enhance.css' %}">
     <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
@@ -167,6 +171,9 @@
                                     <span class="text-[10px] font-bold px-2.5 py-1 rounded-full bg-blue-950/50 text-blue-300 border border-blue-800/50">Administrator</span>
                                 {% else %}
                                     <span class="text-[10px] font-bold px-2.5 py-1 rounded-full bg-cyan-950/50 text-cyan-300 border border-cyan-800/50">Library Staff</span>
+                                    <div class="mt-1.5 text-[10px] text-slate-500 leading-snug">
+                                        {% if u.module_labels %}{{ u.module_labels|join:" · " }}{% else %}<span class="text-amber-500">No modules granted</span>{% endif %}
+                                    </div>
                                 {% endif %}
                             </td>
                             <td class="py-4 px-6">
@@ -183,6 +190,7 @@
                                     <button title="Edit"
                                         data-id="{{ u.admin_id }}" data-fullname="{{ u.fullname }}" data-email="{{ u.email }}"
                                         data-role="{{ u.role }}" data-status="{{ u.account_status }}"
+                                        data-modules="{{ u.module_keys|join:"," }}"
                                         onclick="openEdit(this)"
                                         class="text-slate-400 hover:text-cyan-400 transition-colors p-1.5"><i class="fa-solid fa-pen-to-square"></i></button>
                                     <button title="Reset password"
@@ -211,8 +219,8 @@
     </div>
 
     <!-- Create / Edit modal -->
-    <div id="userModal" class="fixed inset-0 z-[60] hidden items-center justify-center modal-overlay p-4">
-        <div class="w-full max-w-md rounded-2xl border shadow-2xl" style="background-color: var(--bg-modal); border-color: var(--border-modal);">
+    <div id="userModal" class="fixed inset-0 z-[60] hidden items-center justify-center modal-overlay p-4 overflow-y-auto">
+        <div class="w-full max-w-2xl my-auto rounded-2xl border shadow-2xl" style="background-color: var(--bg-modal); border-color: var(--border-modal);">
             <div class="flex items-center justify-between px-6 py-4 border-b" style="border-color: var(--border-modal);">
                 <h3 id="userModalTitle" class="text-sm font-bold text-slate-200 tracking-wide">Add Staff</h3>
                 <button onclick="closeModal('userModal')" class="text-slate-500 hover:text-slate-300"><i class="fa-solid fa-xmark"></i></button>
@@ -245,6 +253,30 @@
                         </select>
                     </div>
                 </div>
+
+                {# Module access — same cart-style picker as "Add Books to Shelf Level". #}
+                <div id="modulesWrap">
+                    <label class="field-label">Module Access</label>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <!-- LEFT: cart -->
+                        <div class="flex flex-col rounded-xl border border-slate-800 overflow-hidden" style="background-color: var(--bg-card);">
+                            <div class="px-4 py-2.5 border-b border-slate-800 flex items-center gap-2 text-xs font-bold text-slate-300">
+                                <i class="fa-solid fa-layer-group text-cyan-500 text-[11px]"></i> Granted <span id="modCartCount" class="text-cyan-400">(0)</span>
+                            </div>
+                            <div id="modCart" class="p-2 space-y-1.5 overflow-y-auto" style="max-height: 34vh; min-height: 150px;"></div>
+                        </div>
+                        <!-- RIGHT: available modules -->
+                        <div class="flex flex-col rounded-xl border border-slate-800 overflow-hidden" style="background-color: var(--bg-card);">
+                            <div class="px-4 py-2.5 border-b border-slate-800 flex items-center gap-2 text-xs font-bold text-slate-300">
+                                <i class="fa-solid fa-grip text-slate-500 text-[11px]"></i> Available modules
+                            </div>
+                            <div id="modList" class="p-2 space-y-1.5 overflow-y-auto" style="max-height: 34vh; min-height: 150px;"></div>
+                        </div>
+                    </div>
+                    <input type="hidden" name="modules" id="f_modules" value="">
+                    <p class="text-[10px] text-slate-500 mt-2">The Dashboard is always available. Everything else must be granted here — a staff member only sees the modules listed on the left.</p>
+                </div>
+
                 <div class="flex items-center justify-end gap-2 pt-2">
                     <button type="button" onclick="closeModal('userModal')" class="text-xs font-semibold px-4 py-2 rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800/50">Cancel</button>
                     <button type="submit" class="text-xs font-bold px-4 py-2 rounded-lg bg-cyan-700/40 text-cyan-300 border border-cyan-700/60 hover:bg-cyan-700/60">Save</button>
@@ -284,6 +316,76 @@
         const editUrlTpl = "{% url 'edit_staff' 0 %}";       // .../users/0/edit/
         const resetUrlTpl = "{% url 'reset_staff_password' 0 %}";
 
+        // ── Module access (cart-style picker, mirrors "Add Books to Shelf Level") ──
+        const MODULES = [
+            {% for key, label, description, icon in staff_module_choices %}
+            { key: "{{ key }}", label: "{{ label|escapejs }}", description: "{{ description|escapejs }}", icon: "{{ icon }}" }{% if not forloop.last %},{% endif %}
+            {% endfor %}
+        ];
+        var modCartKeys = [];   // granted modules, in click order
+
+        function moduleRowHtml(m, inCart) {
+            const btn = inCart
+                ? '<button type="button" class="tbtn del" title="Remove" onclick="removeModule(\'' + m.key + '\')"><i class="fa-solid fa-minus"></i></button>'
+                : '<button type="button" class="tbtn add" title="Grant" onclick="addModule(\'' + m.key + '\')"><i class="fa-solid fa-plus"></i></button>';
+            return '<div class="flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg border border-slate-800 hover:border-slate-700 bg-slate-950/40">'
+                + '<div class="flex items-center gap-2.5 min-w-0">'
+                + '<i class="fa-solid ' + m.icon + ' text-slate-500 text-xs w-4 text-center"></i>'
+                + '<div class="min-w-0"><span class="block text-xs font-medium text-slate-200 truncate">' + m.label + '</span>'
+                + '<span class="block text-[10px] text-slate-500 truncate">' + m.description + '</span></div></div>'
+                + btn + '</div>';
+        }
+
+        function renderModuleLists() {
+            const granted = {};
+            modCartKeys.forEach(function (k) { granted[k] = true; });
+
+            const available = MODULES.filter(function (m) { return !granted[m.key]; });
+            document.getElementById('modList').innerHTML = available.length
+                ? available.map(function (m) { return moduleRowHtml(m, false); }).join('')
+                : '<div class="text-slate-600 text-xs p-3 text-center">All modules granted.</div>';
+
+            const cart = modCartKeys.map(function (k) {
+                return MODULES.find(function (m) { return m.key === k; });
+            }).filter(Boolean);
+            document.getElementById('modCart').innerHTML = cart.length
+                ? cart.map(function (m) { return moduleRowHtml(m, true); }).join('')
+                : '<div class="text-slate-600 text-xs p-3 text-center">Click + on a module to grant it.</div>';
+
+            document.getElementById('modCartCount').textContent = '(' + modCartKeys.length + ')';
+            document.getElementById('f_modules').value = modCartKeys.join(',');
+        }
+
+        function addModule(key) {
+            if (modCartKeys.indexOf(key) === -1) modCartKeys.push(key);
+            renderModuleLists();
+        }
+        function removeModule(key) {
+            modCartKeys = modCartKeys.filter(function (k) { return k !== key; });
+            renderModuleLists();
+        }
+
+        function setModules(keys) {
+            modCartKeys = (keys || []).filter(function (k) {
+                return MODULES.some(function (m) { return m.key === k; });
+            });
+            renderModuleLists();
+        }
+
+        // Admins hold every module implicitly, so the picker only applies to Staff.
+        function syncModulesVisibility() {
+            const isStaff = document.getElementById('f_role').value === 'Staff';
+            document.getElementById('modulesWrap').style.display = isStaff ? '' : 'none';
+        }
+        document.getElementById('f_role').addEventListener('change', syncModulesVisibility);
+
+        document.getElementById('userForm').addEventListener('submit', function (e) {
+            if (document.getElementById('f_role').value === 'Staff' && modCartKeys.length === 0) {
+                e.preventDefault();
+                alert('Grant at least one module to this staff account.');
+            }
+        });
+
         function openCreate() {
             const f = document.getElementById('userForm');
             f.action = createUrl;
@@ -291,6 +393,11 @@
             document.getElementById('userModalTitle').textContent = 'Add Staff';
             document.getElementById('passwordWrap').style.display = '';
             document.getElementById('f_password').setAttribute('required', 'required');
+            // form.reset() snaps Role back to the first option (Administrator);
+            // this modal is "Add Staff", so start on Staff with the picker showing.
+            document.getElementById('f_role').value = 'Staff';
+            setModules([]);
+            syncModulesVisibility();
             show('userModal');
         }
 
@@ -305,6 +412,8 @@
             // No password field on edit (use Reset Password instead)
             document.getElementById('passwordWrap').style.display = 'none';
             document.getElementById('f_password').removeAttribute('required');
+            setModules((btn.dataset.modules || '').split(',').filter(Boolean));
+            syncModulesVisibility();
             show('userModal');
         }
 
