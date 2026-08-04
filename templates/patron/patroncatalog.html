@@ -1,17 +1,19 @@
 {% load static %}
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-module="patron">
 <head>
 <meta charset="UTF-8">
+<meta name="theme-color" content="#ffffff">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>AYLA Library — Book Catalog</title>
+<script src="{% static 'js/theme.js' %}"></script>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{% static 'css/theme.css' %}">
 <style>
-  :root{--bg:#0d1a0f;--surface:#111f13;--surface2:#162019;--border:#1e3322;--accent:#4ade80;--accent2:#f59e0b;--text:#e8f5e9;--muted:#6b8f72;--danger:#f87171;}
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
   body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;padding-bottom:80px;}
   
-  .navbar{position:sticky;top:0;z-index:100;background:#0d1a0fed;backdrop-filter:blur(20px);border-bottom:1px solid var(--border);padding:14px 20px;display:flex;align-items:center;gap:12px;}
+  .navbar{position:sticky;top:0;z-index:100;background:var(--nav-bg);backdrop-filter:blur(20px);border-bottom:1px solid var(--border);padding:14px 20px;display:flex;align-items:center;gap:12px;}
   .back-btn{width:36px;height:36px;border-radius:10px;border:1px solid var(--border);background:var(--surface2);display:flex;align-items:center;justify-content:center;cursor:pointer;text-decoration:none;color:var(--text);font-size:16px;}
   .nav-title{font-family:'Syne',sans-serif;font-size:18px;font-weight:800;flex:1;}
 
@@ -23,24 +25,33 @@
     color:var(--text);font-family:'DM Sans',sans-serif;font-size:15px;
     outline:none;transition:border-color 0.2s,box-shadow 0.2s;
   }
-  .search-input:focus{border-color:var(--accent);box-shadow:0 0 0 3px #4ade8015;}
+  .search-input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--tint-accent);}
   .search-icon{position:absolute;left:16px;top:50%;transform:translateY(-50%);font-size:18px;color:var(--muted);}
   .search-clear{position:absolute;right:16px;top:50%;transform:translateY(-50%);font-size:18px;color:var(--muted);cursor:pointer;display:none;}
 
   .filters{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;margin-bottom:16px;scrollbar-width:none;}
   .filters::-webkit-scrollbar{display:none;}
   .chip{
-    flex-shrink:0;padding:7px 16px;border-radius:20px;
+    flex-shrink:0;padding:7px 16px;border-radius:14px;
     border:1px solid var(--border);background:var(--surface);
     color:var(--muted);font-size:12px;font-weight:500;
     cursor:pointer;transition:all 0.2s;white-space:nowrap;
   }
-  .chip:hover,.chip.active{border-color:var(--accent);color:var(--accent);background:#4ade8010;}
+  .chip:hover,.chip.active{border-color:var(--accent);color:var(--accent);background:var(--tint-accent);}
 
   .results-header{display:flex;align-items:center;justify-content:space-between;padding:0 20px;max-width:900px;margin:0 auto 12px;}
   .results-count{font-size:12px;color:var(--muted);}
+  .sort-wrap{position:relative;}
   .sort-btn{font-size:12px;color:var(--muted);cursor:pointer;display:flex;align-items:center;gap:4px;}
   .sort-btn:hover{color:var(--accent);}
+  .sort-menu{
+    display:none;position:absolute;right:0;top:calc(100% + 6px);z-index:50;
+    background:var(--surface);border:1px solid var(--border);border-radius:10px;
+    padding:6px;min-width:140px;box-shadow:0 8px 24px rgba(0,0,0,0.15);
+  }
+  .sort-menu.open{display:block;}
+  .sort-option{padding:8px 10px;border-radius:7px;font-size:12px;color:var(--text);cursor:pointer;white-space:nowrap;}
+  .sort-option:hover{background:var(--tint-accent);color:var(--accent);}
 
   .book-list{max-width:900px;margin:0 auto;padding:0 20px;}
   .book-card{
@@ -51,7 +62,7 @@
     text-decoration:none;color:var(--text);
     animation:fadeUp 0.4s ease both;
   }
-  .book-card:hover{border-color:#2d6a4f;transform:translateX(3px);}
+  .book-card:hover{border-color:var(--accent-border);transform:translateX(3px);}
   .book-card:nth-child(1){animation-delay:0s;}
   .book-card:nth-child(2){animation-delay:0.05s;}
   .book-card:nth-child(3){animation-delay:0.1s;}
@@ -60,25 +71,26 @@
 
   .book-cover{
     width:56px;height:74px;border-radius:8px;flex-shrink:0;
+    background:var(--cover-1);
     display:flex;align-items:center;justify-content:center;
     font-size:10px;font-weight:700;color:white;text-align:center;
     line-height:1.3;padding:4px;font-family:'Syne',sans-serif;
-    border:1px solid rgba(255,255,255,0.1);
+    border:none;
   }
-  .cover-a{background:linear-gradient(135deg,#1a4d2e,#16a34a);}
-  .cover-b{background:linear-gradient(135deg,#1e3a5f,#2563eb);}
-  .cover-c{background:linear-gradient(135deg,#4a1942,#9333ea);}
-  .cover-d{background:linear-gradient(135deg,#4a2000,#d97706);}
-  .cover-e{background:linear-gradient(135deg,#1f1f1f,#525252);}
-  .cover-f{background:linear-gradient(135deg,#1a3a1f,#2d6a4f);}
+  .cover-a{background:var(--cover-1);}
+  .cover-b{background:var(--cover-2);}
+  .cover-c{background:var(--cover-3);}
+  .cover-d{background:var(--cover-4);}
+  .cover-e{background:var(--cover-5);}
+  .cover-f{background:var(--cover-6);}
 
   .book-info{flex:1;}
   .book-title-row{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:3px;}
   .book-title{font-family:'Syne',sans-serif;font-size:14px;font-weight:700;line-height:1.3;}
   .avail-badge{flex-shrink:0;padding:3px 8px;border-radius:5px;font-size:10px;font-weight:700;}
-  .avail-green{background:#22c55e20;color:var(--accent);}
-  .avail-red{background:#f8717120;color:var(--danger);}
-  .avail-gray{background:#52525220;color:#71717a;}
+  .avail-green{background:var(--tint-accent);color:var(--accent);}
+  .avail-red{background:var(--tint-danger);color:var(--danger);}
+  .avail-gray{background:var(--surface2);color:var(--muted);}
   .book-author{font-size:12px;color:var(--muted);margin-bottom:6px;}
   .book-meta{display:flex;gap:10px;flex-wrap:wrap;}
   .meta-tag{font-size:10px;padding:3px 8px;border-radius:5px;background:var(--surface2);border:1px solid var(--border);color:var(--muted);}
@@ -86,7 +98,7 @@
   .empty{text-align:center;padding:60px 20px;color:var(--muted);}
   .empty-icon{font-size:48px;margin-bottom:12px;}
 
-  .bottom-nav{position:fixed;bottom:0;left:0;right:0;z-index:100;background:#0d1a0fed;backdrop-filter:blur(20px);border-top:1px solid var(--border);display:flex;padding:10px 0 calc(10px + env(safe-area-inset-bottom));}
+  .bottom-nav{position:fixed;bottom:0;left:0;right:0;z-index:100;background:var(--nav-bg);backdrop-filter:blur(20px);border-top:1px solid var(--border);display:flex;padding:10px 0 calc(10px + env(safe-area-inset-bottom));}
   .nav-item{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;cursor:pointer;transition:color 0.2s;color:var(--muted);text-decoration:none;}
   .nav-item.active{color:var(--accent);}
   .nav-item:hover{color:var(--accent);}
@@ -122,11 +134,14 @@
   }
 </style>
     <link rel="stylesheet" href="{% static 'css/patron.css' %}">
+    <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
+    <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
 </head>
 <body>
 <nav class="navbar">
   <a href="{% url 'patron_dashboard' %}" class="back-btn">←</a>
   <div class="nav-title">Book Catalog</div>
+  <button type="button" class="theme-toggle" data-theme-toggle></button>
 </nav>
 
 <div class="search-section">
@@ -148,12 +163,23 @@
 
 <div class="results-header">
   <div class="results-count" id="resCount">Showing {{ books|length }} book{{ books|length|pluralize }}</div>
-  <div class="sort-btn">Sort: Relevance ▾</div>
+  <div class="sort-wrap">
+    <div class="sort-btn" id="sortBtn" onclick="toggleSortMenu()">Sort: <span id="sortLabel">Relevance</span> ▾</div>
+    <div class="sort-menu" id="sortMenu">
+      <div class="sort-option" onclick="applySort('relevance','Relevance')">Relevance</div>
+      <div class="sort-option" onclick="applySort('title','Title A–Z')">Title A–Z</div>
+      <div class="sort-option" onclick="applySort('author','Author A–Z')">Author A–Z</div>
+      <div class="sort-option" onclick="applySort('year','Newest First')">Newest First</div>
+    </div>
+  </div>
 </div>
 
 <div class="book-list" id="bookList">
   {% for book in books %}
-  <a href="{% url 'patron_book_details' book.book_id %}" class="book-card">
+  <a href="{% url 'patron_book_details' book.book_id %}" class="book-card"
+     data-orig-index="{{ forloop.counter0 }}" data-title="{{ book.title|default:'' }}"
+     data-author="{{ book.author|default:'' }}" data-year="{{ book.publication_year|default:0 }}"
+     data-genre="{{ book.genre|default:'' }}" data-status="{{ book.status }}">
     <div class="book-cover {% cycle 'cover-a' 'cover-b' 'cover-c' 'cover-d' 'cover-e' 'cover-f' %}">{{ book.title|truncatechars:14 }}</div>
     <div class="book-info">
       <div class="book-title-row">
@@ -189,26 +215,60 @@
 </nav>
 
 <script>
-function filterBooks(q){
+let currentCategory='all';
+const CATEGORY_KEYWORDS={cs:'computer',math:'math',fiction:'fiction',science:'science',history:'history'};
+
+// Search text and category chip both narrow the same list, so both must be
+// checked together — applying one used to silently wipe out the other.
+function applyFilters(){
+  const q=(document.getElementById('searchInput').value||'').toLowerCase();
   const cards=document.querySelectorAll('.book-card');
   let count=0;
-  q=q.toLowerCase();
   cards.forEach(c=>{
-    const text=c.textContent.toLowerCase();
-    const show=text.includes(q);
+    const matchesSearch=!q||c.textContent.toLowerCase().includes(q);
+    const genre=(c.dataset.genre||'').toLowerCase();
+    const status=c.dataset.status||'';
+    let matchesCat=true;
+    if(currentCategory==='available') matchesCat=status==='Available';
+    else if(currentCategory!=='all') matchesCat=genre.includes(CATEGORY_KEYWORDS[currentCategory]||currentCategory);
+    const show=matchesSearch&&matchesCat;
     c.style.display=show?'flex':'none';
     if(show)count++;
   });
-  document.getElementById('resCount').textContent=`Showing ${count} books`;
+  document.getElementById('resCount').textContent=`Showing ${count} book${count===1?'':'s'}`;
   document.getElementById('clearBtn').style.display=q?'block':'none';
+}
+function filterBooks(q){
+  applyFilters();
 }
 function clearSearch(){
   document.getElementById('searchInput').value='';
-  filterBooks('');
+  applyFilters();
 }
 function filterCat(el,cat){
   document.querySelectorAll('.chip').forEach(c=>c.classList.remove('active'));
   el.classList.add('active');
+  currentCategory=cat;
+  applyFilters();
+}
+
+function toggleSortMenu(){
+  document.getElementById('sortMenu').classList.toggle('open');
+}
+document.addEventListener('click',function(e){
+  const wrap=document.querySelector('.sort-wrap');
+  if(wrap&&!wrap.contains(e.target)) document.getElementById('sortMenu').classList.remove('open');
+});
+function applySort(key,label){
+  document.getElementById('sortLabel').textContent=label;
+  document.getElementById('sortMenu').classList.remove('open');
+  const list=document.getElementById('bookList');
+  const cards=Array.from(list.querySelectorAll('.book-card'));
+  if(key==='title') cards.sort((a,b)=>a.dataset.title.localeCompare(b.dataset.title));
+  else if(key==='author') cards.sort((a,b)=>a.dataset.author.localeCompare(b.dataset.author));
+  else if(key==='year') cards.sort((a,b)=>(parseInt(b.dataset.year)||0)-(parseInt(a.dataset.year)||0));
+  else cards.sort((a,b)=>(parseInt(a.dataset.origIndex)||0)-(parseInt(b.dataset.origIndex)||0));
+  cards.forEach(c=>list.appendChild(c));
 }
 </script>
 </body>

@@ -13,7 +13,7 @@ textarea:focus-visible,
 summary:focus-visible,
 [tabindex]:focus-visible,
 [role="button"]:focus-visible {
-    outline: 2px solid #22d3ee !important;
+    outline: 2px solid var(--accent) !important;
     outline-offset: 2px !important;
     border-radius: 4px;
 }
@@ -21,7 +21,7 @@ summary:focus-visible,
 /* Toggle switches: show focus on the visual track, not the hidden checkbox. */
 .sw input:focus-visible + .tk,
 .tsw input:focus-visible + .sl {
-    outline: 2px solid #22d3ee;
+    outline: 2px solid var(--accent);
     outline-offset: 2px;
 }
 
@@ -41,8 +41,8 @@ summary:focus-visible,
     position: fixed;
     top: 8px; left: 8px;
     z-index: 1000;
-    background: #0e7490;
-    color: #fff;
+    background: var(--accent);
+    color: var(--on-accent);
     padding: 8px 14px;
     border-radius: 8px;
     font: 600 13px/1 'Inter', system-ui, sans-serif;

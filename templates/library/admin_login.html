@@ -1,23 +1,28 @@
 {% load static %}
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-module="admin" data-theme-floating>
 <head>
     <meta charset="UTF-8">
+    <meta name="theme-color" content="#ffffff">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin Login</title>
+    <script src="{% static 'js/theme.js' %}"></script>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'css/theme.css' %}">
     <style>
-        body { font-family: 'Plus Jakarta Sans', sans-serif; background: #070f18; color: #ffffff; margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
-        .card { width: 100%; max-width: 420px; padding: 36px; background: #0c1925; border: 1px solid #1e293b; border-radius: 24px; box-shadow: 0 20px 80px rgba(0,0,0,0.5); }
+        body { font-family: 'Plus Jakarta Sans', sans-serif; background: var(--bg-main); color: var(--text-primary); margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+        .card { width: 100%; max-width: 420px; padding: 36px; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 14px; box-shadow: var(--shadow-pop); }
         .form-group { margin-bottom: 24px; }
-        .form-label { display: block; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; color: #64748b; margin-bottom: 8px; }
+        .form-label { display: block; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); margin-bottom: 8px; }
         .input-wrapper { position: relative; display: flex; align-items: center; }
-        .input-icon { position: absolute; left: 16px; color: #38bdf8; font-size: 14px; display: flex; align-items: center; }
-        .form-input { width: 100%; background-color: #0f1c2a; border: 1px solid #1e293b; border-radius: 12px; padding: 16px 16px 16px 46px; color: #ffffff; font-size: 14px; }
-        .form-input:focus { outline: none; border-color: #38bdf8; box-shadow: 0 0 0 4px rgba(56,189,248,0.12); }
-        .btn { width: 100%; border: none; padding: 16px; border-radius: 14px; font-size: 15px; font-weight: 700; cursor: pointer; background: #38bdf8; color: #070f18; margin-top: 10px; }
-        .error-text { color: red; margin-top: 16px; }
+        .input-icon { position: absolute; left: 16px; color: var(--accent); font-size: 14px; display: flex; align-items: center; }
+        .form-input { width: 100%; background-color: var(--bg-input); border: 1px solid var(--border-color); border-radius: 12px; padding: 16px 16px 16px 46px; color: var(--text-primary); font-size: 14px; }
+        .form-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
+        .btn { width: 100%; border: none; padding: 16px; border-radius: 14px; font-size: 15px; font-weight: 700; cursor: pointer; background: var(--accent); color: var(--on-accent); margin-top: 10px; }
+        .error-text { color: var(--danger); margin-top: 16px; }
     </style>
+    <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
+    <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
 </head>
 <body>
     <div class="card">

@@ -1,34 +1,27 @@
 {% load static %}
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-module="admin">
 <head>
     <meta charset="UTF-8">
+    <meta name="theme-color" content="#ffffff">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Ayla Admin Panel - User Management</title>
+    <script src="{% static 'js/theme.js' %}"></script>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="{% static 'js/tailwind-theme.js' %}"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@400;700&display=swap" rel="stylesheet">
 
+    <link rel="stylesheet" href="{% static 'css/theme.css' %}">
     <style>
-        :root {
-            --bg-main: #060d13;
-            --bg-sidebar: #0b151e;
-            --bg-card: #0d1b26;
-            --bg-modal: #0f2230;
-            --bg-input: #112535;
-            --text-primary: #e2e8f0;
-            --text-muted: #64748b;
-            --border-color: #1e293b;
-            --border-modal: #1d354a;
-        }
         body { font-family: 'Inter', sans-serif; background-color: var(--bg-main); color: var(--text-primary); }
         .logo-text { font-family: 'Rowdies', sans-serif; }
         ::-webkit-scrollbar { width: 6px; height: 6px; }
         ::-webkit-scrollbar-track { background: var(--bg-main); }
         ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
-        .modal-overlay { background: rgba(3, 8, 13, 0.75); }
+        .modal-overlay { background: var(--scrim); }
         @media (max-width: 1024px) {
             aside { position: fixed; left: -100%; top: 0; height: 100vh; z-index: 50; transition: left 0.3s ease; }
             aside.open { left: 0; }
@@ -45,10 +38,12 @@
             width: 100%; background: var(--bg-input); border: 1px solid var(--border-modal); border-radius: 8px;
             padding: 9px 12px; font-size: 13px; color: var(--text-primary); outline: none;
         }
-        .field-input:focus { border-color: #0e7490; }
+        .field-input:focus { border-color: var(--accent-strong); }
     </style>
     <link rel="stylesheet" href="{% static 'css/admin-enhance.css' %}">
     <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
+    <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
+    <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
 </head>
 <body class="flex h-screen overflow-hidden">
 
@@ -63,10 +58,6 @@
             </div>
             <div class="flex items-center gap-4">
                 <span class="bg-cyan-950 text-cyan-400 text-xs px-2.5 py-1 rounded font-bold border border-cyan-800 tracking-wider">{% if request.session.admin_role == 'Staff' %}STAFF{% else %}ADMIN{% endif %}</span>
-                <button class="relative text-slate-400 hover:text-slate-200 p-1">
-                    <i class="fa-solid fa-bell text-lg"></i>
-                    <span class="absolute top-1 right-1 w-2 h-2 bg-amber-500 rounded-full"></span>
-                </button>
                 <div class="w-8 h-8 rounded-full bg-cyan-900 border border-cyan-700 flex items-center justify-center text-xs font-bold text-cyan-200">AD</div>
             </div>
         </header>

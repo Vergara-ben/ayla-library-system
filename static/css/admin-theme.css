@@ -1,153 +1,185 @@
 /* =====================================================================
-   admin-theme.css — Professional visual refresh for the AYLA admin panel.
+   admin-theme.css — shared visual layer for the AYLA admin and library
+   staff panels.
 
-   This is a PRESENTATION-ONLY layer. It changes no HTML structure, ids,
-   classes, or JavaScript, so every existing feature keeps working. It is
-   loaded last (after each page's <style> and admin-enhance.css) so it
+   PRESENTATION ONLY. It changes no HTML structure, ids, classes or
+   JavaScript, so every existing feature keeps working. It is loaded last
+   (after theme.css, each page's <style>, and admin-enhance.css) so it
    composes cleanly on top.
 
-   Strategy:
-   - Re-tune the shared CSS variables (--bg-*, --border-*) that the pages
-     already consume via inline styles, so the whole base palette shifts
-     from one place.
-   - Add depth, refined typography, and consistent control styling on top.
+   All colour comes from theme.css tokens; this file contains no literal
+   colours, so it follows the light/dark switch automatically. The module
+   accent resolves to cyan for the admin panel and violet for library
+   staff without either module needing its own rules.
+
+   Design direction: flat. Panels are separated by a 1px border instead of
+   by shadow or gradient, buttons are solid fills, and hover states change
+   colour rather than position.
    ===================================================================== */
 
-/* ---- 1. Refined palette ------------------------------------------------ */
-:root {
-    --bg-main:      #070c15;
-    --bg-sidebar:   #0a1120;
-    --bg-card:      #0e1626;
-    --bg-modal:     #121d31;
-    --bg-input:     #0b1322;
-    --text-primary: #e9eef7;
-    --text-muted:   #74839c;
-    --border-color: #1b2740;
-    --border-modal: #233252;
+/* ---- 0. Border visibility (WCAG 1.4.11 non-text contrast) -------------
+   The ~700 border-slate-700/NN and border-slate-800/NN utility classes in
+   this markup carry opacity suffixes tuned for a dark background (a hairline
+   glow), which dilutes to ~1.1-1.2:1 on a light one — visually a hint of a
+   border, not a boundary. table cells, cards, inputs and buttons all use
+   this pattern, which is the "borders aren't visible enough" problem.
 
-    --ayla-accent:  #22d3ee;
-    --ayla-accent2: #3b82f6;
-    --ayla-ring:    rgba(34, 211, 238, 0.35);
+   Fix: force every border-slate-700/800 (and divide-slate-800, which
+   generates a border-top on table rows) to the FULL-strength border tone
+   regardless of its own opacity suffix. --tw-slate-700 is tuned per theme
+   to clear 3:1 against every surface it sits on. Hover/focus states that
+   still declare their own colour (e.g. focus:border-cyan-700) are separate,
+   higher-specificity rules and are unaffected. */
+[class*="border-slate-700"],
+[class*="border-slate-800"] {
+    border-color: rgb(var(--tw-slate-700)) !important;
+}
+[class*="divide-slate-700"] > :not([hidden]) ~ :not([hidden]),
+[class*="divide-slate-800"] > :not([hidden]) ~ :not([hidden]) {
+    border-color: rgb(var(--tw-slate-700)) !important;
+}
+/* The one deliberate hover-brighten (shelf tree rows) still gets a visible
+   change on hover, now against the accent instead of a barely-there tint. */
+.hover\:border-slate-700:hover,
+.hover\:border-slate-800:hover {
+    border-color: var(--accent) !important;
 }
 
-/* ---- 2. Base canvas: crisp text + soft ambient depth ------------------- */
-html { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+/* Same fix, for every status/accent colour. Shades 700-900 in each ramp are
+   deliberately pale — the FILL a badge or a tinted secondary button sits on
+   (bg-cyan-700/30, bg-rose-800/10, …) — but the pre-existing markup also
+   uses those same shades as borders on cards, alert boxes, avatars and
+   secondary buttons, where a pale wash reads as no border at all. Redirect
+   border/divide usage to each family's own 500 shade, which clears 3:1
+   against every surface in both themes while keeping its hue — a cyan
+   border still reads as "cyan", just strong enough to see. */
+[class*="border-cyan-8"],    [class*="border-cyan-9"],
+[class*="divide-cyan-8"],    [class*="divide-cyan-9"] {
+    border-color: rgb(var(--tw-cyan-500)) !important;
+}
+/* violet/rose/blue also need their 700 shade caught, not just 800-900: it
+   passes in light mode (5.7-7.1:1) but falls short in dark mode (2.5-2.9:1)
+   -- the two themes were tuned independently and this trio didn't line up. */
+[class*="border-violet-7"],  [class*="border-violet-8"],  [class*="border-violet-9"],
+[class*="divide-violet-7"],  [class*="divide-violet-8"],  [class*="divide-violet-9"] {
+    border-color: rgb(var(--tw-violet-500)) !important;
+}
+[class*="border-emerald-8"], [class*="border-emerald-9"],
+[class*="divide-emerald-8"], [class*="divide-emerald-9"] {
+    border-color: rgb(var(--tw-emerald-500)) !important;
+}
+[class*="border-rose-7"],    [class*="border-rose-8"],    [class*="border-rose-9"],
+[class*="divide-rose-7"],    [class*="divide-rose-8"],    [class*="divide-rose-9"] {
+    border-color: rgb(var(--tw-rose-500)) !important;
+}
+[class*="border-amber-8"],   [class*="border-amber-9"],
+[class*="divide-amber-8"],   [class*="divide-amber-9"] {
+    border-color: rgb(var(--tw-amber-500)) !important;
+}
+[class*="border-blue-7"],    [class*="border-blue-8"],    [class*="border-blue-9"],
+[class*="divide-blue-7"],    [class*="divide-blue-8"],    [class*="divide-blue-9"] {
+    border-color: rgb(var(--tw-blue-500)) !important;
+}
+[class*="border-teal-8"],    [class*="border-teal-9"],
+[class*="divide-teal-8"],    [class*="divide-teal-9"] {
+    border-color: rgb(var(--tw-teal-500)) !important;
+}
 
+/* ---- 1. Base canvas ---------------------------------------------------- */
 body {
     background-color: var(--bg-main) !important;
-    background-image:
-        radial-gradient(1100px 560px at 82% -8%, rgba(34, 211, 238, 0.06), transparent 60%),
-        radial-gradient(820px 460px at -8% 108%, rgba(59, 130, 246, 0.05), transparent 58%) !important;
-    background-attachment: fixed;
+    background-image: none !important;   /* was two ambient radial glows */
 }
 
 h1, h2, h3, h4 { letter-spacing: -0.012em; }
 
-/* ---- 3. Sidebar -------------------------------------------------------- */
+/* ---- 2. Sidebar -------------------------------------------------------- */
 aside nav a {
-    border-radius: 10px;
-    transition: background-color .18s ease, color .18s ease, transform .18s ease;
+    border-radius: var(--radius);
+    transition: background-color .15s ease, color .15s ease;
 }
-aside nav a:hover { transform: translateX(2px); }
 
 /* Active item (Tailwind active class or the aria-current set at runtime) */
 aside nav a[aria-current="page"],
 aside nav a.bg-slate-800\/50 {
-    background-image: linear-gradient(90deg, rgba(34, 211, 238, 0.16), rgba(34, 211, 238, 0.03)) !important;
-    border-color: rgba(34, 211, 238, 0.32) !important;
-    box-shadow: inset 2px 0 0 0 var(--ayla-accent);
+    background: var(--tint-accent) !important;
+    border-color: var(--accent-border) !important;
+    box-shadow: inset 2px 0 0 0 var(--accent);
 }
 
-/* Brand mark glow */
-aside .bg-cyan-950\/50 {
-    box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.16), 0 8px 18px -10px rgba(34, 211, 238, 0.5);
+/* Brand mark */
+aside .bg-cyan-950\/50, aside .bg-violet-950\/50 {
+    box-shadow: none;
 }
 
-/* ---- 4. Cards & panels (elements carrying the card background) --------- */
+/* ---- 3. Cards & panels ------------------------------------------------- */
 [style*="--bg-card"] {
-    border-radius: 16px;
-    box-shadow:
-        0 1px 0 0 rgba(255, 255, 255, 0.025) inset,
-        0 18px 40px -24px rgba(0, 0, 0, 0.85);
-    transition: border-color .2s ease, box-shadow .2s ease;
+    border-radius: var(--radius-lg);
+    box-shadow: none;
+    transition: border-color .15s ease;
 }
 
-/* ---- 5. Inputs, selects, textareas — unified focus ------------------- */
+/* ---- 4. Inputs, selects, textareas — unified focus -------------------- */
 input:not([type=checkbox]):not([type=radio]):not([type=file]):focus,
 select:focus,
 textarea:focus {
-    border-color: var(--ayla-accent) !important;
-    box-shadow: 0 0 0 3px var(--ayla-ring) !important;
+    border-color: var(--accent) !important;
+    box-shadow: 0 0 0 3px var(--accent-ring) !important;
 }
-::placeholder { color: rgba(148, 163, 184, 0.5) !important; }
+::placeholder { color: var(--text-muted) !important; opacity: .75; }
 
-/* ---- 6. Primary (cyan) buttons: gradient + lift ----------------------- */
-.bg-cyan-700, .bg-cyan-600 {
-    background-image: linear-gradient(180deg, #22a6c9, #0e7490) !important;
-    box-shadow: 0 8px 20px -10px rgba(34, 211, 238, 0.5);
-    transition: transform .15s ease, filter .15s ease, box-shadow .15s ease;
+/* ---- 5. Primary buttons: solid fill, no gradient or lift -------------- */
+.bg-cyan-700, .bg-cyan-600, .bg-violet-700, .bg-violet-600 {
+    background-image: none !important;
+    box-shadow: none;
+    transition: background-color .15s ease, border-color .15s ease;
 }
-.bg-cyan-700:hover, .bg-cyan-600:hover { filter: brightness(1.08); transform: translateY(-1px); }
+.bg-cyan-700:hover, .bg-cyan-600:hover,
+.bg-violet-700:hover, .bg-violet-600:hover {
+    background-color: var(--accent-strong) !important;
+}
 
-/* Tinted secondary cyan chips/buttons get a subtle inner ring */
-.bg-cyan-700\/30 { box-shadow: inset 0 0 0 1px rgba(34, 211, 238, 0.14); }
+/* Tinted secondary chips */
+.bg-cyan-700\/30, .bg-violet-700\/30 { box-shadow: none; }
 
-/* ---- 7. Tables -------------------------------------------------------- */
-table thead tr { background: rgba(255, 255, 255, 0.018) !important; }
+/* ---- 6. Tables --------------------------------------------------------- */
+table thead tr { background: var(--bg-subtle) !important; }
 table thead th { letter-spacing: 0.08em; }
 table tbody tr { transition: background-color .12s ease; }
-table tbody tr:hover { background: rgba(34, 211, 238, 0.045) !important; }
+table tbody tr:hover { background: var(--bg-subtle) !important; }
 
-/* ---- 8. Modals: deeper, blurred backdrop ------------------------------ */
-.bg-black\/60 {
-    background: rgba(3, 7, 13, 0.66) !important;
-    backdrop-filter: blur(3px);
-    -webkit-backdrop-filter: blur(3px);
-}
+/* ---- 7. Modals — the one place depth is allowed ---------------------- */
 [style*="--bg-modal"] {
-    border-radius: 20px;
-    box-shadow:
-        0 30px 70px -30px rgba(0, 0, 0, 0.92),
-        0 0 0 1px rgba(255, 255, 255, 0.03) inset;
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-pop);
 }
 
-/* ---- 9. Scrollbars ---------------------------------------------------- */
-::-webkit-scrollbar-thumb { background: #243352; border-radius: 4px; }
-::-webkit-scrollbar-thumb:hover { background: #2d3f5e; }
+/* ---- 8. Scrollbars ----------------------------------------------------- */
+::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
 
-/* ---- 10. Premium micro-interactions (parity with the patron polish) ---
-   Presentation-only: adds gentle motion/depth without touching markup,
-   classes, or behaviour. Accent stays cyan to keep the admin identity. */
-:root { --adm-ease: cubic-bezier(.22, .61, .36, 1); }
-
-/* Consistent, smooth transitions on interactive controls */
+/* ---- 9. Interaction: colour, not motion ------------------------------- */
 button, a, .stat-card, [role="button"] {
-    transition: transform .18s var(--adm-ease), box-shadow .18s ease,
-                filter .18s ease, border-color .18s ease,
-                background-color .18s ease, color .18s ease;
+    transition: background-color .15s ease, border-color .15s ease,
+                color .15s ease;
 }
 
-/* Small stat / summary cards get a gentle hover lift (big table panels,
-   which have no `p-5`, are intentionally excluded so they stay still). */
 .stat-card:hover,
 .p-5.rounded-xl[style*="--bg-card"]:hover {
-    transform: translateY(-2px);
-    border-color: rgba(34, 211, 238, .30) !important;
-    box-shadow:
-        0 24px 56px -30px rgba(0, 0, 0, .9),
-        0 0 0 1px rgba(34, 211, 238, .06) inset;
+    border-color: var(--accent) !important;
 }
-
-/* Tactile press feedback on buttons */
-.bg-cyan-700:active, .bg-cyan-600:active,
-.bg-cyan-700\/30:active, button:active { transform: translateY(0) scale(.98); }
-
-/* Row action icon-buttons lift slightly on hover */
-td .w-7:hover, td .w-8:hover { transform: translateY(-1px); }
 
 /* Empty-state table rows: a touch more breathing room */
 td[colspan] { padding-top: 2.25rem !important; padding-bottom: 2.25rem !important; }
 
-/* Sidebar nav icons nudge on hover for a livelier feel */
-aside nav a .menu-icon, aside nav a i { transition: transform .18s var(--adm-ease); }
-aside nav a:hover .menu-icon, aside nav a:hover i { transform: scale(1.12); }
+/* ---- 10. Sidebar theme switch ----------------------------------------- */
+aside .theme-toggle.is-wide {
+    color: rgb(var(--tw-slate-400));
+    border-color: transparent;
+    margin-bottom: 2px;
+}
+aside .theme-toggle.is-wide:hover {
+    background: var(--bg-subtle);
+    color: var(--accent);
+    border-color: transparent;
+}

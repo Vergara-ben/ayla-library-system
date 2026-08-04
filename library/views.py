@@ -7,7 +7,6 @@ from django.conf import settings
 from django.core.paginator import Paginator
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
-from urllib.parse import quote
 import json
 
 from uuid import uuid4
@@ -56,7 +55,7 @@ from .emails import (
     registration_rejected_email,
 )
 from .reports import REPORT_TYPES, parse_date_range, build_report, render_report_pdf, render_report_excel
-from .models import Book, Patron, PatronLog, Transaction, User, ShelfLevel, Donation, Announcement, FloorPlan, Shelf, Room, Waypoint, BLEBeacon, WaypointConnection, SystemLog, BorrowingRule
+from .models import Book, Patron, PatronLog, Transaction, User, ShelfLevel, Donation, Announcement, FloorPlan, Shelf, Room, Door, Waypoint, BLEBeacon, WaypointConnection, SystemLog, BorrowingRule
 
 # Patron views
 def patron_login(request):
@@ -1257,8 +1256,7 @@ def staff_transaction(request):
     return _transaction_page(request, 'library_staff/transaction.html')
 
 
-@admin_only_required
-def admin_indoor_map(request):
+def _indoor_map_page(request, template):
     # Fetch all floor plans for dropdown selector
     floorplans = FloorPlan.objects.all().order_by('-uploaded_at')
     
@@ -1298,6 +1296,11 @@ def admin_indoor_map(request):
                 rooms_data.append({
                     'id': room.room_id,
                     'name': room.name,
+                    'geometry': room.geometry or None,
+                    'doors': [
+                        _door_payload(d)
+                        for d in Door.objects.filter(room=room, is_active=True)
+                    ],
                     'x': room.map_x,
                     'y': room.map_y,
                     'description': room.description or ''
@@ -1312,6 +1315,9 @@ def admin_indoor_map(request):
                     'name': shelf.name,
                     'x': shelf.map_x,
                     'y': shelf.map_y,
+                    'rotation': shelf.rotation or 0,
+                    'width': shelf.width or 46,
+                    'depth': shelf.depth or 14,
                     'description': shelf.description or '',
                     'room_id': shelf.room.room_id if shelf.room else None
                 })
@@ -1331,22 +1337,12 @@ def admin_indoor_map(request):
     # Serialize floor plan for JavaScript
     floorplan_data = None
     if floorplan:
-        # Construct full image URL with MEDIA_URL prefix
-        image_url = floorplan.image_url
-        if image_url:
-            # Remove leading slash if present to avoid double slashes
-            if image_url.startswith('/'):
-                image_url = image_url[1:]
-            # URL-encode the filename to handle spaces and special characters
-            image_url = quote(image_url)
-            # Always prepend MEDIA_URL to ensure absolute path
-            image_url = f'{settings.MEDIA_URL}{image_url}'
-        else:
-            image_url = ''
-        
+        canvas_width, canvas_height = _floorplan_canvas_size(floorplan)
         floorplan_data = {
             'id': floorplan.floor_plan_id,
-            'image_url': image_url,
+            'name': floorplan.name,
+            'canvas_width': canvas_width,
+            'canvas_height': canvas_height,
             'is_active': floorplan.is_active,
             'uploaded_at': floorplan.uploaded_at.isoformat() if floorplan.uploaded_at else None,
             'renovation_notice': floorplan.renovation_notice,
@@ -1358,14 +1354,28 @@ def admin_indoor_map(request):
     for fp in floorplans:
         floorplans_list.append({
             'id': fp.floor_plan_id,
-            'image_url': fp.image_url,
+            'name': fp.name,
             'is_active': fp.is_active,
             'uploaded_at': fp.uploaded_at.isoformat() if fp.uploaded_at else None
         })
     
     # Pending transactions count for badge
     pending_transactions_count = Transaction.objects.filter(transaction_type='Borrow', return_date__isnull=True).count()
-    
+
+    # A specific shelf to land on, e.g. arriving from "Locate on Map" on a
+    # book's detail modal. `book` is a display label only (not looked up).
+    target_shelf = None
+    shelf_param = request.GET.get('shelf')
+    if shelf_param:
+        shelf = Shelf.objects.filter(shelf_id=shelf_param, room__floor_plan=floorplan).select_related('room').first()
+        if shelf:
+            target_shelf = {
+                'id': shelf.shelf_id,
+                'name': shelf.name,
+                'room_name': shelf.room.name if shelf.room else None,
+                'book': request.GET.get('book') or '',
+            }
+
     context = {
         'floorplan': json.dumps(floorplan_data) if floorplan_data else 'null',
         'floorplans': json.dumps(floorplans_list),
@@ -1374,9 +1384,20 @@ def admin_indoor_map(request):
         'waypoints': json.dumps(waypoints_data),
         'no_floorplans': no_floorplans,
         'pending_transactions_count': pending_transactions_count,
+        'target_shelf': json.dumps(target_shelf) if target_shelf else 'null',
     }
-    
-    return render(request, 'admin/indoormap.html', context)
+
+    return render(request, template, context)
+
+
+@admin_only_required
+def admin_indoor_map(request):
+    return _indoor_map_page(request, 'admin/indoormap.html')
+
+
+@staff_only_required
+def staff_indoor_map(request):
+    return _indoor_map_page(request, 'library_staff/indoormap.html')
 
 
 def _logs_page(request, template):
@@ -1468,6 +1489,7 @@ def admin_book_details_ajax(request, book_id):
         'qr_code': book.qr_code,
         'category': book.shelf_level.category if book.shelf_level else 'N/A',
         'shelf': book.shelf_level.shelf.name if (book.shelf_level and book.shelf_level.shelf) else 'N/A',
+        'shelf_id': book.shelf_level.shelf.shelf_id if (book.shelf_level and book.shelf_level.shelf) else None,
         'shelf_level': (f'Level {book.shelf_level.level_number}' if book.shelf_level else 'N/A'),
         'copies': Book.objects.filter(title=book.title, author=book.author).count(),
     }
@@ -2188,40 +2210,55 @@ def delete_announcement(request):
 @admin_only_required
 def floorplan_management(request):
     floorplans = FloorPlan.objects.prefetch_related('room_set__shelf_set__shelflevel_set').order_by('-uploaded_at')
-    
+
     if request.method == 'POST':
-        image = request.FILES.get('image')
-        
-        if not image:
-            error = 'Image file is required.'
+        # A floor plan is a blank vector canvas — the Administrator draws the
+        # rooms on it. No image is uploaded.
+        name = (request.POST.get('name') or '').strip()
+        if not name:
+            error = 'Floor plan name is required.'
             return render(request, 'admin/floorplanadmin.html', {'floorplans': floorplans, 'error': error})
-        
-        # Validate file type
-        allowed_extensions = ['.png', '.jpg', '.jpeg']
-        if not any(image.name.lower().endswith(ext) for ext in allowed_extensions):
-            error = 'Only PNG, JPG, and JPEG files are allowed.'
+
+        try:
+            canvas_width = float(request.POST.get('canvas_width') or 1000)
+            canvas_height = float(request.POST.get('canvas_height') or 800)
+        except (TypeError, ValueError):
+            error = 'Canvas width and height must be numbers.'
             return render(request, 'admin/floorplanadmin.html', {'floorplans': floorplans, 'error': error})
-        
-        # Save image to media/floorplans/
-        floorplan_dir = os.path.join(settings.MEDIA_ROOT, 'floorplans')
-        os.makedirs(floorplan_dir, exist_ok=True)
-        
-        image_filename = f'floorplan_{timezone.now().strftime("%Y%m%d_%H%M%S")}_{image.name}'
-        image_path = os.path.join(floorplan_dir, image_filename)
-        
-        with open(image_path, 'wb+') as destination:
-            for chunk in image.chunks():
-                destination.write(chunk)
-        
+
+        if not (100 <= canvas_width <= 10000) or not (100 <= canvas_height <= 10000):
+            error = 'Canvas width and height must be between 100 and 10000.'
+            return render(request, 'admin/floorplanadmin.html', {'floorplans': floorplans, 'error': error})
+
         FloorPlan.objects.create(
-            image_url=f'floorplans/{image_filename}',
+            name=name,
+            canvas_width=canvas_width,
+            canvas_height=canvas_height,
             is_active=False,
-            uploaded_at=timezone.now()
         )
-        
+
         return redirect('floorplan_management')
-    
-    return render(request, 'admin/floorplanadmin.html', {'floorplans': floorplans})
+
+    # Which plan the map editor opens on: ?plan=<id>, else the live one, else
+    # the newest. A draft can be drawn in full before it is made active.
+    selected = None
+    requested = request.GET.get('plan')
+    if requested:
+        try:
+            selected = floorplans.filter(floor_plan_id=int(requested)).first()
+        except (TypeError, ValueError):
+            selected = None
+    if selected is None:
+        selected = floorplans.filter(is_active=True).first() or floorplans.first()
+
+    return render(request, 'admin/floorplanadmin.html', {
+        'floorplans': floorplans,
+        'selected_plan_id': selected.floor_plan_id if selected else None,
+        'active_count': floorplans.filter(is_active=True).count(),
+        'renovation_count': floorplans.exclude(
+            Q(renovation_notice__isnull=True) | Q(renovation_notice='')
+        ).count(),
+    })
 
 
 @admin_only_required
@@ -2753,20 +2790,29 @@ def add_room(request):
     map_x = request.POST.get('map_x', 0)
     map_y = request.POST.get('map_y', 0)
     description = request.POST.get('description', '')
-    
+
     if not floor_plan_id or not name:
         return JsonResponse({'success': False, 'error': 'floor_plan_id and name are required'})
-    
+
+    # Rooms are drawn as polygons on the vector canvas; the centroid becomes the
+    # label anchor so map_x/map_y stay meaningful for everything that reads them.
+    geometry, geo_error = _parse_geometry(request.POST.get('geometry'))
+    if geo_error:
+        return JsonResponse({'success': False, 'error': geo_error})
+    if geometry:
+        map_x, map_y = _polygon_centroid(geometry)
+
     try:
         floor_plan = FloorPlan.objects.get(floor_plan_id=floor_plan_id)
         room = Room.objects.create(
             floor_plan=floor_plan,
             name=name,
+            geometry=geometry,
             map_x=float(map_x) if map_x else 0,
             map_y=float(map_y) if map_y else 0,
             description=description
         )
-        return JsonResponse({'success': True, 'room_id': room.room_id})
+        return JsonResponse({'success': True, 'room_id': room.room_id, 'geometry': room.geometry})
     except FloorPlan.DoesNotExist:
         return JsonResponse({'success': False, 'error': 'Floor plan not found'})
 
@@ -2784,19 +2830,29 @@ def edit_room(request):
     
     if not room_id:
         return JsonResponse({'success': False, 'error': 'room_id is required'})
-    
+
+    # Reshaping a room replaces its polygon only — neighbouring rooms are
+    # independent shapes and are never touched.
+    geometry, geo_error = _parse_geometry(request.POST.get('geometry'))
+    if geo_error:
+        return JsonResponse({'success': False, 'error': geo_error})
+
     try:
         room = Room.objects.get(room_id=room_id)
         if name:
             room.name = name
-        if map_x is not None:
-            room.map_x = float(map_x)
-        if map_y is not None:
-            room.map_y = float(map_y)
+        if geometry:
+            room.geometry = geometry
+            room.map_x, room.map_y = _polygon_centroid(geometry)
+        else:
+            if map_x is not None:
+                room.map_x = float(map_x)
+            if map_y is not None:
+                room.map_y = float(map_y)
         if description is not None:
             room.description = description
         room.save()
-        return JsonResponse({'success': True})
+        return JsonResponse({'success': True, 'geometry': room.geometry})
     except Room.DoesNotExist:
         return JsonResponse({'success': False, 'error': 'Room not found'})
 
@@ -2830,13 +2886,21 @@ def add_shelf(request):
     if not room_id or not name:
         return JsonResponse({'success': False, 'error': 'room_id and name are required'})
     
+    # A shelf added from Shelf Manager has no position yet: it stays unplaced
+    # until the Administrator puts it on the floor plan (Fig. 48).
+    try:
+        x = float(map_x) if map_x not in (None, '', '0', 0) else None
+        y = float(map_y) if map_y not in (None, '', '0', 0) else None
+    except (TypeError, ValueError):
+        x = y = None
+
     try:
         room = Room.objects.get(room_id=room_id)
         shelf = Shelf.objects.create(
             room=room,
             name=name,
-            map_x=float(map_x) if map_x else 0,
-            map_y=float(map_y) if map_y else 0,
+            map_x=x,
+            map_y=y,
             description=description
         )
         return JsonResponse({'success': True, 'shelf_id': shelf.shelf_id})
@@ -2872,6 +2936,280 @@ def edit_shelf(request):
         return JsonResponse({'success': True})
     except Shelf.DoesNotExist:
         return JsonResponse({'success': False, 'error': 'Shelf not found'})
+
+
+# ─── SHELF PLACEMENT ON THE FLOOR PLAN ────────────────────────────────
+# One endpoint per Administrator action so each traces to its activity diagram:
+# Place Shelf (Fig. 48), Move Shelf (Fig. 49), Rotate Shelf (Fig. 50) and
+# Unplace Shelf (Fig. 51). Confirmation happens in the UI before these are hit.
+
+def _set_shelf_position(request, action):
+    """Shared body for Place Shelf and Move Shelf."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
+
+    shelf_id = request.POST.get('shelf_id')
+    if not shelf_id:
+        return JsonResponse({'success': False, 'error': 'shelf_id is required'})
+
+    try:
+        map_x = float(request.POST.get('map_x'))
+        map_y = float(request.POST.get('map_y'))
+    except (TypeError, ValueError):
+        return JsonResponse({'success': False, 'error': 'map_x and map_y are required'})
+
+    shelf = Shelf.objects.filter(shelf_id=shelf_id).first()
+    if shelf is None:
+        return JsonResponse({'success': False, 'error': 'Shelf not found'})
+
+    shelf.map_x, shelf.map_y = map_x, map_y
+    shelf.save(update_fields=['map_x', 'map_y'])
+    log_admin_action(request, action, 'Shelf', shelf.shelf_id,
+                     f'{shelf.name} {action.lower()} at ({map_x:.0f}, {map_y:.0f})')
+    return JsonResponse({'success': True, 'map_x': shelf.map_x, 'map_y': shelf.map_y})
+
+
+@admin_only_required
+def place_shelf(request):
+    """Fig. 48 — position a shelf on the floor plan for the first time."""
+    return _set_shelf_position(request, 'Place')
+
+
+@admin_only_required
+def move_shelf(request):
+    """Fig. 49 — move an already-placed shelf to a new position."""
+    return _set_shelf_position(request, 'Move')
+
+
+@admin_only_required
+def rotate_shelf(request):
+    """Fig. 50 — store a shelf's orientation so the map matches the real aisle."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
+
+    shelf_id = request.POST.get('shelf_id')
+    if not shelf_id:
+        return JsonResponse({'success': False, 'error': 'shelf_id is required'})
+
+    try:
+        rotation = float(request.POST.get('rotation'))
+    except (TypeError, ValueError):
+        return JsonResponse({'success': False, 'error': 'rotation must be a number'})
+
+    shelf = Shelf.objects.filter(shelf_id=shelf_id).first()
+    if shelf is None:
+        return JsonResponse({'success': False, 'error': 'Shelf not found'})
+
+    shelf.rotation = rotation % 360        # keep it in 0–359 whatever is sent
+    shelf.save(update_fields=['rotation'])
+    log_admin_action(request, 'Rotate', 'Shelf', shelf.shelf_id,
+                     f'{shelf.name} rotated to {shelf.rotation:.0f}°')
+    return JsonResponse({'success': True, 'rotation': shelf.rotation})
+
+
+# ─── DOORS ON ROOM WALLS ──────────────────────────────────────────────
+def _snap_to_polygon_edge(points, x, y):
+    """Project (x, y) onto the nearest edge of a polygon.
+
+    Returns (snapped_x, snapped_y, bearing_degrees). Doing this server-side
+    keeps a door genuinely on its wall regardless of how imprecisely the
+    Administrator clicked.
+    """
+    best = None
+    count = len(points)
+    for i in range(count):
+        ax, ay = points[i]
+        bx, by = points[(i + 1) % count]
+        dx, dy = bx - ax, by - ay
+        seg_len_sq = dx * dx + dy * dy
+        if seg_len_sq < 1e-9:
+            continue
+        # Parametric position of the closest point, clamped to the segment.
+        t = ((x - ax) * dx + (y - ay) * dy) / seg_len_sq
+        t = max(0.0, min(1.0, t))
+        px, py = ax + t * dx, ay + t * dy
+        dist_sq = (x - px) ** 2 + (y - py) ** 2
+        if best is None or dist_sq < best[0]:
+            bearing = math.degrees(math.atan2(dy, dx)) % 360
+            best = (dist_sq, px, py, bearing)
+
+    if best is None:
+        return x, y, 0.0
+    return best[1], best[2], best[3]
+
+
+@admin_only_required
+def add_door(request):
+    """Place a door on a room's wall, snapped to the nearest edge."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
+
+    room_id = request.POST.get('room_id')
+    if not room_id:
+        return JsonResponse({'success': False, 'error': 'room_id is required'})
+
+    try:
+        click_x = float(request.POST.get('map_x'))
+        click_y = float(request.POST.get('map_y'))
+    except (TypeError, ValueError):
+        return JsonResponse({'success': False, 'error': 'map_x and map_y are required'})
+
+    try:
+        width = float(request.POST.get('width') or 28)
+    except (TypeError, ValueError):
+        width = 28.0
+    if not (6 <= width <= 400):
+        return JsonResponse({'success': False, 'error': 'Door width must be between 6 and 400'})
+
+    room = Room.objects.filter(room_id=room_id).first()
+    if room is None:
+        return JsonResponse({'success': False, 'error': 'Room not found'})
+    if not room.geometry or len(room.geometry) < 3:
+        return JsonResponse({'success': False, 'error': 'Draw the room shape before adding a door'})
+
+    x, y, bearing = _snap_to_polygon_edge(room.geometry, click_x, click_y)
+
+    swing = -1 if request.POST.get('swing') == '-1' else 1
+    door = Door.objects.create(
+        room=room, map_x=x, map_y=y, width=width, rotation=bearing,
+        swing=swing, label=(request.POST.get('label') or '').strip() or None,
+    )
+    log_admin_action(request, 'Add', 'Door', door.door_id,
+                     f'Door on {room.name} at ({x:.0f}, {y:.0f})')
+    return JsonResponse({'success': True, 'door': _door_payload(door)})
+
+
+@admin_only_required
+def move_door(request):
+    """Reposition an existing door after a drag along its wall.
+
+    Re-snaps to the room's nearest edge server-side, same as placement —
+    the client only constrains the drag to look right in real time; the
+    saved position always comes from the authoritative geometry.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
+
+    door = Door.objects.filter(door_id=request.POST.get('door_id')).select_related('room').first()
+    if door is None:
+        return JsonResponse({'success': False, 'error': 'Door not found'})
+
+    try:
+        drag_x = float(request.POST.get('map_x'))
+        drag_y = float(request.POST.get('map_y'))
+    except (TypeError, ValueError):
+        return JsonResponse({'success': False, 'error': 'map_x and map_y are required'})
+
+    room = door.room
+    if not room.geometry or len(room.geometry) < 3:
+        return JsonResponse({'success': False, 'error': 'This room has no shape to snap to'})
+
+    x, y, bearing = _snap_to_polygon_edge(room.geometry, drag_x, drag_y)
+    door.map_x, door.map_y, door.rotation = x, y, bearing
+    door.save(update_fields=['map_x', 'map_y', 'rotation'])
+    return JsonResponse({'success': True, 'x': door.map_x, 'y': door.map_y, 'rotation': door.rotation})
+
+
+@admin_only_required
+def delete_door(request):
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
+
+    door = Door.objects.filter(door_id=request.POST.get('door_id')).select_related('room').first()
+    if door is None:
+        return JsonResponse({'success': False, 'error': 'Door not found'})
+
+    room_name, door_id = door.room.name, door.door_id
+    door.delete()
+    log_admin_action(request, 'Delete', 'Door', door_id, f'Door removed from {room_name}')
+    return JsonResponse({'success': True})
+
+
+@admin_only_required
+def flip_door(request):
+    """Reverse which way a door swings."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
+
+    door = Door.objects.filter(door_id=request.POST.get('door_id')).first()
+    if door is None:
+        return JsonResponse({'success': False, 'error': 'Door not found'})
+
+    door.swing = -1 if door.swing >= 0 else 1
+    door.save(update_fields=['swing'])
+    return JsonResponse({'success': True, 'swing': door.swing})
+
+
+@admin_only_required
+def resize_shelf(request):
+    """Set a shelf's footprint. Shelves in the library are not all one size.
+
+    Dragging a resize handle on anything but a corner-preserving axis shifts
+    the shelf's centre (e.g. pulling the right edge out while the left edge
+    stays put moves the centre right by half the delta) — map_x/map_y are
+    therefore optional and, when sent, are saved in the same call so the
+    shape never visibly snaps back before the recentred position lands.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
+
+    shelf_id = request.POST.get('shelf_id')
+    if not shelf_id:
+        return JsonResponse({'success': False, 'error': 'shelf_id is required'})
+
+    try:
+        width = float(request.POST.get('width'))
+        depth = float(request.POST.get('depth'))
+    except (TypeError, ValueError):
+        return JsonResponse({'success': False, 'error': 'width and depth must be numbers'})
+
+    if not (4 <= width <= 2000) or not (4 <= depth <= 2000):
+        return JsonResponse({'success': False, 'error': 'Width and depth must be between 4 and 2000'})
+
+    map_x_raw, map_y_raw = request.POST.get('map_x'), request.POST.get('map_y')
+    new_x = new_y = None
+    if map_x_raw is not None and map_y_raw is not None:
+        try:
+            new_x, new_y = float(map_x_raw), float(map_y_raw)
+        except (TypeError, ValueError):
+            return JsonResponse({'success': False, 'error': 'map_x and map_y must be numbers'})
+
+    shelf = Shelf.objects.filter(shelf_id=shelf_id).first()
+    if shelf is None:
+        return JsonResponse({'success': False, 'error': 'Shelf not found'})
+
+    fields = ['width', 'depth']
+    shelf.width, shelf.depth = width, depth
+    if new_x is not None:
+        shelf.map_x, shelf.map_y = new_x, new_y
+        fields += ['map_x', 'map_y']
+    shelf.save(update_fields=fields)
+    log_admin_action(request, 'Resize', 'Shelf', shelf.shelf_id,
+                     f'{shelf.name} resized to {width:.0f} x {depth:.0f}')
+    return JsonResponse({'success': True, 'width': shelf.width, 'depth': shelf.depth,
+                         'map_x': shelf.map_x, 'map_y': shelf.map_y})
+
+
+@admin_only_required
+def unplace_shelf(request):
+    """Fig. 51 — take a shelf off the map while keeping its record and books."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
+
+    shelf_id = request.POST.get('shelf_id')
+    if not shelf_id:
+        return JsonResponse({'success': False, 'error': 'shelf_id is required'})
+
+    shelf = Shelf.objects.filter(shelf_id=shelf_id).first()
+    if shelf is None:
+        return JsonResponse({'success': False, 'error': 'Shelf not found'})
+
+    shelf.map_x = None
+    shelf.map_y = None
+    shelf.save(update_fields=['map_x', 'map_y'])
+    log_admin_action(request, 'Unplace', 'Shelf', shelf.shelf_id,
+                     f'{shelf.name} removed from the floor plan')
+    return JsonResponse({'success': True})
 
 
 @admin_login_required
@@ -2983,39 +3321,132 @@ def toggle_active(request):
 
 
 # ─── MAP CONFIGURATION: BEACONS & WAYPOINTS ──────────────────────
-def _floorplan_media_url(floor_plan):
-    """Build the public MEDIA URL for a floor plan image (matches admin_indoor_map)."""
-    image_url = floor_plan.image_url or ''
-    if not image_url:
-        return ''
-    if image_url.startswith('/'):
-        image_url = image_url[1:]
-    return f'{settings.MEDIA_URL}{quote(image_url)}'
+def _floorplan_canvas_size(floor_plan):
+    """Return the (width, height) of the floor plan's drawing canvas.
+
+    Floor plans are vector canvases, not images: every map_x/map_y stored for
+    rooms, shelves, waypoints and beacons is expressed in this coordinate space.
+    """
+    return float(floor_plan.canvas_width or 1000), float(floor_plan.canvas_height or 800)
 
 
-def _floorplan_image_size(floor_plan):
-    """Return (width, height) in pixels of the floor plan image, or (None, None)."""
-    if not floor_plan.image_url:
+def _door_payload(door):
+    return {
+        'door_id': door.door_id,
+        'room_id': door.room_id,
+        'x': door.map_x,
+        'y': door.map_y,
+        'width': door.width or 28,
+        'rotation': door.rotation or 0,
+        'swing': door.swing if door.swing in (1, -1) else 1,
+        'label': door.label or '',
+    }
+
+
+def _room_payload(room, doors_by_room=None):
+    """Serialise a room including its drawn polygon (may be None if never drawn)."""
+    doors = (doors_by_room or {}).get(room.room_id, [])
+    return {
+        'room_id': room.room_id,
+        'name': room.name,
+        'geometry': room.geometry or None,
+        'map_x': room.map_x,
+        'map_y': room.map_y,
+        'doors': [_door_payload(d) for d in doors],
+    }
+
+
+def _doors_for_floorplan(floor_plan, active_only=False):
+    """Group a floor plan's doors by room id, ready for _room_payload."""
+    qs = Door.objects.filter(room__floor_plan=floor_plan)
+    if active_only:
+        qs = qs.filter(is_active=True)
+    grouped = {}
+    for door in qs:
+        grouped.setdefault(door.room_id, []).append(door)
+    return grouped
+
+
+def _polygon_centroid(points):
+    """Area-weighted centroid of a closed polygon, used as the room label anchor.
+
+    Falls back to the arithmetic mean for degenerate (zero-area) input.
+    """
+    if not points:
+        return 0.0, 0.0
+    if len(points) < 3:
+        return (
+            sum(p[0] for p in points) / len(points),
+            sum(p[1] for p in points) / len(points),
+        )
+
+    area = cx = cy = 0.0
+    for i in range(len(points)):
+        x0, y0 = points[i]
+        x1, y1 = points[(i + 1) % len(points)]
+        cross = x0 * y1 - x1 * y0
+        area += cross
+        cx += (x0 + x1) * cross
+        cy += (y0 + y1) * cross
+    area *= 0.5
+
+    if abs(area) < 1e-9:
+        return (
+            sum(p[0] for p in points) / len(points),
+            sum(p[1] for p in points) / len(points),
+        )
+    return cx / (6 * area), cy / (6 * area)
+
+
+def _parse_geometry(raw):
+    """Validate a posted polygon: a list of at least three [x, y] pairs.
+
+    Returns (points, error). Points are floats so the centroid maths is safe.
+    """
+    if raw in (None, ''):
         return None, None
-    rel = floor_plan.image_url.lstrip('/')
-    path = os.path.join(settings.MEDIA_ROOT, rel)
     try:
-        from PIL import Image
-        with Image.open(path) as img:
-            return img.width, img.height
-    except Exception:
-        return None, None
+        data = json.loads(raw) if isinstance(raw, str) else raw
+    except (TypeError, ValueError):
+        return None, 'Geometry must be valid JSON'
+
+    if not isinstance(data, list) or len(data) < 3:
+        return None, 'A room needs at least three points'
+
+    points = []
+    for pair in data:
+        if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+            return None, 'Each geometry point must be an [x, y] pair'
+        try:
+            points.append([float(pair[0]), float(pair[1])])
+        except (TypeError, ValueError):
+            return None, 'Geometry coordinates must be numbers'
+    return points, None
 
 
 @admin_only_required
 def get_map_data(request):
-    """Return the active floor plan plus all its beacons, waypoints, connections
-    and the list of shelves (for the waypoint-link dropdown) as JSON."""
-    floor_plan = FloorPlan.objects.filter(is_active=True).first()
-    if floor_plan is None:
-        return JsonResponse({'success': False, 'has_active': False, 'error': 'No active floor plan'})
+    """Return one floor plan plus its beacons, waypoints, connections and the
+    list of shelves (for the waypoint-link dropdown) as JSON.
 
-    width, height = _floorplan_image_size(floor_plan)
+    Defaults to the active plan, but any plan may be requested by id so the
+    Administrator can draw a new layout before making it live.
+    """
+    requested_id = request.GET.get('floor_plan_id')
+    floor_plan = None
+    if requested_id:
+        try:
+            floor_plan = FloorPlan.objects.filter(floor_plan_id=int(requested_id)).first()
+        except (TypeError, ValueError):
+            floor_plan = None
+    if floor_plan is None:
+        floor_plan = FloorPlan.objects.filter(is_active=True).first()
+    if floor_plan is None:
+        floor_plan = FloorPlan.objects.order_by('-uploaded_at').first()
+    if floor_plan is None:
+        return JsonResponse({'success': False, 'has_active': False, 'error': 'No floor plan yet'})
+
+    width, height = _floorplan_canvas_size(floor_plan)
 
     beacons = [
         {
@@ -3053,15 +3484,19 @@ def get_map_data(request):
         )
     ]
 
+    doors_by_room = _doors_for_floorplan(floor_plan)
     rooms = [
-        {'room_id': r.room_id, 'name': r.name, 'map_x': r.map_x, 'map_y': r.map_y}
+        _room_payload(r, doors_by_room)
         for r in Room.objects.filter(floor_plan=floor_plan)
     ]
 
     shelves = [
         {
             'shelf_id': s.shelf_id, 'name': s.name,
-            'map_x': s.map_x, 'map_y': s.map_y, 'room_id': s.room_id,
+            'map_x': s.map_x, 'map_y': s.map_y, 'rotation': s.rotation or 0,
+            'width': s.width or 46, 'depth': s.depth or 14,
+            'placed': s.map_x is not None and s.map_y is not None,
+            'room_id': s.room_id,
         }
         for s in Shelf.objects.filter(room__floor_plan=floor_plan).order_by('name')
     ]
@@ -3070,9 +3505,10 @@ def get_map_data(request):
         'success': True,
         'has_active': True,
         'floor_plan_id': floor_plan.floor_plan_id,
-        'image_url': _floorplan_media_url(floor_plan),
-        'image_width': width,
-        'image_height': height,
+        'name': floor_plan.name,
+        'is_active': floor_plan.is_active,
+        'canvas_width': width,
+        'canvas_height': height,
         'beacons': beacons,
         'waypoints': waypoints,
         'connections': connections,
@@ -3138,6 +3574,29 @@ def delete_beacon(request):
 
 
 @admin_only_required
+def move_beacon(request):
+    """Reposition an existing beacon after a drag on the map canvas."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
+
+    beacon = BLEBeacon.objects.filter(beacon_id=request.POST.get('beacon_id')).first()
+    if beacon is None:
+        return JsonResponse({'success': False, 'error': 'Beacon not found'})
+
+    try:
+        map_x = float(request.POST.get('map_x'))
+        map_y = float(request.POST.get('map_y'))
+    except (TypeError, ValueError):
+        return JsonResponse({'success': False, 'error': 'map_x and map_y are required'})
+
+    beacon.map_x, beacon.map_y = map_x, map_y
+    beacon.save(update_fields=['map_x', 'map_y'])
+    log_admin_action(request, 'Move', 'Beacon', beacon.beacon_id,
+                     f'{beacon.label or beacon.beacon_uuid} moved to ({map_x:.0f}, {map_y:.0f})')
+    return JsonResponse({'success': True, 'map_x': beacon.map_x, 'map_y': beacon.map_y})
+
+
+@admin_only_required
 def add_waypoint(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
@@ -3183,6 +3642,29 @@ def add_waypoint(request):
             'linked_shelf_name': linked_shelf.name if linked_shelf else None,
         },
     })
+
+
+@admin_only_required
+def move_waypoint(request):
+    """Reposition an existing waypoint after a drag on the map canvas."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
+
+    waypoint = Waypoint.objects.filter(waypoint_id=request.POST.get('waypoint_id')).first()
+    if waypoint is None:
+        return JsonResponse({'success': False, 'error': 'Waypoint not found'})
+
+    try:
+        map_x = float(request.POST.get('map_x'))
+        map_y = float(request.POST.get('map_y'))
+    except (TypeError, ValueError):
+        return JsonResponse({'success': False, 'error': 'map_x and map_y are required'})
+
+    waypoint.map_x, waypoint.map_y = map_x, map_y
+    waypoint.save(update_fields=['map_x', 'map_y'])
+    log_admin_action(request, 'Move', 'Waypoint', waypoint.waypoint_id,
+                     f'{waypoint.label or "Waypoint"} moved to ({map_x:.0f}, {map_y:.0f})')
+    return JsonResponse({'success': True, 'map_x': waypoint.map_x, 'map_y': waypoint.map_y})
 
 
 @admin_only_required
@@ -3308,11 +3790,32 @@ def get_patron_map_data(request):
     if floor_plan is None:
         return JsonResponse({'success': False, 'has_active': False, 'error': 'No active floor plan'})
 
-    width, height = _floorplan_image_size(floor_plan)
+    width, height = _floorplan_canvas_size(floor_plan)
 
+    doors_by_room = _doors_for_floorplan(floor_plan, active_only=True)
+    rooms = [
+        _room_payload(r, doors_by_room)
+        for r in Room.objects.filter(floor_plan=floor_plan, is_active=True)
+    ]
+    # Unplaced shelves have no position, so they cannot be drawn or navigated to.
+    shelf_qs = (
+        Shelf.objects
+        .filter(room__floor_plan=floor_plan, is_active=True,
+                map_x__isnull=False, map_y__isnull=False)
+        .prefetch_related('shelflevel_set')
+    )
     shelves = [
-        {'shelf_id': s.shelf_id, 'name': s.name, 'x': s.map_x, 'y': s.map_y}
-        for s in Shelf.objects.filter(room__floor_plan=floor_plan, is_active=True)
+        {
+            'shelf_id': s.shelf_id, 'name': s.name,
+            'x': s.map_x, 'y': s.map_y, 'rotation': s.rotation or 0,
+            'width': s.width or 46, 'depth': s.depth or 14,
+            # Feeds the "section labels" and "shelf level indicators" layers.
+            'levels': [
+                {'level_number': lv.level_number, 'category': lv.category or ''}
+                for lv in s.shelflevel_set.all() if lv.is_active
+            ],
+        }
+        for s in shelf_qs
     ]
     waypoints = [
         {
@@ -3340,10 +3843,11 @@ def get_patron_map_data(request):
         'success': True,
         'has_active': True,
         'floor_plan_id': floor_plan.floor_plan_id,
-        'image_url': _floorplan_media_url(floor_plan),
-        'image_width': width,
-        'image_height': height,
+        'name': floor_plan.name,
+        'canvas_width': width,
+        'canvas_height': height,
         'renovation_notice': floor_plan.renovation_notice or '',
+        'rooms': rooms,
         'shelves': shelves,
         'waypoints': waypoints,
         'beacons': beacons,
@@ -3408,6 +3912,12 @@ def get_navigation_route(request):
         linked = Waypoint.objects.filter(floor_plan=floor_plan, linked_shelf=target_shelf).first()
         if linked is not None:
             goal_wp = linked.waypoint_id
+        elif target_shelf.map_x is None or target_shelf.map_y is None:
+            return JsonResponse({
+                'success': False,
+                'error': "This book's shelf has not been placed on the floor plan yet. "
+                         "Please ask library staff for directions.",
+            })
         else:
             goal_wp = nearest_waypoint(target_shelf.map_x, target_shelf.map_y)
 

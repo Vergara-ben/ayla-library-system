@@ -1,17 +1,19 @@
 {% load static %}
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-module="patron">
 <head>
 <meta charset="UTF-8">
+<meta name="theme-color" content="#ffffff">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>AYLA Library — Announcements</title>
+<script src="{% static 'js/theme.js' %}"></script>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{% static 'css/theme.css' %}">
 <style>
-  :root{--bg:#0d1a0f;--surface:#111f13;--surface2:#162019;--border:#1e3322;--accent:#4ade80;--accent2:#f59e0b;--text:#e8f5e9;--muted:#6b8f72;--danger:#f87171;}
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
   body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;padding-bottom:80px;}
 
-  .navbar{position:sticky;top:0;z-index:100;background:#0d1a0fed;backdrop-filter:blur(20px);border-bottom:1px solid var(--border);padding:14px 20px;display:flex;align-items:center;gap:12px;}
+  .navbar{position:sticky;top:0;z-index:100;background:var(--nav-bg);backdrop-filter:blur(20px);border-bottom:1px solid var(--border);padding:14px 20px;display:flex;align-items:center;gap:12px;}
   .back-btn{width:36px;height:36px;border-radius:10px;border:1px solid var(--border);background:var(--surface2);display:flex;align-items:center;justify-content:center;cursor:pointer;text-decoration:none;color:var(--text);font-size:16px;}
   .nav-title{font-family:'Syne',sans-serif;font-size:18px;font-weight:800;flex:1;}
   .mark-all{font-size:12px;color:var(--accent);cursor:pointer;opacity:0.8;}
@@ -21,7 +23,7 @@
   .tab{flex:1;padding:14px;border:none;background:transparent;color:var(--muted);font-family:'Syne',sans-serif;font-size:14px;font-weight:700;cursor:pointer;border-bottom:2px solid transparent;transition:all 0.2s;display:flex;align-items:center;justify-content:center;gap:8px;}
   .tab.active{color:var(--accent);border-bottom-color:var(--accent);}
   .tab:hover:not(.active){color:var(--text);}
-  .tab-badge{background:var(--danger);color:white;border-radius:10px;padding:2px 7px;font-size:10px;font-weight:700;}
+  .tab-badge{background:var(--danger);color:var(--on-status);border-radius:10px;padding:2px 7px;font-size:10px;font-weight:700;}
 
   .page{max-width:600px;margin:0 auto;padding:20px;}
 
@@ -36,10 +38,10 @@
     transition:all 0.2s;cursor:pointer;
     animation:fadeUp 0.4s ease both;
   }
-  .ann-card:hover{border-color:#2d6a4f;}
+  .ann-card:hover{border-color:var(--accent-border);}
   .ann-card.unread{border-left-color:var(--accent);}
   .ann-card.urgent{border-left-color:var(--danger);}
-  .ann-card.info{border-left-color:var(--blue,#60a5fa);}
+  .ann-card.info{border-left-color:var(--blue,var(--blue));}
   .ann-header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:8px;}
   .ann-title-row{display:flex;align-items:center;gap:8px;}
   .ann-icon-badge{font-size:18px;}
@@ -47,10 +49,10 @@
   .ann-date{font-size:11px;color:var(--muted);flex-shrink:0;}
   .ann-msg{font-size:13px;color:var(--muted);line-height:1.6;margin-bottom:8px;}
   .ann-tag{display:inline-block;padding:3px 10px;border-radius:5px;font-size:10px;font-weight:700;letter-spacing:0.3px;}
-  .tag-green{background:#22c55e20;color:var(--accent);}
-  .tag-red{background:#f8717120;color:var(--danger);}
-  .tag-amber{background:#f59e0b20;color:var(--accent2);}
-  .tag-blue{background:#60a5fa20;color:#60a5fa;}
+  .tag-green{background:var(--tint-accent);color:var(--accent);}
+  .tag-red{background:var(--tint-danger);color:var(--danger);}
+  .tag-amber{background:var(--tint-warning);color:var(--accent2);}
+  .tag-blue{background:var(--tint-info);color:var(--blue);}
   .unread-dot{width:8px;height:8px;border-radius:50%;background:var(--accent);flex-shrink:0;margin-top:4px;}
 
   /* NOTIFICATION CARD */
@@ -74,7 +76,7 @@
   .btn-renew{padding:7px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:11px;cursor:pointer;transition:all 0.2s;font-weight:600;}
   .btn-renew:hover{border-color:var(--accent);color:var(--accent);}
   .btn-renew.urgent{border-color:var(--danger);color:var(--danger);}
-  .btn-renew.urgent:hover{background:#f8717115;}
+  .btn-renew.urgent:hover{background:var(--tint-danger);}
 
   .section-date{font-size:11px;color:var(--muted);font-weight:600;letter-spacing:1px;text-transform:uppercase;margin-bottom:10px;margin-top:20px;}
   .section-date:first-child{margin-top:0;}
@@ -82,7 +84,7 @@
   .empty{text-align:center;padding:48px 20px;color:var(--muted);}
   .empty-icon{font-size:40px;margin-bottom:10px;}
 
-  .bottom-nav{position:fixed;bottom:0;left:0;right:0;z-index:100;background:#0d1a0fed;backdrop-filter:blur(20px);border-top:1px solid var(--border);display:flex;padding:10px 0 calc(10px + env(safe-area-inset-bottom));}
+  .bottom-nav{position:fixed;bottom:0;left:0;right:0;z-index:100;background:var(--nav-bg);backdrop-filter:blur(20px);border-top:1px solid var(--border);display:flex;padding:10px 0 calc(10px + env(safe-area-inset-bottom));}
   .nav-item{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;cursor:pointer;color:var(--muted);text-decoration:none;transition:color 0.2s;}
   .nav-item:hover{color:var(--accent);}
   .nav-icon{font-size:20px;}.nav-label{font-size:10px;font-weight:500;}
@@ -108,12 +110,17 @@
   }
 </style>
     <link rel="stylesheet" href="{% static 'css/patron.css' %}">
+    <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
+    <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
 </head>
 <body>
 <nav class="navbar">
   <a href="{% url 'patron_dashboard' %}" class="back-btn">←</a>
   <div class="nav-title">Updates</div>
-  <div class="mark-all" onclick="markAllRead()">Mark all read</div>
+  <div style="display:flex;align-items:center;gap:10px;">
+    <button type="button" class="theme-toggle" data-theme-toggle></button>
+    <div class="mark-all" onclick="markAllRead()">Mark all read</div>
+  </div>
 </nav>
 
 <div class="tabs">

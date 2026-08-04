@@ -1,6 +1,6 @@
 {% load static %}
 <!DOCTYPE html>
-<html lang="en" data-module="admin">
+<html lang="en" data-module="staff">
 <head>
     <meta charset="UTF-8">
     <meta name="theme-color" content="#ffffff">
@@ -124,7 +124,7 @@
         }
 
         .menu-item.active a {
-            color: var(--accent-cyan);
+            color: var(--accent-violet);
             background-color: var(--tint-accent);
             border: 1px solid var(--accent-border);
             font-weight: 600;
@@ -183,7 +183,7 @@
         .badge-admin-tag {
             background-color: var(--tint-accent);
             border: 1px solid var(--accent-border);
-            color: var(--accent-cyan);
+            color: var(--accent-violet);
             font-size: 10px;
             font-weight: 700;
             padding: 4px 10px;
@@ -272,7 +272,7 @@
         }
 
         .leaflet-popup-content h3 {
-            color: var(--accent-cyan);
+            color: var(--accent-violet);
             margin: 0 0 8px 0;
             font-size: 14px;
         }
@@ -300,7 +300,7 @@
         .filter-item input[type="checkbox"] {
             width: 18px;
             height: 18px;
-            accent-color: var(--accent-cyan);
+            accent-color: var(--accent-violet);
             cursor: pointer;
         }
 
@@ -335,7 +335,7 @@
 
         .floorplan-selector select:focus {
             outline: none;
-            border-color: var(--accent-cyan);
+            border-color: var(--accent-violet);
         }
 
         /* Error message styling */
@@ -351,7 +351,7 @@
         }
 
         .map-error h3 {
-            color: var(--accent-cyan);
+            color: var(--accent-violet);
             margin-bottom: 12px;
             font-size: 18px;
         }
@@ -402,7 +402,7 @@
             font-family: 'Playfair Display', serif;
             font-size: 22px;
             font-weight: 600;
-            color: var(--accent-cyan);
+            color: var(--accent-violet);
             margin-bottom: 4px;
         }
 
@@ -468,14 +468,14 @@
 </head>
 <body>
 
-    {% include 'admin/_sidebar.html' with active='indoor_map' %}
+    {% include 'library_staff/_sidebar.html' with active='indoor_map' %}
 
     <div class="main-content">
         <header class="top-navbar">
             <h2 class="page-title">Indoor Map & Navigation</h2>
             <div class="navbar-actions">
-                <span class="badge-admin-tag">ADMIN</span>
-                <div class="user-avatar">AD</div>
+                <span class="badge-admin-tag">STAFF</span>
+                <div class="user-avatar">ST</div>
             </div>
         </header>
 
@@ -485,8 +485,7 @@
                 {% if no_floorplans %}
                     <div class="map-error">
                         <h3>No Floor Plan Yet</h3>
-                        <p>Create a floor plan and draw the library layout to view the indoor map.</p>
-                        <a href="{% url 'floorplan_management' %}">Go to Floor Plan Management</a>
+                        <p>An admin needs to create a floor plan and draw the library layout before it can be viewed here.</p>
                     </div>
                 {% else %}
                     <div id="floorplan-map" class="map-canvas"></div>
@@ -749,7 +748,7 @@
             roomMarkers.forEach(marker => map.removeLayer(marker));
             shelfMarkers.forEach(marker => map.removeLayer(marker));
             waypointMarkers.forEach(marker => map.removeLayer(marker));
-            
+
             roomMarkers = [];
             shelfMarkers = [];
             waypointMarkers = [];
@@ -774,7 +773,7 @@
                 const selectedId = parseInt(this.value);
                 if (selectedId && selectedId !== floorplanData.id) {
                     // Reload page with selected floor plan
-                    window.location.href = `/admin-portal/indoor-map/?floorplan=${selectedId}`;
+                    window.location.href = `/library-staff/indoor-map/?floorplan=${selectedId}`;
                 }
             });
         }
@@ -828,7 +827,6 @@
                     <div class="map-error">
                         <h3>Error Loading Map</h3>
                         <p>${message}</p>
-                        <a href="{% url 'floorplan_management' %}">Go to Floor Plan Management</a>
                     </div>
                 `;
             }

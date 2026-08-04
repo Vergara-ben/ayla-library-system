@@ -1,40 +1,43 @@
 {% load static %}
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-module="patron">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#ffffff">
 <title>AYLA Library — Dashboard</title>
+<script src="{% static 'js/theme.js' %}"></script>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{% static 'css/theme.css' %}">
 <style>
-  :root { --bg:#0d1a0f;--surface:#111f13;--surface2:#162019;--border:#1e3322;--accent:#4ade80;--accent2:#f59e0b;--text:#e8f5e9;--muted:#6b8f72;--danger:#f87171;--blue:#60a5fa; }
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
   body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;padding-bottom:80px;}
   
   /* NAVBAR */
   .navbar{
     position:sticky;top:0;z-index:100;
-    background:#0d1a0fed;backdrop-filter:blur(20px);
+    background:var(--nav-bg);backdrop-filter:blur(20px);
     border-bottom:1px solid var(--border);
     padding:14px 20px;
     display:flex;align-items:center;justify-content:space-between;
   }
   .nav-logo{display:flex;align-items:center;gap:10px;}
-  .logo-icon{width:36px;height:36px;background:linear-gradient(135deg,#1e3322,#2d6a4f);border-radius:10px;display:flex;align-items:center;justify-content:center;font-family:'Syne',sans-serif;font-weight:800;font-size:14px;color:var(--accent);border:1px solid #2d6a4f50;}
+  /* Wide lockup — height only, width follows the aspect ratio. */
+  .logo-icon{height:38px;}
   .logo-text{font-family:'Syne',sans-serif;font-weight:800;font-size:18px;}
   .nav-right{display:flex;align-items:center;gap:12px;}
   .nav-btn{width:36px;height:36px;border-radius:10px;border:1px solid var(--border);background:var(--surface2);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:16px;position:relative;transition:all 0.2s;}
   .nav-btn:hover{border-color:var(--accent);}
-  .badge{position:absolute;top:-4px;right:-4px;width:16px;height:16px;background:var(--danger);border-radius:50%;font-size:9px;display:flex;align-items:center;justify-content:center;font-weight:700;color:white;}
-  .avatar{width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,#2d6a4f,#1a4d2e);display:flex;align-items:center;justify-content:center;font-family:'Syne',sans-serif;font-weight:700;font-size:14px;color:var(--accent);cursor:pointer;border:1px solid #2d6a4f50;}
+  .badge{position:absolute;top:-4px;right:-4px;width:16px;height:16px;background:var(--danger);border-radius:50%;font-size:9px;display:flex;align-items:center;justify-content:center;font-weight:700;color:var(--on-status);}
+  .avatar{width:36px;height:36px;border-radius:10px;background:var(--tint-accent);display:flex;align-items:center;justify-content:center;font-family:'Syne',sans-serif;font-weight:700;font-size:14px;color:var(--accent);cursor:pointer;border:1px solid var(--accent-border);text-decoration:none;}
 
   /* MAIN */
   .main{max-width:960px;margin:0 auto;padding:20px;}
 
   /* ANNOUNCEMENT BANNER */
   .announcement{
-    background:linear-gradient(135deg,#162019,#1a3a1f);
-    border:1px solid #2d6a4f50;border-radius:16px;
+    background:var(--tint-accent);
+    border:1px solid var(--accent-border);border-radius:14px;
     padding:16px 20px;margin-bottom:20px;
     display:flex;align-items:center;gap:12px;
     animation:fadeDown 0.5s ease both;
@@ -54,32 +57,32 @@
   /* STATS */
   .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:24px;animation:fadeUp 0.5s 0.1s ease both;}
   @media(max-width:600px){.stats{grid-template-columns:repeat(2,1fr);}}
-  .stat-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:20px;position:relative;overflow:hidden;cursor:pointer;transition:transform 0.2s,border-color 0.2s;}
-  .stat-card:hover{transform:translateY(-2px);border-color:#2d6a4f;}
+  .stat-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:20px;position:relative;overflow:hidden;cursor:pointer;transition:border-color 0.2s;}
+  .stat-card:hover{border-color:var(--accent);}
   .stat-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;border-radius:3px 3px 0 0;}
   .stat-card.green::before{background:var(--accent);}
   .stat-card.amber::before{background:var(--accent2);}
   .stat-card.blue::before{background:var(--blue);}
-  .stat-card.pink::before{background:#f472b6;}
+  .stat-card.pink::before{background:var(--pink);}
   .stat-icon{font-size:18px;margin-bottom:10px;}
   .stat-num{font-family:'Syne',sans-serif;font-size:32px;font-weight:800;line-height:1;}
   .stat-card.green .stat-num{color:var(--accent);}
   .stat-card.amber .stat-num{color:var(--accent2);}
   .stat-card.blue .stat-num{color:var(--blue);}
-  .stat-card.pink .stat-num{color:#f472b6;}
+  .stat-card.pink .stat-num{color:var(--pink);}
   .stat-label{font-size:11px;color:var(--muted);margin-top:6px;letter-spacing:0.3px;}
   .stat-sub{font-size:10px;margin-top:6px;}
   .stat-card.green .stat-sub{color:var(--accent);}
   .stat-card.amber .stat-sub{color:var(--accent2);}
   .stat-card.blue .stat-sub{color:var(--blue);}
-  .stat-card.pink .stat-sub{color:#f472b6;}
+  .stat-card.pink .stat-sub{color:var(--pink);}
 
   /* GRID */
   .grid{display:grid;grid-template-columns:1fr 280px;gap:20px;animation:fadeUp 0.5s 0.15s ease both;}
   @media(max-width:700px){.grid{grid-template-columns:1fr;}}
 
   /* CARD */
-  .card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:20px;}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:20px;}
   .card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;}
   .card-title{font-family:'Syne',sans-serif;font-size:15px;font-weight:700;display:flex;align-items:center;gap:8px;}
   .view-all{font-size:12px;color:var(--accent);text-decoration:none;opacity:0.8;}
@@ -88,7 +91,7 @@
   /* BOOK ITEM */
   .book-item{display:flex;align-items:center;gap:14px;padding:14px 0;border-bottom:1px solid var(--border);}
   .book-item:last-child{border-bottom:none;padding-bottom:0;}
-  .book-thumb{width:40px;height:52px;border-radius:6px;background:linear-gradient(135deg,#1e3322,#2d6a4f);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--accent);flex-shrink:0;font-family:'Syne',sans-serif;border:1px solid #2d6a4f50;text-align:center;line-height:1.2;padding:4px;}
+  .book-thumb{width:40px;height:52px;border-radius:6px;background:var(--tint-accent);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--accent);flex-shrink:0;font-family:'Syne',sans-serif;border:1px solid var(--accent-border);text-align:center;line-height:1.2;padding:4px;}
   .book-info{flex:1;}
   .book-title{font-size:13px;font-weight:600;margin-bottom:3px;}
   .book-author{font-size:11px;color:var(--muted);margin-bottom:8px;}
@@ -98,9 +101,9 @@
   .fill-amber{background:var(--accent2);}
   .fill-red{background:var(--danger);}
   .book-badge{flex-shrink:0;padding:4px 10px;border-radius:6px;font-size:10px;font-weight:700;letter-spacing:0.3px;}
-  .badge-green{background:#22c55e20;color:var(--accent);}
-  .badge-amber{background:#f59e0b20;color:var(--accent2);}
-  .badge-red{background:#f8717120;color:var(--danger);}
+  .badge-green{background:var(--tint-accent);color:var(--accent);}
+  .badge-amber{background:var(--tint-warning);color:var(--accent2);}
+  .badge-red{background:var(--tint-danger);color:var(--danger);}
 
   /* HISTORY */
   .history-item{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border);}
@@ -113,22 +116,22 @@
   /* QUICK ACTIONS */
   .quick-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;}
   .q-btn{background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:18px 12px;text-align:center;cursor:pointer;transition:all 0.2s;text-decoration:none;display:block;}
-  .q-btn:hover{border-color:var(--accent);background:#4ade8010;}
+  .q-btn:hover{border-color:var(--accent);background:var(--tint-accent);}
   .q-btn-icon{font-size:22px;margin-bottom:6px;}
   .q-btn-label{font-size:11px;color:var(--muted);font-weight:500;}
   .q-btn:hover .q-btn-label{color:var(--accent);}
 
   /* OVERDUE */
-  .overdue-card{background:#f8717108;border:1px solid #f8717130;border-radius:12px;padding:14px;margin-top:4px;}
+  .overdue-card{background:var(--tint-danger);border:1px solid var(--border);border-radius:12px;padding:14px;margin-top:4px;}
   .overdue-title{font-size:12px;color:var(--danger);font-weight:700;margin-bottom:8px;display:flex;align-items:center;gap:6px;}
-  .overdue-item{font-size:12px;color:var(--text);padding:6px 0;border-bottom:1px solid #f8717120;}
+  .overdue-item{font-size:12px;color:var(--text);padding:6px 0;border-bottom:1px solid var(--border);}
   .overdue-item:last-child{border-bottom:none;padding-bottom:0;}
   .overdue-days{font-size:10px;color:var(--danger);}
 
   /* BOTTOM NAV */
   .bottom-nav{
     position:fixed;bottom:0;left:0;right:0;z-index:100;
-    background:#0d1a0fed;backdrop-filter:blur(20px);
+    background:var(--nav-bg);backdrop-filter:blur(20px);
     border-top:1px solid var(--border);
     display:flex;padding:10px 0 calc(10px + env(safe-area-inset-bottom));
   }
@@ -180,16 +183,18 @@
   }
 </style>
     <link rel="stylesheet" href="{% static 'css/patron.css' %}">
+    <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
+    <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
 </head>
 <body>
 
 <!-- NAVBAR -->
 <nav class="navbar">
   <div class="nav-logo">
-    <div class="logo-icon">A</div>
-    <div class="logo-text">AYLA</div>
+    <img src="{% static 'images/ayla-logo.png' %}" data-logo-light="{% static 'images/ayla-logo.png' %}" data-logo-dark="{% static 'images/ayla-logo-dark.png' %}" alt="AYLA" class="logo-icon ayla-logo">
   </div>
   <div class="nav-right">
+    <button type="button" class="theme-toggle" data-theme-toggle></button>
     <a href="{% url 'patron_announcements' %}" class="nav-btn">🔔{% if recent_announcements %}<span class="badge">{{ recent_announcements|length }}</span>{% endif %}</a>
     <a href="{% url 'patron_account' %}" class="avatar">{{ patron.fullname|first|upper }}</a>
   </div>
@@ -291,7 +296,7 @@
             <div class="hist-title">{{ tx.book.title }}</div>
             <div class="hist-date">Returned {{ tx.return_date|date:"M j, Y" }}</div>
           </div>
-          <div class="hist-status" style="border-radius:5px;padding:3px 8px;font-size:10px;background:#22c55e20;color:var(--accent)">Returned</div>
+          <div class="hist-status" style="border-radius:5px;padding:3px 8px;font-size:10px;background:var(--tint-accent);color:var(--accent)">Returned</div>
         </div>
         {% empty %}
         <div class="hist-date">No borrowing history yet.</div>

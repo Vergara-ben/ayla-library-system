@@ -1,41 +1,25 @@
 {% load static %}
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-module="admin">
 <head>
     <meta charset="UTF-8">
+    <meta name="theme-color" content="#ffffff">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Ayla - Admin Dashboard</title>
+    <script src="{% static 'js/theme.js' %}"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@0,600;1,400&display=swap" rel="stylesheet">
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="{% static 'js/tailwind-theme.js' %}"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'css/theme.css' %}">
     <style>
         .logo-text { font-family: 'Rowdies', sans-serif; }
         aside.w-64 { font-family: 'Inter', sans-serif; }
     </style>
     <style>
-        :root {
-            --bg-darker: #050b11;
-            --bg-dark: #070f18;
-            --bg-sidebar: #060d14;
-            --bg-card: #0c1925;
-            --bg-input: #0f1c2a;
-            --accent-blue: #38bdf8;
-            --accent-cyan: #06b6d4;
-            --border-color: #162535;
-            --text-main: #ffffff;
-            --text-muted: #64748b;
-            
-            --status-returned: #10b981;
-            --status-returned-bg: rgba(16, 185, 129, 0.1);
-            --status-borrowed: #f59e0b;
-            --status-borrowed-bg: rgba(245, 158, 11, 0.1);
-            --status-overdue: #ef4444;
-            --status-overdue-bg: rgba(239, 68, 68, 0.1);
-        }
-
         * {
             box-sizing: border-box;
             margin: 0;
@@ -73,7 +57,7 @@
         .logo-icon {
             width: 36px;
             height: 36px;
-            background-color: #1a364a;
+            background-color: var(--border-color);
             border-radius: 8px;
             display: flex;
             align-items: center;
@@ -81,7 +65,7 @@
             color: var(--accent-blue);
             font-weight: 700;
             font-size: 18px;
-            box-shadow: 0 0 15px rgba(56, 189, 248, 0.15);
+            box-shadow: 0 0 15px var(--tint-accent);
         }
 
         .brand-text {
@@ -123,7 +107,7 @@
             align-items: center;
             justify-content: space-between;
             padding: 12px 14px;
-            color: #94a3b8;
+            color: var(--text-muted);
             text-decoration: none;
             font-size: 14px;
             font-weight: 500;
@@ -134,13 +118,13 @@
 
         .menu-item a:hover {
             color: var(--text-main);
-            background-color: rgba(255, 255, 255, 0.02);
+            background-color: var(--bg-subtle);
         }
 
         .menu-item.active a {
             color: var(--accent-cyan);
-            background-color: rgba(6, 182, 212, 0.06);
-            border: 1px solid rgba(6, 182, 212, 0.15);
+            background-color: var(--tint-accent);
+            border: 1px solid var(--accent-border);
             font-weight: 600;
         }
 
@@ -155,7 +139,7 @@
         }
 
         .badge-count {
-            background-color: #ef4444;
+            background-color: var(--danger);
             color: white;
             font-size: 10px;
             font-weight: 700;
@@ -197,8 +181,8 @@
         }
 
         .badge-admin-tag {
-            background-color: rgba(6, 182, 212, 0.1);
-            border: 1px solid rgba(6, 182, 212, 0.2);
+            background-color: var(--tint-accent);
+            border: 1px solid var(--accent-border);
             color: var(--accent-cyan);
             font-size: 10px;
             font-weight: 700;
@@ -228,22 +212,22 @@
             right: 4px;
             width: 6px;
             height: 6px;
-            background-color: #f59e0b;
+            background-color: var(--warning);
             border-radius: 50%;
         }
 
         .user-avatar {
             width: 32px;
             height: 32px;
-            background-color: #1e293b;
+            background-color: var(--tint-accent);
             border-radius: 50%;
             display: flex;
             align-items: center;
             justify-content: center;
             font-size: 11px;
             font-weight: 700;
-            color: #cbd5e1;
-            border: 1px solid var(--border-color);
+            color: var(--accent);
+            border: 1px solid var(--accent-border);
             cursor: pointer;
         }
 
@@ -257,7 +241,7 @@
 
         /* --- HERO BANNER --- */
         .hero-banner {
-            background: linear-gradient(90deg, #0a1724 0%, #07111a 100%);
+            background: linear-gradient(90deg, var(--bg-card) 0%, var(--bg-main) 100%);
             border: 1px solid var(--border-color);
             border-radius: 16px;
             padding: 28px 32px;
@@ -318,18 +302,21 @@
         }
 
         .btn-outline:hover {
-            background-color: rgba(255, 255, 255, 0.02);
-            border-color: #334155;
+            background-color: var(--bg-subtle);
+            border-color: var(--border-color);
         }
 
+        /* Primary action: a real accent fill. It previously used
+           --border-color (a boundary tone) as its background, which left the
+           label at 4.3:1 and gave it a hover state that changed nothing. */
         .btn-filled {
-            background-color: #1e3a53;
-            border: 1px solid rgba(56, 189, 248, 0.2);
-            color: var(--text-main);
+            background-color: var(--accent);
+            border: 1px solid var(--accent);
+            color: var(--on-accent);
         }
 
         .btn-filled:hover {
-            background-color: #244767;
+            background-color: var(--accent-strong);
         }
 
 
@@ -364,10 +351,10 @@
             margin-bottom: 6px;
         }
 
-        .stat-card:nth-child(1) .stat-value { color: #38bdf8; }
-        .stat-card:nth-child(2) .stat-value { color: #f59e0b; }
-        .stat-card:nth-child(3) .stat-value { color: #ef4444; }
-        .stat-card:nth-child(4) .stat-value { color: #ffffff; }
+        .stat-card:nth-child(1) .stat-value { color: var(--accent); }
+        .stat-card:nth-child(2) .stat-value { color: var(--warning); }
+        .stat-card:nth-child(3) .stat-value { color: var(--danger); }
+        .stat-card:nth-child(4) .stat-value { color: var(--text-primary); }
 
         .stat-indicator {
             font-size: 12px;
@@ -378,10 +365,10 @@
         }
 
         .stat-indicator.up {
-            color: #10b981;
+            color: var(--success);
         }
         .stat-indicator.down {
-            color: #ef4444;
+            color: var(--danger);
         }
 
 
@@ -417,7 +404,7 @@
         }
 
         .btn-view-all {
-            background: rgba(255, 255, 255, 0.03);
+            background: var(--bg-subtle);
             border: 1px solid var(--border-color);
             color: var(--text-muted);
             padding: 4px 12px;
@@ -430,7 +417,7 @@
 
         .btn-view-all:hover {
             color: var(--text-main);
-            border-color: #334155;
+            border-color: var(--border-color);
         }
 
 
@@ -446,8 +433,8 @@
             align-items: center;
             justify-content: space-between;
             padding: 14px 16px;
-            background-color: rgba(255,255,255,0.01);
-            border: 1px solid rgba(255,255,255,0.02);
+            background-color: var(--bg-subtle);
+            border: 1px solid var(--border-color);
             border-radius: 8px;
         }
 
@@ -464,10 +451,10 @@
             flex-shrink: 0;
         }
         /* Variations matching mockup cover shades */
-        .cover-1 { background: linear-gradient(135deg, #102a43 0%, #244767 100%); }
-        .cover-2 { background: linear-gradient(135deg, #2d1b4e 0%, #4c2d87 100%); }
-        .cover-3 { background: linear-gradient(135deg, #421a1a 0%, #742a2a 100%); }
-        .cover-4 { background: linear-gradient(135deg, #123e57 0%, #1b5c7e 100%); }
+        .cover-1 { background: linear-gradient(135deg, var(--bg-input) 0%, var(--border-color) 100%); }
+        .cover-2 { background: linear-gradient(135deg, var(--tint-accent) 0%, var(--tint-accent) 100%); }
+        .cover-3 { background: linear-gradient(135deg, var(--tint-danger) 0%, var(--tint-danger) 100%); }
+        .cover-4 { background: linear-gradient(135deg, var(--tint-accent) 0%, var(--tint-accent) 100%); }
 
         .book-details .book-title {
             font-size: 14px;
@@ -520,7 +507,7 @@
         }
 
         .action-card {
-            background-color: rgba(255,255,255,0.01);
+            background-color: var(--bg-subtle);
             border: 1px solid var(--border-color);
             border-radius: 8px;
             padding: 16px;
@@ -534,8 +521,8 @@
         }
 
         .action-card:hover {
-            border-color: rgba(56, 189, 248, 0.2);
-            background-color: rgba(255,255,255,0.02);
+            border-color: var(--accent-border);
+            background-color: var(--bg-subtle);
         }
 
         .action-icon {
@@ -545,7 +532,7 @@
         .action-label {
             font-size: 12px;
             font-weight: 500;
-            color: #94a3b8;
+            color: var(--text-muted);
         }
 
         /* Today's Entry Log Info Panel */
@@ -559,7 +546,7 @@
             justify-content: space-between;
             align-items: center;
             padding: 14px 0;
-            border-bottom: 1px solid rgba(255,255,255,0.03);
+            border-bottom: 1px solid var(--border-color);
             font-size: 13px;
         }
 
@@ -576,9 +563,9 @@
             font-weight: 600;
         }
         
-        .log-stat-row:nth-child(1) .log-stat-val { color: #38bdf8; }
-        .log-stat-row:nth-child(2) .log-stat-val { color: #38bdf8; }
-        .log-stat-row:nth-child(3) .log-stat-val { color: #f59e0b; }
+        .log-stat-row:nth-child(1) .log-stat-val { color: var(--accent); }
+        .log-stat-row:nth-child(2) .log-stat-val { color: var(--accent); }
+        .log-stat-row:nth-child(3) .log-stat-val { color: var(--warning); }
 
 
         /* --- RESPONSIVE LAYOUT BREAKPOINTS --- */
@@ -607,6 +594,8 @@
     </style>
     <link rel="stylesheet" href="{% static 'css/admin-enhance.css' %}">
     <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
+    <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
+    <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
 </head>
 <body>
 
@@ -619,7 +608,6 @@
             
             <div class="navbar-actions">
                 <span class="badge-admin-tag">ADMIN</span>
-                <button class="icon-btn" title="Notifications">🔔</button>
                 <div class="user-avatar" title="Admin User">AD</div>
             </div>
         </header>
@@ -731,22 +719,22 @@
                             <h3 class="panel-title">⚡ Quick Actions</h3>
                         </div>
                         <div class="quick-actions-grid">
-                            <div class="action-card">
+                            <a href="{% url 'admin_management' %}" class="action-card">
                                 <span class="action-icon">📚</span>
                                 <span class="action-label">Books</span>
-                            </div>
-                            <div class="action-card">
+                            </a>
+                            <a href="{% url 'admin_manage_patron' %}" class="action-card">
                                 <span class="action-icon">👥</span>
                                 <span class="action-label">Patrons</span>
-                            </div>
-                            <div class="action-card">
+                            </a>
+                            <a href="{% url 'admin_transaction' %}" class="action-card">
                                 <span class="action-icon">📋</span>
                                 <span class="action-label">Transactions</span>
-                            </div>
-                            <div class="action-card">
+                            </a>
+                            <a href="{% url 'admin_log_management' %}" class="action-card">
                                 <span class="action-icon">🚪</span>
                                 <span class="action-label">Entry Logs</span>
-                            </div>
+                            </a>
                         </div>
                     </section>
 

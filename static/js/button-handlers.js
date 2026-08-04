@@ -109,10 +109,10 @@ function showNotification(type, message, duration = 3000) {
     z-index: 1000;
     animation: slideIn 0.3s ease-out;
     font-weight: 500;
-    ${type === 'success' ? 'background-color: #15803d; color: white;' : ''}
-    ${type === 'error' ? 'background-color: #dc2626; color: white;' : ''}
-    ${type === 'warning' ? 'background-color: #f59e0b; color: white;' : ''}
-    ${type === 'info' ? 'background-color: #0ea5e9; color: white;' : ''}
+    ${type === 'success' ? 'background-color: var(--success); color: var(--on-accent);' : ''}
+    ${type === 'error' ? 'background-color: var(--danger); color: var(--on-accent);' : ''}
+    ${type === 'warning' ? 'background-color: var(--warning); color: var(--on-accent);' : ''}
+    ${type === 'info' ? 'background-color: var(--info); color: var(--on-accent);' : ''}
   `;
   notification.textContent = message;
   
@@ -211,8 +211,9 @@ function createPagination(totalItems, itemsPerPage, pageCallback) {
     btn.textContent = i;
     btn.style.cssText = `
       padding: 8px 12px;
-      border: 1px solid #ccc;
-      background: #f5f5f5;
+      border: 1px solid var(--border-color);
+      background: var(--bg-subtle);
+      color: var(--text-primary);
       cursor: pointer;
       border-radius: 4px;
     `;
@@ -274,21 +275,21 @@ function validateFormField(fieldId, validationType = 'text') {
   const value = field.value.trim();
   
   if (!value) {
-    field.style.borderColor = '#dc2626';
+    field.style.borderColor = 'var(--danger)';
     return false;
   }
   
   if (validationType === 'email' && !validateEmail(value)) {
-    field.style.borderColor = '#dc2626';
+    field.style.borderColor = 'var(--danger)';
     return false;
   }
   
   if (validationType === 'phone' && !validatePhone(value)) {
-    field.style.borderColor = '#dc2626';
+    field.style.borderColor = 'var(--danger)';
     return false;
   }
   
-  field.style.borderColor = '#10b981';
+  field.style.borderColor = 'var(--success)';
   return true;
 }
 
@@ -300,8 +301,9 @@ function setupAutoComplete(inputId, suggestionList) {
   const suggestionContainer = document.createElement('div');
   suggestionContainer.style.cssText = `
     position: absolute;
-    background: white;
-    border: 1px solid #ddd;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
     max-height: 200px;
     overflow-y: auto;
     width: 100%;
@@ -327,10 +329,10 @@ function setupAutoComplete(inputId, suggestionList) {
         div.style.cssText = `
           padding: 8px 12px;
           cursor: pointer;
-          border-bottom: 1px solid #eee;
+          border-bottom: 1px solid var(--border-color);
         `;
-        div.onmouseover = () => div.style.backgroundColor = '#f0f0f0';
-        div.onmouseout = () => div.style.backgroundColor = 'white';
+        div.onmouseover = () => div.style.backgroundColor = 'var(--bg-subtle)';
+        div.onmouseout = () => div.style.backgroundColor = 'transparent';
         div.onclick = () => {
           input.value = item;
           suggestionContainer.style.display = 'none';

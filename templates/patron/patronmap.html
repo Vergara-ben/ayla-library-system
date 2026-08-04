@@ -1,31 +1,33 @@
 {% load static %}
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-module="patron">
 <head>
 <meta charset="UTF-8">
+<meta name="theme-color" content="#ffffff">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>AYLA Library — Floor Map</title>
+<script src="{% static 'js/theme.js' %}"></script>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<link rel="stylesheet" href="{% static 'css/theme.css' %}">
 <style>
-  :root{--bg:#0d1a0f;--surface:#111f13;--surface2:#162019;--border:#1e3322;--accent:#4ade80;--accent2:#f59e0b;--text:#e8f5e9;--muted:#6b8f72;--danger:#f87171;}
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
   body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);height:100vh;display:flex;flex-direction:column;overflow:hidden;}
 
-  .navbar{flex-shrink:0;background:#0d1a0fed;backdrop-filter:blur(20px);border-bottom:1px solid var(--border);padding:14px 20px;display:flex;align-items:center;gap:12px;z-index:200;}
+  .navbar{flex-shrink:0;background:var(--nav-bg);backdrop-filter:blur(20px);border-bottom:1px solid var(--border);padding:14px 20px;display:flex;align-items:center;gap:12px;z-index:200;}
   .back-btn{width:36px;height:36px;border-radius:10px;border:1px solid var(--border);background:var(--surface2);display:flex;align-items:center;justify-content:center;cursor:pointer;text-decoration:none;color:var(--text);font-size:16px;}
   .nav-title{font-family:'Syne',sans-serif;font-size:18px;font-weight:800;flex:1;}
   .floor-toggle{display:flex;gap:4px;}
   .fl-btn{padding:6px 12px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--muted);font-size:12px;cursor:pointer;transition:all 0.2s;}
-  .fl-btn.active{border-color:var(--accent);color:var(--accent);background:#4ade8015;}
+  .fl-btn.active{border-color:var(--accent);color:var(--accent);background:var(--tint-accent);}
 
   /* MAP */
   #map{flex:1;position:relative;z-index:1;}
-  .leaflet-container{background:#0d1a0f!important;}
+  .leaflet-container{background:var(--bg)!important;}
 
   /* INFO PANEL */
   .info-panel{
-    flex-shrink:0;background:#0d1a0fed;backdrop-filter:blur(20px);
+    flex-shrink:0;background:var(--nav-bg);backdrop-filter:blur(20px);
     border-top:1px solid var(--border);padding:16px 20px;
     z-index:200;
   }
@@ -42,39 +44,50 @@
   .btn-row{display:flex;gap:8px;}
   .btn-nav{
     flex:1;padding:13px;
-    background:linear-gradient(135deg,#22c55e,#16a34a);
+    background:var(--accent);
     border:none;border-radius:12px;
-    color:#0d1a0f;font-family:'Syne',sans-serif;font-size:14px;font-weight:700;
+    color:var(--on-accent);font-family:'Syne',sans-serif;font-size:14px;font-weight:700;
     cursor:pointer;transition:all 0.2s;display:flex;align-items:center;justify-content:center;gap:6px;
   }
-  .btn-nav:hover{transform:translateY(-1px);}
+  .btn-nav:hover{background:var(--accent-strong);}
   .btn-nav.disabled{background:var(--surface2);color:var(--muted);border:1px solid var(--border);}
   .btn-layers{padding:13px 16px;background:var(--surface2);border:1px solid var(--border);border-radius:12px;color:var(--text);font-size:14px;cursor:pointer;transition:all 0.2s;}
   .btn-layers:hover{border-color:var(--accent);}
 
+  /* MAP LABELS (section names + shelf level indicators) */
+  .map-label{background:none;border:none;}
+  .map-label span{
+    display:inline-block;font-size:10px;font-weight:700;letter-spacing:.2px;
+    color:var(--text);background:var(--nav-bg);border:1px solid var(--border);
+    border-radius:6px;padding:1px 6px;white-space:nowrap;transform:translateX(-50%);
+  }
+  .map-label.subtle span{font-weight:500;color:var(--muted);font-size:9px;}
+
   /* LEGEND */
   .map-legend{
     position:absolute;top:12px;right:12px;z-index:500;
-    background:#111f13ee;backdrop-filter:blur(10px);
+    background:var(--nav-bg);backdrop-filter:blur(10px);
     border:1px solid var(--border);border-radius:12px;padding:12px 14px;
   }
   .legend-item{display:flex;align-items:center;gap:8px;margin-bottom:7px;font-size:11px;color:var(--muted);}
   .legend-item:last-child{margin-bottom:0;}
   .legend-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;}
+  .legend-bar{width:12px;height:3px;border-radius:2px;flex-shrink:0;}
+  .l-door{background:var(--accent2);}
   .l-target{background:var(--accent2);}
-  .l-shelf{background:#4ade8060;}
-  .l-patron{background:#60a5fa;}
-  .l-exit{background:#9333ea;}
+  .l-shelf{background:var(--tint-accent);}
+  .l-patron{background:var(--blue);}
+  .l-exit{background:var(--cover-3);}
 
   /* BLUETOOTH MODAL */
-  .modal-overlay{position:fixed;inset:0;z-index:1000;background:#00000080;display:flex;align-items:center;justify-content:center;padding:20px;opacity:0;pointer-events:none;transition:opacity 0.3s;}
+  .modal-overlay{position:fixed;inset:0;z-index:1000;background:var(--scrim);display:flex;align-items:center;justify-content:center;padding:20px;opacity:0;pointer-events:none;transition:opacity 0.3s;}
   .modal-overlay.show{opacity:1;pointer-events:all;}
-  .modal{background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:32px;max-width:360px;width:100%;text-align:center;transform:translateY(20px);transition:transform 0.3s;}
+  .modal{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:32px;max-width:360px;width:100%;text-align:center;transform:translateY(20px);transition:transform 0.3s;}
   .modal-overlay.show .modal{transform:translateY(0);}
   .modal-icon{font-size:48px;margin-bottom:16px;}
   .modal-title{font-family:'Syne',sans-serif;font-size:20px;font-weight:800;margin-bottom:8px;}
   .modal-text{font-size:13px;color:var(--muted);margin-bottom:24px;line-height:1.6;}
-  .btn-enable{width:100%;padding:13px;background:linear-gradient(135deg,#22c55e,#16a34a);border:none;border-radius:12px;color:#0d1a0f;font-family:'Syne',sans-serif;font-size:15px;font-weight:700;cursor:pointer;margin-bottom:10px;}
+  .btn-enable{width:100%;padding:13px;background:var(--accent);border:none;border-radius:12px;color:var(--on-accent);font-family:'Syne',sans-serif;font-size:15px;font-weight:700;cursor:pointer;margin-bottom:10px;}
   .btn-skip{width:100%;padding:13px;background:transparent;border:1px solid var(--border);border-radius:12px;color:var(--muted);font-family:'DM Sans',sans-serif;font-size:14px;cursor:pointer;}
 
   /* Mobile Responsive */
@@ -102,11 +115,14 @@
   }
 </style>
     <link rel="stylesheet" href="{% static 'css/patron.css' %}">
+    <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
+    <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
 </head>
 <body>
 <nav class="navbar">
   <a href="{% if target.book_id %}{% url 'patron_book_details' target.book_id %}{% else %}{% url 'patron_catalog' %}{% endif %}" class="back-btn">←</a>
   <div class="nav-title">Floor Map</div>
+  <button type="button" class="theme-toggle" data-theme-toggle></button>
 </nav>
 
 <div id="map">
@@ -115,6 +131,7 @@
     <div class="legend-item"><div class="legend-dot l-target"></div>Target Shelf</div>
     <div class="legend-item"><div class="legend-dot l-shelf"></div>Shelf</div>
     <div class="legend-item"><div class="legend-dot l-patron"></div>Your Position</div>
+    <div class="legend-item"><div class="legend-bar l-door"></div>Door</div>
   </div>
 </div>
 
@@ -131,7 +148,6 @@
     </div>
   </div>
   <div class="btn-row">
-    <button class="btn-layers" onclick="toggleLayers()">🗂️ Layers</button>
     <button class="btn-layers" id="simBtn" onclick="toggleSimulation()" title="Demo: simulate a continuously moving position">🎮 Simulate</button>
     <button class="btn-nav" id="navBtn" onclick="showBTModal()">📡 Enable Navigation</button>
   </div>
@@ -166,9 +182,55 @@ let imgW = 0, imgH = 0;
 let mapData = null;
 let patronPos = null;            // {x, y} in floor-plan pixels (top-left origin)
 let routeLine = null, patronMarker = null;
-const shelfLayer = L.layerGroup();
-const beaconLayer = L.layerGroup();
-let extrasVisible = true;
+// The six independently toggleable layers the manuscript specifies.
+const baseLayer = L.layerGroup();       // 1. floor plan (room polygons)
+const shelfLayer = L.layerGroup();      // 2. shelf markers
+const sectionLayer = L.layerGroup();    // 3. section labels (shelf-level category)
+const levelLayer = L.layerGroup();      // 4. shelf level indicators
+const routeLayer = L.layerGroup();      // 5. A* route
+const positionLayer = L.layerGroup();   // 6. patron position marker
+
+// Doors drawn as a floor-plan symbol so the way into a room is obvious.
+function doorArc(d) {
+  const rad = (d.rotation || 0) * Math.PI / 180;
+  const ux = Math.cos(rad), uy = Math.sin(rad);
+  const half = (d.width || 28) / 2;
+  const swing = (d.swing === -1) ? -1 : 1;
+  const nx = -uy * swing, ny = ux * swing;
+  const a = [d.x - ux * half, d.y - uy * half];
+  const b = [d.x + ux * half, d.y + uy * half];
+  const arc = [];
+  for (let i = 0; i <= 10; i++) {
+    const t = (i / 10) * (Math.PI / 2);
+    arc.push([a[0] + (ux * Math.cos(t) + nx * Math.sin(t)) * half * 2,
+              a[1] + (uy * Math.cos(t) + ny * Math.sin(t)) * half * 2]);
+  }
+  return { a: a, b: b, arc: arc };
+}
+
+function addDoorToLayer(d, layer) {
+  const g = doorArc(d);
+  const accent = AylaTheme.color('--accent2');
+  // Break the wall, then mark the opening and its swing.
+  L.polyline([toLatLng(g.a[0], g.a[1]), toLatLng(g.b[0], g.b[1])],
+    { color: AylaTheme.color('--surface2'), weight: 6, opacity: 1, interactive: false }).addTo(layer);
+  L.polyline([toLatLng(g.a[0], g.a[1]), toLatLng(g.b[0], g.b[1])],
+    { color: accent, weight: 3, opacity: 1 })
+    .bindTooltip(d.label || 'Door', { direction: 'top', sticky: true }).addTo(layer);
+  L.polyline(g.arc.map(function (p) { return toLatLng(p[0], p[1]); }),
+    { color: accent, weight: 1, opacity: 0.6, dashArray: '3,3', interactive: false }).addTo(layer);
+}
+
+// Each shelf draws at its own footprint and rotation, as configured by the
+// Administrator. The constants are fallbacks for older records only.
+const SHELF_W = 46, SHELF_D = 14;
+function shelfCorners(cx, cy, rotationDeg, width, depth) {
+  const rad = (rotationDeg || 0) * Math.PI / 180;
+  const cos = Math.cos(rad), sin = Math.sin(rad);
+  const hw = (width || SHELF_W) / 2, hd = (depth || SHELF_D) / 2;
+  return [[-hw, -hd], [hw, -hd], [hw, hd], [-hw, hd]].map((p) =>
+    toLatLng(cx + p[0] * cos - p[1] * sin, cy + p[0] * sin + p[1] * cos));
+}
 let bleInterval = null;
 const rssiBuffers = {};          // beacon_uuid -> [rssi, ...] (moving-average window)
 
@@ -193,15 +255,6 @@ function setStatus(color, text) {
   document.getElementById('statusText').textContent = text;
 }
 
-function loadImageSize(url) {
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
-    img.onerror = () => resolve({ w: 1000, h: 1000 });
-    img.src = url;
-  });
-}
-
 async function fetchJSON(url) {
   const res = await fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
   return res.json();
@@ -217,36 +270,71 @@ async function initMap() {
     return;
   }
   mapData = data;
-  imgW = data.image_width; imgH = data.image_height;
-  if (!imgW || !imgH) { const d = await loadImageSize(data.image_url); imgW = d.w; imgH = d.h; }
+  imgW = data.canvas_width; imgH = data.canvas_height;
 
   const bounds = [[0, 0], [imgH, imgW]];
-  if (data.image_url) L.imageOverlay(data.image_url, bounds).addTo(map);
+
+  // ---- Layer 1: floor plan base — the rooms the librarian drew ARE the map.
+  L.rectangle(bounds, {
+    color: 'transparent', fillColor: AylaTheme.color('--surface'),
+    fillOpacity: 1, interactive: false,
+  }).addTo(baseLayer);
+  (data.rooms || []).forEach((room) => {
+    if (!room.geometry || room.geometry.length < 3) return;
+    L.polygon(room.geometry.map((p) => toLatLng(p[0], p[1])), {
+      color: AylaTheme.color('--border'), weight: 2,
+      fillColor: AylaTheme.color('--surface2'), fillOpacity: 1,
+    }).bindTooltip(room.name || 'Room', { direction: 'top', sticky: true }).addTo(baseLayer);
+    (room.doors || []).forEach(function (d) { addDoorToLayer(d, baseLayer); });
+  });
+
   map.fitBounds(bounds);
   setTimeout(() => map.invalidateSize(), 200);
 
-  // Shelves (target highlighted amber)
+  // ---- Layers 2-4: shelf footprints, section labels, shelf level indicators
   data.shelves.forEach((s) => {
     const isTarget = targetData.shelf_id && s.shelf_id === targetData.shelf_id;
-    L.circleMarker(toLatLng(s.x, s.y), {
-      radius: isTarget ? 9 : 6,
-      color: isTarget ? '#f59e0b' : '#4ade80',
-      weight: 2,
-      fillColor: isTarget ? '#f59e0b' : '#4ade80',
-      fillOpacity: isTarget ? 0.9 : 0.45,
-    }).bindTooltip((isTarget ? '🎯 ' : '') + s.name, { direction: 'top' }).addTo(shelfLayer);
-  });
-  shelfLayer.addTo(map);
+    const accent = isTarget ? AylaTheme.color('--accent2') : AylaTheme.color('--accent');
 
-  // Waypoint graph is intentionally NOT rendered for patrons — it is admin-only
-  // navigation infrastructure. Only the computed A* route (routeLine) is shown.
+    L.polygon(shelfCorners(s.x, s.y, s.rotation, s.width, s.depth), {
+      color: accent, weight: 2, fillColor: accent,
+      fillOpacity: isTarget ? 0.8 : 0.4,
+    }).bindTooltip((isTarget ? '🎯 ' : '') + s.name, { direction: 'top', sticky: true }).addTo(shelfLayer);
 
-  // Beacons (faint blue)
-  data.beacons.forEach((b) => {
-    L.circleMarker(toLatLng(b.x, b.y), { radius: 4, color: '#60a5fa', weight: 1, fillColor: '#60a5fa', fillOpacity: 0.5 })
-      .bindTooltip('📡 ' + (b.label || b.beacon_uuid), { direction: 'top' }).addTo(beaconLayer);
+    // Section label = the shelf level's category text (Fiction, Economics …).
+    const categories = (s.levels || []).map((lv) => lv.category).filter(Boolean);
+    if (categories.length) {
+      L.marker(toLatLng(s.x, s.y - ((s.depth || SHELF_D) / 2 + 10)), {
+        interactive: false,
+        icon: L.divIcon({ className: 'map-label', html: '<span>' + categories[0] + '</span>', iconSize: [90, 16] }),
+      }).addTo(sectionLayer);
+    }
+
+    // Shelf level indicators = how many levels this shelf carries.
+    if ((s.levels || []).length) {
+      L.marker(toLatLng(s.x, s.y + ((s.depth || SHELF_D) / 2 + 9)), {
+        interactive: false,
+        icon: L.divIcon({ className: 'map-label subtle', html: '<span>' + s.levels.length + (s.levels.length === 1 ? ' level' : ' levels') + '</span>', iconSize: [70, 14] }),
+      }).addTo(levelLayer);
+    }
   });
-  beaconLayer.addTo(map);
+
+  // Waypoint graph and BLE beacons are deliberately NOT rendered for patrons —
+  // both are admin-only navigation infrastructure. Only the computed A* route
+  // and the patron's own position appear.
+
+  [baseLayer, shelfLayer, sectionLayer, levelLayer, routeLayer, positionLayer]
+    .forEach((lyr) => lyr.addTo(map));
+
+  // Six independently toggleable layers.
+  L.control.layers(null, {
+    'Floor plan': baseLayer,
+    'Shelves': shelfLayer,
+    'Section labels': sectionLayer,
+    'Shelf levels': levelLayer,
+    'Route': routeLayer,
+    'Your position': positionLayer,
+  }, { collapsed: true, position: 'topleft' }).addTo(map);
 
   // Tap to set location (manual / fallback positioning)
   map.on('click', (e) => setPatronPosition(fromLatLng(e.latlng), 'manual'));
@@ -281,8 +369,8 @@ function setPatronPosition(pos, source) {
   patronPos = pos;
   const ll = toLatLng(pos.x, pos.y);
   if (!patronMarker) {
-    patronMarker = L.circleMarker(ll, { radius: 8, color: '#ffffff', weight: 3, fillColor: '#60a5fa', fillOpacity: 1 })
-      .bindTooltip('You are here', { direction: 'top' }).addTo(map);
+    patronMarker = L.circleMarker(ll, { radius: 8, color: AylaTheme.color('--surface'), weight: 3, fillColor: AylaTheme.color('--blue'), fillOpacity: 1 })
+      .bindTooltip('You are here', { direction: 'top' }).addTo(positionLayer);
   } else {
     patronMarker.setLatLng(ll);
   }
@@ -299,15 +387,10 @@ async function computeRoute() {
   try { r = await fetchJSON(url); } catch (e) { return; }
   if (!r.success) { document.getElementById('shelfPath').textContent = r.error || 'No route found'; return; }
   const latlngs = r.route.map((p) => toLatLng(p.x, p.y));
-  if (routeLine) map.removeLayer(routeLine);
-  routeLine = L.polyline(latlngs, { color: '#60a5fa', weight: 4, opacity: 0.9 }).addTo(map);
+  if (routeLine) routeLayer.removeLayer(routeLine);
+  routeLine = L.polyline(latlngs, { color: AylaTheme.color('--blue'), weight: 4, opacity: 0.9 }).addTo(routeLayer);
   document.getElementById('navBtn').textContent = '🧭 Navigating…';
   document.getElementById('shelfPath').textContent = 'Distance ≈ ' + Math.round(r.distance) + ' px · ' + Math.max(r.route.length - 1, 0) + ' segment(s)';
-}
-
-function toggleLayers() {
-  extrasVisible = !extrasVisible;
-  [beaconLayer].forEach((lyr) => { extrasVisible ? lyr.addTo(map) : map.removeLayer(lyr); });
 }
 
 // ---- Demo simulation ------------------------------------------------------
@@ -430,6 +513,13 @@ async function enableBLE() {
 }
 
 initMap();
+</script>
+
+<script>
+  /* Leaflet paints marker colours into SVG attributes when the map is built,
+     so they cannot follow a live theme switch. Re-initialise the page instead
+     — the map is rebuilt from the server and comes back correctly themed. */
+  document.addEventListener('ayla:themechange', function () { location.reload(); });
 </script>
 </body>
 </html>

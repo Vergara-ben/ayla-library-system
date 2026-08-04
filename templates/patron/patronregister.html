@@ -1,17 +1,15 @@
 {% load static %}
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-module="patron" data-theme-floating>
 <head>
 <meta charset="UTF-8">
+<meta name="theme-color" content="#ffffff">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>AYLA Library — Register</title>
+<script src="{% static 'js/theme.js' %}"></script>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{% static 'css/theme.css' %}">
 <style>
-  :root {
-    --bg: #0d1a0f; --surface: #111f13; --surface2: #162019;
-    --border: #1e3322; --accent: #4ade80; --accent2: #f59e0b;
-    --text: #e8f5e9; --muted: #6b8f72; --danger: #f87171;
-  }
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   
   body { 
@@ -21,7 +19,7 @@
     position: relative;
     
     /* MALINAW NA BACKGROUND: Nilagyan lang ng napakanipis na black tint para mabasa pa rin ang text */
-    background: linear-gradient(rgba(0, 0, 0, 0.45), rgba(0, 0, 0, 0.55)), 
+    background: linear-gradient(var(--auth-overlay-1), var(--auth-overlay-2)), 
                 url("{% static 'images/ayla2.jpg' %}"); /* <-- Palitan mo lang ito ng filename ng image mo */
     background-size: cover;
     background-position: center;
@@ -32,48 +30,43 @@
   /* 💡 TINANGGAL NA NATIN DITO YUNG GRID OVERLAY NA MAY MGA GUHIT-GUHIT */
 
   /* Swabeng blur sa likod ng card para maging lumulutang ang UI */
-  .bg-orb { position: fixed; border-radius: 50%; filter: blur(90px); pointer-events: none; z-index: 0; opacity: 0.4; }
-  .orb1 { width: 400px; height: 400px; background: #1a4d2e40; top: -100px; right: -100px; }
-  .orb2 { width: 300px; height: 300px; background: #f59e0b10; bottom: -80px; left: -80px; }
+  .bg-orb { display: none; }
 
   .page { position: relative; z-index: 1; max-width: 540px; margin: 0 auto; padding: 32px 20px; }
 
   .back-link {
     display: inline-flex; align-items: center; gap: 6px;
-    color: #ffffff; font-size: 13px; text-decoration: none;
-    margin-bottom: 28px; transition: color 0.2s;
-    text-shadow: 0 2px 4px rgba(0,0,0,0.5); /* Para litaw kahit sa maliwanag na bg */
+    color: var(--on-glass); font-size: 13px; text-decoration: none;
+    margin-bottom: 28px; transition: color 0.2s; /* Para litaw kahit sa maliwanag na bg */
   }
   .back-link:hover { color: var(--accent); }
 
   .header { margin-bottom: 32px; animation: fadeDown 0.6s ease both; }
   .header .logo-row { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+  /* Wide lockup — fix the height only, let the width follow. */
   .logo-icon {
-    width: 40px; height: 40px; background: linear-gradient(135deg, #1e3322, #2d6a4f);
-    border-radius: 11px; display: flex; align-items: center; justify-content: center;
-    font-family: 'Syne', sans-serif; font-weight: 800; font-size: 16px; color: var(--accent);
-    border: 1px solid #2d6a4f50;
+    height: 46px;
   }
-  .header h1 { font-family: 'Syne', sans-serif; font-size: 24px; font-weight: 800; text-shadow: 0 2px 4px rgba(0,0,0,0.5); }
-  .header p { color: #e8f5e9; font-size: 14px; text-shadow: 0 1px 3px rgba(0,0,0,0.5); }
+  .header h1 { font-family: 'Syne', sans-serif; font-size: 24px; font-weight: 800; }
+  .header p { color: var(--text); font-size: 14px; }
 
   .step-indicator {
     display: flex; gap: 8px; margin-bottom: 28px; animation: fadeUp 0.5s 0.1s ease both;
   }
   .step {
-    flex: 1; height: 4px; border-radius: 4px; background: rgba(255,255,255,0.2);
+    flex: 1; height: 4px; border-radius: 4px; background: var(--glass-border);
     transition: background 0.4s;
   }
   .step.active { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
-  .step.done { background: #2d6a4f; }
+  .step.done { background: var(--accent); }
 
   .card {
-    background: rgba(17, 31, 19, 0.85); /* Glassmorphism look */
+    background: var(--auth-card); /* Glassmorphism look */
     backdrop-filter: blur(16px); /* Mas pinalinaw ang blur ng salamin */
     -webkit-backdrop-filter: blur(16px);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 20px; padding: 32px;
-    box-shadow: 0 24px 50px rgba(0,0,0,0.6);
+    border: 1px solid var(--glass-border);
+    border-radius:14px; padding: 32px;
+    box-shadow: var(--shadow-pop);
     animation: fadeUp 0.6s 0.15s ease both;
   }
   .section-title {
@@ -86,55 +79,55 @@
   .form-grid .full { grid-column: 1 / -1; }
 
   .form-group { margin-bottom: 0; }
-  label { display: block; font-size: 11px; color: #a3c2a6; margin-bottom: 7px; letter-spacing: 0.8px; font-weight: 600; text-transform: uppercase; }
+  label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 7px; letter-spacing: 0.8px; font-weight: 600; text-transform: uppercase; }
   input, select, textarea {
-    width: 100%; background: rgba(13, 26, 15, 0.6); border: 1px solid rgba(255,255,255,0.1);
+    width: 100%; background: var(--glass-soft); border: 1px solid var(--glass-border);
     border-radius: 11px; padding: 12px 14px;
     color: var(--text); font-family: 'DM Sans', sans-serif; font-size: 14px;
     outline: none; transition: all 0.2s;
     appearance: none;
   }
   select { cursor: pointer; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%236b8f72' viewBox='0 0 16 16'%3E%3Cpath d='M7.247 11.14L2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 14px center; padding-right: 36px; }
-  input:focus, select:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.25); background: rgba(13, 26, 15, 0.8); }
-  input::placeholder, textarea::placeholder { color: rgba(232, 245, 233, 0.4); }
+  input:focus, select:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--tint-accent); background: var(--glass); }
+  input::placeholder, textarea::placeholder { color: var(--muted); }
 
   .patron-types {
     display: grid; grid-template-columns: 1fr 1fr;
     gap: 10px;
   }
   .type-card {
-    padding: 14px; border: 1px solid rgba(255,255,255,0.1);
+    padding: 14px; border: 1px solid var(--glass-border);
     border-radius: 12px; cursor: pointer;
     display: flex; flex-direction: column; align-items: center;
-    gap: 6px; background: rgba(13, 26, 15, 0.4);
+    gap: 6px; background: var(--glass-soft);
     transition: all 0.2s; text-align: center;
   }
-  .type-card:hover { border-color: var(--accent); background: rgba(74, 222, 128, 0.05); }
-  .type-card.selected { border-color: var(--accent); background: rgba(74, 222, 128, 0.15); box-shadow: 0 0 12px rgba(74, 222, 128, 0.1); }
+  .type-card:hover { border-color: var(--accent); background: var(--tint-accent); }
+  .type-card.selected { border-color: var(--accent); background: var(--tint-accent); box-shadow: 0 0 12px var(--tint-accent); }
   .type-card .type-icon { font-size: 22px; }
-  .type-card .type-label { font-size: 12px; font-weight: 500; color: #a3c2a6; }
+  .type-card .type-label { font-size: 12px; font-weight: 500; color: var(--muted); }
   .type-card.selected .type-label { color: var(--accent); font-weight: 700; }
 
-  .divider { height: 1px; background: rgba(255,255,255,0.1); margin: 24px 0; }
+  .divider { height: 1px; background: var(--glass-border); margin: 24px 0; }
 
   .btn-row { display: flex; gap: 12px; margin-top: 24px; }
   .btn-secondary {
     flex: 0 0 auto; padding: 13px 20px;
-    background: rgba(22, 32, 25, 0.8); border: 1px solid rgba(255,255,255,0.1);
-    border-radius: 12px; color: #a3c2a6; font-family: 'DM Sans', sans-serif;
+    background: var(--glass); border: 1px solid var(--glass-border);
+    border-radius: 12px; color: var(--muted); font-family: 'DM Sans', sans-serif;
     font-size: 14px; cursor: pointer; transition: all 0.2s;
   }
   .btn-secondary:hover { border-color: var(--accent); color: var(--accent); }
   .btn-primary {
     flex: 1; padding: 13px;
-    background: linear-gradient(135deg, #22c55e, #16a34a);
+    background: var(--accent);
     border: none; border-radius: 12px;
-    color: #0d1a0f; font-family: 'Syne', sans-serif; font-size: 15px; font-weight: 700;
-    cursor: pointer; transition: all 0.2s; box-shadow: 0 4px 20px rgba(34, 197, 94, 0.3);
+    color: var(--on-accent); font-family: 'Syne', sans-serif; font-size: 15px; font-weight: 700;
+    cursor: pointer; transition: background-color 0.2s;
   }
-  .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 8px 28px rgba(34, 197, 94, 0.5); }
+  .btn-primary:hover { background: var(--accent-strong); }
 
-  .error-text { color: #f87171; margin-bottom: 20px; font-size: 14px; }
+  .error-text { color: var(--danger); margin-bottom: 20px; font-size: 14px; }
 
   /* SUCCESS SCREEN */
   .success-screen {
@@ -144,12 +137,12 @@
   .success-screen.show { display: block; }
   .success-icon { font-size: 64px; margin-bottom: 16px; }
   .success-title { font-family: 'Syne', sans-serif; font-size: 22px; font-weight: 800; margin-bottom: 8px; color: var(--accent); }
-  .success-sub { color: #a3c2a6; font-size: 14px; margin-bottom: 32px; }
+  .success-sub { color: var(--muted); font-size: 14px; margin-bottom: 32px; }
 
   .qr-display {
-    background: white; border-radius: 16px;
+    background: white; border-radius:14px;
     padding: 20px; display: inline-block; margin-bottom: 24px;
-    box-shadow: 0 8px 32px #00000060;
+    box-shadow: 0 8px 32px var(--scrim);
   }
   .qr-placeholder {
     width: 160px; height: 160px;
@@ -163,11 +156,11 @@
     padding: 11px 22px; border-radius: 10px;
     font-family: 'DM Sans', sans-serif; font-size: 13px; font-weight: 500;
     cursor: pointer; transition: all 0.2s;
-    display: flex; align-items: center; gap: 6px; border: 1px solid rgba(255,255,255,0.1);
-    background: rgba(22, 32, 25, 0.8); color: var(--text);
+    display: flex; align-items: center; gap: 6px; border: 1px solid var(--glass-border);
+    background: var(--glass); color: var(--text);
   }
   .btn-dl:hover { border-color: var(--accent); color: var(--accent); }
-  .btn-dl.primary { background: linear-gradient(135deg,#22c55e,#16a34a); border-color: transparent; color: #0d1a0f; font-weight: 700; }
+  .btn-dl.primary { background: var(--accent); border-color: transparent; color: var(--on-accent); font-weight: 700; }
 
   @keyframes fadeDown { from { opacity:0; transform:translateY(-16px);} to { opacity:1; transform:translateY(0);} }
   @keyframes fadeUp { from { opacity:0; transform:translateY(16px);} to { opacity:1; transform:translateY(0);} }
@@ -186,6 +179,8 @@
   }
 </style>
     <link rel="stylesheet" href="{% static 'css/patron.css' %}">
+    <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
+    <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
 </head>
 <body>
 <div class="bg-orb orb1"></div>
@@ -195,11 +190,8 @@
 
   <div class="header">
     <div class="logo-row">
-      <div class="logo-icon">A</div>
-      <div>
-        <div style="font-family:'Syne',sans-serif;font-weight:800;font-size:18px;">AYLA</div>
-        <div style="font-size:11px;color:#a3c2a6;letter-spacing:2px;text-transform:uppercase;font-weight:700;">Library System</div>
-      </div>
+      <img src="{% static 'images/ayla-logo.png' %}" data-logo-light="{% static 'images/ayla-logo.png' %}" data-logo-dark="{% static 'images/ayla-logo-dark.png' %}" alt="AYLA" class="logo-icon ayla-logo">
+      <div style="font-size:11px;color:var(--muted);letter-spacing:2px;text-transform:uppercase;font-weight:700;">Library System</div>
     </div>
     <h1>Create Account</h1>
     <p>Register as a new library patron</p>
@@ -208,11 +200,11 @@
   {% if stage == 'otp' %}
   <!-- ── OTP VERIFICATION STAGE ─────────────────────────── -->
   {% if error %}<p class="error-text">{{ error }}</p>{% endif %}
-  {% if info %}<p style="font-size:13px;color:#4ade80;text-align:center;margin-bottom:12px;">{{ info }}</p>{% endif %}
+  {% if info %}<p style="font-size:13px;color:var(--accent);text-align:center;margin-bottom:12px;">{{ info }}</p>{% endif %}
   <div class="card" id="otpCard">
     <div class="section-title">📧 Verify Your Email</div>
-    <p style="font-size:13px;color:#a3c2a6;margin-bottom:20px;">
-      We sent a 6-digit code to <strong style="color:#e8f5e9">{{ otp_email }}</strong>.
+    <p style="font-size:13px;color:var(--muted);margin-bottom:20px;">
+      We sent a 6-digit code to <strong style="color:var(--text)">{{ otp_email }}</strong>.
       Enter it below to verify your email address.
     </p>
     <form method="POST" action="{% url 'patron_register' %}">
@@ -233,7 +225,7 @@
       {% csrf_token %}
       <input type="hidden" name="action" value="resend_otp">
       <input type="hidden" name="email" value="{{ otp_email }}">
-      <button type="submit" style="background:none;border:none;color:#4ade80;font-size:13px;cursor:pointer;text-decoration:underline;">
+      <button type="submit" style="background:none;border:none;color:var(--accent);font-size:13px;cursor:pointer;text-decoration:underline;">
         Resend code
       </button>
     </form>
@@ -298,7 +290,7 @@
 
       <div id="step2" style="display:none">
         <div class="section-title">🏷️ Patron Type</div>
-        <p style="font-size:13px;color:#a3c2a6;margin-bottom:20px;">Select your patron category</p>
+        <p style="font-size:13px;color:var(--muted);margin-bottom:20px;">Select your patron category</p>
         <div class="patron-types">
           <div class="type-card" onclick="selectType(this)"><div class="type-icon">🎓</div><div class="type-label">Student</div></div>
           <div class="type-card" onclick="selectType(this)"><div class="type-icon">👩‍🏫</div><div class="type-label">Teacher</div></div>
@@ -328,9 +320,9 @@
         <div class="form-group" style="margin-bottom:24px">
           <label>Valid ID / Proof of Residency</label>
           <input type="file" id="credentialDocument" name="credential_document" accept=".jpg,.jpeg,.png,.pdf" style="padding:9px 14px;" required>
-          <div style="font-size:11px;color:#a3c2a6;margin-top:6px;">JPG, PNG, or PDF — max 5 MB. Reviewed by the library administrator.</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:6px;">JPG, PNG, or PDF — max 5 MB. Reviewed by the library administrator.</div>
         </div>
-        <div style="font-size:12px;color:#a3c2a6;background:rgba(13, 26, 15, 0.8);border-radius:10px;padding:12px 14px;border:1px solid rgba(255,255,255,0.1);margin-bottom:8px">
+        <div style="font-size:12px;color:var(--muted);background:var(--glass);border-radius:10px;padding:12px 14px;border:1px solid var(--glass-border);margin-bottom:8px">
           📋 By registering, you agree to the library's borrowing policy and terms of use.
           After email verification, your account will be reviewed by an administrator before activation.
         </div>

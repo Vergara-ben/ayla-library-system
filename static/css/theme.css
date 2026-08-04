@@ -1,0 +1,697 @@
+/* =====================================================================
+   theme.css — AYLA single source of truth for colour.
+
+   Loaded FIRST on every page (before each page's own <style>), so pages
+   can consume these tokens and override nothing.
+
+   Two axes:
+     data-theme  = "light" (default) | "dark"      -> on <html>
+     data-module = "admin" | "staff" | "patron"    -> on <html>
+
+   Light is the real default: a visitor whose OS is in dark mode still
+   lands on the light theme. Dark is opt-in through the header toggle and
+   remembered in localStorage (see static/js/theme.js).
+
+   Section 1 re-maps the Tailwind colour ramps to CSS variables so the
+   ~2,000 utility classes already written into the admin/staff markup
+   (text-slate-400, bg-cyan-950/50, …) follow the theme with no markup
+   changes. Channels are stored as "R G B" triplets so Tailwind's slash
+   opacity modifiers keep working (see static/js/tailwind-theme.js).
+
+   Sections 2-4 define the semantic tokens the hand-written CSS uses.
+   ===================================================================== */
+
+/* =====================================================================
+   1. TAILWIND RAMPS
+   ===================================================================== */
+
+/* ---- 1a. Light: the neutral ramp is inverted -------------------------
+   In the dark design slate-100 was near-white body text and slate-800
+   was a raised panel. Inverting the ramp keeps every existing class
+   meaningful: slate-100 becomes near-black text, slate-800 becomes a
+   light panel. */
+:root {
+    --tw-slate-50:  15 23 42;
+    --tw-slate-100: 15 23 42;
+    --tw-slate-200: 30 41 59;
+    --tw-slate-300: 51 65 85;
+    --tw-slate-400: 71 85 105;     /* most common muted text — 7.4:1 on white */
+    --tw-slate-500: 85 99 122;     /* 5.6:1 on the subtle table-header fill */
+    --tw-slate-600: 100 116 139;   /* dim text, still 4.8:1 on white */
+    --tw-slate-700: 127 139 158;   /* borders — 3.4:1+, boundaries must be visible (WCAG 1.4.11) */
+    --tw-slate-800: 241 245 249;   /* panel / hover fills only — see admin-theme.css for the
+                                       border-slate-800 redirect to --tw-slate-700 */
+    --tw-slate-900: 248 250 252;
+    --tw-slate-950: 255 255 255;
+
+    /* ---- Accents ----------------------------------------------------
+       Not a straight inversion. Solid button fills (600/700) stay
+       saturated so buttons still read as buttons; the light shades that
+       were "bright accent text on black" are darkened to pass contrast
+       on white, and the near-black tints (800-950) become pale washes. */
+
+    /* Cyan — admin */
+    /* "cyan" is the admin panel's accent ramp — now the AYLA brand blue.
+       The class names stay so no template needs editing. */
+    --tw-cyan-50:  239 244 252;
+    --tw-cyan-100: 219 232 250;
+    --tw-cyan-200: 0 42 128;       /* text on a pale blue chip */
+    --tw-cyan-300: 0 48 143;
+    --tw-cyan-400: 0 56 168;       /* accent text — 9.9:1 on white */
+    --tw-cyan-500: 0 56 168;
+    --tw-cyan-600: 0 56 168;       /* fill; also used as text */
+    --tw-cyan-700: 0 56 168;       /* fill + border */
+    --tw-cyan-800: 191 214 247;
+    --tw-cyan-900: 219 232 250;
+    --tw-cyan-950: 239 244 252;    /* pale chip fill */
+
+    /* Violet — library staff */
+    /* "violet" is the staff panel's accent ramp — also the brand blue now. */
+    --tw-violet-50:  239 244 252;
+    --tw-violet-100: 219 232 250;
+    --tw-violet-200: 0 42 128;
+    --tw-violet-300: 0 48 143;
+    --tw-violet-400: 0 56 168;     /* accent text — 9.9:1 on white */
+    --tw-violet-500: 0 56 168;
+    --tw-violet-600: 0 56 168;
+    --tw-violet-700: 0 56 168;
+    --tw-violet-800: 191 214 247;
+    --tw-violet-900: 219 232 250;
+    --tw-violet-950: 239 244 252;
+
+    /* Emerald / green — success + patron */
+    --tw-emerald-50:  236 253 245;
+    --tw-emerald-100: 6 78 59;
+    --tw-emerald-200: 6 95 70;
+    --tw-emerald-300: 4 120 87;
+    --tw-emerald-400: 4 120 87;    /* 4.6:1 on white */
+    --tw-emerald-500: 4 120 87;
+    --tw-emerald-600: 4 120 87;
+    --tw-emerald-700: 4 120 87;
+    --tw-emerald-800: 167 243 208;
+    --tw-emerald-900: 209 250 229;
+    --tw-emerald-950: 236 253 245;
+
+    --tw-green-50:  240 253 244;
+    --tw-green-100: 20 83 45;
+    --tw-green-200: 22 101 52;
+    --tw-green-300: 21 128 61;
+    --tw-green-400: 21 128 61;
+    --tw-green-500: 21 128 61;
+    --tw-green-600: 21 128 61;
+    --tw-green-700: 21 128 61;
+    --tw-green-800: 187 247 208;
+    --tw-green-900: 220 252 231;
+    --tw-green-950: 240 253 244;
+
+    /* Rose / red — danger, overdue */
+    --tw-rose-50:  255 241 242;
+    --tw-rose-100: 136 19 55;
+    --tw-rose-200: 159 18 57;
+    --tw-rose-300: 190 18 60;
+    --tw-rose-400: 190 18 60;      /* 6.0:1 on white */
+    --tw-rose-500: 190 18 60;
+    --tw-rose-600: 190 18 60;
+    --tw-rose-700: 190 18 60;
+    --tw-rose-800: 254 205 211;
+    --tw-rose-900: 255 228 230;
+    --tw-rose-950: 255 241 242;
+
+    --tw-red-50:  254 242 242;
+    --tw-red-100: 127 29 29;
+    --tw-red-300: 185 28 28;
+    --tw-red-400: 185 28 28;
+    --tw-red-500: 185 28 28;
+    --tw-red-600: 185 28 28;
+    --tw-red-700: 185 28 28;
+    --tw-red-800: 254 202 202;
+    --tw-red-900: 254 226 226;
+    --tw-red-950: 254 242 242;
+
+    /* Amber — pending, borrowed, warnings.
+       500 is used both as text and as a fill, so it is pinned to a shade
+       that clears 4.5:1 either way. */
+    --tw-amber-50:  255 251 235;
+    --tw-amber-100: 120 53 15;
+    --tw-amber-200: 146 64 14;
+    --tw-amber-300: 180 83 9;
+    --tw-amber-400: 180 83 9;      /* 4.7:1 on white */
+    --tw-amber-500: 180 83 9;
+    --tw-amber-600: 180 83 9;
+    --tw-amber-700: 146 64 14;
+    --tw-amber-800: 253 230 138;
+    --tw-amber-900: 254 243 199;
+    --tw-amber-950: 255 251 235;
+
+    --tw-yellow-400: 161 98 7;
+    --tw-yellow-500: 161 98 7;
+    --tw-yellow-600: 133 77 14;
+
+    --tw-orange-400: 194 65 12;
+    --tw-orange-500: 234 88 12;
+    --tw-orange-600: 234 88 12;
+
+    /* Blue / teal / purple / pink — occasional secondary accents */
+    --tw-blue-50:  239 246 255;
+    --tw-blue-100: 30 58 138;
+    --tw-blue-300: 29 78 216;
+    --tw-blue-400: 29 78 216;      /* 6.3:1 on white */
+    --tw-blue-500: 37 99 235;
+    --tw-blue-600: 37 99 235;
+    --tw-blue-700: 29 78 216;
+    --tw-blue-800: 191 219 254;
+    --tw-blue-900: 219 234 254;
+    --tw-blue-950: 239 246 255;
+
+    --tw-teal-400: 15 118 110;
+    --tw-teal-500: 13 148 136;
+    --tw-teal-600: 13 148 136;
+    --tw-teal-800: 153 246 228;
+    --tw-teal-900: 204 251 241;
+    --tw-teal-950: 240 253 250;
+
+    --tw-purple-400: 126 34 206;
+    --tw-purple-500: 147 51 234;
+    --tw-purple-900: 243 232 255;
+    --tw-purple-950: 250 245 255;
+
+    --tw-pink-400: 190 24 93;
+    --tw-pink-500: 219 39 119;
+    --tw-pink-900: 252 231 243;
+    --tw-pink-950: 253 242 248;
+
+    --tw-indigo-400: 67 56 202;
+    --tw-indigo-500: 79 70 229;
+    --tw-indigo-900: 224 231 255;
+    --tw-indigo-950: 238 242 255;
+}
+
+/* ---- 1b. Dark: the original Tailwind values ------------------------- */
+[data-theme="dark"] {
+    --tw-slate-50:  248 250 252;
+    --tw-slate-100: 241 245 249;
+    --tw-slate-200: 226 232 240;
+    --tw-slate-300: 203 213 225;
+    --tw-slate-400: 148 163 184;
+    --tw-slate-500: 130 143 163;   /* lifted from #64748b — failed AA on dark panels */
+    --tw-slate-600: 125 139 161;   /* likewise: used for small separator text */
+    --tw-slate-700: 94 112 146;    /* borders — clears 3:1 on both admin navy and staff purple */
+    --tw-slate-800: 30 41 59;
+    --tw-slate-900: 15 23 42;
+    --tw-slate-950: 2 6 23;
+
+    /* admin accent ramp — brand blue, lightened for dark surfaces */
+    --tw-cyan-50:  239 246 255;
+    --tw-cyan-100: 219 234 254;
+    --tw-cyan-200: 191 219 254;
+    --tw-cyan-300: 147 197 253;
+    --tw-cyan-400: 96 165 250;     /* accent text — 6.6:1 on card */
+    --tw-cyan-500: 59 130 246;     /* border strength — 4.7:1 on card */
+    --tw-cyan-600: 37 99 235;
+    --tw-cyan-700: 29 78 216;
+    --tw-cyan-800: 30 64 175;
+    --tw-cyan-900: 30 58 138;
+    --tw-cyan-950: 23 37 84;
+
+    /* staff accent ramp — same brand blue */
+    --tw-violet-50:  239 246 255;
+    --tw-violet-100: 219 234 254;
+    --tw-violet-200: 191 219 254;
+    --tw-violet-300: 147 197 253;
+    --tw-violet-400: 96 165 250;
+    --tw-violet-500: 59 130 246;   /* also used as text at 90% opacity */
+    --tw-violet-600: 37 99 235;
+    --tw-violet-700: 29 78 216;
+    --tw-violet-800: 30 64 175;
+    --tw-violet-900: 30 58 138;
+    --tw-violet-950: 23 37 84;
+
+    --tw-emerald-50:  236 253 245;
+    --tw-emerald-100: 209 250 229;
+    --tw-emerald-200: 167 243 208;
+    --tw-emerald-300: 110 231 183;
+    --tw-emerald-400: 52 211 153;
+    --tw-emerald-500: 16 185 129;
+    --tw-emerald-600: 5 150 105;
+    --tw-emerald-700: 4 120 87;
+    --tw-emerald-800: 6 95 70;
+    --tw-emerald-900: 6 78 59;
+    --tw-emerald-950: 2 44 34;
+
+    --tw-green-50:  240 253 244;
+    --tw-green-100: 220 252 231;
+    --tw-green-200: 187 247 208;
+    --tw-green-300: 134 239 172;
+    --tw-green-400: 74 222 128;
+    --tw-green-500: 34 197 94;
+    --tw-green-600: 22 163 74;
+    --tw-green-700: 21 128 61;
+    --tw-green-800: 22 101 52;
+    --tw-green-900: 20 83 45;
+    --tw-green-950: 5 46 22;
+
+    --tw-rose-50:  255 241 242;
+    --tw-rose-100: 255 228 230;
+    --tw-rose-200: 254 205 211;
+    --tw-rose-300: 253 164 175;
+    --tw-rose-400: 251 113 133;
+    --tw-rose-500: 244 63 94;
+    --tw-rose-600: 225 29 72;
+    --tw-rose-700: 190 18 60;
+    --tw-rose-800: 159 18 57;
+    --tw-rose-900: 136 19 55;
+    --tw-rose-950: 76 5 25;
+
+    --tw-red-50:  254 242 242;
+    --tw-red-100: 254 226 226;
+    --tw-red-300: 252 165 165;
+    --tw-red-400: 248 113 113;
+    --tw-red-500: 239 68 68;
+    --tw-red-600: 220 38 38;
+    --tw-red-700: 185 28 28;
+    --tw-red-800: 153 27 27;
+    --tw-red-900: 127 29 29;
+    --tw-red-950: 69 10 10;
+
+    --tw-amber-50:  255 251 235;
+    --tw-amber-100: 254 243 199;
+    --tw-amber-200: 253 230 138;
+    --tw-amber-300: 252 211 77;
+    --tw-amber-400: 251 191 36;
+    --tw-amber-500: 245 158 11;
+    --tw-amber-600: 217 119 6;
+    --tw-amber-700: 180 83 9;
+    --tw-amber-800: 146 64 14;
+    --tw-amber-900: 120 53 15;
+    --tw-amber-950: 69 26 3;
+
+    --tw-yellow-400: 250 204 21;
+    --tw-yellow-500: 234 179 8;
+    --tw-yellow-600: 202 138 4;
+
+    --tw-orange-400: 251 146 60;
+    --tw-orange-500: 249 115 22;
+    --tw-orange-600: 234 88 12;
+
+    --tw-blue-50:  239 246 255;
+    --tw-blue-100: 219 234 254;
+    --tw-blue-300: 147 197 253;
+    --tw-blue-400: 96 165 250;
+    --tw-blue-500: 59 130 246;
+    --tw-blue-600: 37 99 235;
+    --tw-blue-700: 29 78 216;
+    --tw-blue-800: 30 64 175;
+    --tw-blue-900: 30 58 138;
+    --tw-blue-950: 23 37 84;
+
+    --tw-teal-400: 45 212 191;
+    --tw-teal-500: 20 184 166;
+    --tw-teal-600: 13 148 136;
+    --tw-teal-800: 17 94 89;
+    --tw-teal-900: 19 78 74;
+    --tw-teal-950: 4 47 46;
+
+    --tw-purple-400: 192 132 252;
+    --tw-purple-500: 168 85 247;
+    --tw-purple-900: 88 28 135;
+    --tw-purple-950: 59 7 100;
+
+    --tw-pink-400: 244 114 182;
+    --tw-pink-500: 236 72 153;
+    --tw-pink-900: 131 24 67;
+    --tw-pink-950: 80 7 36;
+
+    --tw-indigo-400: 129 140 248;
+    --tw-indigo-500: 99 102 241;
+    --tw-indigo-900: 49 46 129;
+    --tw-indigo-950: 30 27 75;
+}
+
+/* =====================================================================
+   2. SEMANTIC SURFACE TOKENS — light (default)
+
+   Both historical naming systems are declared so every page keeps
+   working: the admin/staff pages read --bg-main / --bg-card /
+   --text-primary, the patron pages read --bg / --surface / --text.
+   ===================================================================== */
+:root {
+    color-scheme: light;
+
+    /* admin + staff naming */
+    --bg-main:      #f4f6f9;
+    --bg-dark:      #f4f6f9;   /* legacy alias used by the dashboards */
+    --bg-darker:    #eef1f6;
+    --bg-sidebar:   #ffffff;
+    --bg-card:      #ffffff;
+    --bg-modal:     #ffffff;
+    --bg-input:     #ffffff;
+    --input-bg:     #ffffff;   /* legacy alias used by the sign-in pages */
+    --bg-subtle:    #f1f5f9;   /* table headers, hover rows */
+    --text-primary: #0f172a;
+    --text-main:    #0f172a;
+    --text-muted:   #55637a;   /* 6.2:1 on white */
+    --border-color: #7f8b9e;   /* 3.4:1+ on white/page — a real boundary, not a hint of one */
+    --border-modal: #7f8b9e;
+
+    /* patron naming */
+    --bg:        #f4f6f9;
+    --surface:   #ffffff;
+    --surface2:  #eff3f8;
+    --border:    #7f8b9e;      /* 3.1:1+ on white/surface — same boundary rule as --border-color */
+    --text:      #0f172a;
+    --muted:     #55637a;      /* 5.5:1 on white */
+    --danger:    #b91c1c;
+    --blue:      #1d4ed8;
+    --pink:      #be185d;
+    --success:   #047857;
+    --warning:   #b45309;
+    --info:      #1d4ed8;
+
+    /* translucent sticky bars (navbar / bottom nav) */
+    --nav-bg: rgba(255, 255, 255, 0.92);
+
+    /* soft status washes — replace the old hard-coded #xxxxxx20 fills */
+    --tint-success: rgba(4, 120, 87, 0.10);
+    --tint-warning: rgba(180, 83, 9, 0.10);
+    --tint-danger:  rgba(190, 18, 60, 0.10);
+    --tint-info:    rgba(29, 78, 216, 0.10);
+    --tint-pink:    rgba(190, 24, 93, 0.10);
+
+    /* shared status colours */
+    --status-returned:    #047857;
+    --status-returned-bg: rgba(4, 120, 87, 0.10);
+    --status-borrowed:    #b45309;
+    --status-borrowed-bg: rgba(180, 83, 9, 0.10);
+    --status-overdue:     #be123c;
+    --status-overdue-bg:  rgba(190, 18, 60, 0.10);
+
+    /* Text that sits on top of a solid --accent or status fill */
+    --on-accent: #ffffff;
+    --on-status: #ffffff;
+
+    /* Book-cover placeholder fills. Always carry white text, so both
+       themes stay in the mid-dark range. */
+    --cover-1: #15803d;
+    --cover-2: #1d4ed8;
+    --cover-3: #7e22ce;
+    --cover-4: #b45309;
+    --cover-5: #475569;
+    --cover-6: #0f766e;
+
+    /* Sign-in screens: a photo background needs a scrim and a floating
+       card. In light mode the scrim lightens the photo instead of
+       darkening it, so the card can carry dark text. */
+    --auth-overlay-1: rgba(255, 255, 255, 0.74);
+    --auth-overlay-2: rgba(255, 255, 255, 0.84);
+    --auth-card:      rgba(255, 255, 255, 0.95);
+    --glass:          rgba(255, 255, 255, 0.75);
+    --glass-soft:     rgba(255, 255, 255, 0.55);
+    /* Form fields on the sign-in/register cards use this as their border. At
+       the old 0.12 it read 1.3:1 — effectively no edge at all. 0.50 clears
+       the 3:1 non-text minimum while still looking like a glass edge. */
+    --glass-border:   rgba(15, 23, 42, 0.50);
+    --on-glass:       #0f172a;
+
+    /* flat-design primitives */
+    --radius:     10px;
+    --radius-lg:  14px;
+    --shadow:     none;                              /* flat by default */
+    --shadow-pop: 0 8px 24px -12px rgba(15, 23, 42, 0.18);  /* modals, menus */
+    --scrim:      rgba(15, 23, 42, 0.35);
+}
+
+/* =====================================================================
+   3. MODULE ACCENTS — light
+   All three modules share the AYLA brand blue (#0038A8, the flag blue from
+   the logo) so the product reads as one identity. Portals stay
+   distinguishable by their header badge ("ADMIN"/"STAFF"), sidebar label
+   and nav contents rather than by hue.
+
+   The logo's other two colours are deliberately NOT used as accents: red
+   is already --danger and gold is already --warning, so promoting them
+   would make ordinary pages read as alerts. They live in the logo mark.
+   ===================================================================== */
+[data-module="admin"] {
+    --accent:        #0038A8;   /* 9.9:1 on white */
+    --accent-strong: #002A80;
+    --tint-accent:   rgba(0, 56, 168, 0.10);
+    --accent-soft:   #eef3fc;
+    --accent-border: #0038A8;  /* same as --accent — was a pale wash at 1.25:1 */
+    --accent-ring:   rgba(0, 56, 168, 0.22);
+    --accent-blue:   #0038A8;  /* legacy names kept so pages need no edit */
+    --accent-cyan:   #0038A8;
+}
+
+[data-module="staff"] {
+    --accent:        #0038A8;
+    --accent-strong: #002A80;
+    --tint-accent:   rgba(0, 56, 168, 0.10);
+    --accent-soft:   #eef3fc;
+    --accent-border: #0038A8;  /* same as --accent — was a pale wash at 1.39:1 */
+    --accent-ring:   rgba(0, 56, 168, 0.22);
+    --accent-blue:   #0038A8;
+    --accent-violet: #0038A8;
+}
+
+[data-module="patron"] {
+    --accent:        #0038A8;
+    --accent-strong: #002A80;
+    --tint-accent:   rgba(0, 56, 168, 0.10);
+    --accent-soft:   #eef3fc;
+    --accent-border: #0038A8;  /* same as --accent — was a pale wash at 1.21:1 */
+    --accent-ring:   rgba(0, 56, 168, 0.22);
+    --accent2:       #b45309;   /* amber secondary — echoes the logo's sun */
+    /* login page token system — names kept, values now brand blue */
+    --green:  #0038A8;
+    --green2: #002A80;
+    --dark:   #f4f6f9;
+}
+
+/* =====================================================================
+   4. DARK THEME — opt-in. Each module keeps the tint it has today.
+   ===================================================================== */
+[data-theme="dark"] {
+    color-scheme: dark;
+
+    /* Neutral dark defaults for every surface token. The per-module blocks
+       below refine these; without them a token a module does not define
+       would fall through to its light value from :root. */
+    --bg-main:   #0b1220;  --bg-dark:    #0b1220;  --bg-darker: #070d18;
+    --bg-sidebar:#0d1524;  --bg-card:    #111a2b;  --bg-modal:  #141e32;
+    --bg-input:  #0e1727;  --input-bg:   #0e1727;
+    /* Patron has no --border-color override of its own, so shared components
+       like .theme-toggle fall through to this default — must clear 3:1 too. */
+    --border-color: #5e7092; --border-modal: #5e7092;
+    --bg:        #0e1520;  --surface:    #141c29;  --surface2:  #1a2432;
+    --border:    #243044;  --text:       #e9eef7;
+    --nav-bg:    rgba(13, 21, 36, 0.92);
+    --auth-card: rgba(12, 18, 32, 0.80);
+
+    --bg-subtle:    rgba(255, 255, 255, 0.03);
+    --text-primary: #e9eef7;
+    --text-main:    #e9eef7;
+    --text-muted:   #94a3b8;   /* lightened from #64748b for readability */
+
+    --auth-overlay-1: rgba(0, 0, 0, 0.78);
+    --auth-overlay-2: rgba(0, 0, 0, 0.82);
+    --glass:          rgba(255, 255, 255, 0.06);
+    --glass-soft:     rgba(255, 255, 255, 0.03);
+    --glass-border:   rgba(255, 255, 255, 0.42);   /* 3:1+ on card and field — was 0.10 (1.3:1) */
+    --on-glass:       #f8fafc;
+
+    --danger:  #f87171;
+    --blue:    #60a5fa;
+    --pink:    #f472b6;
+    --success: #34d399;
+    --warning: #fbbf24;
+    --info:    #60a5fa;
+    --on-status: #0b1220;      /* bright fills in dark need dark text */
+
+    --tint-success: rgba(52, 211, 153, 0.12);
+    --tint-warning: rgba(251, 191, 36, 0.12);
+    --tint-danger:  rgba(251, 113, 133, 0.12);
+    --tint-info:    rgba(96, 165, 250, 0.12);
+    --tint-pink:    rgba(244, 114, 182, 0.12);
+
+    --status-returned:    #34d399;
+    --status-returned-bg: rgba(16, 185, 129, 0.12);
+    --status-borrowed:    #fbbf24;
+    --status-borrowed-bg: rgba(245, 158, 11, 0.12);
+    --status-overdue:     #fb7185;
+    --status-overdue-bg:  rgba(244, 63, 94, 0.12);
+
+    --shadow:     none;
+    --shadow-pop: 0 12px 32px -16px rgba(0, 0, 0, 0.75);
+    --scrim:      rgba(2, 6, 23, 0.62);
+}
+
+/* Admin — navy */
+[data-theme="dark"][data-module="admin"] {
+    --bg-main:      #0b1220;
+    --bg-dark:      #0b1220;
+    --bg-darker:    #070d18;
+    --bg-sidebar:   #0d1524;
+    --bg-card:      #111a2b;
+    --bg-modal:     #141e32;
+    --bg-input:     #0e1727;
+    --input-bg:     #0e1727;
+    --border-color: #5e7092;   /* 3.3:1+ on card/sidebar/input/modal */
+    --border-modal: #5e7092;
+    --nav-bg:       rgba(13, 21, 36, 0.92);
+    --auth-card:    rgba(12, 25, 37, 0.80);
+
+    /* The flag blue is 1.8:1 on this navy — far too dark to use as-is, so
+       dark mode uses a lightened tint of the same hue (6.6:1+). */
+    --accent:        #60A5FA;
+    --accent-strong: #93C5FD;
+    --tint-accent:   rgba(96, 165, 250, 0.12);
+    --accent-soft:   rgba(96, 165, 250, 0.10);
+    --accent-border: #60A5FA;  /* full strength — the 32% wash was 2.1:1 */
+    --accent-ring:   rgba(96, 165, 250, 0.30);
+    --accent-blue:   #60A5FA;
+    --accent-cyan:   #60A5FA;
+    --on-accent:     #06132b;
+}
+
+/* Library staff — brand navy (was violet) */
+[data-theme="dark"][data-module="staff"] {
+    --bg-main:      #0b1220;
+    --bg-dark:      #0b1220;
+    --bg-darker:    #070d18;
+    --bg-sidebar:   #0d1524;
+    --bg-card:      #111a2b;
+    --bg-modal:     #141e32;
+    --bg-input:     #0e1727;
+    --input-bg:     #0e1727;
+    --border-color: #5e7092;   /* 3.3:1+ on card/sidebar/input — same neutral used by admin */
+    --border-modal: #5e7092;
+    --nav-bg:       rgba(13, 21, 36, 0.92);
+    --auth-card:    rgba(12, 25, 37, 0.80);
+
+    --accent:        #60A5FA;
+    --accent-strong: #93C5FD;
+    --tint-accent:   rgba(96, 165, 250, 0.12);
+    --accent-soft:   rgba(96, 165, 250, 0.10);
+    --accent-border: #60A5FA;  /* full strength — the 32% wash was 1.8:1 */
+    --accent-ring:   rgba(96, 165, 250, 0.30);
+    --accent-blue:   #60A5FA;
+    --accent-violet: #60A5FA;
+    --on-accent:     #06132b;
+}
+
+/* Patron — brand navy (was green) */
+[data-theme="dark"][data-module="patron"] {
+    --bg:        #0b1220;
+    --surface:   #111a2b;
+    --surface2:  #16203a;
+    --border:    #5e7092;      /* 3.3:1+ on bg/surface/surface2 */
+    --text:      #e9eef7;
+    --muted:     #93a3bd;      /* 6.5:1 on bg/surface */
+    --nav-bg:    rgba(11, 18, 32, 0.92);
+    --auth-card: rgba(8, 14, 26, 0.80);
+
+    --accent:        #60A5FA;
+    --accent-strong: #93C5FD;
+    --tint-accent:   rgba(96, 165, 250, 0.12);
+    --accent-soft:   rgba(96, 165, 250, 0.10);
+    --accent-border: #60A5FA;  /* full strength — the 30% wash was 2.1:1 */
+    --accent-ring:   rgba(96, 165, 250, 0.28);
+    --accent2:       #fbbf24;   /* amber secondary — echoes the logo's sun */
+    --on-accent:     #06132b;   /* light blue fill needs dark text */
+    --green:  #60A5FA;
+    --green2: #93C5FD;
+    --dark:   #070d18;
+}
+
+/* =====================================================================
+   5. BASE — applies to every page in both themes
+   ===================================================================== */
+html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+/* ---- AYLA logo -------------------------------------------------------
+   The logo is a plain <img> whose src theme.js swaps for the light-wordmark
+   variant in dark mode. Deliberately NOT a CSS background and NOT two
+   stacked <img> tags: both of those fail invisibly (an empty box, or the
+   logo drawn twice) whenever this stylesheet is stale or outranked. An
+   <img> with a real src always renders something.
+
+   Size it by HEIGHT only — the logo is a wide lockup and a fixed width
+   would squash it. */
+.ayla-logo { width: auto; flex-shrink: 0; }
+
+/* Native form controls, scrollbars and autofill follow the theme */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+    background: rgb(var(--tw-slate-700));
+    border-radius: 6px;
+}
+::-webkit-scrollbar-thumb:hover { background: rgb(var(--tw-slate-600)); }
+
+/* Visible keyboard focus everywhere — important for the accessibility
+   requirement, and it costs nothing visually until a key is used. */
+:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+/* Modal scrims are a theme token rather than a hard-coded black */
+.bg-black\/60, .bg-black\/80 { background: var(--scrim) !important; }
+
+/* =====================================================================
+   6. THEME TOGGLE BUTTON — one component, used by all three modules
+   ===================================================================== */
+.theme-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 36px;
+    height: 36px;
+    flex-shrink: 0;
+    border: 1px solid var(--border-color, var(--border));
+    border-radius: var(--radius);
+    background: transparent;
+    color: var(--text-muted, var(--muted));
+    font: inherit;
+    font-size: 14px;
+    cursor: pointer;
+    transition: color .15s ease, border-color .15s ease, background-color .15s ease;
+}
+.theme-toggle:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+}
+/* Wide variant for the admin/staff sidebar footer */
+.theme-toggle.is-wide {
+    width: 100%;
+    height: auto;
+    justify-content: flex-start;
+    padding: 8px 12px;
+    font-size: 13px;
+    font-weight: 500;
+}
+/* Show the icon for the theme you would switch TO */
+.theme-toggle .icon-dark  { display: inline; }
+.theme-toggle .icon-light { display: none; }
+[data-theme="dark"] .theme-toggle .icon-dark  { display: none; }
+[data-theme="dark"] .theme-toggle .icon-light { display: inline; }
+.theme-toggle .label-dark  { display: inline; }
+.theme-toggle .label-light { display: none; }
+[data-theme="dark"] .theme-toggle .label-dark  { display: none; }
+[data-theme="dark"] .theme-toggle .label-light { display: inline; }
+
+/* =====================================================================
+   7. REDUCED MOTION
+   ===================================================================== */
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: .001ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: .001ms !important;
+        scroll-behavior: auto !important;
+    }
+}

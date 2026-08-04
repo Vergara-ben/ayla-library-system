@@ -1,28 +1,21 @@
 {% load static %}
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-module="staff">
 <head>
     <meta charset="UTF-8">
+    <meta name="theme-color" content="#ffffff">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Ayla Admin Panel - Log Management</title>
+    <script src="{% static 'js/theme.js' %}"></script>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="{% static 'js/tailwind-theme.js' %}"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@400;700&display=swap" rel="stylesheet">
     
+    <link rel="stylesheet" href="{% static 'css/theme.css' %}">
     <style>
-        :root {
-            --bg-main: #0a0714;
-            --bg-sidebar: #130e20;
-            --bg-card: #161128;
-            --bg-input: #1a1436;
-            --bg-modal: #1a1332;
-            --text-primary: #e2e8f0;
-            --text-muted: #64748b;
-            --border-color: #2a2144;
-        }
-
         body {
             font-family: 'Inter', sans-serif;
             background-color: var(--bg-main);
@@ -113,6 +106,8 @@
     </style>
     <link rel="stylesheet" href="{% static 'css/admin-enhance.css' %}">
     <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
+    <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
+    <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
 </head>
 <body class="flex h-screen overflow-hidden">
 
@@ -129,10 +124,6 @@
             </div>
             <div class="flex items-center gap-4">
                 <span class="bg-violet-950 text-violet-400 text-xs px-2.5 py-1 rounded font-bold border border-violet-800 tracking-wider">{% if request.session.admin_role == 'Staff' %}STAFF{% else %}ADMIN{% endif %}</span>
-                <button class="relative text-slate-400 hover:text-slate-200 p-1">
-                    <i class="fa-solid fa-bell text-lg"></i>
-                    <span class="absolute top-1 right-1 w-2 h-2 bg-amber-500 rounded-full"></span>
-                </button>
                 <div class="w-8 h-8 rounded-full bg-violet-900 border border-violet-700 flex items-center justify-center text-xs font-bold text-violet-200">
                     AD
                 </div>

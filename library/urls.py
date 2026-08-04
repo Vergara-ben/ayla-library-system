@@ -30,6 +30,7 @@ urlpatterns = [
     path('library-staff/donations/', views.staff_donations, name='staff_donations'),
     path('library-staff/logs/', views.staff_logs, name='staff_logs'),
     path('library-staff/shelf-manager/', views.staff_shelf, name='staff_shelf'),
+    path('library-staff/indoor-map/', views.staff_indoor_map, name='staff_indoor_map'),
     # User Management (Admin-only: manage Library Staff accounts)
     path('admin-portal/users/', views.user_management, name='user_management'),
     path('admin-portal/users/create/', views.create_staff, name='create_staff'),
@@ -116,9 +117,22 @@ urlpatterns = [
     path('admin-portal/toggle-active/', views.toggle_active, name='toggle_active'),
     # Map Configuration: Beacons & Waypoints
     path('admin-portal/map-data/', views.get_map_data, name='get_map_data'),
+    # Shelf placement on the floor plan (Figures 48-51)
+    path('admin-portal/place-shelf/', views.place_shelf, name='place_shelf'),
+    path('admin-portal/move-shelf/', views.move_shelf, name='move_shelf'),
+    path('admin-portal/rotate-shelf/', views.rotate_shelf, name='rotate_shelf'),
+    path('admin-portal/resize-shelf/', views.resize_shelf, name='resize_shelf'),
+    path('admin-portal/unplace-shelf/', views.unplace_shelf, name='unplace_shelf'),
+    # Doors on room walls
+    path('admin-portal/add-door/', views.add_door, name='add_door'),
+    path('admin-portal/move-door/', views.move_door, name='move_door'),
+    path('admin-portal/delete-door/', views.delete_door, name='delete_door'),
+    path('admin-portal/flip-door/', views.flip_door, name='flip_door'),
     path('admin-portal/add-beacon/', views.add_beacon, name='add_beacon'),
+    path('admin-portal/move-beacon/', views.move_beacon, name='move_beacon'),
     path('admin-portal/delete-beacon/', views.delete_beacon, name='delete_beacon'),
     path('admin-portal/add-waypoint/', views.add_waypoint, name='add_waypoint'),
+    path('admin-portal/move-waypoint/', views.move_waypoint, name='move_waypoint'),
     path('admin-portal/delete-waypoint/', views.delete_waypoint, name='delete_waypoint'),
     path('admin-portal/add-waypoint-connection/', views.add_waypoint_connection, name='add_waypoint_connection'),
     path('admin-portal/delete-waypoint-connection/', views.delete_waypoint_connection, name='delete_waypoint_connection'),

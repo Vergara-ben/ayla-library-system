@@ -1,14 +1,74 @@
-{% load static %}
+
 <!DOCTYPE html>
 <html lang="en" data-module="admin">
 <head>
+<script>
+window.__errors=[];window.addEventListener('error',function(e){window.__errors.push('error: '+e.message+' @ line '+e.lineno+':'+e.colno);});window.addEventListener('unhandledrejection',function(e){window.__errors.push('unhandledrejection: '+(e.reason&&e.reason.stack?e.reason.stack:e.reason));});
+(function(){var _L;Object.defineProperty(window,'L',{configurable:true,get:function(){return _L;},
+ set:function(v){_L=v;if(v&&v.Map&&v.Map.addInitHook)v.Map.addInitHook(function(){window.__map=this;});}});})();
+window.__posted=[];
+window.fetch=function(url,opts){
+  if(opts&&opts.method==='POST'){
+    // The static preview strips every {% url %} tag to the literal string
+    // "#", so every endpoint posts to the same URL — this harness cannot
+    // distinguish requests by URL like the real app does. It infers the
+    // endpoint from which fields are present in the body instead.
+    var q=new URLSearchParams(String(opts.body));
+    var log=JSON.parse(sessionStorage.getItem('__posted')||'[]');
+    log.push({url:String(url),body:String(opts.body)});
+    sessionStorage.setItem('__posted',JSON.stringify(log));
+    var res={success:true};
+    var hasWidth = q.get('width')!==null;
+    var hasRotation = q.get('rotation')!==null;
+    var hasGeometry = q.get('geometry')!==null;
+    var hasDoorId = q.get('door_id')!==null;
+    var hasMapXY = q.get('map_x')!==null && q.get('map_y')!==null;
+    var hasConnPair = q.get('waypoint_from_id')!==null && q.get('waypoint_to_id')!==null;
+
+    if (hasConnPair) {
+      // add_waypoint_connection: server returns the created connection row.
+      res.connection = { connection_id: Math.floor(Math.random()*9000)+100,
+        waypoint_from_id: parseInt(q.get('waypoint_from_id'),10), waypoint_to_id: parseInt(q.get('waypoint_to_id'),10) };
+    } else if (hasGeometry) {
+      res.geometry = JSON.parse(q.get('geometry'));
+    } else if (hasWidth) {
+      // resize_shelf: width/depth always; map_x/map_y only when an edge drag recentred it.
+      res.width = parseFloat(q.get('width')); res.depth = parseFloat(q.get('depth'));
+      if (hasMapXY) { res.map_x = parseFloat(q.get('map_x')); res.map_y = parseFloat(q.get('map_y')); }
+    } else if (hasDoorId && hasMapXY) {
+      // move_door: server re-snaps and also returns rotation.
+      res.x = parseFloat(q.get('map_x')); res.y = parseFloat(q.get('map_y')); res.rotation = 90;
+    } else if (hasRotation) {
+      // rotate_shelf
+      res.rotation = parseFloat(q.get('rotation'));
+    } else if (hasMapXY) {
+      // move_shelf / move_beacon / move_waypoint — same {shelf,beacon,waypoint}_id + map_x/map_y shape.
+      res.map_x = parseFloat(q.get('map_x')); res.map_y = parseFloat(q.get('map_y'));
+    }
+    return Promise.resolve({json:function(){return Promise.resolve(res);}});
+  }
+  return Promise.resolve({json:function(){return Promise.resolve({
+    success:true,has_active:true,floor_plan_id:1,name:'Ground Floor',is_active:true,
+    canvas_width:1000,canvas_height:800,
+    rooms:[{room_id:7,name:'Reading Hall',geometry:[[100,100],[400,100],[400,300],[100,300]],
+            doors:[{door_id:1,room_id:7,x:250,y:100,width:28,rotation:0,swing:1,label:'Main'}]}],
+    shelves:[{shelf_id:3,name:'Shelf A',map_x:600,map_y:200,rotation:0,width:80,depth:20,placed:true,room_id:7}],
+    beacons:[{beacon_id:9,beacon_uuid:'u1',map_x:150,map_y:150,label:'B1'}],
+    waypoints:[{waypoint_id:11,map_x:120,map_y:120,label:'WP1',linked_shelf_id:null,linked_shelf_name:null},
+               {waypoint_id:12,map_x:220,map_y:120,label:'WP2',linked_shelf_id:null,linked_shelf_name:null}],
+    connections:[{connection_id:5,waypoint_from_id:11,waypoint_to_id:12,distance:100}]
+  });}});
+};
+window.confirm=function(){return true;};
+</script>
+
     <meta charset="UTF-8">
     <meta name="theme-color" content="#ffffff">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Ayla Admin Panel - Floor Plan Management</title>
-    <script src="{% static 'js/theme.js' %}"></script>
+    <script src="/static/js/theme.js?v=1785426215"></script>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="{% static 'js/tailwind-theme.js' %}"></script>
+    <script src="/static/js/tailwind-theme.js?v=1785426215"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -19,7 +79,7 @@
     <link rel="stylesheet" href="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.15.0/dist/leaflet-geoman.css"/>
     <script src="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.15.0/dist/leaflet-geoman.min.js"></script>
 
-    <link rel="stylesheet" href="{% static 'css/theme.css' %}">
+    <link rel="stylesheet" href="/static/css/theme.css?v=1785426215">
     <style>
         body {
             font-family: 'Inter', sans-serif;
@@ -172,14 +232,102 @@
         .map-dot.waypoint { background: var(--success); }
         .map-dot.waypoint.selected { background: var(--warning); }
     </style>
-    <link rel="stylesheet" href="{% static 'css/admin-enhance.css' %}">
-    <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
-    <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
-    <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
+    <link rel="stylesheet" href="/static/css/admin-enhance.css?v=1785426215">
+    <link rel="stylesheet" href="/static/css/admin-theme.css?v=1785426215">
 </head>
 <body class="flex h-screen overflow-hidden">
 
-    {% include 'admin/_sidebar.html' with active='floorplans' %}
+    
+
+<aside class="w-64 flex-shrink-0 flex flex-col" style="background-color: var(--bg-sidebar); border-right: 1px solid var(--border-color);">
+    <div class="p-6 flex items-center gap-3" style="border-bottom: 1px solid var(--border-color);">
+        <div class="w-10 h-10 rounded-lg flex items-center justify-center text-xl font-bold text-cyan-400 bg-cyan-950/50 border border-cyan-800">
+            A
+        </div>
+        <div>
+            <h1 class="logo-text text-xl tracking-wider text-slate-100 leading-none">AYLA</h1>
+            <span class="text-xs tracking-widest text-slate-500 uppercase font-semibold">Admin Panel</span>
+        </div>
+    </div>
+
+    <nav class="flex-1 px-4 py-6 space-y-7 overflow-y-auto">
+        <div>
+            <p class="px-2 text-xs font-bold tracking-widest text-slate-500 uppercase mb-3">Overview</p>
+            <div class="space-y-1">
+                <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-800/50 text-cyan-400 font-medium border border-slate-700/50text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                    <i class="fa-solid fa-chart-pie w-5 text-sm"></i>
+                    <span class="text-sm font-medium">Dashboard</span>
+                </a>
+                <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-800/50 text-cyan-400 font-medium border border-slate-700/50text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                    <i class="fa-solid fa-map w-5 text-sm"></i>
+                    <span class="text-sm font-medium">Indoor Map</span>
+                </a>
+            </div>
+        </div>
+
+        <div>
+            <p class="px-2 text-xs font-bold tracking-widest text-slate-500 uppercase mb-3">Management</p>
+            <div class="space-y-1">
+                <a href="#" class="flex items-center justify-between px-3 py-2 rounded-lg bg-slate-800/50 text-cyan-400 font-medium border border-slate-700/50text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                    <div class="flex items-center gap-3">
+                        <i class="fa-solid fa-file-invoice w-5 text-sm"></i>
+                        <span class="text-sm font-medium">Transactions</span>
+                    </div>
+                    <span class="bg-rose-500/20 text-rose-400 text-xs px-2 py-0.5 rounded-full font-semibold">Pending Transactions Count</span>
+                </a>
+                <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-800/50 text-cyan-400 font-medium border border-slate-700/50text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                    <i class="fa-solid fa-clipboard-list w-5 text-sm"></i>
+                    <span class="text-sm font-medium">Log Management</span>
+                </a>
+                <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-800/50 text-cyan-400 font-medium border border-slate-700/50text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                    <i class="fa-solid fa-book w-5 text-sm"></i>
+                    <span class="text-sm font-medium">Manage Books</span>
+                </a>
+                <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-800/50 text-cyan-400 font-medium border border-slate-700/50text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                    <i class="fa-solid fa-users w-5 text-sm"></i>
+                    <span class="text-sm font-medium">Manage Patrons</span>
+                </a>
+                <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-800/50 text-cyan-400 font-medium border border-slate-700/50text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                    <i class="fa-solid fa-hand-holding-heart w-5 text-sm"></i>
+                    <span class="text-sm font-medium">Donations</span>
+                </a>
+                <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-800/50 text-cyan-400 font-medium border border-slate-700/50text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                    <i class="fa-solid fa-bullhorn w-5 text-sm"></i>
+                    <span class="text-sm font-medium">Announcements</span>
+                </a>
+                <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-800/50 text-cyan-400 font-medium border border-slate-700/50text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                    <i class="fa-solid fa-layer-group w-5 text-sm"></i>
+                    <span class="text-sm font-medium">Floor Plans</span>
+                </a>
+                <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-800/50 text-cyan-400 font-medium border border-slate-700/50text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                    <i class="fa-solid fa-folder-tree w-5 text-sm"></i>
+                    <span class="text-sm font-medium">Shelf Manager</span>
+                </a>
+                <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-800/50 text-cyan-400 font-medium border border-slate-700/50text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                    <i class="fa-solid fa-chart-line w-5 text-sm"></i><span class="text-sm font-medium">Reports</span>
+                </a>
+                <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-800/50 text-cyan-400 font-medium border border-slate-700/50text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                    <i class="fa-solid fa-gears w-5 text-sm"></i><span class="text-sm font-medium">Borrowing Rules</span>
+                </a>
+                <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-800/50 text-cyan-400 font-medium border border-slate-700/50text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors">
+                    <i class="fa-solid fa-user-gear w-5 text-sm"></i><span class="text-sm font-medium">User Management</span>
+                </a>
+            </div>
+        </div>
+
+        <div>
+            <p class="px-2 text-xs font-bold tracking-widest text-slate-500 uppercase mb-3">Account</p>
+            <div class="space-y-1">
+                <button type="button" class="theme-toggle is-wide" data-theme-toggle></button>
+                <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40 hover:text-rose-300 transition-colors">
+                    <i class="fa-solid fa-right-from-bracket w-5 text-sm"></i>
+                    <span class="text-sm font-medium">Logout</span>
+                </a>
+            </div>
+        </div>
+    </nav>
+</aside>
+
 
     <div class="flex-1 flex flex-col overflow-hidden">
         
@@ -192,6 +340,10 @@
             </div>
             <div class="flex items-center gap-4">
                 <span class="bg-cyan-950 text-cyan-400 text-xs px-2.5 py-1 rounded font-bold border border-cyan-800 tracking-wider">ADMIN</span>
+                <button class="relative text-slate-400 hover:text-slate-200 p-1">
+                    <i class="fa-solid fa-bell text-lg"></i>
+                    <span class="absolute top-1 right-1 w-2 h-2 bg-amber-500 rounded-full"></span>
+                </button>
                 <div class="w-8 h-8 rounded-full bg-cyan-900 border border-cyan-700 flex items-center justify-center text-xs font-bold text-cyan-200">
                     AD
                 </div>
@@ -200,24 +352,24 @@
 
         <main class="flex-1 overflow-y-auto p-8 space-y-6">
             
-            {% if error %}
-                <div class="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">{{ error }}</div>
-            {% endif %}
+            
+                <div class="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">Error</div>
+            
 
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
                     <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Total Floor Plans</p>
-                    <p class="text-3xl font-bold text-cyan-400 mt-2">{{ floorplans|length }}</p>
+                    <p class="text-3xl font-bold text-cyan-400 mt-2">Floorplans</p>
                     <p class="text-[10px] text-slate-500 mt-1">All floor plans</p>
                 </div>
                 <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
                     <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Active</p>
-                    <p class="text-3xl font-bold text-emerald-400 mt-2">{{ active_count }}</p>
+                    <p class="text-3xl font-bold text-emerald-400 mt-2">Active Count</p>
                     <p class="text-[10px] text-slate-500 mt-1">Currently active</p>
                 </div>
                 <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
                     <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Under Renovation</p>
-                    <p class="text-3xl font-bold text-amber-500 mt-2">{{ renovation_count }}</p>
+                    <p class="text-3xl font-bold text-amber-500 mt-2">Renovation Count</p>
                     <p class="text-[10px] text-slate-500 mt-1">Renovation notices</p>
                 </div>
             </div>
@@ -250,47 +402,47 @@
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-slate-800/40 text-xs text-slate-300">
-                            {% for floorplan in floorplans %}
+                            
                             <tr class="hover:bg-slate-800/10 transition-colors">
-                                <td class="py-4 px-6 font-mono text-slate-400">#{{ floorplan.floor_plan_id }}</td>
-                                <td class="py-4 px-6 font-semibold text-slate-200">{{ floorplan.name }}</td>
-                                <td class="py-4 px-6 font-mono text-slate-400">{{ floorplan.canvas_width|floatformat:0 }} × {{ floorplan.canvas_height|floatformat:0 }}</td>
+                                <td class="py-4 px-6 font-mono text-slate-400">#Floor Plan Id</td>
+                                <td class="py-4 px-6 font-semibold text-slate-200">Name</td>
+                                <td class="py-4 px-6 font-mono text-slate-400">Canvas Width × Canvas Height</td>
                                 <td class="py-4 px-6">
-                                    {% if floorplan.is_active %}
+                                    
                                         <span class="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-1 rounded text-[10px] font-bold tracking-wide uppercase">Active</span>
-                                    {% else %}
+                                    
                                         <span class="bg-slate-500/10 text-slate-400 border border-slate-500/20 px-2 py-1 rounded text-[10px] font-bold tracking-wide uppercase">Inactive</span>
-                                    {% endif %}
+                                    
                                 </td>
                                 <td class="py-4 px-6">
-                                    {% if floorplan.renovation_notice %}
-                                        <span class="bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-1 rounded text-[10px] font-bold tracking-wide uppercase">{{ floorplan.renovation_notice }}</span>
-                                    {% else %}
+                                    
+                                        <span class="bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-1 rounded text-[10px] font-bold tracking-wide uppercase">Renovation Notice</span>
+                                    
                                         <span class="text-slate-500">None</span>
-                                    {% endif %}
+                                    
                                 </td>
-                                <td class="py-4 px-6 text-slate-300">{{ floorplan.uploaded_at|date:"M d, Y H:i" }}</td>
+                                <td class="py-4 px-6 text-slate-300">Uploaded At</td>
                                 <td class="py-4 px-6 text-center">
                                     <div class="flex items-center justify-center gap-1.5">
-                                        <form method="post" action="{% url 'set_active_floorplan' %}" class="inline">
-                                            {% csrf_token %}
-                                            <input type="hidden" name="floorplan_id" value="{{ floorplan.floor_plan_id }}">
-                                            {% if floorplan.is_active %}
+                                        <form method="post" action="#" class="inline">
+                                            
+                                            <input type="hidden" name="floorplan_id" value="Floor Plan Id">
+                                            
                                             <button type="submit" class="w-7 h-7 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 transition-colors" title="Set Inactive">
                                                 <i class="fa-solid fa-power-off text-[10px]"></i>
                                             </button>
-                                            {% else %}
+                                            
                                             <button type="submit" class="w-7 h-7 rounded border border-slate-800 text-emerald-500/70 hover:text-emerald-400 hover:bg-emerald-950/20 transition-colors" title="Set Active">
                                                 <i class="fa-solid fa-check text-[10px]"></i>
                                             </button>
-                                            {% endif %}
+                                            
                                         </form>
-                                        <button data-floorplan-id="{{ floorplan.floor_plan_id }}" data-notice="{{ floorplan.renovation_notice|default:"" }}" data-message="{{ floorplan.renovation_message|default:"" }}" onclick="openRenovationModalFromData(this)" class="w-7 h-7 rounded border border-slate-800 text-amber-500/70 hover:text-amber-400 hover:bg-amber-950/20 transition-colors" title="Toggle Renovation">
+                                        <button data-floorplan-id="Floor Plan Id" data-notice="Renovation Notice" data-message="Renovation Message" onclick="openRenovationModalFromData(this)" class="w-7 h-7 rounded border border-slate-800 text-amber-500/70 hover:text-amber-400 hover:bg-amber-950/20 transition-colors" title="Toggle Renovation">
                                             <i class="fa-solid fa-hammer text-[10px]"></i>
                                         </button>
-                                        <form method="post" action="{% url 'delete_floorplan' %}" class="inline" onsubmit="return confirm('Are you sure you want to delete this floor plan?');">
-                                            {% csrf_token %}
-                                            <input type="hidden" name="floorplan_id" value="{{ floorplan.floor_plan_id }}">
+                                        <form method="post" action="#" class="inline" onsubmit="return confirm('Are you sure you want to delete this floor plan?');">
+                                            
+                                            <input type="hidden" name="floorplan_id" value="Floor Plan Id">
                                             <button type="submit" class="w-7 h-7 rounded border border-slate-800 text-rose-500/70 hover:text-rose-400 hover:bg-rose-950/20 transition-colors" title="Delete">
                                                 <i class="fa-solid fa-trash-can text-[10px]"></i>
                                             </button>
@@ -298,11 +450,11 @@
                                     </div>
                                 </td>
                             </tr>
-                            {% empty %}
+                            
                             <tr>
                                 <td colspan="6" class="py-8 text-center text-slate-500">No floor plans found.</td>
                             </tr>
-                            {% endfor %}
+                            
                         </tbody>
                     </table>
                 </div>
@@ -311,18 +463,18 @@
 
             <!-- Map Configuration. Any plan can be drawn on, not just the live
                  one, so a new layout can be finished before it is activated. -->
-            {% if floorplans %}
+            
             <div class="rounded-xl border border-slate-800/80 overflow-hidden shadow-2xl flex flex-col" style="background-color: var(--bg-card);">
                 <div class="p-5 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div class="flex items-center gap-2 flex-wrap">
                         <i class="fa-solid fa-location-dot text-cyan-600 text-xs"></i>
                         <h4 class="text-sm font-bold text-slate-200 tracking-wide">Map Configuration</h4>
                         <select id="planPicker" onchange="switchPlan(this.value)" class="text-[11px] rounded-lg px-2 py-1.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
-                            {% for fp in floorplans %}
-                            <option value="{{ fp.floor_plan_id }}" {% if fp.floor_plan_id == selected_plan_id %}selected{% endif %}>
-                                {{ fp.name }}{% if fp.is_active %} — live{% else %} — draft{% endif %}
+                            
+                            <option value="Floor Plan Id" selected>
+                                Name — live — draft
                             </option>
-                            {% endfor %}
+                            
                         </select>
                         <span id="planLiveBadge" class="hidden text-[10px] font-bold uppercase tracking-wide px-2 py-1 rounded bg-amber-500/10 text-amber-500 border border-amber-500/20">Draft — not visible to patrons</span>
                     </div>
@@ -374,13 +526,13 @@
                     <div id="mapConfig"></div>
                 </div>
             </div>
-            {% endif %}
+            
 
             <!-- Rooms, Shelves, Sections, and Shelf Levels Management -->
-            {% for floorplan in floorplans %}
+            
             <div class="rounded-xl border border-slate-800/80 overflow-hidden shadow-2xl flex flex-col" style="background-color: var(--bg-card);">
                 <div class="p-5 border-b border-slate-800">
-                    <h4 class="text-sm font-bold text-slate-200 tracking-wide">Floor Plan #{{ floorplan.floor_plan_id }} - Structure</h4>
+                    <h4 class="text-sm font-bold text-slate-200 tracking-wide">Floor Plan #Floor Plan Id - Structure</h4>
                 </div>
                 
                 <!-- Rooms -->
@@ -390,29 +542,29 @@
                         <span class="text-[10px] text-slate-500 italic">Use &ldquo;Place Room&rdquo; on the map above</span>
                     </div>
                     <div class="space-y-2">
-                        {% for room in floorplan.room_set.all %}
-                        <div class="flex items-center justify-between p-3 rounded-lg border border-slate-800/60 bg-slate-900/20" data-room-id="{{ room.room_id }}" data-name="{{ room.name }}" data-map-x="{{ room.map_x }}" data-map-y="{{ room.map_y }}" data-description="{{ room.description|default:"" }}">
+                        
+                        <div class="flex items-center justify-between p-3 rounded-lg border border-slate-800/60 bg-slate-900/20" data-room-id="Room Id" data-name="Name" data-map-x="Map X" data-map-y="Map Y" data-description="Description">
                             <div class="flex items-center gap-3">
                                 <i class="fa-solid fa-door-open text-slate-500 text-xs"></i>
-                                <span class="text-xs font-medium text-slate-300">{{ room.name }}</span>
-                                <span class="text-[10px] text-slate-500">({{ room.map_x }}, {{ room.map_y }})</span>
+                                <span class="text-xs font-medium text-slate-300">Name</span>
+                                <span class="text-[10px] text-slate-500">(Map X, Map Y)</span>
                             </div>
                             <div class="flex items-center gap-2">
                                 <button onclick="openEditRoomModalFromData(this.closest('.flex.items-center.justify-between'))" class="text-amber-500/70 hover:text-amber-400 text-xs" title="Edit Room">
                                     <i class="fa-solid fa-pen"></i>
                                 </button>
-                                <form method="post" action="{% url 'delete_room' %}" class="inline" onsubmit="return confirm('Delete this room and all its shelves?');">
-                                    {% csrf_token %}
-                                    <input type="hidden" name="room_id" value="{{ room.room_id }}">
+                                <form method="post" action="#" class="inline" onsubmit="return confirm('Delete this room and all its shelves?');">
+                                    
+                                    <input type="hidden" name="room_id" value="Room Id">
                                     <button type="submit" class="text-rose-500/70 hover:text-rose-400 text-xs">
                                         <i class="fa-solid fa-trash-can"></i>
                                     </button>
                                 </form>
                             </div>
                         </div>
-                        {% empty %}
+                        
                         <p class="text-xs text-slate-500">No rooms added.</p>
-                        {% endfor %}
+                        
                     </div>
                 </div>
 
@@ -423,27 +575,27 @@
                         <span class="text-[10px] text-slate-500 italic">Use &ldquo;Place Shelf&rdquo; on the map above</span>
                     </div>
                     <div class="space-y-2">
-                        {% for room in floorplan.room_set.all %}
-                            {% for shelf in room.shelf_set.all %}
+                        
+                            
                             <div class="flex items-center justify-between p-3 rounded-lg border border-slate-800/60 bg-slate-900/20">
                                 <div class="flex items-center gap-3">
                                     <i class="fa-solid fa-box text-slate-500 text-xs"></i>
-                                    <span class="text-xs font-medium text-slate-300">{{ shelf.name }}</span>
-                                    <span class="text-[10px] text-slate-500">({{ shelf.map_x }}, {{ shelf.map_y }})</span>
-                                    <span class="text-[10px] text-slate-500">Room: {{ room.name }}</span>
+                                    <span class="text-xs font-medium text-slate-300">Name</span>
+                                    <span class="text-[10px] text-slate-500">(Map X, Map Y)</span>
+                                    <span class="text-[10px] text-slate-500">Room: Name</span>
                                 </div>
-                                <form method="post" action="{% url 'delete_shelf' %}" class="inline" onsubmit="return confirm('Delete this shelf and all its shelf levels?');">
-                                    {% csrf_token %}
-                                    <input type="hidden" name="shelf_id" value="{{ shelf.shelf_id }}">
+                                <form method="post" action="#" class="inline" onsubmit="return confirm('Delete this shelf and all its shelf levels?');">
+                                    
+                                    <input type="hidden" name="shelf_id" value="Shelf Id">
                                     <button type="submit" class="text-rose-500/70 hover:text-rose-400 text-xs">
                                         <i class="fa-solid fa-trash-can"></i>
                                     </button>
                                 </form>
                             </div>
-                            {% endfor %}
-                        {% empty %}
+                            
+                        
                         <p class="text-xs text-slate-500">No shelves added.</p>
-                        {% endfor %}
+                        
                     </div>
                 </div>
 
@@ -453,32 +605,32 @@
                         <h5 class="text-xs font-bold text-slate-400 uppercase tracking-wider">Shelf Levels</h5>
                     </div>
                     <div class="space-y-2">
-                        {% for room in floorplan.room_set.all %}
-                            {% for shelf in room.shelf_set.all %}
-                                {% for level in shelf.shelflevel_set.all %}
+                        
+                            
+                                
                                 <div class="flex items-center justify-between p-3 rounded-lg border border-slate-800/60 bg-slate-900/20">
                                     <div class="flex items-center gap-3">
                                         <i class="fa-solid fa-layer-group text-slate-500 text-xs"></i>
-                                        <span class="text-xs font-medium text-slate-300">{{ level.category|default:level.level_number }}</span>
-                                        <span class="text-[10px] text-slate-500">Level {{ level.level_number }} · Shelf: {{ shelf.name }}</span>
+                                        <span class="text-xs font-medium text-slate-300">Category</span>
+                                        <span class="text-[10px] text-slate-500">Level Level Number · Shelf: Name</span>
                                     </div>
-                                    <form method="post" action="{% url 'delete_shelf_level' %}" class="inline" onsubmit="return confirm('Delete this shelf level?');">
-                                        {% csrf_token %}
-                                        <input type="hidden" name="shelf_level_id" value="{{ level.shelf_level_id }}">
+                                    <form method="post" action="#" class="inline" onsubmit="return confirm('Delete this shelf level?');">
+                                        
+                                        <input type="hidden" name="shelf_level_id" value="Shelf Level Id">
                                         <button type="submit" class="text-rose-500/70 hover:text-rose-400 text-xs">
                                             <i class="fa-solid fa-trash-can"></i>
                                         </button>
                                     </form>
                                 </div>
-                                {% endfor %}
-                            {% endfor %}
-                        {% empty %}
+                                
+                            
+                        
                         <p class="text-xs text-slate-500">No shelf levels added.</p>
-                        {% endfor %}
+                        
                     </div>
                 </div>
             </div>
-            {% endfor %}
+            
 
         </main>
     </div>
@@ -493,7 +645,7 @@
                 </button>
             </div>
             <form method="post" class="space-y-4 text-xs">
-                {% csrf_token %}
+                
                 <div class="space-y-1.5">
                     <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Floor Plan Name</label>
                     <input type="text" name="name" placeholder="e.g. Ground Floor" maxlength="255" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" required>
@@ -533,8 +685,8 @@
                     <i class="fa-solid fa-xmark text-sm"></i>
                 </button>
             </div>
-            <form method="post" action="{% url 'add_room' %}" class="space-y-4 text-xs">
-                {% csrf_token %}
+            <form method="post" action="#" class="space-y-4 text-xs">
+                
                 <input type="hidden" name="floorplan_id" id="roomFloorplanId">
                 <div class="space-y-1.5">
                     <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Room Name</label>
@@ -575,8 +727,8 @@
                     <i class="fa-solid fa-xmark text-sm"></i>
                 </button>
             </div>
-            <form method="post" action="{% url 'edit_room' %}" class="space-y-4 text-xs">
-                {% csrf_token %}
+            <form method="post" action="#" class="space-y-4 text-xs">
+                
                 <input type="hidden" name="room_id" id="editRoomId">
                 <div class="space-y-1.5">
                     <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Room Name</label>
@@ -617,8 +769,8 @@
                     <i class="fa-solid fa-xmark text-sm"></i>
                 </button>
             </div>
-            <form method="post" action="{% url 'add_shelf' %}" class="space-y-4 text-xs">
-                {% csrf_token %}
+            <form method="post" action="#" class="space-y-4 text-xs">
+                
                 <input type="hidden" name="floorplan_id" id="shelfFloorplanId">
                 <div class="space-y-1.5">
                     <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Room</label>
@@ -665,8 +817,8 @@
                     <i class="fa-solid fa-xmark text-sm"></i>
                 </button>
             </div>
-            <form method="post" action="{% url 'add_shelf_level' %}" class="space-y-4 text-xs">
-                {% csrf_token %}
+            <form method="post" action="#" class="space-y-4 text-xs">
+                
                 <input type="hidden" name="shelf_id" id="shelfLevelShelfId">
                 <div class="space-y-1.5">
                     <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Level Number</label>
@@ -697,8 +849,8 @@
                     <i class="fa-solid fa-xmark text-sm"></i>
                 </button>
             </div>
-            <form method="post" action="{% url 'toggle_renovation' %}" class="space-y-4 text-xs">
-                {% csrf_token %}
+            <form method="post" action="#" class="space-y-4 text-xs">
+                
                 <input type="hidden" name="floorplan_id" id="renovationFloorplanId">
                 <div class="space-y-1.5">
                     <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Renovation Notice</label>
@@ -1022,31 +1174,31 @@
     <!-- Map Configuration logic (beacons & waypoints) -->
     <script>
     (function () {
-        const CSRF = "{{ csrf_token }}";
+        const CSRF = "Csrf Token";
         const URLS = {
-            mapData: "{% url 'get_map_data' %}",
-            addRoom: "{% url 'add_room' %}",
-            editRoom: "{% url 'edit_room' %}",
-            deleteRoom: "{% url 'delete_room' %}",
-            addDoor: "{% url 'add_door' %}",
-            moveDoor: "{% url 'move_door' %}",
-            deleteDoor: "{% url 'delete_door' %}",
-            flipDoor: "{% url 'flip_door' %}",
-            placeShelf: "{% url 'place_shelf' %}",
-            moveShelf: "{% url 'move_shelf' %}",
-            rotateShelf: "{% url 'rotate_shelf' %}",
-            resizeShelf: "{% url 'resize_shelf' %}",
-            editShelf: "{% url 'edit_shelf' %}",
-            unplaceShelf: "{% url 'unplace_shelf' %}",
-            addShelf: "{% url 'add_shelf' %}",
-            addBeacon: "{% url 'add_beacon' %}",
-            moveBeacon: "{% url 'move_beacon' %}",
-            deleteBeacon: "{% url 'delete_beacon' %}",
-            addWaypoint: "{% url 'add_waypoint' %}",
-            moveWaypoint: "{% url 'move_waypoint' %}",
-            deleteWaypoint: "{% url 'delete_waypoint' %}",
-            addConn: "{% url 'add_waypoint_connection' %}",
-            deleteConn: "{% url 'delete_waypoint_connection' %}",
+            mapData: "#",
+            addRoom: "#",
+            editRoom: "#",
+            deleteRoom: "#",
+            addDoor: "#",
+            moveDoor: "#",
+            deleteDoor: "#",
+            flipDoor: "#",
+            placeShelf: "#",
+            moveShelf: "#",
+            rotateShelf: "#",
+            resizeShelf: "#",
+            editShelf: "#",
+            unplaceShelf: "#",
+            addShelf: "#",
+            addBeacon: "#",
+            moveBeacon: "#",
+            deleteBeacon: "#",
+            addWaypoint: "#",
+            moveWaypoint: "#",
+            deleteWaypoint: "#",
+            addConn: "#",
+            deleteConn: "#",
         };
 
         let lmap = null;
@@ -2442,7 +2594,7 @@
     })();
     </script>
 
-    <script src="{% static 'js/admin-enhance.js' %}" defer></script>
+    <script src="/static/js/admin-enhance.js?v=1785426215" defer></script>
 
 <script>
   /* Leaflet paints marker colours into SVG attributes when the map is built,

@@ -15,8 +15,17 @@ class ActiveLocationManager(models.Manager):
 
 # ─── 1. FLOOR PLANS ───────────────────────────────────────────
 class FloorPlan(models.Model):
+    """A floor plan is a blank vector canvas the Administrator draws on.
+
+    There is no floor-plan image: rooms are drawn as editable polygons
+    (see Room.geometry), and shelves, beacons and waypoints are placed on the
+    same canvas. `canvas_width`/`canvas_height` define the coordinate space that
+    every map_x/map_y in the navigation tables is expressed in.
+    """
     floor_plan_id = models.AutoField(primary_key=True)
-    image_url = models.CharField(max_length=255, blank=True, null=True)
+    name = models.CharField(max_length=255, default='Floor Plan')
+    canvas_width = models.FloatField(default=1000)
+    canvas_height = models.FloatField(default=800)
     is_active = models.BooleanField(default=True)
     renovation_notice = models.CharField(max_length=255, blank=True, null=True)
     renovation_message = models.TextField(blank=True, null=True)
@@ -26,7 +35,7 @@ class FloorPlan(models.Model):
         db_table = 'Floor_Plans'
 
     def __str__(self):
-        return f"Floor Plan {self.floor_plan_id}"
+        return self.name or f"Floor Plan {self.floor_plan_id}"
 
 
 # ─── 2. BLE BEACONS ───────────────────────────────────────────
@@ -58,6 +67,9 @@ class Room(models.Model):
         db_column='floor_plan_id'
     )
     name = models.CharField(max_length=255)
+    # Polygon drawn by the Administrator: a list of [x, y] vertices in canvas
+    # coordinates. map_x/map_y remain the label anchor (polygon centroid).
+    geometry = models.JSONField(blank=True, null=True)
     map_x = models.FloatField()
     map_y = models.FloatField()
     description = models.TextField(blank=True, null=True)
@@ -68,6 +80,35 @@ class Room(models.Model):
 
     def __str__(self):
         return self.name
+
+
+# ─── 3b. DOORS ────────────────────────────────────────────────
+class Door(models.Model):
+    """An opening on a room's wall.
+
+    Placed by snapping to the nearest edge of the room polygon, so `rotation`
+    records the bearing of that wall and the door can be drawn as a proper
+    floor-plan symbol (a gap in the wall plus a swing arc) rather than a pin.
+    """
+    door_id = models.AutoField(primary_key=True)
+    room = models.ForeignKey(
+        Room,
+        on_delete=models.CASCADE,
+        db_column='room_id'
+    )
+    map_x = models.FloatField()
+    map_y = models.FloatField()
+    width = models.FloatField(default=28)       # opening size, canvas units
+    rotation = models.FloatField(default=0)     # bearing of the wall, degrees
+    swing = models.SmallIntegerField(default=1) # 1 = arc inward, -1 = outward
+    label = models.CharField(max_length=255, blank=True, null=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = 'Doors'
+
+    def __str__(self):
+        return self.label or f"Door {self.door_id}"
 
 
 # ─── 4. SHELVES ───────────────────────────────────────────────
@@ -81,8 +122,15 @@ class Shelf(models.Model):
         blank=True
     )
     name = models.CharField(max_length=255)
-    map_x = models.FloatField()
-    map_y = models.FloatField()
+    # Null coordinates mean the shelf exists in the hierarchy but has not been
+    # placed on the floor plan yet (or was unplaced by the Administrator).
+    map_x = models.FloatField(blank=True, null=True)
+    map_y = models.FloatField(blank=True, null=True)
+    rotation = models.FloatField(default=0)     # degrees clockwise
+    # Footprint in canvas units. Shelves are not all the same size, so each
+    # carries its own; rotation is applied about the centre of this rectangle.
+    width = models.FloatField(default=46)       # along the shelf run
+    depth = models.FloatField(default=14)       # front to back
     description = models.TextField(blank=True, null=True)
     is_active = models.BooleanField(default=True)
 
