@@ -278,8 +278,7 @@
                                     </td>
                                     <td class="py-4 px-6 text-center">
                                         {% if not tx.return_date and tx.transaction_type == 'Borrow' %}
-                                            {# Both actions charge money, so each is confirmed in a
-                                               modal that shows the exact figure first. #}
+                                            {# Both actions charge money, so each is confirmed in a modal that shows the exact figure first. #}
                                             <div class="inline-flex justify-center gap-1.5">
                                                 <button type="button" onclick="openTxAction({{ tx.transaction_id }}, 'return')" class="rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-1 text-[10px] font-semibold hover:bg-emerald-500/20 hover:text-emerald-100">Mark Returned</button>
                                                 <button type="button" onclick="openTxAction({{ tx.transaction_id }}, 'lost')" class="rounded-lg bg-rose-500/10 text-rose-400 border border-rose-500/20 px-2 py-1 text-[10px] font-semibold hover:bg-rose-500/20 hover:text-rose-100">Mark Lost</button>
