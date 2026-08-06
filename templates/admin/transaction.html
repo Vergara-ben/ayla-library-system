@@ -219,10 +219,13 @@
                                 <th class="py-3 px-6 w-24">TX ID</th>
                                 <th class="py-3 px-6">Patron</th>
                                 <th class="py-3 px-6">Book Title</th>
+                                <th class="py-3 px-6 w-32">Type</th>
                                 <th class="py-3 px-6">Borrow Date</th>
                                 <th class="py-3 px-6">Due Date</th>
                                 <th class="py-3 px-6">Returned</th>
                                 <th class="py-3 px-6 text-center w-28">Status</th>
+                                <th class="py-3 px-6 w-32">Processed By</th>
+                                <th class="py-3 px-6 w-24 text-right">Fine</th>
                                 <th class="py-3 px-6 text-center w-36">Actions</th>
                             </tr>
                         </thead>
@@ -250,6 +253,12 @@
                                         <div class="font-medium text-slate-300">{{ tx.book.title }}</div>
                                         <div class="text-[10px] text-slate-500 mt-0.5">{{ tx.book.author }}</div>
                                     </td>
+                                    <td class="py-4 px-6">
+                                        <span class="text-[10px] font-bold px-2 py-1 rounded-full
+                                            {% if tx.transaction_type == 'Borrow' %}bg-cyan-950/50 text-cyan-300 border border-cyan-800/50
+                                            {% elif tx.transaction_type == 'Return' %}bg-emerald-950/50 text-emerald-300 border border-emerald-800/50
+                                            {% else %}bg-slate-800/60 text-slate-300 border border-slate-700/50{% endif %}">{{ tx.transaction_type }}</span>
+                                    </td>
                                     <td class="py-4 px-6 text-slate-400">{{ tx.transaction_date|date:"M j, Y" }}</td>
                                     <td class="py-4 px-6 text-slate-400">
                                         {% if tx.due_date %}
@@ -276,6 +285,15 @@
                                             <span class="inline-block bg-slate-800/50 text-slate-400 border border-slate-700/40 px-2 py-0.5 rounded text-[10px] font-medium min-w-[76px]">{{ tx.transaction_type }}</span>
                                         {% endif %}
                                     </td>
+                                    <td class="py-4 px-6 text-slate-400">
+                                        {% if tx.processed_by %}{{ tx.processed_by.fullname }}
+                                        <span class="block text-[10px] text-slate-600">{{ tx.processed_by.role }}</span>
+                                        {% else %}&mdash;{% endif %}
+                                    </td>
+                                    <td class="py-4 px-6 text-right font-mono
+                                        {% if tx.fine_amount %}text-rose-400{% else %}text-slate-500{% endif %}">
+                                        {% if tx.fine_amount %}PHP {{ tx.fine_amount|floatformat:2 }}{% else %}&mdash;{% endif %}
+                                    </td>
                                     <td class="py-4 px-6 text-center">
                                         {% if not tx.return_date and tx.transaction_type == 'Borrow' %}
                                             {# Both actions charge money, so each is confirmed in a modal that shows the exact figure first. #}
@@ -290,7 +308,7 @@
                                 </tr>
                             {% empty %}
                                 <tr>
-                                    <td colspan="8" class="py-6 px-6 text-center text-slate-500">No transactions found.</td>
+                                    <td colspan="11" class="py-6 px-6 text-center text-slate-500">No transactions found.</td>
                                 </tr>
                             {% endfor %}
                         </tbody>

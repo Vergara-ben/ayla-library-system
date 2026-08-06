@@ -197,6 +197,8 @@
                             <tr class="border-b border-slate-800/80 text-[10px] font-bold tracking-wider text-slate-500 uppercase bg-slate-900/5">
                                 <th class="py-3 px-6 w-28">Log ID</th>
                                 <th class="py-3 px-6">Patron</th>
+                                <th class="py-3 px-6">Email</th>
+                                <th class="py-3 px-6 w-24">Type</th>
                                 <th class="py-3 px-6">School</th>
                                 <th class="py-3 px-6">Purpose</th>
                                 <th class="py-3 px-6">Entry Time</th>
@@ -210,6 +212,8 @@
                                 <tr class="hover:bg-slate-800/10 transition-colors">
                                     <td class="py-4 px-6 font-mono text-slate-500">#LOG-{{ log.log_id }}</td>
                                     <td class="py-4 px-6 font-bold text-slate-200">{{ log.patron.fullname }}</td>
+                                    <td class="py-4 px-6 font-mono text-slate-500">{{ log.patron.email|default:"—" }}</td>
+                                    <td class="py-4 px-6 text-slate-400">{{ log.patron.patron_type|default:"—" }}</td>
                                     <td class="py-4 px-6 text-slate-400">{{ log.school|default:"—" }}</td>
                                     <td class="py-4 px-6 text-slate-400">{{ log.purpose_of_visit|default:"—" }}</td>
                                     <td class="py-4 px-6 text-slate-300 font-medium">{{ log.entry_time|date:"M j, Y" }} · {{ log.entry_time|time:"h:i A" }}</td>

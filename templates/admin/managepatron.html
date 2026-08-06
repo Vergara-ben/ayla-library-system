@@ -304,6 +304,9 @@
                                 <th class="py-3 px-6 w-24">Type</th>
                                 <th class="py-3 px-6">Course / Dept.</th>
                                 <th class="py-3 px-6">Email</th>
+                                <th class="py-3 px-6 w-32">Contact</th>
+                                <th class="py-3 px-6 w-32">Registered</th>
+                                <th class="py-3 px-6 w-40">Identity</th>
                                 <th class="py-3 px-6 text-center w-24">Borrows</th>
                                 <th class="py-3 px-6 text-center w-24">Status</th>
                                 <th class="py-3 px-6 text-center w-28">Actions</th>
@@ -333,6 +336,20 @@
                                     </td>
                                     <td class="py-4 px-6 text-slate-400">{{ patron.address }}</td>
                                     <td class="py-4 px-6 font-mono text-slate-500">{{ patron.email }}</td>
+                                    <td class="py-4 px-6 text-slate-400">{{ patron.contact_number|default:"-" }}</td>
+                                    <td class="py-4 px-6 text-slate-400">
+                                        {{ patron.registration_date|date:"M d, Y" }}
+                                        <span class="block text-[10px] text-slate-600">{{ patron.registration_channel|default:"-" }}</span>
+                                    </td>
+                                    <td class="py-4 px-6 text-slate-400">
+                                        {% if patron.id_type %}
+                                            {{ patron.id_type }}
+                                            <span class="block text-[10px] font-mono text-slate-600">{{ patron.id_number|default:"-" }}</span>
+                                            {% if patron.identity_verified_by %}<span class="block text-[10px] text-emerald-500">by {{ patron.identity_verified_by.fullname }}</span>{% endif %}
+                                        {% else %}
+                                            <span class="text-slate-600">Not recorded</span>
+                                        {% endif %}
+                                    </td>
                                     <td class="py-4 px-6 text-center font-semibold text-slate-400">
                                         <span class="text-slate-200">{{ patron.active_borrows }}</span> / <span class="text-rose-400">{{ patron.overdue_count }}</span>
                                     </td>

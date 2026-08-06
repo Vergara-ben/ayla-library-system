@@ -149,6 +149,7 @@
                 <table class="w-full text-left border-collapse">
                     <thead>
                         <tr class="border-b border-slate-800/80 text-[10px] font-bold tracking-wider text-slate-500 uppercase bg-slate-900/5">
+                            <th class="py-3 px-6 w-16">ID</th>
                             <th class="py-3 px-6">Name</th>
                             <th class="py-3 px-6">Email</th>
                             <th class="py-3 px-6 w-32">Role</th>
@@ -159,6 +160,7 @@
                     <tbody class="divide-y divide-slate-800/40 text-xs text-slate-300">
                         {% for u in users %}
                         <tr class="hover:bg-slate-800/10 transition-colors">
+                            <td class="py-4 px-6 font-mono text-slate-500">{{ u.admin_id }}</td>
                             <td class="py-4 px-6">
                                 <div class="flex items-center gap-3">
                                     <div class="w-8 h-8 rounded-full bg-cyan-950/50 border border-cyan-900/40 flex items-center justify-center text-[11px] font-bold text-cyan-300">{{ u.fullname|slice:":2"|upper }}</div>

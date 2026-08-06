@@ -184,6 +184,7 @@
                     <table class="w-full text-left border-collapse">
                         <thead>
                             <tr class="border-b border-slate-800/80 text-[10px] font-bold tracking-wider text-slate-500 uppercase bg-slate-900/5">
+                                <th class="py-3 px-6 w-20">ID</th>
                                 <th class="py-3 px-6">When</th>
                                 <th class="py-3 px-6">Copy</th>
                                 <th class="py-3 px-6">Action</th>
@@ -195,6 +196,7 @@
                         <tbody class="divide-y divide-slate-800/40 text-xs text-slate-300">
                             {% for m in movements %}
                             <tr class="hover:bg-slate-800/10 transition-colors">
+                                <td class="py-3 px-6 font-mono text-slate-500">{{ m.movement_id }}</td>
                                 <td class="py-3 px-6 text-slate-400 whitespace-nowrap">{{ m.timestamp|date:"M d, Y H:i" }}</td>
                                 <td class="py-3 px-6 font-medium text-slate-200">{{ m.inventory_record.display_title }}</td>
                                 <td class="py-3 px-6">
@@ -218,7 +220,7 @@
                                 </td>
                             </tr>
                             {% empty %}
-                            <tr><td colspan="6" class="py-10 text-center text-slate-500 text-xs">No stock movements recorded yet.</td></tr>
+                            <tr><td colspan="7" class="py-10 text-center text-slate-500 text-xs">No stock movements recorded yet.</td></tr>
                             {% endfor %}
                         </tbody>
                     </table>
@@ -260,6 +262,8 @@
                                 <th class="py-3 px-6 w-28">Condition</th>
                                 <th class="py-3 px-6 w-40">Shelf location</th>
                                 <th class="py-3 px-6 w-28">Received</th>
+                                <th class="py-3 px-6 w-32">Received By</th>
+                                <th class="py-3 px-6">Notes</th>
                                 <th class="py-3 px-6 text-center w-44">Actions</th>
                             </tr>
                         </thead>
@@ -270,6 +274,7 @@
                                     <div class="font-bold text-slate-200">{{ r.display_title }}</div>
                                     <div class="text-[10px] text-slate-500">
                                         Copy #{{ r.inventory_id }}
+                                        <span class="block font-mono text-[9px] text-slate-600 truncate" title="{{ r.qr_label }}">{{ r.qr_label }}</span>
                                         {% if not r.book %}<span class="text-purple-400">· not catalogued</span>{% endif %}
                                         {% if r.status == 'Removed' %}<span class="text-rose-400">· removed</span>{% endif %}
                                     </div>
@@ -288,6 +293,8 @@
                                 </td>
                                 <td class="py-4 px-6 text-slate-400">{{ r.shelf_location|default:"Not shelved" }}</td>
                                 <td class="py-4 px-6 text-slate-400">{{ r.received_date|date:"M d, Y" }}</td>
+                                <td class="py-4 px-6 text-slate-400">{{ r.received_by.fullname|default:"&mdash;" }}</td>
+                                <td class="py-4 px-6 text-slate-400">{{ r.notes|default:"&mdash;" }}</td>
                                 <td class="py-4 px-6">
                                     <div class="flex items-center justify-center gap-2">
                                         <button title="QR label"
@@ -311,7 +318,7 @@
                                 </td>
                             </tr>
                             {% empty %}
-                            <tr><td colspan="6" class="py-10 text-center text-slate-500 text-xs">
+                            <tr><td colspan="8" class="py-10 text-center text-slate-500 text-xs">
                                 No copies in inventory yet. Use <strong class="text-slate-400">Receive Stock</strong> to take delivery of the first one.
                             </td></tr>
                             {% endfor %}
