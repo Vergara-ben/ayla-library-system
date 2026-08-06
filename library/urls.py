@@ -33,6 +33,16 @@ urlpatterns = [
     path('library-staff/logs/', views.staff_logs, name='staff_logs'),
     path('library-staff/shelf-manager/', views.staff_shelf, name='staff_shelf'),
     path('library-staff/indoor-map/', views.staff_indoor_map, name='staff_indoor_map'),
+    path('library-staff/receiving/', views.staff_inventory_receive, name='staff_inventory_receive'),
+    # Inventory Management (Administrator-only)
+    path('admin-portal/inventory/', views.inventory_management, name='inventory_management'),
+    path('admin-portal/inventory/receive/', views.receive_stock, name='receive_stock'),
+    path('admin-portal/inventory/condition/', views.update_copy_condition, name='update_copy_condition'),
+    path('admin-portal/inventory/update/', views.update_inventory_record, name='update_inventory_record'),
+    path('admin-portal/inventory/deaccession/', views.deaccession_copy, name='deaccession_copy'),
+    path('admin-portal/inventory/search-by-qr/', views.search_inventory_by_qr, name='search_inventory_by_qr'),
+    path('admin-portal/inventory/audit/compare/', views.stock_audit_compare, name='stock_audit_compare'),
+    path('admin-portal/inventory/audit/apply/', views.stock_audit_apply, name='stock_audit_apply'),
     # User Management (Admin-only: manage Library Staff accounts)
     path('admin-portal/users/', views.user_management, name='user_management'),
     path('admin-portal/users/create/', views.create_staff, name='create_staff'),
@@ -52,6 +62,7 @@ urlpatterns = [
     path('admin-portal/edit-book/<int:book_id>/', views.admin_edit_book, name='admin_edit_book'),
     path('admin-portal/delete-book/<int:book_id>/', views.admin_delete_book, name='admin_delete_book'),
     path('admin-portal/transaction/', views.admin_transaction, name='admin_transaction'),
+    path('admin-portal/transaction/<int:transaction_id>/preview/', views.transaction_action_preview, name='transaction_action_preview'),
     path('admin-portal/transaction/<int:transaction_id>/action/', views.admin_transaction_action, name='admin_transaction_action'),
     path('admin-portal/indoor-map/', views.admin_indoor_map, name='admin_indoor_map'),
     path('admin-portal/log-management/', views.admin_log_management, name='admin_log_management'),
@@ -82,6 +93,7 @@ urlpatterns = [
     # Floor Plan Management
     path('admin-portal/floorplan-management/', views.floorplan_management, name='floorplan_management'),
     path('admin-portal/set-active-floorplan/', views.set_active_floorplan, name='set_active_floorplan'),
+    path('admin-portal/set-floorplan-scale/', views.set_floorplan_scale, name='set_floorplan_scale'),
     path('admin-portal/toggle-renovation/', views.toggle_renovation, name='toggle_renovation'),
     path('admin-portal/delete-floorplan/', views.delete_floorplan, name='delete_floorplan'),
     path('admin-portal/add-room/', views.add_room, name='add_room'),

@@ -327,7 +327,15 @@
                             <tr class="hover:bg-slate-800/10 transition-colors">
                                 <td class="py-4 px-6 font-mono text-slate-400">#{{ floorplan.floor_plan_id }}</td>
                                 <td class="py-4 px-6 font-semibold text-slate-200">{{ floorplan.name }}</td>
-                                <td class="py-4 px-6 font-mono text-slate-400">{{ floorplan.canvas_width|floatformat:0 }} × {{ floorplan.canvas_height|floatformat:0 }}</td>
+                                <td class="py-4 px-6 font-mono text-slate-400">
+                                    {{ floorplan.canvas_width|floatformat:0 }} × {{ floorplan.canvas_height|floatformat:0 }}
+                                    {# Scale is what makes BLE trilateration possible at all. #}
+                                    <div class="mt-1 flex items-center gap-1">
+                                        <input type="number" id="scale-{{ floorplan.floor_plan_id }}" value="{{ floorplan.pixels_per_meter|default_if_none:'' }}" placeholder="units/m" min="0.1" max="1000" step="0.1" class="w-20 rounded px-1.5 py-0.5 text-[10px] text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700" style="background-color: var(--bg-input);">
+                                        <button type="button" onclick="saveScale({{ floorplan.floor_plan_id }})" class="text-[10px] font-bold px-1.5 py-0.5 rounded border border-slate-700 text-cyan-400 hover:bg-slate-800/60">Set</button>
+                                        {% if not floorplan.pixels_per_meter %}<span class="text-[9px] text-amber-500" title="BLE positioning is disabled without a scale">no scale</span>{% endif %}
+                                    </div>
+                                </td>
                                 <td class="py-4 px-6">
                                     {% if floorplan.is_active %}
                                         <span class="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-1 rounded text-[10px] font-bold tracking-wide uppercase">Active</span>
@@ -599,6 +607,15 @@
                         <input type="number" name="canvas_height" value="800" min="100" max="10000" step="10" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" required>
                     </div>
                 </div>
+                <div class="space-y-1.5">
+                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Scale — canvas units per metre</label>
+                    <input type="number" name="pixels_per_meter" placeholder="e.g. 50" min="0.1" max="1000" step="0.1" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                    <p class="text-[10px] text-slate-500 leading-relaxed">
+                        Measure one wall in the library, see how many canvas units it spans, and divide.
+                        <strong class="text-amber-500">BLE positioning stays off until this is set</strong> —
+                        beacon distances arrive in metres and the map is in canvas units.
+                    </p>
+                </div>
                 <p class="text-[10px] text-slate-500 leading-relaxed">
                     The floor plan is a blank canvas — after creating it, open the map below and use
                     <span class="text-cyan-400 font-semibold">Draw Room</span> to trace the library layout.
@@ -826,6 +843,52 @@
                     <input type="text" id="beaconUuid" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" placeholder="e.g., 550e8400-e29b-41d4-a716-446655440000">
                 </div>
                 <div class="space-y-1.5">
+                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">How it advertises</label>
+                    <select id="beaconAdvType" onchange="syncBeaconFields()" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                        <option value="iBeacon">iBeacon (Apple manufacturer data)</option>
+                        <option value="Eddystone">Eddystone-UID (service 0xFEAA)</option>
+                        <option value="ServiceUUID">Advertises its own service UUID</option>
+                        <option value="DeviceName">Match on device name</option>
+                    </select>
+                    <p class="text-[10px] text-slate-500 leading-relaxed">
+                        Pick the wrong one and the beacon is never matched, so no position is ever computed.
+                        Run <span class="text-cyan-400 font-semibold">tools/beacon-probe.html</span> beside the
+                        hardware to see what it actually broadcasts.
+                    </p>
+                </div>
+                <div id="beaconIBeaconFields" class="grid grid-cols-2 gap-3">
+                    <div class="space-y-1.5">
+                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Major</label>
+                        <input type="number" id="beaconMajor" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" placeholder="optional">
+                    </div>
+                    <div class="space-y-1.5">
+                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Minor</label>
+                        <input type="number" id="beaconMinor" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" placeholder="optional">
+                    </div>
+                    <p class="col-span-2 text-[10px] text-slate-500">Beacons usually share one UUID and differ only by major/minor — set both to tell them apart.</p>
+                </div>
+                <div id="beaconEddystoneFields" class="hidden grid grid-cols-2 gap-3">
+                    <div class="space-y-1.5">
+                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Namespace (10-byte hex)</label>
+                        <input type="text" id="beaconNamespace" maxlength="20" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" placeholder="20 hex chars">
+                    </div>
+                    <div class="space-y-1.5">
+                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Instance (6-byte hex)</label>
+                        <input type="text" id="beaconInstance" maxlength="12" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" placeholder="12 hex chars">
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div class="space-y-1.5">
+                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">TX power @ 1 m (dBm)</label>
+                        <input type="number" id="beaconTxPower" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" placeholder="-59">
+                    </div>
+                    <div class="space-y-1.5">
+                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Path-loss exponent</label>
+                        <input type="number" id="beaconPathLoss" step="0.1" min="1" max="6" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" placeholder="2.0">
+                    </div>
+                    <p class="col-span-2 text-[10px] text-slate-500">Measure RSSI one metre from this beacon. Indoors with metal shelving the exponent is nearer 2.5–3.5 than the 2.0 of free space.</p>
+                </div>
+                <div class="space-y-1.5">
                     <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Label (optional)</label>
                     <input type="text" id="beaconLabel" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" placeholder="e.g., North-East Corner">
                 </div>
@@ -987,6 +1050,24 @@
         function closeRenovationModal() {
             document.getElementById('renovationModal').classList.add('hidden');
             document.body.style.overflow = 'auto';
+        }
+
+        // Map scale: canvas units per real-world metre. BLE trilateration is
+        // disabled until this is set, so it lives next to the plan itself.
+        async function saveScale(planId) {
+            const input = document.getElementById('scale-' + planId);
+            const body = new URLSearchParams({ floorplan_id: planId, pixels_per_meter: input.value.trim() });
+            const res = await fetch("{% url 'set_floorplan_scale' %}", {
+                method: 'POST', body: body,
+                headers: {
+                    'X-CSRFToken': '{{ csrf_token }}',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+            });
+            const data = await res.json();
+            if (!data.success) { alert(data.error || 'Could not save the scale.'); return; }
+            window.location.reload();
         }
 
         function toggleSidebar() {
@@ -1427,7 +1508,13 @@
                 + field('X', 'inspBeaconX', Math.round(d.map_x), { readonly: true })
                 + field('Y', 'inspBeaconY', Math.round(d.map_y), { readonly: true })
                 + '</div>'
-                + '<p class="insp-note">UUID: ' + esc(d.beacon_uuid) + '</p>'
+                + '<p class="insp-note">' + esc(d.advertisement_type || 'iBeacon') + ' &middot; ' + esc(d.beacon_uuid) + '</p>'
+                + ((d.major != null || d.minor != null)
+                    ? '<p class="insp-note">Major ' + (d.major != null ? d.major : '—') + ' &middot; Minor ' + (d.minor != null ? d.minor : '—') + '</p>' : '')
+                + (d.namespace_id ? '<p class="insp-note">NS ' + esc(d.namespace_id) + ' &middot; ID ' + esc(d.instance_id || '—') + '</p>' : '')
+                + '<p class="insp-note">Calibration: '
+                    + (d.tx_power != null ? d.tx_power + ' dBm @ 1 m' : '<span style="color:var(--warning)">not measured</span>')
+                    + ' &middot; n=' + (d.path_loss_n != null ? d.path_loss_n : '2.0 (default)') + '</p>'
                 + '<div class="map-actions">'
                 + '<button class="map-action-btn danger" onclick="mapDeleteBeacon(' + id + ')"><i class="fa-solid fa-trash"></i> Delete beacon</button>'
                 + '</div>'
@@ -1595,6 +1682,13 @@
             document.getElementById('waypointModal').classList.add('hidden');
         };
 
+        // Only the fields belonging to the chosen advertisement type are shown.
+        window.syncBeaconFields = function () {
+            const t = document.getElementById('beaconAdvType').value;
+            document.getElementById('beaconIBeaconFields').classList.toggle('hidden', t !== 'iBeacon');
+            document.getElementById('beaconEddystoneFields').classList.toggle('hidden', t !== 'Eddystone');
+        };
+
         window.submitBeacon = async function () {
             const uuid = document.getElementById('beaconUuid').value.trim();
             const label = document.getElementById('beaconLabel').value.trim();
@@ -1602,6 +1696,13 @@
             if (!pending) return;
             const r = await postData(URLS.addBeacon, {
                 floor_plan_id: floorPlanId, beacon_uuid: uuid, label: label,
+                advertisement_type: document.getElementById('beaconAdvType').value,
+                major: document.getElementById('beaconMajor').value.trim(),
+                minor: document.getElementById('beaconMinor').value.trim(),
+                namespace_id: document.getElementById('beaconNamespace').value.trim(),
+                instance_id: document.getElementById('beaconInstance').value.trim(),
+                tx_power: document.getElementById('beaconTxPower').value.trim(),
+                path_loss_n: document.getElementById('beaconPathLoss').value.trim(),
                 map_x: pending.x, map_y: pending.y,
             });
             if (r.success) { addBeaconMarker(r.beacon); closeBeaconModal(); }

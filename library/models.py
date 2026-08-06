@@ -28,6 +28,11 @@ class FloorPlan(models.Model):
     name = models.CharField(max_length=255, default='Floor Plan')
     canvas_width = models.FloatField(default=1000)
     canvas_height = models.FloatField(default=800)
+    # Canvas units per real-world metre. Everything on this plan (rooms, shelves,
+    # beacons, waypoints) is stored in canvas units, while BLE path-loss returns
+    # metres — without this scale the two cannot be mixed, so trilateration
+    # refuses to run until an Administrator measures and sets it.
+    pixels_per_meter = models.FloatField(blank=True, null=True)
     is_active = models.BooleanField(default=True)
     renovation_notice = models.CharField(max_length=255, blank=True, null=True)
     renovation_message = models.TextField(blank=True, null=True)
@@ -48,7 +53,35 @@ class BLEBeacon(models.Model):
         on_delete=models.CASCADE,
         db_column='floor_plan_id'
     )
+    # How this beacon identifies itself over the air. Classic iBeacons put their
+    # proximity UUID in manufacturer data (company 0x004C) and advertise no
+    # service UUID at all; Eddystone advertises service 0xFEAA on every unit, so
+    # the per-beacon ID is the namespace+instance inside its service data.
+    # Matching on the wrong one yields zero RSSI samples while the config looks
+    # perfectly correct, so the type is explicit rather than guessed.
+    ADVERTISEMENT_TYPE_CHOICES = [
+        ('iBeacon', 'iBeacon (Apple, manufacturer data)'),
+        ('Eddystone', 'Eddystone-UID (service 0xFEAA)'),
+        ('ServiceUUID', 'Advertises its own service UUID'),
+        ('DeviceName', 'Match on device name'),
+    ]
+
     beacon_uuid = models.CharField(max_length=255)
+    advertisement_type = models.CharField(
+        max_length=20, choices=ADVERTISEMENT_TYPE_CHOICES, default='iBeacon')
+    # iBeacon: several beacons usually share one proximity UUID and differ only
+    # by major/minor, so both are needed to tell them apart.
+    major = models.IntegerField(blank=True, null=True)
+    minor = models.IntegerField(blank=True, null=True)
+    # Eddystone-UID: 10-byte namespace + 6-byte instance, stored as hex.
+    namespace_id = models.CharField(max_length=32, blank=True, null=True)
+    instance_id = models.CharField(max_length=16, blank=True, null=True)
+    # Calibration. tx_power is the RSSI measured one metre from this beacon and
+    # path_loss_n the environment exponent (2.0 free space; 2.5-3.5 indoors with
+    # metal shelving). Both are per-beacon because they differ per unit and per
+    # aisle; null falls back to the conservative defaults in the client.
+    tx_power = models.IntegerField(blank=True, null=True)
+    path_loss_n = models.FloatField(blank=True, null=True)
     map_x = models.FloatField()
     map_y = models.FloatField()
     label = models.CharField(max_length=255, blank=True, null=True)
@@ -375,6 +408,19 @@ class Patron(models.Model):
         ('Inactive', 'Inactive'),
     ]
 
+    # Physical IDs a walk-in patron can present at the desk. Kept broad because
+    # Ayla serves students, teachers, parents and general visitors alike.
+    ID_TYPE_CHOICES = [
+        ('National ID', 'National ID (PhilSys)'),
+        ('School ID', 'School ID'),
+        ('Barangay ID', 'Barangay ID'),
+        ("Driver's Licence", "Driver's Licence"),
+        ('Postal ID', 'Postal ID'),
+        ('UMID', 'UMID / SSS / GSIS'),
+        ('Passport', 'Passport'),
+        ('Other', 'Other government-issued ID'),
+    ]
+
     REGISTRATION_CHANNEL_CHOICES = [
         ('Online', 'Online'),
         ('On-site', 'On-site'),
@@ -404,8 +450,24 @@ class Patron(models.Model):
         choices=REGISTRATION_CHANNEL_CHOICES,
         default='On-site'
     )
-    # Uploaded ID / proof of residency (media-relative path, online channel).
+    # Uploaded ID / proof of residency (media-relative path). Online sign-ups
+    # attach it themselves; on-site the desk may photograph the ID presented.
     credential_document = models.CharField(max_length=255, blank=True, null=True)
+    # On-site identity validation (Ch.1 ¶242, Fig. 5): the patron "presents a
+    # physical ID" and it is verified on the spot. Recording what was seen, by
+    # whom and when is what makes that check auditable rather than assumed.
+    id_type = models.CharField(
+        max_length=50, choices=ID_TYPE_CHOICES, blank=True, null=True)
+    id_number = models.CharField(max_length=100, blank=True, null=True)
+    identity_verified_by = models.ForeignKey(
+        'User',
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        db_column='identity_verified_by',
+        related_name='verified_patrons',
+    )
+    identity_verified_at = models.DateTimeField(blank=True, null=True)
     # Email OTP for the online registration flow.
     otp_code = models.CharField(max_length=6, blank=True, null=True)
     otp_expires_at = models.DateTimeField(blank=True, null=True)
@@ -598,3 +660,174 @@ class PasswordResetOTP(models.Model):
         return (self.used_at is None
                 and not self.is_expired
                 and self.attempts < self.MAX_ATTEMPTS)
+
+
+# ─── 17. INVENTORY RECORDS ────────────────────────────────────
+class InventoryRecord(models.Model):
+    """One physical copy on the shelves (Ch.1 ¶268).
+
+    Deliberately separate from Book, which is the *catalogue* record: this
+    module does not catalogue titles and does not assign shelf locations, so a
+    received copy may exist here before it is catalogued or shelved. That is why
+    `book` is nullable.
+
+    Its `qr_label` is the copy-level QR, distinct from the catalogue QR on Book.
+    """
+
+    SOURCE_CHOICES = [
+        ('Purchase', 'Shipment'),
+        ('Donation', 'Donation'),
+    ]
+
+    CONDITION_CHOICES = [
+        ('Good', 'Good'),
+        ('Damaged', 'Damaged'),
+        ('Lost', 'Lost'),
+        ('Withdrawn', 'Withdrawn'),
+    ]
+
+    # Donated copies keep the accessioning lifecycle from Ch.1 ¶258; a shipment
+    # has no equivalent stage, so this stays null for purchases.
+    STAGE_CHOICES = [
+        ('Received', 'Received'),
+        ('Processing', 'Processing'),
+        ('Shelved', 'Shelved'),
+    ]
+
+    STATUS_CHOICES = [
+        ('In Stock', 'In Stock'),
+        ('Removed', 'Removed'),        # audit adjustment or deaccession
+    ]
+
+    inventory_id = models.AutoField(primary_key=True)
+    book = models.ForeignKey(
+        'Book',
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,                     # received before catalogued
+        db_column='book_id',
+        related_name='inventory_records',
+    )
+    # Free-text stand-in used only while the copy has no catalogue record yet.
+    title_hint = models.CharField(max_length=255, blank=True, null=True)
+    source = models.CharField(max_length=20, choices=SOURCE_CHOICES, default='Purchase')
+    # Shipment intake fields — meaningless on a donation, so both stay null there.
+    supplier = models.CharField(max_length=255, blank=True, null=True)
+    po_number = models.CharField(max_length=100, blank=True, null=True)
+    # Donation intake fields — the mirror image, null on a shipment.
+    donor_name = models.CharField(max_length=255, blank=True, null=True)
+    donated_date = models.DateField(blank=True, null=True)
+    processing_stage = models.CharField(
+        max_length=20, choices=STAGE_CHOICES, blank=True, null=True)
+    # The accessioning row this copy is tracked by on the Donations page.
+    # Null while the donated copy is still uncatalogued, since Donation requires
+    # a Book; it is created the moment the copy is linked to a catalogue record.
+    donation = models.ForeignKey(
+        'Donation',
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        db_column='donation_id',
+        related_name='inventory_copies',
+    )
+    condition = models.CharField(max_length=20, choices=CONDITION_CHOICES, default='Good')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='In Stock')
+    qr_label = models.CharField(max_length=255, unique=True, blank=True, null=True)
+    received_date = models.DateField(default=timezone.localdate)
+    received_by = models.ForeignKey(
+        'User',
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        db_column='received_by',
+        related_name='received_inventory',
+    )
+    notes = models.TextField(blank=True, null=True)
+
+    class Meta:
+        db_table = 'Inventory_Records'
+        ordering = ['-received_date', '-inventory_id']
+
+    def __str__(self):
+        return f"{self.display_title} ({self.condition})"
+
+    @property
+    def display_title(self):
+        if self.book:
+            return self.book.title
+        return self.title_hint or f'Uncatalogued copy #{self.inventory_id}'
+
+    @property
+    def shelf_location(self):
+        """Where the catalogue says this copy lives, or None if unshelved."""
+        level = self.book.shelf_level if self.book else None
+        if level is None:
+            return None
+        shelf = level.shelf
+        return f"{shelf.name} · Level {level.level_number}" if shelf else f"Level {level.level_number}"
+
+    @property
+    def counts_as_held(self):
+        """Whether this copy should be found on the shelves during an audit."""
+        return self.status == 'In Stock' and self.condition in ('Good', 'Damaged')
+
+    @property
+    def source_detail(self):
+        """The intake reference for this copy, whichever source it came from."""
+        if self.source == 'Donation':
+            parts = [self.donor_name] if self.donor_name else []
+            if self.donated_date:
+                parts.append(self.donated_date.strftime('%b %d, %Y'))
+            return ' · '.join(parts)
+        parts = [self.supplier] if self.supplier else []
+        if self.po_number:
+            parts.append('PO ' + self.po_number)
+        return ' · '.join(parts)
+
+
+# ─── 18. STOCK MOVEMENTS ──────────────────────────────────────
+class StockMovement(models.Model):
+    """Audit trail for every change to a copy's stock status (Ch.1 ¶268).
+
+    "Every action that changes a copy's stock status — whether an addition, a
+    condition change, an audit adjustment, or a correction — is logged in a
+    movement history that records the actor, the reason, and the source."
+    """
+
+    ACTION_CHOICES = [
+        ('Received', 'Received'),
+        ('ConditionChange', 'Condition Change'),
+        ('AuditAdjustment', 'Audit Adjustment'),
+        ('Correction', 'Correction'),
+        ('Deaccession', 'Deaccession'),
+    ]
+
+    movement_id = models.AutoField(primary_key=True)
+    inventory_record = models.ForeignKey(
+        InventoryRecord,
+        on_delete=models.CASCADE,
+        db_column='inventory_id',
+        related_name='movements',
+    )
+    action = models.CharField(max_length=30, choices=ACTION_CHOICES)
+    actor = models.ForeignKey(
+        'User',
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        db_column='actor_id',
+        related_name='stock_movements',
+    )
+    actor_name = models.CharField(max_length=255, blank=True, null=True)
+    reason = models.CharField(max_length=500, blank=True, null=True)
+    source = models.CharField(max_length=100, blank=True, null=True)
+    condition_before = models.CharField(max_length=20, blank=True, null=True)
+    condition_after = models.CharField(max_length=20, blank=True, null=True)
+    timestamp = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        db_table = 'Stock_Movements'
+        ordering = ['-timestamp', '-movement_id']
+
+    def __str__(self):
+        return f"{self.action} — {self.inventory_record_id}"

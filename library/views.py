@@ -5,7 +5,7 @@ from django.utils import timezone
 from django.http import HttpResponse, JsonResponse
 from django.conf import settings
 from django.core.paginator import Paginator
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 import json
 
@@ -25,6 +25,7 @@ from .auth_utils import (
     admin_only_required,
     staff_only_required,
     module_required,
+    admin_or_module_required,
 )
 from .modules import STAFF_MODULES, clean_module_keys
 
@@ -59,7 +60,7 @@ from .emails import (
     registration_rejected_email,
 )
 from .reports import REPORT_TYPES, parse_date_range, build_report, render_report_pdf, render_report_excel
-from .models import Book, Patron, PatronLog, Transaction, User, ShelfLevel, Donation, Announcement, FloorPlan, Shelf, Room, Door, Waypoint, BLEBeacon, WaypointConnection, SystemLog, BorrowingRule, PasswordResetOTP
+from .models import Book, Patron, PatronLog, Transaction, User, ShelfLevel, Donation, Announcement, FloorPlan, Shelf, Room, Door, Waypoint, BLEBeacon, WaypointConnection, SystemLog, BorrowingRule, PasswordResetOTP, InventoryRecord, StockMovement
 
 # Patron views
 def patron_login(request):
@@ -884,6 +885,10 @@ def admin_add_patron(request):
         address = request.POST.get('address', '').strip()
         password = request.POST.get('password', '').strip()
         account_status = request.POST.get('account_status', 'Active').strip()
+        # On-site identity validation (Ch.1 ¶242, Fig. 5).
+        id_type = request.POST.get('id_type', '').strip()
+        id_number = request.POST.get('id_number', '').strip()
+        id_confirmed = request.POST.get('id_confirmed', '').strip() in ('1', 'true', 'on', 'yes')
 
         initial = {
             'fullname': fullname,
@@ -892,14 +897,31 @@ def admin_add_patron(request):
             'contact_number': contact_number,
             'address': address,
             'account_status': account_status,
+            'id_type': id_type,
+            'id_number': id_number,
         }
 
+        credential_path = None
         if not all([fullname, patron_type, email, password]):
             error = 'Full name, patron type, email, and password are required.'
         elif Patron.objects.filter(email=email).exists():
             error = 'A patron with that email already exists.'
+        elif id_type not in dict(Patron.ID_TYPE_CHOICES):
+            error = 'Select the type of ID the patron presented.'
+        elif not id_number:
+            error = 'Enter the ID number shown on the presented ID.'
+        elif not id_confirmed:
+            error = 'Confirm that you checked the physical ID before registering this patron.'
         else:
+            try:
+                credential_path = _save_credential_document(
+                    request.FILES.get('credential_document'), email)
+            except ValueError as exc:
+                error = str(exc)
+
+        if error is None:
             hashed_password = hash_password(password)
+            verifier = User.objects.filter(admin_id=request.session.get('admin_id')).first()
             patron = Patron.objects.create(
                 fullname=fullname,
                 email=email,
@@ -911,8 +933,15 @@ def admin_add_patron(request):
                 registration_channel='On-site',
                 qr_code=str(uuid4()),
                 otp_verified=True,
+                id_type=id_type,
+                id_number=id_number,
+                credential_document=credential_path,
+                identity_verified_by=verifier,
+                identity_verified_at=timezone.now(),
             )
-            log_admin_action(request, 'Create', 'Patron', patron.patron_id, f'Added "{patron.fullname}"')
+            log_admin_action(request, 'Create', 'Patron', patron.patron_id,
+                             f'Added "{patron.fullname}" — identity verified against '
+                             f'{id_type} {id_number}')
             return redirect('admin_manage_patron')
 
     # Get patron list context
@@ -945,6 +974,7 @@ def admin_add_patron(request):
         'add_mode': True,
         'error': error,
         'initial': initial,
+        'id_type_choices': Patron.ID_TYPE_CHOICES,
     }
     return render(request, 'admin/managepatron.html', context)
 
@@ -1067,6 +1097,7 @@ def admin_manage_patron(request):
         'paginator': paginator,
         'search_query': search_query,
         'querystring': urlencode({'search': search_query}) if search_query else '',
+        'id_type_choices': Patron.ID_TYPE_CHOICES,
     }
     return render(request, 'admin/managepatron.html', context)
 
@@ -1154,6 +1185,7 @@ def admin_edit_patron(request, patron_id):
         'error': error,
         'success': success,
         'initial': initial,
+        'id_type_choices': Patron.ID_TYPE_CHOICES,
     }
     return render(request, 'admin/managepatron.html', context)
 
@@ -1265,6 +1297,44 @@ def admin_delete_book(request, book_id):
 
 
 @admin_login_required
+def transaction_action_preview(request, transaction_id):
+    """What Mark Returned / Mark Lost would do, for the confirmation modal.
+
+    Read-only: the figures shown are computed the same way the action computes
+    them, so the modal cannot promise one fine and charge another.
+    """
+    tx = (Transaction.objects.select_related('book', 'patron')
+          .filter(transaction_id=transaction_id).first())
+    if tx is None:
+        return JsonResponse({'success': False, 'error': 'Transaction not found'})
+
+    action = (request.GET.get('action') or 'return').strip()
+    rule = BorrowingRule.current()
+    today = timezone.localdate()
+    overdue_fine = rule.compute_fine(tx.due_date, today)
+    is_overdue = bool(tx.due_date and today > tx.due_date)
+
+    data = {
+        'transaction_id': tx.transaction_id,
+        'book': tx.book.title if tx.book else '—',
+        'patron': tx.patron.fullname if tx.patron else '—',
+        'due_date': tx.due_date.strftime('%B %d, %Y') if tx.due_date else '—',
+        'is_overdue': is_overdue,
+        'overdue_fine': f'{overdue_fine:.2f}',
+        'already_closed': tx.return_date is not None,
+    }
+    if action == 'lost':
+        data.update({
+            'action': 'lost',
+            'lost_fee': f'{rule.lost_book_fee:.2f}',
+            'total_fine': f'{(overdue_fine + rule.lost_book_fee):.2f}',
+        })
+    else:
+        data.update({'action': 'return', 'total_fine': f'{overdue_fine:.2f}'})
+    return JsonResponse({'success': True, 'preview': data})
+
+
+@admin_login_required
 def admin_transaction_action(request, transaction_id):
     if request.method == 'POST':
         action = request.POST.get('action')
@@ -1292,10 +1362,29 @@ def admin_transaction_action(request, transaction_id):
             if tx.book:
                 tx.book.status = 'Lost'
                 tx.book.save()
+            # A copy written off at the desk is a stock movement too, so the
+            # inventory follows automatically rather than by a second manual step.
+            flagged = flag_inventory_copy_lost(
+                request, tx.book,
+                f'Marked lost on transaction #{tx.transaction_id}'
+                + (f' by {tx.patron.fullname}' if tx.patron else ''))
             log_admin_action(request, 'Process', 'Transaction', tx.transaction_id,
-                             f'Marked "{tx.book.title if tx.book else ""}" lost (fine {tx.fine_amount})')
+                             f'Marked "{tx.book.title if tx.book else ""}" lost (fine {tx.fine_amount})'
+                             + (' — inventory copy flagged' if flagged else ''))
             if tx.patron and tx.book:
                 lost_book_email(tx.patron, tx.book, tx.fine_amount)
+
+        # The confirmation modal posts by fetch and refreshes the table itself.
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            if tx is None:
+                return JsonResponse({'success': False, 'error': 'Transaction not found'})
+            return JsonResponse({
+                'success': True,
+                'action': action,
+                'transaction_id': tx.transaction_id,
+                'book': tx.book.title if tx.book else '',
+                'fine_amount': f'{tx.fine_amount:.2f}' if tx.fine_amount else '0.00',
+            })
     return portal_redirect(request, 'admin_transaction')
 
 
@@ -1619,6 +1708,7 @@ def _logs_page(request, template):
         'status': status,
         'querystring': urlencode(params),
         'patron_types': [choice[0] for choice in Patron.PATRON_TYPE_CHOICES],
+        'id_type_choices': Patron.ID_TYPE_CHOICES,
     }
     return render(request, template, context)
 
@@ -1946,13 +2036,31 @@ def import_donations(request):
                 status='Available'
             )
             
+            donated_on = date_donated if date_donated else timezone.localdate()
             donation = Donation.objects.create(
                 donor_name=donor_name,
-                date_donated=date_donated if date_donated else timezone.now(),
+                date_donated=donated_on,
                 book=book,
                 status='Received'
             )
-            
+
+            # A bulk import is still an intake, so it lands in Inventory like
+            # any other donation — otherwise it would be a second way in.
+            record = InventoryRecord.objects.create(
+                book=book,
+                source='Donation',
+                donor_name=donor_name,
+                donated_date=donated_on if not hasattr(donated_on, 'date') else donated_on.date(),
+                processing_stage='Received',
+                condition='Good',
+                status='In Stock',
+                qr_label=str(uuid4()),
+                donation=donation,
+            )
+            _record_movement(record, 'Received', request,
+                             reason='Received via donation import',
+                             source='Donation import', after='Good')
+
             imported_count += 1
         
         return JsonResponse({
@@ -2232,59 +2340,22 @@ def process_transaction(request):
 
 # Donation Management Views
 def _donations_page(request, template):
-    donations_queryset = Donation.objects.select_related('book').order_by('-date_donated')
-    
-    if request.method == 'POST':
-        donor_name = request.POST.get('donor_name', '').strip()
-        date_donated = request.POST.get('date_donated', '').strip()
-        title = request.POST.get('title', '').strip()
-        author = request.POST.get('author', '').strip()
-        isbn = request.POST.get('ISBN', '').strip()
-        genre = request.POST.get('genre', '').strip()
-        publication_year = request.POST.get('publication_year', '').strip()
-        
-        if not all([donor_name, date_donated, title, author]):
-            error = 'Donor name, date, title, and author are required.'
-            return render(request, template, {'donations': donations_queryset, 'error': error})
-        
-        # Create book with status Donated
-        book = Book.objects.create(
-            title=title,
-            author=author,
-            ISBN=isbn if isbn else None,
-            genre=genre if genre else None,
-            publication_year=int(publication_year) if publication_year else None,
-            status='Donated'
-        )
-        
-        # Generate QR code for the book
-        qr = qrcode.QRCode(version=1, box_size=10, border=5)
-        qr.add_data(str(book.book_id))
-        qr.make(fit=True)
-        img = qr.make_image(fill_color="black", back_color="white")
-        
-        qr_dir = os.path.join(settings.MEDIA_ROOT, 'qrcodes', 'books')
-        os.makedirs(qr_dir, exist_ok=True)
-        
-        qr_filename = f'book_qr_{book.book_id}.png'
-        qr_path = os.path.join(qr_dir, qr_filename)
-        img.save(qr_path)
-        
-        # Save QR code path to cover_img_url
-        book.cover_img_url = f'qrcodes/books/{qr_filename}'
-        book.save()
-        
-        # Create donation record
-        from datetime import datetime
-        donation = Donation.objects.create(
-            book=book,
-            donor_name=donor_name,
-            date_donated=datetime.strptime(date_donated, '%Y-%m-%d').date() if date_donated else timezone.localdate(),
-            status='Received'
-        )
-        log_admin_action(request, 'Create', 'Donation', donation.donation_id,
-                         f'"{book.title}" from {donor_name}')
+    """The donation accessioning queue (Ch.1 ¶258, Fig. 7).
 
+    Intake itself lives in Inventory — ¶268, Fig. 9 and Fig. 78 all place
+    "receive books / process donations" there — so this page no longer creates
+    donations. It tracks copies received in Inventory through
+    Received → Processing → Shelved.
+    """
+    donations_queryset = (Donation.objects
+                          .select_related('book')
+                          .prefetch_related('inventory_copies')
+                          .order_by('-date_donated'))
+
+    if request.method == 'POST':
+        # Donation intake moved to Inventory; nothing is created here any more.
+        messages.info(request, 'Donations are received in Inventory Management, '
+                               'then tracked here through to Shelved.')
         return portal_redirect(request, 'donation_management')
 
     # Pagination
@@ -2315,7 +2386,7 @@ def update_donation_status(request):
         status = request.POST.get('status')
         
         donation = Donation.objects.filter(donation_id=donation_id).first()
-        if donation:
+        if donation and status in dict(Donation.STATUS_CHOICES):
             donation.status = status
             donation.save()
 
@@ -2323,6 +2394,9 @@ def update_donation_status(request):
             if status == 'Shelved':
                 donation.book.status = 'Available'
                 donation.book.save()
+            # Carry the stage back to the inventory copies this row tracks, so
+            # the two never disagree about where a donation has got to.
+            donation.inventory_copies.update(processing_stage=status)
             log_admin_action(request, 'Update', 'Donation', donation.donation_id,
                              f'Status set to {status}')
 
@@ -2336,6 +2410,16 @@ def delete_donation(request):
         donation = Donation.objects.filter(donation_id=donation_id).first()
         if donation:
             detail = f'"{donation.book.title}" from {donation.donor_name}' if donation.book else donation.donor_name
+            # The catalogue record may now back physical copies in Inventory —
+            # deleting it would strand them, so deaccession those first.
+            held = InventoryRecord.objects.filter(book=donation.book, status='In Stock').count()
+            if held:
+                messages.error(
+                    request,
+                    f'{held} copy(ies) of this title are still in Inventory. '
+                    'Deaccession them there before deleting the donation record.'
+                )
+                return portal_redirect(request, 'donation_management')
             # Delete the book as well since it's linked
             donation.book.delete()
             log_admin_action(request, 'Delete', 'Donation', donation_id, detail)
@@ -2468,10 +2552,24 @@ def floorplan_management(request):
             error = 'Canvas width and height must be between 100 and 10000.'
             return render(request, 'admin/floorplanadmin.html', {'floorplans': floorplans, 'error': error})
 
+        # Optional at creation; BLE positioning stays disabled until it is set.
+        raw_scale = (request.POST.get('pixels_per_meter') or '').strip()
+        pixels_per_meter = None
+        if raw_scale:
+            try:
+                pixels_per_meter = float(raw_scale)
+            except (TypeError, ValueError):
+                error = 'Scale must be a number.'
+                return render(request, 'admin/floorplanadmin.html', {'floorplans': floorplans, 'error': error})
+            if not (0.1 <= pixels_per_meter <= 1000):
+                error = 'Scale must be between 0.1 and 1000 canvas units per metre.'
+                return render(request, 'admin/floorplanadmin.html', {'floorplans': floorplans, 'error': error})
+
         FloorPlan.objects.create(
             name=name,
             canvas_width=canvas_width,
             canvas_height=canvas_height,
+            pixels_per_meter=pixels_per_meter,
             is_active=False,
         )
 
@@ -2516,6 +2614,44 @@ def set_active_floorplan(request):
                 floorplan.save()
 
     return redirect('floorplan_management')
+
+
+@admin_only_required
+def set_floorplan_scale(request):
+    """Set how many canvas units represent one real-world metre.
+
+    BLE path-loss gives distances in metres while every stored coordinate is in
+    canvas units; this is the conversion between them. Without it the client
+    disables trilateration instead of silently misplacing the patron.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
+
+    plan = FloorPlan.objects.filter(floor_plan_id=request.POST.get('floorplan_id')).first()
+    if plan is None:
+        return JsonResponse({'success': False, 'error': 'Floor plan not found'})
+
+    raw = (request.POST.get('pixels_per_meter') or '').strip()
+    if raw == '':
+        plan.pixels_per_meter = None
+        plan.save(update_fields=['pixels_per_meter'])
+        log_admin_action(request, 'Update', 'FloorPlan', plan.floor_plan_id,
+                         'Cleared the map scale - BLE positioning disabled')
+        return JsonResponse({'success': True, 'pixels_per_meter': None})
+
+    try:
+        scale = float(raw)
+    except (TypeError, ValueError):
+        return JsonResponse({'success': False, 'error': 'Scale must be a number'})
+    if not (0.1 <= scale <= 1000):
+        return JsonResponse({'success': False,
+                             'error': 'Scale must be between 0.1 and 1000 canvas units per metre'})
+
+    plan.pixels_per_meter = scale
+    plan.save(update_fields=['pixels_per_meter'])
+    log_admin_action(request, 'Update', 'FloorPlan', plan.floor_plan_id,
+                     f'Map scale set to {scale:g} canvas units per metre')
+    return JsonResponse({'success': True, 'pixels_per_meter': scale})
 
 
 @admin_only_required
@@ -3686,16 +3822,7 @@ def get_map_data(request):
 
     width, height = _floorplan_canvas_size(floor_plan)
 
-    beacons = [
-        {
-            'beacon_id': b.beacon_id,
-            'beacon_uuid': b.beacon_uuid,
-            'map_x': b.map_x,
-            'map_y': b.map_y,
-            'label': b.label or '',
-        }
-        for b in BLEBeacon.objects.filter(floor_plan=floor_plan)
-    ]
+    beacons = [_beacon_payload(b) for b in BLEBeacon.objects.filter(floor_plan=floor_plan)]
 
     waypoints = [
         {
@@ -3747,12 +3874,31 @@ def get_map_data(request):
         'is_active': floor_plan.is_active,
         'canvas_width': width,
         'canvas_height': height,
+        'pixels_per_meter': floor_plan.pixels_per_meter,
         'beacons': beacons,
         'waypoints': waypoints,
         'connections': connections,
         'rooms': rooms,
         'shelves': shelves,
     })
+
+
+def _beacon_payload(b):
+    """Everything the client needs to recognise this beacon and range from it."""
+    return {
+        'beacon_id': b.beacon_id,
+        'beacon_uuid': b.beacon_uuid,
+        'advertisement_type': b.advertisement_type or 'iBeacon',
+        'major': b.major,
+        'minor': b.minor,
+        'namespace_id': (b.namespace_id or '').lower() or None,
+        'instance_id': (b.instance_id or '').lower() or None,
+        'tx_power': b.tx_power,
+        'path_loss_n': b.path_loss_n,
+        'map_x': b.map_x,
+        'map_y': b.map_y,
+        'label': b.label or '',
+    }
 
 
 @admin_only_required
@@ -3779,23 +3925,49 @@ def add_beacon(request):
     except (TypeError, ValueError):
         return JsonResponse({'success': False, 'error': 'Invalid coordinates'})
 
+    adv_type = (request.POST.get('advertisement_type') or 'iBeacon').strip()
+    if adv_type not in dict(BLEBeacon.ADVERTISEMENT_TYPE_CHOICES):
+        adv_type = 'iBeacon'
+
+    def _int_or_none(key):
+        raw = (request.POST.get(key) or '').strip()
+        if raw == '':
+            return None
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            raise ValueError(key)
+
+    def _float_or_none(key):
+        raw = (request.POST.get(key) or '').strip()
+        if raw == '':
+            return None
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            raise ValueError(key)
+
+    try:
+        major, minor, tx_power = _int_or_none('major'), _int_or_none('minor'), _int_or_none('tx_power')
+        path_loss_n = _float_or_none('path_loss_n')
+    except ValueError as bad:
+        return JsonResponse({'success': False, 'error': f'{bad} must be a number'})
+
     beacon = BLEBeacon.objects.create(
         floor_plan=floor_plan,
         beacon_uuid=beacon_uuid,
+        advertisement_type=adv_type,
+        major=major,
+        minor=minor,
+        namespace_id=(request.POST.get('namespace_id') or '').strip().lower() or None,
+        instance_id=(request.POST.get('instance_id') or '').strip().lower() or None,
+        tx_power=tx_power,
+        path_loss_n=path_loss_n,
         map_x=map_x,
         map_y=map_y,
         label=label or None,
     )
-    return JsonResponse({
-        'success': True,
-        'beacon': {
-            'beacon_id': beacon.beacon_id,
-            'beacon_uuid': beacon.beacon_uuid,
-            'map_x': beacon.map_x,
-            'map_y': beacon.map_y,
-            'label': beacon.label or '',
-        },
-    })
+    return JsonResponse({'success': True, 'beacon': _beacon_payload(beacon)})
 
 
 @admin_only_required
@@ -4066,7 +4238,8 @@ def get_patron_map_data(request):
         for w in Waypoint.objects.filter(floor_plan=floor_plan)
     ]
     beacons = [
-        {'beacon_id': b.beacon_id, 'beacon_uuid': b.beacon_uuid, 'x': b.map_x, 'y': b.map_y, 'label': b.label or ''}
+        # Same serialiser as the editor, plus x/y aliases the patron map uses.
+        dict(_beacon_payload(b), x=b.map_x, y=b.map_y)
         for b in BLEBeacon.objects.filter(floor_plan=floor_plan)
     ]
     wp_ids = [w['waypoint_id'] for w in waypoints]
@@ -4084,6 +4257,9 @@ def get_patron_map_data(request):
         'name': floor_plan.name,
         'canvas_width': width,
         'canvas_height': height,
+        # Null until an Administrator measures it; the client refuses to
+        # trilaterate without it rather than mixing metres with canvas units.
+        'pixels_per_meter': floor_plan.pixels_per_meter,
         'renovation_notice': floor_plan.renovation_notice or '',
         'rooms': rooms,
         'shelves': shelves,
@@ -4273,11 +4449,24 @@ def entry_log_register(request):
     school = (request.POST.get('school') or '').strip()
     purpose = (request.POST.get('purpose_of_visit') or '').strip()
 
+    # On-site identity validation (Ch.1 ¶242, Fig. 5): the patron presents a
+    # physical ID and the desk verifies it on the spot. Record what was seen.
+    id_type = (request.POST.get('id_type') or '').strip()
+    id_number = (request.POST.get('id_number') or '').strip()
+    id_confirmed = (request.POST.get('id_confirmed') or '').strip() in ('1', 'true', 'on', 'yes')
+
     valid_types = [choice[0] for choice in Patron.PATRON_TYPE_CHOICES]
     if not all([firstname, lastname, email, contact_number, address, patron_type]):
         return JsonResponse({'success': False, 'error': 'All fields are required.'})
     if patron_type not in valid_types:
         return JsonResponse({'success': False, 'error': 'Please choose a valid patron type.'})
+    if id_type not in dict(Patron.ID_TYPE_CHOICES):
+        return JsonResponse({'success': False, 'error': 'Select the type of ID the patron presented.'})
+    if not id_number:
+        return JsonResponse({'success': False, 'error': 'Enter the ID number shown on the presented ID.'})
+    if not id_confirmed:
+        return JsonResponse({'success': False,
+                             'error': 'Confirm that you checked the physical ID before registering.'})
 
     from django.core.validators import validate_email as _validate_email
     from django.core.exceptions import ValidationError as _ValidationError
@@ -4289,18 +4478,28 @@ def entry_log_register(request):
     if Patron.objects.filter(email__iexact=email).exists():
         return JsonResponse({'success': False, 'error': 'A patron with this email already exists.'})
 
+    verifier = User.objects.filter(admin_id=request.session.get('admin_id')).first()
     patron = Patron.objects.create(
         fullname=f'{firstname} {lastname}',
         email=email,
         contact_number=contact_number,
         address=address,
         patron_type=patron_type,
-        account_status='Active',   # desk staff verified identity on the spot
+        # Active on the spot because the ID was checked in person, and the
+        # check is now on the record rather than merely assumed.
+        account_status='Active',
         password_hash=hash_password(None),  # unusable until set via the portal
         registration_channel='On-site',
         qr_code=str(uuid4()),
         otp_verified=True,
+        id_type=id_type,
+        id_number=id_number,
+        identity_verified_by=verifier,
+        identity_verified_at=timezone.now(),
     )
+    log_admin_action(request, 'Create', 'Patron', patron.patron_id,
+                     f'On-site registration of "{patron.fullname}" — identity verified '
+                     f'against {id_type} {id_number}')
     log = PatronLog.objects.create(
         patron=patron,
         school=school or None,
@@ -4567,3 +4766,505 @@ def toggle_staff_status(request, user_id):
     messages.success(request, f'{user.fullname} is now {new_status}.')
     return redirect('user_management')
 
+
+
+# ─── INVENTORY MANAGEMENT (Administrator-only) ─────────────────────────────
+# Copy-level stock control, distinct from the Book catalogue (Ch.1 ¶268). This
+# module never catalogues a title and never assigns a shelf — a received copy
+# may sit in inventory before it is catalogued or shelved.
+
+def _record_movement(record, action, request, reason='', source='',
+                     before=None, after=None):
+    """Log one stock movement. Every status-changing action goes through here."""
+    admin_id = request.session.get('admin_id')
+    actor = User.objects.filter(admin_id=admin_id).first() if admin_id else None
+    return StockMovement.objects.create(
+        inventory_record=record,
+        action=action,
+        actor=actor,
+        actor_name=actor.fullname if actor else (request.session.get('admin_fullname') or 'System'),
+        reason=(reason or '')[:500],
+        source=(source or '')[:100],
+        condition_before=before,
+        condition_after=after,
+    )
+
+
+def _inventory_stats():
+    qs = InventoryRecord.objects.all()
+    in_stock = qs.filter(status='In Stock')
+    return {
+        'total_copies': qs.count(),
+        'in_stock': in_stock.count(),
+        'good_count': in_stock.filter(condition='Good').count(),
+        'damaged_count': in_stock.filter(condition='Damaged').count(),
+        'lost_count': in_stock.filter(condition='Lost').count(),
+        'withdrawn_count': in_stock.filter(condition='Withdrawn').count(),
+        'removed_count': qs.filter(status='Removed').count(),
+        'uncatalogued': qs.filter(book__isnull=True, status='In Stock').count(),
+    }
+
+
+@admin_only_required
+def inventory_management(request):
+    """Inventory list, stock-audit workspace, and movement history."""
+    tab = (request.GET.get('tab') or 'stock').strip()
+    q = (request.GET.get('q') or '').strip()
+    condition = (request.GET.get('condition') or '').strip()
+    source = (request.GET.get('source') or '').strip()
+
+    records = InventoryRecord.objects.select_related(
+        'book', 'book__shelf_level', 'book__shelf_level__shelf', 'received_by'
+    )
+    if q:
+        records = records.filter(
+            Q(book__title__icontains=q) | Q(title_hint__icontains=q)
+            | Q(qr_label__icontains=q) | Q(supplier__icontains=q)
+            | Q(po_number__icontains=q) | Q(donor_name__icontains=q)
+        )
+    if condition in dict(InventoryRecord.CONDITION_CHOICES):
+        records = records.filter(condition=condition)
+    if source in dict(InventoryRecord.SOURCE_CHOICES):
+        records = records.filter(source=source)
+
+    paginator = Paginator(records, 20)
+    page_obj = paginator.get_page(request.GET.get('page', 1))
+
+    movements = (StockMovement.objects
+                 .select_related('inventory_record', 'inventory_record__book', 'actor')
+                 .all())
+    move_paginator = Paginator(movements, 25)
+    move_page = move_paginator.get_page(request.GET.get('mpage', 1))
+
+    context = {
+        'tab': tab,
+        'records': page_obj,
+        'paginator': paginator,
+        'movements': move_page,
+        'q': q,
+        'condition_filter': condition,
+        'source_filter': source,
+        'condition_choices': InventoryRecord.CONDITION_CHOICES,
+        'source_choices': InventoryRecord.SOURCE_CHOICES,
+        'stage_choices': InventoryRecord.STAGE_CHOICES,
+        'today': timezone.localdate().isoformat(),
+        'books': Book.objects.order_by('title'),
+        'shelves': Shelf.objects.filter(is_active=True).select_related('room').order_by('name'),
+        'pending_transactions_count': Transaction.objects.filter(
+            transaction_type='Borrow', return_date__isnull=True).count(),
+    }
+    context.update(_inventory_stats())
+    return render(request, 'admin/inventoryadmin.html', context)
+
+
+def _sync_donation_row(record):
+    """Keep a donated copy and its accessioning row in step.
+
+    Inventory is the single intake point (Ch.1 ¶268, Fig. 9, Fig. 78); the
+    Donations page then tracks the copy through Received → Processing → Shelved
+    (¶258, Fig. 7). Donation requires a Book, so an uncatalogued donated copy
+    has no row until it is catalogued — this is called again at that point.
+    """
+    if record.source != 'Donation' or record.book is None:
+        return None
+    stage = record.processing_stage or 'Received'
+    if record.donation is None:
+        record.donation = Donation.objects.create(
+            book=record.book,
+            donor_name=record.donor_name or 'Unknown donor',
+            date_donated=record.donated_date or timezone.localdate(),
+            status=stage,
+        )
+        record.save(update_fields=['donation'])
+    elif record.donation.status != stage:
+        record.donation.status = stage
+        record.donation.save(update_fields=['status'])
+    return record.donation
+
+
+def _receiving_redirect(request):
+    """Staff land back on their receiving page, Administrators on the module."""
+    if request.session.get('admin_role') == 'Staff':
+        return redirect('staff_inventory_receive')
+    return redirect('inventory_management')
+
+
+@admin_or_module_required('inventory')
+def receive_stock(request):
+    """Intake new copies.
+
+    Shipments and donations are separate intakes with their own fields: a
+    shipment records supplier and PO number, a donation records donor and date
+    plus the Received/Processing/Shelved accessioning stage from Ch.1 ¶258.
+    """
+    if request.method != 'POST':
+        return _receiving_redirect(request)
+
+    book_id = (request.POST.get('book_id') or '').strip()
+    title_hint = (request.POST.get('title_hint') or '').strip()
+    source = (request.POST.get('source') or 'Purchase').strip()
+    condition = (request.POST.get('condition') or 'Good').strip()
+    notes = (request.POST.get('notes') or '').strip()
+    try:
+        quantity = int(request.POST.get('quantity') or 1)
+    except ValueError:
+        quantity = 0
+
+    if source not in dict(InventoryRecord.SOURCE_CHOICES):
+        source = 'Purchase'
+    if condition not in dict(InventoryRecord.CONDITION_CHOICES):
+        condition = 'Good'
+    if quantity < 1 or quantity > 100:
+        messages.error(request, 'Quantity must be between 1 and 100.')
+        return _receiving_redirect(request)
+
+    book = Book.objects.filter(book_id=book_id).first() if book_id else None
+    if book is None and not title_hint:
+        messages.error(request, 'Pick a catalogued title, or type a title for the uncatalogued copy.')
+        return _receiving_redirect(request)
+
+    # Only the fields belonging to the chosen intake are kept, so a donation
+    # can never carry a PO number and a shipment can never carry a donor.
+    supplier = po_number = donor_name = processing_stage = None
+    donated_date = None
+    if source == 'Donation':
+        donor_name = (request.POST.get('donor_name') or '').strip()
+        if not donor_name:
+            messages.error(request, 'A donation needs the donor name for the record.')
+            return _receiving_redirect(request)
+        raw_date = (request.POST.get('donated_date') or '').strip()
+        if raw_date:
+            try:
+                donated_date = datetime.strptime(raw_date, '%Y-%m-%d').date()
+            except ValueError:
+                messages.error(request, 'Donation date must be a valid date.')
+                return _receiving_redirect(request)
+        else:
+            donated_date = timezone.localdate()
+        processing_stage = (request.POST.get('processing_stage') or 'Received').strip()
+        if processing_stage not in dict(InventoryRecord.STAGE_CHOICES):
+            processing_stage = 'Received'
+    else:
+        supplier = (request.POST.get('supplier') or '').strip() or None
+        po_number = (request.POST.get('po_number') or '').strip() or None
+
+    admin = User.objects.filter(admin_id=request.session.get('admin_id')).first()
+    created = []
+    for _ in range(quantity):
+        record = InventoryRecord.objects.create(
+            book=book,
+            title_hint=title_hint or None,
+            source=source,
+            supplier=supplier,
+            po_number=po_number,
+            donor_name=donor_name,
+            donated_date=donated_date,
+            processing_stage=processing_stage,
+            condition=condition,
+            status='In Stock',
+            qr_label=str(uuid4()),      # copy-level label, not the catalogue QR
+            received_by=admin,
+            notes=notes or None,
+        )
+        _record_movement(record, 'Received', request,
+                         reason='Received in ' + condition.lower() + ' condition',
+                         source=record.source_detail or source, after=condition)
+        # A catalogued donation immediately joins the accessioning queue.
+        _sync_donation_row(record)
+        created.append(record)
+
+    label = 'donation' if source == 'Donation' else 'shipment'
+    log_admin_action(request, 'Create', 'Inventory', None,
+                     'Received ' + str(len(created)) + ' copy(ies) of "'
+                     + created[0].display_title + '" by ' + label)
+    messages.success(request,
+                     'Received ' + str(len(created)) + ' copy(ies) by ' + label
+                     + '. Print the QR labels from the list.')
+    return _receiving_redirect(request)
+
+
+@module_required('inventory')
+def staff_inventory_receive(request):
+    """Library Staff receiving desk — intake only, per Ch.1 ¶268.
+
+    Deliberately not the full module: no audit, no deaccession, no condition
+    changes and no movement history, all of which stay with the Administrator.
+    """
+    mine = (InventoryRecord.objects
+            .select_related('book', 'received_by')
+            .filter(received_by__admin_id=request.session.get('admin_id'))
+            .order_by('-inventory_id')[:25])
+    return render(request, 'library_staff/inventoryreceive.html', {
+        'recent': mine,
+        'books': Book.objects.order_by('title'),
+        'condition_choices': InventoryRecord.CONDITION_CHOICES,
+        'stage_choices': InventoryRecord.STAGE_CHOICES,
+        'today': timezone.localdate().isoformat(),
+        'pending_transactions_count': Transaction.objects.filter(
+            transaction_type='Borrow', return_date__isnull=True).count(),
+    })
+
+
+@admin_only_required
+def update_copy_condition(request):
+    """Record a copy as damaged, lost, withdrawn, or back in good order."""
+    if request.method != 'POST':
+        return redirect('inventory_management')
+
+    record = InventoryRecord.objects.filter(
+        inventory_id=request.POST.get('inventory_id')).first()
+    if record is None:
+        messages.error(request, 'Inventory record not found.')
+        return redirect('inventory_management')
+
+    new_condition = (request.POST.get('condition') or '').strip()
+    reason = (request.POST.get('reason') or '').strip()
+    if new_condition not in dict(InventoryRecord.CONDITION_CHOICES):
+        messages.error(request, 'Pick a valid condition.')
+        return redirect('inventory_management')
+    if not reason:
+        messages.error(request, 'A reason is required so the movement history stays meaningful.')
+        return redirect('inventory_management')
+
+    before = record.condition
+    if before == new_condition:
+        messages.warning(request, 'That copy is already recorded as ' + new_condition + '.')
+        return redirect('inventory_management')
+
+    record.condition = new_condition
+    record.save(update_fields=['condition'])
+    _record_movement(record, 'ConditionChange', request, reason=reason,
+                     source='Staff inspection', before=before, after=new_condition)
+    log_admin_action(request, 'Update', 'Inventory', record.inventory_id,
+                     '"' + record.display_title + '" condition ' + before + ' to ' + new_condition)
+    messages.success(request, record.display_title + ': ' + before + ' to ' + new_condition + '.')
+    return redirect('inventory_management')
+
+
+@admin_only_required
+def update_inventory_record(request):
+    """Edit a copy's descriptive metadata, independently of its quantity."""
+    if request.method != 'POST':
+        return redirect('inventory_management')
+
+    record = InventoryRecord.objects.filter(
+        inventory_id=request.POST.get('inventory_id')).first()
+    if record is None:
+        messages.error(request, 'Inventory record not found.')
+        return redirect('inventory_management')
+
+    book_id = (request.POST.get('book_id') or '').strip()
+    record.book = Book.objects.filter(book_id=book_id).first() if book_id else None
+    record.title_hint = (request.POST.get('title_hint') or '').strip() or None
+    source = (request.POST.get('source') or record.source).strip()
+    if source in dict(InventoryRecord.SOURCE_CHOICES):
+        record.source = source
+    if record.source == 'Donation':
+        record.donor_name = (request.POST.get('donor_name') or '').strip() or None
+        record.supplier = record.po_number = None
+        stage = (request.POST.get('processing_stage') or '').strip()
+        record.processing_stage = stage if stage in dict(InventoryRecord.STAGE_CHOICES) else record.processing_stage
+    else:
+        record.supplier = (request.POST.get('supplier') or '').strip() or None
+        record.po_number = (request.POST.get('po_number') or '').strip() or None
+        record.donor_name = None
+        record.donated_date = None
+        record.processing_stage = None
+    record.notes = (request.POST.get('notes') or '').strip() or None
+    record.save(update_fields=['book', 'title_hint', 'source', 'supplier', 'po_number',
+                               'donor_name', 'donated_date', 'processing_stage', 'notes'])
+    # Catalogue a donated copy here and it joins the accessioning queue; change
+    # its stage here and the Donations page follows.
+    _sync_donation_row(record)
+
+    _record_movement(record, 'Correction', request,
+                     reason=(request.POST.get('reason') or 'Metadata corrected')[:500],
+                     source=record.source)
+    log_admin_action(request, 'Update', 'Inventory', record.inventory_id,
+                     'Updated details for "' + record.display_title + '"')
+    messages.success(request, 'Updated ' + record.display_title + '.')
+    return redirect('inventory_management')
+
+
+@admin_only_required
+def deaccession_copy(request):
+    """Remove a record created in error.
+
+    Reserved for data-entry mistakes — routine stock reduction is a condition
+    change (damaged / lost / withdrawn), not a deaccession.
+    """
+    if request.method != 'POST':
+        return redirect('inventory_management')
+
+    record = InventoryRecord.objects.filter(
+        inventory_id=request.POST.get('inventory_id')).first()
+    if record is None:
+        messages.error(request, 'Inventory record not found.')
+        return redirect('inventory_management')
+
+    reason = (request.POST.get('reason') or '').strip()
+    if not reason:
+        messages.error(request, 'Deaccession needs a reason — it is an audited correction.')
+        return redirect('inventory_management')
+    if record.status == 'Removed':
+        messages.warning(request, 'That copy has already been removed.')
+        return redirect('inventory_management')
+
+    record.status = 'Removed'
+    record.save(update_fields=['status'])
+    _record_movement(record, 'Deaccession', request, reason=reason, source=record.source,
+                     before=record.condition, after=record.condition)
+    log_admin_action(request, 'Delete', 'Inventory', record.inventory_id,
+                     'Deaccessioned "' + record.display_title + '" - ' + reason)
+    messages.success(request, record.display_title + ' removed from inventory.')
+    return redirect('inventory_management')
+
+
+@admin_only_required
+def search_inventory_by_qr(request):
+    """Resolve a scanned copy label — used by condition updates and audits."""
+    qr_label = (request.GET.get('qr_label') or '').strip()
+    if not qr_label:
+        return JsonResponse({'success': False, 'error': 'QR label is required'})
+
+    record = (InventoryRecord.objects
+              .select_related('book', 'book__shelf_level', 'book__shelf_level__shelf')
+              .filter(qr_label=qr_label).first())
+    if record is None:
+        return JsonResponse({'success': False, 'error': 'No inventory copy matches that label'})
+
+    return JsonResponse({'success': True, 'record': {
+        'inventory_id': record.inventory_id,
+        'title': record.display_title,
+        'condition': record.condition,
+        'status': record.status,
+        'source': record.source,
+        'location': record.shelf_location or 'Not shelved',
+        'catalogued': record.book is not None,
+    }})
+
+
+def _expected_copies_for_shelf(shelf_id):
+    """Copies the system believes are on this shelf right now."""
+    return (InventoryRecord.objects
+            .select_related('book', 'book__shelf_level', 'book__shelf_level__shelf')
+            .filter(status='In Stock',
+                    condition__in=['Good', 'Damaged'],
+                    book__shelf_level__shelf__shelf_id=shelf_id))
+
+
+@admin_only_required
+def stock_audit_compare(request):
+    """Compare a shelf's expected holdings against what was physically scanned.
+
+    Produces the discrepancy report only — nothing is written until the
+    Administrator confirms it via stock_audit_apply.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
+
+    shelf_id = (request.POST.get('shelf_id') or '').strip()
+    shelf = Shelf.objects.filter(shelf_id=shelf_id).first() if shelf_id else None
+    if shelf is None:
+        return JsonResponse({'success': False, 'error': 'Pick a shelf to audit'})
+
+    scanned_labels = [s.strip() for s in request.POST.getlist('scanned') if s.strip()]
+    expected = list(_expected_copies_for_shelf(shelf.shelf_id))
+    expected_by_label = {r.qr_label: r for r in expected}
+
+    found, missing, unexpected = [], [], []
+    seen = set()
+    for label in scanned_labels:
+        if label in seen:
+            continue
+        seen.add(label)
+        record = expected_by_label.get(label)
+        if record is not None:
+            found.append(record)
+        else:
+            other = InventoryRecord.objects.select_related('book').filter(qr_label=label).first()
+            unexpected.append({
+                'qr_label': label,
+                'inventory_id': other.inventory_id if other else None,
+                'title': other.display_title if other else 'Unknown label',
+                'belongs_to': (other.shelf_location or 'Not shelved') if other else '-',
+            })
+
+    found_ids = {r.inventory_id for r in found}
+    for record in expected:
+        if record.inventory_id not in found_ids:
+            missing.append({
+                'inventory_id': record.inventory_id,
+                'qr_label': record.qr_label,
+                'title': record.display_title,
+                'condition': record.condition,
+            })
+
+    return JsonResponse({
+        'success': True,
+        'shelf': shelf.name,
+        'expected_count': len(expected),
+        'scanned_count': len(seen),
+        'found_count': len(found),
+        'missing': missing,
+        'unexpected': unexpected,
+        'reconciled': not missing and not unexpected,
+    })
+
+
+@admin_only_required
+def stock_audit_apply(request):
+    """Apply an audit result after the Administrator confirms it."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
+
+    if (request.POST.get('confirm') or '').strip() != 'yes':
+        return JsonResponse({'success': False,
+                             'error': 'Confirm the discrepancy report before it is applied'})
+
+    ids = [i for i in request.POST.getlist('missing_ids') if str(i).strip().isdigit()]
+    reason = (request.POST.get('reason') or '').strip() or 'Not found during stock audit'
+    shelf_name = (request.POST.get('shelf_name') or '').strip()
+    if not ids:
+        return JsonResponse({'success': False, 'error': 'Nothing to adjust'})
+
+    adjusted = 0
+    for record in InventoryRecord.objects.filter(inventory_id__in=ids):
+        before = record.condition
+        if before == 'Lost':
+            continue
+        record.condition = 'Lost'
+        record.save(update_fields=['condition'])
+        _record_movement(record, 'AuditAdjustment', request, reason=reason,
+                         source=('Stock audit - ' + shelf_name) if shelf_name else 'Stock audit',
+                         before=before, after='Lost')
+        adjusted += 1
+
+    log_admin_action(request, 'Update', 'Inventory', None,
+                     'Stock audit on ' + (shelf_name or 'shelf') + ': '
+                     + str(adjusted) + ' copy(ies) marked lost')
+    return JsonResponse({'success': True, 'adjusted': adjusted})
+
+
+def flag_inventory_copy_lost(request, book, reason):
+    """Mark one in-stock copy of `book` lost when a loan is written off.
+
+    Called from the Transactions module's Mark Lost action, so a copy lost at
+    the desk shows up in inventory without a second manual step (Ch.1 ¶268).
+    Returns the record it touched, or None when the title has no copy on record.
+    """
+    if book is None:
+        return None
+    record = (InventoryRecord.objects
+              .filter(book=book, status='In Stock')
+              .exclude(condition='Lost')
+              .order_by('condition', 'inventory_id')
+              .first())
+    if record is None:
+        return None
+    before = record.condition
+    record.condition = 'Lost'
+    record.save(update_fields=['condition'])
+    _record_movement(record, 'ConditionChange', request, reason=reason,
+                     source='Transactions module', before=before, after='Lost')
+    return record

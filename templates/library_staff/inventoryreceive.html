@@ -1,0 +1,249 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en" data-module="staff">
+<head>
+    <meta charset="UTF-8">
+    <meta name="theme-color" content="#ffffff">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ayla Staff Portal - Stock Receiving</title>
+    <script src="{% static 'js/theme.js' %}"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="{% static 'js/tailwind-theme.js' %}"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'css/theme.css' %}">
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: var(--bg-main); color: var(--text-primary); }
+        .logo-text { font-family: 'Rowdies', sans-serif; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: var(--bg-main); }
+        ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
+        .mobile-menu-btn {
+            display: none; align-items: center; justify-content: center;
+            width: 2.5rem; height: 2.5rem; border-radius: 0.5rem;
+            background: var(--bg-card); border: 1px solid var(--border-color);
+            color: var(--text-primary); cursor: pointer; margin-right: 0.75rem;
+        }
+        @media (max-width: 1024px) {
+            aside { position: fixed; left: -100%; top: 0; height: 100vh; z-index: 50; transition: left 0.3s ease; }
+            aside.open { left: 0; }
+            .mobile-menu-btn { display: flex !important; }
+            main { padding: 1rem; }
+        }
+        .field-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); margin-bottom: 6px; display: block; }
+        .field-input {
+            width: 100%; background: var(--bg-input); border: 1px solid var(--border-modal);
+            border-radius: 8px; padding: 9px 12px; font-size: 13px; color: var(--text-primary); outline: none;
+        }
+        .field-input:focus { border-color: var(--accent-strong); }
+    </style>
+    <link rel="stylesheet" href="{% static 'css/admin-enhance.css' %}">
+    <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
+    <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
+    <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
+</head>
+<body class="flex h-screen overflow-hidden">
+
+    {% include 'library_staff/_sidebar.html' with active='inventory' %}
+
+    <div class="flex-1 flex flex-col overflow-hidden">
+
+        <header class="h-16 flex-shrink-0 flex items-center justify-between px-8" style="background-color: var(--bg-main);">
+            <div class="flex items-center">
+                <button class="mobile-menu-btn" onclick="toggleSidebar()"><i class="fa-solid fa-bars"></i></button>
+                <h2 class="logo-text text-lg tracking-wider text-slate-200 uppercase">Stock Receiving</h2>
+            </div>
+            <div class="flex items-center gap-4">
+                <span class="bg-violet-950 text-violet-400 text-xs px-2.5 py-1 rounded font-bold border border-violet-800 tracking-wider">STAFF</span>
+                <div class="w-8 h-8 rounded-full bg-violet-900 border border-violet-700 flex items-center justify-center text-xs font-bold text-violet-200">ST</div>
+            </div>
+        </header>
+
+        <main class="flex-1 overflow-y-auto p-8 space-y-6">
+
+            {% if messages %}
+                {% for message in messages %}
+                <div class="px-4 py-3 rounded-lg border text-xs font-semibold {% if message.tags == 'error' %}bg-rose-950/40 border-rose-800/60 text-rose-300{% elif message.tags == 'warning' %}bg-amber-950/40 border-amber-800/60 text-amber-300{% else %}bg-emerald-950/40 border-emerald-800/60 text-emerald-300{% endif %}">
+                    {{ message }}
+                </div>
+                {% endfor %}
+            {% endif %}
+
+            <div class="rounded-lg border border-slate-800 px-4 py-3 text-[11px] text-slate-400 leading-relaxed" style="background-color: var(--bg-card);">
+                You can take delivery of shipments and donations here. Stock audits, condition changes,
+                deaccession and the movement history are handled by the Administrator.
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+                <!-- Intake -->
+                <div class="rounded-xl border border-slate-800/80 overflow-hidden" style="background-color: var(--bg-card);">
+                    <div class="px-5 py-3 border-b border-slate-800/60">
+                        <h4 class="text-sm font-bold text-slate-200 tracking-wide">Receive Stock</h4>
+                    </div>
+                    <form method="post" action="{% url 'receive_stock' %}" class="px-5 py-5 space-y-4">
+                        {% csrf_token %}
+
+                        <div>
+                            <label class="field-label">How did this arrive?</label>
+                            <div class="flex items-center gap-1 bg-slate-900/50 rounded-lg p-1 border border-slate-800">
+                                <button type="button" id="srcShipmentBtn" onclick="setSource('Purchase')" class="flex-1 px-4 py-2 rounded-md text-[11px] font-bold transition-colors bg-violet-700/30 text-violet-400 border border-violet-800/50">
+                                    <i class="fa-solid fa-truck-ramp-box mr-1"></i> Shipment
+                                </button>
+                                <button type="button" id="srcDonationBtn" onclick="setSource('Donation')" class="flex-1 px-4 py-2 rounded-md text-[11px] font-bold transition-colors text-slate-400 hover:text-slate-200 hover:bg-slate-800/40">
+                                    <i class="fa-solid fa-hand-holding-heart mr-1"></i> Donation
+                                </button>
+                            </div>
+                            <input type="hidden" name="source" id="rcvSource" value="Purchase">
+                        </div>
+
+                        <div>
+                            <label class="field-label">Catalogued title</label>
+                            <select name="book_id" class="field-input">
+                                <option value="">— Not catalogued yet —</option>
+                                {% for b in books %}<option value="{{ b.book_id }}">{{ b.title }} — {{ b.author }}</option>{% endfor %}
+                            </select>
+                        </div>
+                        <div>
+                            <label class="field-label">Title (if not catalogued)</label>
+                            <input type="text" name="title_hint" class="field-input" placeholder="Working title for the physical copy">
+                        </div>
+
+                        <div id="shipmentFields" class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="field-label">Supplier</label>
+                                <input type="text" name="supplier" class="field-input" placeholder="Who shipped it">
+                            </div>
+                            <div>
+                                <label class="field-label">PO number</label>
+                                <input type="text" name="po_number" class="field-input" placeholder="PO-2026-001">
+                            </div>
+                        </div>
+
+                        <div id="donationFields" class="hidden space-y-4">
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label class="field-label">Donor name</label>
+                                    <input type="text" name="donor_name" id="rcvDonor" class="field-input" placeholder="Who donated it">
+                                </div>
+                                <div>
+                                    <label class="field-label">Date donated</label>
+                                    <input type="date" name="donated_date" class="field-input" value="{{ today }}">
+                                </div>
+                            </div>
+                            <div>
+                                <label class="field-label">Accessioning stage</label>
+                                <select name="processing_stage" class="field-input">
+                                    {% for value, label in stage_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="field-label">Condition on arrival</label>
+                                <select name="condition" class="field-input">
+                                    {% for value, label in condition_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+                                </select>
+                            </div>
+                            <div>
+                                <label class="field-label">Number of copies</label>
+                                <input type="number" name="quantity" class="field-input" value="1" min="1" max="100" required>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="field-label">Notes</label>
+                            <input type="text" name="notes" class="field-input" placeholder="Verified against the delivery note, etc.">
+                        </div>
+
+                        <button type="submit" class="w-full bg-violet-600/20 text-violet-400 border border-violet-600/30 px-4 py-3 rounded-lg text-sm font-semibold hover:bg-violet-600/30 transition-colors">
+                            <i class="fa-solid fa-check mr-1"></i> Receive into inventory
+                        </button>
+                    </form>
+                </div>
+
+                <!-- What this account has received -->
+                <div class="rounded-xl border border-slate-800/80 overflow-hidden" style="background-color: var(--bg-card);">
+                    <div class="px-5 py-3 border-b border-slate-800/60">
+                        <h4 class="text-sm font-bold text-slate-200 tracking-wide">Your recent receipts</h4>
+                    </div>
+                    <div class="divide-y divide-slate-800/40">
+                        {% for r in recent %}
+                        <div class="px-5 py-3 flex items-center justify-between gap-3">
+                            <div class="min-w-0">
+                                <p class="text-xs font-bold text-slate-200 truncate">{{ r.display_title }}</p>
+                                <p class="text-[10px] text-slate-500">
+                                    Copy #{{ r.inventory_id }} ·
+                                    {% if r.source == 'Donation' %}Donation{% else %}Shipment{% endif %}
+                                    {% if r.source_detail %} · {{ r.source_detail }}{% endif %}
+                                    {% if r.processing_stage %} · {{ r.processing_stage }}{% endif %}
+                                </p>
+                            </div>
+                            <button type="button"
+                                data-id="{{ r.inventory_id }}" data-title="{{ r.display_title }}" data-label="{{ r.qr_label }}"
+                                onclick="openLabel(this)" title="QR label"
+                                class="text-slate-400 hover:text-violet-400 p-1.5 flex-shrink-0"><i class="fa-solid fa-qrcode"></i></button>
+                        </div>
+                        {% empty %}
+                        <p class="px-5 py-10 text-center text-slate-500 text-xs">Nothing received on this account yet.</p>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- QR label -->
+    <div id="labelModal" class="fixed inset-0 z-[60] hidden items-center justify-center p-4" style="background: var(--scrim);">
+        <div class="w-full max-w-xs rounded-2xl border shadow-2xl" style="background-color: var(--bg-modal); border-color: var(--border-modal);">
+            <div class="flex items-center justify-between px-6 py-4 border-b" style="border-color: var(--border-modal);">
+                <h3 class="text-sm font-bold text-slate-200 tracking-wide">Copy QR Label</h3>
+                <button onclick="closeModal('labelModal')" class="text-slate-500 hover:text-slate-300"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="px-6 py-5 text-center space-y-3">
+                <div class="bg-white rounded-lg p-3 inline-block"><img id="labelImg" alt="Copy QR label" style="width:180px;height:180px"></div>
+                <p id="labelTitle" class="text-xs font-bold text-slate-200"></p>
+                <p id="labelCode" class="text-[10px] text-slate-500 break-all"></p>
+                <a id="labelDownload" class="inline-block text-xs font-bold px-4 py-2 rounded-lg bg-violet-700/40 text-violet-300 border border-violet-700/60 hover:bg-violet-700/60" download target="_blank">Download label</a>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function toggleSidebar() { document.querySelector('aside')?.classList.toggle('open'); }
+        function show(id) { const m = document.getElementById(id); m.classList.remove('hidden'); m.classList.add('flex'); }
+        function closeModal(id) { const m = document.getElementById(id); m.classList.add('hidden'); m.classList.remove('flex'); }
+
+        // Switch the form between the two intakes.
+        function setSource(kind) {
+            const donation = kind === 'Donation';
+            document.getElementById('rcvSource').value = kind;
+            document.getElementById('shipmentFields').classList.toggle('hidden', donation);
+            document.getElementById('donationFields').classList.toggle('hidden', !donation);
+            document.getElementById('rcvDonor').required = donation;
+            const active = ['bg-violet-700/30', 'text-violet-400', 'border', 'border-violet-800/50'];
+            const idle = ['text-slate-400', 'hover:text-slate-200', 'hover:bg-slate-800/40'];
+            const ship = document.getElementById('srcShipmentBtn');
+            const don = document.getElementById('srcDonationBtn');
+            (donation ? don : ship).classList.add(...active);
+            (donation ? don : ship).classList.remove(...idle);
+            (donation ? ship : don).classList.remove(...active);
+            (donation ? ship : don).classList.add(...idle);
+        }
+
+        function openLabel(btn) {
+            const code = btn.dataset.label || '';
+            document.getElementById('labelImg').src = 'https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=' + encodeURIComponent(code);
+            document.getElementById('labelTitle').textContent = btn.dataset.title;
+            document.getElementById('labelCode').textContent = code;
+            const dl = document.getElementById('labelDownload');
+            dl.href = 'https://api.qrserver.com/v1/create-qr-code/?size=600x600&data=' + encodeURIComponent(code);
+            dl.setAttribute('download', 'copy_label_' + btn.dataset.id + '.png');
+            show('labelModal');
+        }
+    </script>
+    <script src="{% static 'js/admin-enhance.js' %}" defer></script>
+</body>
+</html>

@@ -22,7 +22,8 @@ from io import BytesIO
 
 from django.utils import timezone
 
-from .models import Transaction, Patron, PatronLog, Book, Donation
+from .models import (Transaction, Patron, PatronLog, Book, Donation,
+                     InventoryRecord, StockMovement)
 
 
 REPORT_TYPES = [
@@ -31,10 +32,13 @@ REPORT_TYPES = [
     ('books', 'Books Report'),
     ('patrons', 'Patrons Report'),
     ('donations', 'Donations Report'),
+    ('stock_levels', 'Stock Levels Report'),
+    ('stock_movement', 'Stock Movement Report'),
 ]
 
 # Reports that represent a real-time snapshot rather than a date range.
-SNAPSHOT_REPORTS = {'books', 'patrons'}
+# Stock levels are a point-in-time count; stock movement is a log over time.
+SNAPSHOT_REPORTS = {'books', 'patrons', 'stock_levels'}
 
 LIBRARY_NAME = 'Ayla Public Library'
 LIBRARY_LOCATION = 'Brgy. Sala, Cabuyao, Laguna'
@@ -265,12 +269,108 @@ def _donations(start, end):
     }
 
 
+def _stock_levels(start, end):
+    """Point-in-time count of physical copies by title and condition."""
+    records = (InventoryRecord.objects
+               .select_related('book', 'book__shelf_level', 'book__shelf_level__shelf')
+               .order_by('book__title', 'title_hint', 'inventory_id'))
+
+    # Group copies by the title they belong to, so the report reads as stock
+    # levels rather than a list of individual copies.
+    groups = {}
+    totals = {'Good': 0, 'Damaged': 0, 'Lost': 0, 'Withdrawn': 0}
+    removed = 0
+    for r in records:
+        if r.status == 'Removed':
+            removed += 1
+            continue
+        key = r.display_title
+        g = groups.setdefault(key, {
+            'title': key,
+            'location': r.shelf_location or 'Not shelved',
+            'catalogued': r.book is not None,
+            'Good': 0, 'Damaged': 0, 'Lost': 0, 'Withdrawn': 0,
+        })
+        if r.condition in g:
+            g[r.condition] += 1
+            totals[r.condition] += 1
+
+    rows = []
+    for g in groups.values():
+        on_hand = g['Good'] + g['Damaged']
+        rows.append([
+            g['title'],
+            'Yes' if g['catalogued'] else 'No',
+            g['location'],
+            g['Good'], g['Damaged'], g['Lost'], g['Withdrawn'], on_hand,
+        ])
+
+    return {
+        'key': 'stock_levels',
+        'title': 'Stock Levels Report',
+        'subtitle': 'Physical copies held, by title and condition',
+        'columns': ['Title', 'Catalogued', 'Shelf Location',
+                    'Good', 'Damaged', 'Lost', 'Withdrawn', 'On Hand'],
+        'rows': rows,
+        'summary': [
+            ('Titles Held', len(rows)),
+            ('Copies On Hand', totals['Good'] + totals['Damaged']),
+            ('Good', totals['Good']),
+            ('Damaged', totals['Damaged']),
+            ('Lost', totals['Lost']),
+            ('Withdrawn', totals['Withdrawn']),
+            ('Deaccessioned', removed),
+        ],
+    }
+
+
+def _stock_movement(start, end):
+    """Every stock-status change in the period, with actor, reason and source."""
+    movements = (StockMovement.objects
+                 .select_related('inventory_record', 'inventory_record__book')
+                 .filter(timestamp__date__range=(start, end))
+                 .order_by('-timestamp', '-movement_id'))
+
+    rows = []
+    counts = {}
+    for m in movements:
+        counts[m.action] = counts.get(m.action, 0) + 1
+        if m.condition_before and m.condition_after and m.condition_before != m.condition_after:
+            change = m.condition_before + ' to ' + m.condition_after
+        else:
+            change = m.condition_after or '—'
+        rows.append([
+            _fmt_date(timezone.localtime(m.timestamp).date()),
+            m.inventory_record.display_title if m.inventory_record else '—',
+            m.get_action_display(),
+            change,
+            m.actor_name or '—',
+            m.reason or '—',
+        ])
+
+    summary = [('Total Movements', len(rows))]
+    for key, label in StockMovement.ACTION_CHOICES:
+        if counts.get(key):
+            summary.append((label, counts[key]))
+
+    return {
+        'key': 'stock_movement',
+        'title': 'Stock Movement Report',
+        'subtitle': 'Every change to a copy stock status, with actor and reason',
+        'columns': ['Date', 'Copy', 'Action', 'Condition Change', 'Actor', 'Reason'],
+        'rows': rows,
+        'summary': summary,
+    }
+
+
 _BUILDERS = {
     'transactions': _transactions,
     'patron_logs': _patron_logs,
     'books': _books,
     'patrons': _patrons,
     'donations': _donations,
+    'stock_levels': _stock_levels,
+    'stock_movement': _stock_movement,
 }
 
 

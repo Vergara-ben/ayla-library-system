@@ -140,7 +140,7 @@
     <div class="shelf-dot"></div>
     <div class="shelf-details">
       <div class="shelf-name" id="shelfName">{% if target.shelf_name %}Target: {{ target.shelf_name }}{% else %}Browse the map{% endif %}</div>
-      <div class="shelf-path" id="shelfPath">{% if target.book_title %}{{ target.book_title }}{% else %}Tap the map or enable navigation{% endif %}</div>
+      <div class="shelf-path" id="shelfPath">{% if target.book_title %}{{ target.book_title }}{% else %}Enable Bluetooth to see your position{% endif %}</div>
     </div>
     <div class="nav-status" id="navStatus">
       <div class="status-dot amber" id="statusDot"></div>
@@ -148,7 +148,6 @@
     </div>
   </div>
   <div class="btn-row">
-    <button class="btn-layers" id="simBtn" onclick="toggleSimulation()" title="Demo: simulate a continuously moving position">🎮 Simulate</button>
     <button class="btn-nav" id="navBtn" onclick="showBTModal()">📡 Enable Navigation</button>
   </div>
 </div>
@@ -233,21 +232,20 @@ function shelfCorners(cx, cy, rotationDeg, width, depth) {
 }
 let bleInterval = null;
 const rssiBuffers = {};          // beacon_uuid -> [rssi, ...] (moving-average window)
+const advertisedTxPower = {};    // beacon_id -> 1 m reference read off the packet
+const matchedBeacons = new Set();// beacon_ids actually seen, for the status line
 
 // Position Threshold filtering state (stabilises the continuous position marker).
 let lastSmoothPos = null;        // smoothing baseline
 const POS_JUMP_MAX = 80;         // px: cap physically implausible jumps between cycles
 const POS_SMOOTHING = 0.4;       // exponential moving-average factor
 
-// Demo simulation state (drives a continuously moving position on any device).
-let simInterval = null, simPos = null;
 
 const NAV_DATA_URL = "{% url 'get_patron_map_data' %}";
 const NAV_ROUTE_URL = "{% url 'get_navigation_route' %}";
 
 // Flip y so stored (x, y) is a top-left pixel origin (matches the admin tool).
 function toLatLng(x, y) { return [imgH - y, x]; }
-function fromLatLng(ll) { return { x: ll.lng, y: imgH - ll.lat }; }
 
 function setStatus(color, text) {
   const dot = document.getElementById('statusDot');
@@ -336,12 +334,9 @@ async function initMap() {
     'Your position': positionLayer,
   }, { collapsed: true, position: 'topleft' }).addTo(map);
 
-  // Tap to set location (manual / fallback positioning)
-  map.on('click', (e) => setPatronPosition(fromLatLng(e.latlng), 'manual'));
-
   if (targetData.shelf_name) {
     document.getElementById('shelfName').textContent = 'Target: ' + targetData.shelf_name;
-    document.getElementById('shelfPath').textContent = 'Tap the map or enable navigation to start';
+    document.getElementById('shelfPath').textContent = 'Enable Bluetooth to start navigating';
   } else {
     document.getElementById('shelfPath').textContent = 'Open a book and tap "View on Map" to navigate to its shelf';
   }
@@ -360,12 +355,10 @@ function applyPositionThreshold(pos) {
   return smoothed;
 }
 
-function setPatronPosition(pos, source) {
-  if (source === 'ble' || source === 'sim') {
-    pos = applyPositionThreshold(pos);   // continuous estimates → stable marker
-  } else {
-    lastSmoothPos = pos;                 // manual tap is exact; reset smoothing baseline
-  }
+// Position comes from live BLE trilateration only — there is no manual or
+// simulated placement, so a marker on this map always means a real measurement.
+function setPatronPosition(pos) {
+  pos = applyPositionThreshold(pos);     // continuous estimates → stable marker
   patronPos = pos;
   const ll = toLatLng(pos.x, pos.y);
   if (!patronMarker) {
@@ -374,9 +367,7 @@ function setPatronPosition(pos, source) {
   } else {
     patronMarker.setLatLng(ll);
   }
-  if (source === 'ble') setStatus('green', 'BLE: Active');
-  else if (source === 'sim') setStatus('green', 'Simulating position');
-  else setStatus('amber', 'Location set (tap)');
+  setStatus('green', 'BLE: Active');
   if (targetData.shelf_id) computeRoute();
 }
 
@@ -390,62 +381,38 @@ async function computeRoute() {
   if (routeLine) routeLayer.removeLayer(routeLine);
   routeLine = L.polyline(latlngs, { color: AylaTheme.color('--blue'), weight: 4, opacity: 0.9 }).addTo(routeLayer);
   document.getElementById('navBtn').textContent = '🧭 Navigating…';
-  document.getElementById('shelfPath').textContent = 'Distance ≈ ' + Math.round(r.distance) + ' px · ' + Math.max(r.route.length - 1, 0) + ' segment(s)';
-}
-
-// ---- Demo simulation ------------------------------------------------------
-// Continuously moves the position marker so navigation can be demonstrated on
-// any device, independent of the experimental Web Bluetooth scanning API.
-// This is a presentation aid; the real positioning path is BLE trilateration.
-function targetShelfXY() {
-  if (!mapData || !targetData.shelf_id) return null;
-  const s = (mapData.shelves || []).find((sh) => sh.shelf_id === targetData.shelf_id);
-  return s ? { x: s.x, y: s.y } : null;
-}
-
-function toggleSimulation() {
-  if (simInterval) { stopSimulation(); return; }
-  if (bleInterval) { clearInterval(bleInterval); bleInterval = null; }  // mutually exclusive with live BLE
-  lastSmoothPos = null;
-  const start = (mapData && mapData.beacons && mapData.beacons[0])
-    ? { x: mapData.beacons[0].x, y: mapData.beacons[0].y }
-    : { x: imgW * 0.15, y: imgH * 0.85 };
-  simPos = { x: start.x, y: start.y };
-  setPatronPosition(simPos, 'sim');
-  const b = document.getElementById('simBtn'); if (b) b.textContent = '⏹ Stop';
-  simInterval = setInterval(simStep, 1200);
-}
-
-function simStep() {
-  const tgt = targetShelfXY();
-  if (tgt) {
-    const dx = tgt.x - simPos.x, dy = tgt.y - simPos.y;
-    const dist = Math.hypot(dx, dy);
-    if (dist < 14) { setStatus('green', 'Arrived at shelf'); stopSimulation(); return; }
-    const step = Math.min(40, dist);
-    simPos = {
-      x: simPos.x + (dx / dist) * step + (Math.random() - 0.5) * 12,   // small wobble mimics BLE noise
-      y: simPos.y + (dy / dist) * step + (Math.random() - 0.5) * 12,
-    };
-  } else {
-    simPos = {
-      x: Math.max(0, Math.min(imgW, simPos.x + (Math.random() - 0.5) * 32)),
-      y: Math.max(0, Math.min(imgH, simPos.y + (Math.random() - 0.5) * 32)),
-    };
-  }
-  setPatronPosition(simPos, 'sim');
-}
-
-function stopSimulation() {
-  if (simInterval) { clearInterval(simInterval); simInterval = null; }
-  const b = document.getElementById('simBtn'); if (b) b.textContent = '🎮 Simulate';
+  const segs = Math.max(r.route.length - 1, 0);
+  const ppm = mapData && mapData.pixels_per_meter;
+  const dist = ppm ? (Math.round((r.distance / ppm) * 10) / 10) + ' m' : Math.round(r.distance) + ' canvas units';
+  document.getElementById('shelfPath').textContent = 'Distance ≈ ' + dist + ' · ' + segs + ' segment(s)';
 }
 
 // ---- Bluetooth Low Energy positioning (best-effort, with manual fallback) ----
 function showBTModal() { document.getElementById('btModal').classList.add('show'); }
 function closeBTModal() { document.getElementById('btModal').classList.remove('show'); }
 
-function rssiToDistance(rssi, txPower, n) { return Math.pow(10, ((txPower || -59) - rssi) / (10 * (n || 2.0))); }
+// Log-distance path loss. Returns METRES — the only function on this page that
+// does. Everything else on the map is in canvas units, so callers must convert
+// through mapData.pixels_per_meter before mixing the two.
+//
+// txPower is the RSSI measured one metre from that specific beacon and n the
+// environment exponent. Both are per-beacon: −59/2.0 is free space, while a
+// library aisle lined with metal shelving is nearer 2.5–3.5, and getting these
+// wrong scales every distance non-linearly.
+const DEFAULT_TX_POWER = -59;
+const DEFAULT_PATH_LOSS_N = 2.0;
+function rssiToDistance(rssi, txPower, n) {
+  const p = (txPower == null) ? DEFAULT_TX_POWER : txPower;
+  const exp = (n == null || n <= 0) ? DEFAULT_PATH_LOSS_N : n;
+  return Math.pow(10, (p - rssi) / (10 * exp));
+}
+
+// Configured calibration wins; then whatever the beacon advertised; then the
+// conservative default.
+function calibrationFor(b) {
+  const tx = (b.tx_power != null) ? b.tx_power : advertisedTxPower[b.beacon_id];
+  return { txPower: (tx == null ? null : tx), n: b.path_loss_n };
+}
 
 function pushRssi(uuid, rssi, win) {
   const buf = rssiBuffers[uuid] || (rssiBuffers[uuid] = []);
@@ -453,29 +420,129 @@ function pushRssi(uuid, rssi, win) {
   if (buf.length > (win || 5)) buf.shift();   // Moving Average window
 }
 
+const APPLE_COMPANY_ID = 0x004C;      // iBeacon manufacturer data
+const EDDYSTONE_SERVICE = '0000feaa-0000-1000-8000-00805f9b34fb';
+
+function hex(view, from, to) {
+  let out = '';
+  for (let i = from; i < to; i++) out += view.getUint8(i).toString(16).padStart(2, '0');
+  return out;
+}
+
+// Classic iBeacons advertise no service UUID — their identity lives in Apple
+// manufacturer data: 0x02 0x15, 16-byte proximity UUID, major, minor, then the
+// measured power at 1 m. Several beacons normally share one UUID and differ
+// only by major/minor, so all three are read.
+function parseIBeacon(e) {
+  const md = e.manufacturerData;
+  if (!md || typeof md.get !== 'function') return null;
+  const v = md.get(APPLE_COMPANY_ID);
+  if (!v || v.byteLength < 23) return null;
+  if (v.getUint8(0) !== 0x02 || v.getUint8(1) !== 0x15) return null;   // not a proximity beacon
+  const raw = hex(v, 2, 18);
+  return {
+    uuid: raw.slice(0, 8) + '-' + raw.slice(8, 12) + '-' + raw.slice(12, 16)
+        + '-' + raw.slice(16, 20) + '-' + raw.slice(20),
+    major: v.getUint16(18, false),
+    minor: v.getUint16(20, false),
+    measuredPower: v.getInt8(22),
+  };
+}
+
+// Eddystone advertises service 0xFEAA on every unit, so the service UUID alone
+// cannot tell two beacons apart — the per-beacon ID is the namespace+instance
+// inside a UID frame (type 0x00).
+function parseEddystone(e) {
+  const sd = e.serviceData;
+  if (!sd || typeof sd.get !== 'function') return null;
+  const v = sd.get(EDDYSTONE_SERVICE) || sd.get('feaa');
+  if (!v || v.byteLength < 18) return null;
+  if (v.getUint8(0) !== 0x00) return null;            // only UID frames identify a beacon
+  return {
+    txPower: v.getInt8(1),                            // calibrated RSSI at 0 m
+    namespace: hex(v, 2, 12),
+    instance: hex(v, 12, 18),
+  };
+}
+
+// Which configured beacon, if any, this advertisement came from. Returns the
+// beacon plus any calibration the packet itself carried.
+function matchBeacon(e) {
+  const ib = parseIBeacon(e);
+  const ed = parseEddystone(e);
+  const advUuids = (e.uuids || []).map((u) => String(u).toLowerCase());
+  const name = e.device && e.device.name;
+
+  for (const b of mapData.beacons) {
+    const type = b.advertisement_type || 'iBeacon';
+    const bu = String(b.beacon_uuid || '').toLowerCase();
+
+    if (type === 'iBeacon' && ib) {
+      if (ib.uuid !== bu) continue;
+      if (b.major != null && b.major !== ib.major) continue;
+      if (b.minor != null && b.minor !== ib.minor) continue;
+      // iBeacon carries its own 1 m reference; the configured value wins.
+      return { beacon: b, advertisedTxPower: ib.measuredPower };
+    }
+    if (type === 'Eddystone' && ed) {
+      if (b.namespace_id && b.namespace_id !== ed.namespace) continue;
+      if (b.instance_id && b.instance_id !== ed.instance) continue;
+      if (!b.namespace_id && !b.instance_id) continue;   // nothing to match on
+      // Eddystone reports power at 0 m; ~41 dB is the conventional 1 m offset.
+      return { beacon: b, advertisedTxPower: ed.txPower - 41 };
+    }
+    if (type === 'ServiceUUID' && advUuids.includes(bu)) {
+      return { beacon: b, advertisedTxPower: null };
+    }
+    if (type === 'DeviceName' && name && name === b.label) {
+      return { beacon: b, advertisedTxPower: null };
+    }
+  }
+  return null;
+}
+
 function onAdvertisement(e) {
   try {
     if (e.rssi == null || !mapData) return;
-    const advUuids = (e.uuids || []).map((u) => String(u).toLowerCase());
-    const name = e.device && e.device.name;
-    mapData.beacons.forEach((b) => {
-      const bu = String(b.beacon_uuid).toLowerCase();
-      if (advUuids.includes(bu) || (name && name === b.label)) pushRssi(b.beacon_uuid, e.rssi);
-    });
+    const hit = matchBeacon(e);
+    if (!hit) return;
+    // Remember whatever calibration arrived with the packet so it can stand in
+    // when the Administrator has not measured this beacon yet.
+    if (hit.advertisedTxPower != null && advertisedTxPower[hit.beacon.beacon_id] == null) {
+      advertisedTxPower[hit.beacon.beacon_id] = hit.advertisedTxPower;
+    }
+    matchedBeacons.add(hit.beacon.beacon_id);
+    pushRssi(hit.beacon.beacon_uuid, e.rssi);
   } catch (_) { /* ignore malformed advertisements */ }
 }
 
 function trilaterate() {
   if (!mapData) return;
+  // Beacon coordinates are canvas units and rssiToDistance() gives metres, so
+  // without a measured scale the two cannot be combined. Refuse rather than
+  // produce a position that looks plausible and is wrong.
+  const scale = mapData.pixels_per_meter;
+  if (!scale || scale <= 0) {
+    setStatus('amber', 'Map scale not set — ask an administrator');
+    return;
+  }
   const pts = [];
   mapData.beacons.forEach((b) => {
     const buf = rssiBuffers[b.beacon_uuid];
     if (buf && buf.length) {
       const avg = buf.reduce((a, c) => a + c, 0) / buf.length;
-      pts.push({ x: b.x, y: b.y, d: rssiToDistance(avg) });
+      const cal = calibrationFor(b);
+      // metres → canvas units, so every term below is in the same unit
+      pts.push({ x: b.x, y: b.y, d: rssiToDistance(avg, cal.txPower, cal.n) * scale });
     }
   });
-  if (pts.length < 3) return;   // need at least three beacons
+  if (pts.length < 3) {
+    // Say why nothing is happening — silence here is what makes a beacon
+    // mismatch look like broken hardware.
+    setStatus('amber', 'BLE: ' + matchedBeacons.size + ' of '
+      + mapData.beacons.length + ' beacons seen — need 3 to fix a position');
+    return;
+  }
   // Linear least-squares trilateration using the last beacon as the reference point.
   const ref = pts[pts.length - 1];
   let Sxx = 0, Sxy = 0, Syy = 0, Sxb = 0, Syb = 0;
@@ -489,15 +556,16 @@ function trilaterate() {
   if (Math.abs(det) < 1e-6) return;
   const x = (Syy * Sxb - Sxy * Syb) / det;
   const y = (Sxx * Syb - Sxy * Sxb) / det;
-  if (isFinite(x) && isFinite(y)) setPatronPosition({ x: x, y: y }, 'ble');
+  if (isFinite(x) && isFinite(y)) setPatronPosition({ x: x, y: y });
 }
 
 async function enableBLE() {
   closeBTModal();
-  if (simInterval) stopSimulation();   // live BLE and the demo simulation are mutually exclusive
   if (!('bluetooth' in navigator) || !navigator.bluetooth.requestLEScan) {
-    setStatus('amber', 'BLE unavailable — tap to locate');
-    alert('Live Bluetooth positioning is not available in this browser. Tap anywhere on the map to set your location manually (fallback navigation).');
+    setStatus('amber', 'BLE not supported on this device');
+    alert('This browser cannot scan for Bluetooth beacons, so your position cannot be '
+        + 'determined here. The floor plan and shelf locations are still available.\n\n'
+        + 'Live positioning needs Chrome on Android or desktop with Web Bluetooth scanning enabled.');
     return;
   }
   try {
@@ -507,8 +575,9 @@ async function enableBLE() {
     if (bleInterval) clearInterval(bleInterval);
     bleInterval = setInterval(trilaterate, 1500);
   } catch (err) {
-    setStatus('amber', 'BLE blocked — tap to locate');
-    alert('Bluetooth scanning was blocked or failed. Tap anywhere on the map to set your location manually (fallback navigation).');
+    setStatus('amber', 'Bluetooth scanning blocked');
+    alert('Bluetooth scanning was blocked or cancelled, so your position cannot be shown. '
+        + 'Allow the Bluetooth permission and try again.');
   }
 }
 

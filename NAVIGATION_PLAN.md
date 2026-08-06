@@ -175,6 +175,13 @@ literally "independently toggleable" and is a standard, defensible Leaflet featu
 
 ### 3.0 Three defects found in the existing BLE path
 
+**(a) Unit mismatch — FIXED 2026-08-05.**
+> `FloorPlan.pixels_per_meter` added (migration `0024`), set from the floor-plan
+> editor, served in the patron map payload. `trilaterate()` now converts metres
+> to canvas units before solving, and refuses to run when the scale is unset
+> rather than misplacing the patron. Measured error on a worked example fell
+> from 2.8 m to 0. The original description follows.
+
 **(a) Unit mismatch — this will visibly misplace the patron.**
 `rssiToDistance()` returns **metres** (log-distance path-loss model), but beacon
 `map_x`/`map_y` are **canvas units**. `trilaterate()` mixes both in one equation:
@@ -193,6 +200,15 @@ This is invisible today because nothing can reach the BLE path (see 3.1), and bo
 the manual tap and the demo simulation bypass `trilaterate()` entirely. It will
 surface the moment BLE runs — i.e. during the defense demo. **Fix first.**
 
+**(b) Beacon identification — FIXED 2026-08-05.**
+> `BLEBeacon` gained `advertisement_type`, `major`/`minor` (iBeacon) and
+> `namespace_id`/`instance_id` (Eddystone-UID), migration `0025`. The client now
+> parses Apple manufacturer data (company 0x004C, type 0x02 0x15) and Eddystone
+> service data (0xFEAA, UID frame 0x00) instead of matching service UUIDs, so two
+> beacons sharing a proximity UUID are told apart by major/minor. 15 parser
+> assertions pass against real byte layouts. `tools/beacon-probe.html` is still the
+> way to learn what your units actually broadcast. Original description follows.
+
 **(b) Beacon identification may not match real hardware.**
 `onAdvertisement()` matches only on advertised **service UUIDs** (`e.uuids`) or
 `device.name` vs the beacon's label. Classic **iBeacons advertise neither** — their
@@ -203,6 +219,11 @@ it cannot distinguish one from another (the per-beacon ID is in `serviceData`).
 
 Run `tools/beacon-probe.html` beside the beacons to see what they actually broadcast
 before writing the matching code.
+
+**(c) No calibration — FIXED 2026-08-05.**
+> Per-beacon `tx_power` (RSSI at 1 m) and `path_loss_n` added and used by
+> `rssiToDistance()`, falling back to the value advertised in the packet and then
+> to -59/2.0. Both are editable when placing a beacon. Original description follows.
 
 **(c) No calibration.** `txPower` is hardcoded to −59 dBm and the path-loss exponent
 `n` to 2.0. Real beacons need their own measured RSSI-at-1 m, and indoors with metal

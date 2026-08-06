@@ -396,6 +396,32 @@
                         {% for pt in patron_types %}<option value="{{ pt }}">{{ pt }}</option>{% endfor %}
                     </select>
                 </div>
+                {# On-site identity validation — Ch.1 ¶242: the walk-in patron
+                   presents a physical ID and the desk verifies it on the spot. #}
+                <div class="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 space-y-2.5">
+                    <p class="text-[10px] uppercase font-bold tracking-wider text-amber-500">
+                        <i class="fa-solid fa-id-card text-[10px]"></i> Identity Validation
+                    </p>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        <div class="space-y-1.5">
+                            <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">ID Presented</label>
+                            <select id="lgIdType" class="w-full rounded-lg px-3 py-2 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700" style="background-color: var(--bg-input);">
+                                <option value="">Select ID type…</option>
+                                {% for value, label in id_type_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+                            </select>
+                        </div>
+                        <div class="space-y-1.5">
+                            <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">ID Number</label>
+                            <input type="text" id="lgIdNumber" placeholder="As shown on the ID" class="w-full rounded-lg px-3 py-2 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 placeholder-slate-600" style="background-color: var(--bg-input);">
+                        </div>
+                    </div>
+                    <label class="flex items-start gap-2.5 cursor-pointer select-none">
+                        <input type="checkbox" id="lgIdConfirmed" class="mt-0.5 w-4 h-4 rounded border-slate-600 bg-slate-900 text-amber-600 focus:ring-amber-700 focus:ring-offset-0">
+                        <span class="text-[11px] text-slate-300 leading-relaxed">
+                            I have seen the physical ID and confirm it matches the patron in front of me.
+                        </span>
+                    </label>
+                </div>
                 <button type="button" onclick="lgSubmitRegister()" class="w-full bg-cyan-700 hover:bg-cyan-600 text-white font-bold px-5 py-2.5 rounded-lg flex items-center justify-center gap-2 tracking-wide transition-colors">
                     <i class="fa-solid fa-user-plus text-xs"></i> Register &amp; Log Entry
                 </button>
@@ -495,6 +521,7 @@
             setTimeout(function () { document.getElementById('lgName').focus(); }, 50);
         }
         function closeNewLogModal() {
+            clearTimeout(lgConfirmTimer);
             document.getElementById('newLogModal').classList.add('hidden');
             document.body.style.overflow = 'auto';
         }
@@ -522,6 +549,9 @@
                 document.getElementById(f).value = '';
             });
             document.getElementById('lgPatronType').value = '';
+            document.getElementById('lgIdType').value = '';
+            document.getElementById('lgIdNumber').value = '';
+            document.getElementById('lgIdConfirmed').checked = false;
             document.getElementById('lgActionError').classList.add('hidden');
             document.getElementById('lgRegError').classList.add('hidden');
             lgShowPanel('lgActionPanel');
@@ -595,6 +625,9 @@
                     email: document.getElementById('lgRegEmail').value.trim(),
                     contact_number: document.getElementById('lgContact').value.trim(),
                     address: document.getElementById('lgAddress').value.trim(),
+                    id_type: document.getElementById('lgIdType').value,
+                    id_number: document.getElementById('lgIdNumber').value.trim(),
+                    id_confirmed: document.getElementById('lgIdConfirmed').checked ? '1' : '',
                     patron_type: document.getElementById('lgPatronType').value,
                     school: document.getElementById('lgSchool').value.trim(),
                     purpose_of_visit: document.getElementById('lgPurpose').value.trim(),
@@ -612,6 +645,8 @@
             }
         }
 
+        let lgConfirmTimer = null;
+
         function lgShowConfirm(r) {
             const isEntry = r.action === 'entry';
             document.getElementById('lgConfirmIcon').className = 'fa-solid ' + (isEntry ? 'fa-right-to-bracket text-emerald-400' : 'fa-right-from-bracket text-blue-400') + ' text-3xl';
@@ -622,6 +657,10 @@
                 ? ('Entry: ' + r.log.entry_time)
                 : ('Exit: ' + r.log.exit_time + (r.log.duration ? ' · Duration ' + r.log.duration : ''));
             lgShowPanel('lgConfirmPanel');
+            // The receipt is the point of this panel, but it should not sit there
+            // waiting for a click — show it briefly, then close and refresh.
+            clearTimeout(lgConfirmTimer);
+            lgConfirmTimer = setTimeout(lgDone, 2000);
         }
 
         function lgDone() {

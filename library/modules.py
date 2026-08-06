@@ -22,6 +22,10 @@ STAFF_MODULES = [
      'Maintain rooms, shelves, and shelf levels', 'fa-folder-tree'),
     ('indoor_map', 'Floor Plan Module',
      'Edit the floor plan, waypoints, and beacons', 'fa-map'),
+    # Ch.1 ¶268 gives Library Staff the stock-receiving functions only — audits,
+    # deaccession, condition changes and movement history stay Administrator-only.
+    ('inventory', 'Stock Receiving',
+     'Receive shipments and donations into inventory', 'fa-truck-ramp-box'),
 ]
 
 MODULE_KEYS = [key for key, _label, _desc, _icon in STAFF_MODULES]

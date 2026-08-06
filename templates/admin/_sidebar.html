@@ -47,6 +47,11 @@ active keys: dashboard, indoor_map, transactions, logs, books, patrons,
                     <i class="fa-solid fa-book w-5 text-sm"></i>
                     <span class="text-sm {% if active != 'books' %}font-medium{% endif %}">Manage Books</span>
                 </a>
+                {# Administrator-only: no Library Staff equivalent of this page. #}
+                <a href="{% url 'inventory_management' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg {% if active == 'inventory' %}bg-slate-800/50 text-cyan-400 font-medium border border-slate-700/50{% else %}text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors{% endif %}">
+                    <i class="fa-solid fa-boxes-stacked w-5 text-sm"></i>
+                    <span class="text-sm {% if active != 'inventory' %}font-medium{% endif %}">Inventory</span>
+                </a>
                 <a href="{% url 'admin_manage_patron' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg {% if active == 'patrons' %}bg-slate-800/50 text-cyan-400 font-medium border border-slate-700/50{% else %}text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors{% endif %}">
                     <i class="fa-solid fa-users w-5 text-sm"></i>
                     <span class="text-sm {% if active != 'patrons' %}font-medium{% endif %}">Manage Patrons</span>

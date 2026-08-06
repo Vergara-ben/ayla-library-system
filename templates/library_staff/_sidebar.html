@@ -60,6 +60,12 @@ active keys: dashboard, transactions, logs, books, donations, shelf, indoor_map
                     <span class="text-sm {% if active != 'shelf' %}font-medium{% endif %}">Shelf Manager</span>
                 </a>
                 {% endif %}
+                {% if 'inventory' in allowed_modules %}
+                <a href="{% url 'staff_inventory_receive' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg {% if active == 'inventory' %}bg-slate-800/50 text-violet-400 font-medium border border-slate-700/50{% else %}text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors{% endif %}">
+                    <i class="fa-solid fa-truck-ramp-box w-5 text-sm"></i>
+                    <span class="text-sm {% if active != 'inventory' %}font-medium{% endif %}">Stock Receiving</span>
+                </a>
+                {% endif %}
                 {% if 'indoor_map' in allowed_modules %}
                 <a href="{% url 'staff_indoor_map' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg {% if active == 'indoor_map' %}bg-slate-800/50 text-violet-400 font-medium border border-slate-700/50{% else %}text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors{% endif %}">
                     <i class="fa-solid fa-map w-5 text-sm"></i>

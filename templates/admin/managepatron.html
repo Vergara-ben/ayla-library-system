@@ -316,7 +316,15 @@
                                         <div class="w-8 h-8 rounded-full bg-cyan-950 text-cyan-400 border border-cyan-800/60 flex items-center justify-center font-bold text-[11px]">{{ patron.fullname|slice:':1'|upper }}</div>
                                         <div>
                                             <div class="font-bold text-slate-200">{{ patron.fullname }}</div>
-                                            <div class="text-[9px] text-slate-500 mt-0.5">Joined {{ patron.registration_date|date:'M Y' }}</div>
+                                            <div class="text-[9px] text-slate-500 mt-0.5">
+                                                Joined {{ patron.registration_date|date:'M Y' }}
+                                                {# Evidence the on-site ID check actually happened. #}
+                                                {% if patron.identity_verified_at %}
+                                                    · <span class="text-emerald-500" title="{{ patron.id_type }} {{ patron.id_number }} — verified {{ patron.identity_verified_at|date:'M d, Y H:i' }}{% if patron.identity_verified_by %} by {{ patron.identity_verified_by.fullname }}{% endif %}"><i class="fa-solid fa-id-card"></i> ID verified</span>
+                                                {% elif patron.registration_channel == 'On-site' %}
+                                                    · <span class="text-amber-500" title="Registered before identity capture was required"><i class="fa-solid fa-triangle-exclamation"></i> no ID on record</span>
+                                                {% endif %}
+                                            </div>
                                         </div>
                                     </td>
                                     <td class="py-4 px-6 font-mono text-slate-400">{{ patron.patron_id }}</td>
@@ -399,7 +407,7 @@
                 </button>
             </div>
 
-            <form id="patronForm" method="post" class="space-y-4 text-xs">
+            <form id="patronForm" method="post" enctype="multipart/form-data" class="space-y-4 text-xs">
                 {% csrf_token %}
                 <input type="hidden" id="formMode" name="form_mode" value="add">
                 <input type="hidden" id="patronId" name="patron_id" value="">
@@ -464,6 +472,43 @@
                     <input type="password" id="password" name="password" placeholder="Required for new patrons" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium placeholder-slate-600 tracking-wide" style="background-color: var(--bg-input);">
                 </div>
 
+                {# On-site identity validation — Ch.1 ¶242: the patron "presents a
+                   physical ID" and it is verified on the spot. #}
+                <div id="identityBlock" class="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4 space-y-3">
+                    <p class="text-[10px] uppercase font-bold tracking-wider text-amber-500">
+                        <i class="fa-solid fa-id-card text-[10px]"></i> Identity Validation
+                    </p>
+                    <p class="text-[11px] text-slate-400 leading-relaxed">
+                        On-site registration requires the patron to present a physical ID. Record what you checked.
+                    </p>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div class="space-y-1.5">
+                            <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">ID Presented</label>
+                            <select id="idType" name="id_type" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium appearance-none pr-10 cursor-pointer tracking-wide" style="background-color: var(--bg-input);">
+                                <option value="">Select ID type…</option>
+                                {% for value, label in id_type_choices %}
+                                <option value="{{ value }}" {% if value == initial.id_type %}selected{% endif %}>{{ label }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="space-y-1.5">
+                            <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">ID Number</label>
+                            <input type="text" id="idNumber" name="id_number" value="{{ initial.id_number|default:'' }}" placeholder="As shown on the ID" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium placeholder-slate-600 tracking-wide" style="background-color: var(--bg-input);">
+                        </div>
+                    </div>
+                    <div class="space-y-1.5">
+                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Photo of the ID (optional)</label>
+                        <input type="file" name="credential_document" accept=".jpg,.jpeg,.png,.pdf" class="w-full rounded-lg px-3 py-2 text-slate-300 border border-slate-700/60 text-[11px]" style="background-color: var(--bg-input);">
+                        <p class="text-[10px] text-slate-500">JPG, PNG or PDF, max 5 MB. Kept with the patron record as evidence of the check.</p>
+                    </div>
+                    <label class="flex items-start gap-2.5 cursor-pointer select-none">
+                        <input type="checkbox" name="id_confirmed" value="1" class="mt-0.5 w-4 h-4 rounded border-slate-600 bg-slate-900 text-amber-600 focus:ring-amber-700 focus:ring-offset-0">
+                        <span class="text-[11px] text-slate-300 leading-relaxed">
+                            I have seen the physical ID above and confirm it matches the patron in front of me.
+                        </span>
+                    </label>
+                </div>
+
                 <div class="pt-4 flex items-center justify-end gap-3">
                     <button type="button" onclick="closeModal()" class="px-5 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:text-slate-100 hover:bg-slate-800/40 font-semibold tracking-wide transition-colors min-w-[100px]">
                         Cancel
@@ -505,15 +550,20 @@
             formMode.value = mode;
             patronIdField.value = patronId || '';
 
+            // The ID check belongs to registration, not to later edits.
+            const identity = document.getElementById('identityBlock');
+
             if (mode === 'add') {
                 modalTitle.textContent = 'Add New Patron';
                 submitBtn.innerHTML = '<i class="fa-solid fa-check text-xs"></i> Add Patron';
                 form.action = "{% url 'admin_add_patron' %}";
                 form.reset();
+                if (identity) identity.style.display = '';
             } else if (mode === 'edit') {
                 modalTitle.textContent = 'Edit Patron';
                 submitBtn.innerHTML = '<i class="fa-solid fa-check text-xs"></i> Save Changes';
                 form.action = "{% url 'admin_edit_patron' 0 %}".replace('0', patronId);
+                if (identity) identity.style.display = 'none';
                 loadPatronData(patronId);
             }
 

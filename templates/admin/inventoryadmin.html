@@ -1,0 +1,801 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en" data-module="admin">
+<head>
+    <meta charset="UTF-8">
+    <meta name="theme-color" content="#ffffff">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ayla Admin Panel - Inventory Management</title>
+    <script src="{% static 'js/theme.js' %}"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="{% static 'js/tailwind-theme.js' %}"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'css/theme.css' %}">
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: var(--bg-main); color: var(--text-primary); }
+        .logo-text { font-family: 'Rowdies', sans-serif; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: var(--bg-main); }
+        ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
+
+        .mobile-menu-btn {
+            display: none; align-items: center; justify-content: center;
+            width: 2.5rem; height: 2.5rem; border-radius: 0.5rem;
+            background: var(--bg-card); border: 1px solid var(--border-color);
+            color: var(--text-primary); cursor: pointer; margin-right: 0.75rem;
+        }
+        @media (max-width: 1024px) {
+            aside { position: fixed; left: -100%; top: 0; height: 100vh; z-index: 50; transition: left 0.3s ease; }
+            aside.open { left: 0; }
+            .mobile-menu-btn { display: flex !important; }
+            main { padding: 1rem; }
+        }
+
+        .field-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); margin-bottom: 6px; display: block; }
+        .field-input {
+            width: 100%; background: var(--bg-input); border: 1px solid var(--border-modal);
+            border-radius: 8px; padding: 9px 12px; font-size: 13px; color: var(--text-primary); outline: none;
+        }
+        .field-input:focus { border-color: var(--accent-strong); }
+        .tab-btn { padding: 8px 16px; border-radius: 8px; font-size: 12px; font-weight: 700; }
+        .tab-btn.active { background: var(--tint-accent); color: var(--accent); border: 1px solid var(--accent-border); }
+        .tab-btn:not(.active) { color: var(--text-muted); border: 1px solid transparent; }
+        .tab-btn:not(.active):hover { color: var(--text-primary); background: var(--bg-subtle); }
+    </style>
+    <link rel="stylesheet" href="{% static 'css/admin-enhance.css' %}">
+    <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
+    <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
+    <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
+</head>
+<body class="flex h-screen overflow-hidden">
+
+    {% include 'admin/_sidebar.html' with active='inventory' %}
+
+    <div class="flex-1 flex flex-col overflow-hidden">
+
+        <header class="h-16 flex-shrink-0 flex items-center justify-between px-8" style="background-color: var(--bg-main);">
+            <div class="flex items-center">
+                <button class="mobile-menu-btn" onclick="toggleSidebar()">
+                    <i class="fa-solid fa-bars"></i>
+                </button>
+                <h2 class="logo-text text-lg tracking-wider text-slate-200 uppercase">Inventory Management</h2>
+            </div>
+            <div class="flex items-center gap-4">
+                <span class="bg-cyan-950 text-cyan-400 text-xs px-2.5 py-1 rounded font-bold border border-cyan-800 tracking-wider">ADMIN</span>
+                <div class="w-8 h-8 rounded-full bg-cyan-900 border border-cyan-700 flex items-center justify-center text-xs font-bold text-cyan-200">AD</div>
+            </div>
+        </header>
+
+        <main class="flex-1 overflow-y-auto p-8 space-y-6">
+
+            {% if messages %}
+                {% for message in messages %}
+                <div class="px-4 py-3 rounded-lg border text-xs font-semibold {% if message.tags == 'error' %}bg-rose-950/40 border-rose-800/60 text-rose-300{% elif message.tags == 'warning' %}bg-amber-950/40 border-amber-800/60 text-amber-300{% else %}bg-emerald-950/40 border-emerald-800/60 text-emerald-300{% endif %}">
+                    {{ message }}
+                </div>
+                {% endfor %}
+            {% endif %}
+
+            <!-- Stock levels at a glance -->
+            <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+                <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
+                    <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">In Stock</p>
+                    <p class="text-3xl font-bold text-cyan-400 mt-2">{{ in_stock }}</p>
+                    <p class="text-[10px] text-slate-500 mt-1">of {{ total_copies }} copies</p>
+                </div>
+                <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
+                    <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Good</p>
+                    <p class="text-3xl font-bold text-emerald-400 mt-2">{{ good_count }}</p>
+                </div>
+                <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
+                    <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Damaged</p>
+                    <p class="text-3xl font-bold text-amber-500 mt-2">{{ damaged_count }}</p>
+                </div>
+                <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
+                    <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Lost</p>
+                    <p class="text-3xl font-bold text-rose-400 mt-2">{{ lost_count }}</p>
+                </div>
+                <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
+                    <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Withdrawn</p>
+                    <p class="text-3xl font-bold text-slate-400 mt-2">{{ withdrawn_count }}</p>
+                </div>
+                <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
+                    <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Uncatalogued</p>
+                    <p class="text-3xl font-bold text-purple-400 mt-2">{{ uncatalogued }}</p>
+                    <p class="text-[10px] text-slate-500 mt-1">received, not catalogued</p>
+                </div>
+            </div>
+
+            <!-- Tabs -->
+            <div class="rounded-xl border border-slate-800/80 overflow-hidden" style="background-color: var(--bg-card);">
+                <div class="px-5 py-3 border-b border-slate-800/60 flex flex-wrap items-center justify-between gap-3">
+                    <div class="flex items-center gap-1">
+                        <a href="?tab=stock" class="tab-btn {% if tab != 'audit' and tab != 'history' %}active{% endif %}"><i class="fa-solid fa-boxes-stacked mr-1"></i> Stock</a>
+                        <a href="?tab=audit" class="tab-btn {% if tab == 'audit' %}active{% endif %}"><i class="fa-solid fa-clipboard-check mr-1"></i> Stock Audit</a>
+                        <a href="?tab=history" class="tab-btn {% if tab == 'history' %}active{% endif %}"><i class="fa-solid fa-clock-rotate-left mr-1"></i> Movement History</a>
+                    </div>
+                    <button type="button" onclick="show('receiveModal')" class="bg-cyan-600/20 text-cyan-400 border border-cyan-600/30 px-4 py-2 rounded-lg text-xs font-semibold hover:bg-cyan-600/30 transition-colors flex items-center gap-2">
+                        <i class="fa-solid fa-truck-ramp-box"></i> Receive Stock
+                    </button>
+                </div>
+
+                {% if tab == 'audit' %}
+                <!-- ── Stock audit: expected holdings vs what is physically scanned ── -->
+                <div class="p-5 space-y-4">
+                    <p class="text-xs text-slate-400 leading-relaxed">
+                        Pick a shelf, scan every copy on it, then compare. The discrepancy report below is
+                        <strong class="text-slate-300">not applied until you confirm it</strong>.
+                    </p>
+
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                        <div class="space-y-3">
+                            <div>
+                                <label class="field-label" for="auditShelf">Shelf to audit</label>
+                                <select id="auditShelf" class="field-input">
+                                    <option value="">Select a shelf…</option>
+                                    {% for s in shelves %}
+                                    <option value="{{ s.shelf_id }}">{{ s.name }}{% if s.room %} — {{ s.room.name }}{% endif %}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div>
+                                <label class="field-label" for="auditManual">Add a copy label</label>
+                                <div class="flex gap-2">
+                                    <input type="text" id="auditManual" class="field-input" placeholder="Type or paste a QR label, then Enter">
+                                    <button type="button" onclick="addScannedLabel(document.getElementById('auditManual').value); document.getElementById('auditManual').value='';" class="px-3 rounded-lg border border-slate-700 text-slate-300 text-xs font-semibold hover:bg-slate-800/50">Add</button>
+                                </div>
+                            </div>
+                            <div class="flex gap-2">
+                                <button type="button" id="auditCamBtn" onclick="toggleAuditCamera()" class="flex-1 bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-cyan-400 text-xs font-bold px-3 py-2 rounded-lg">
+                                    <i class="fa-solid fa-camera mr-1"></i> Scan with camera
+                                </button>
+                                <button type="button" onclick="clearScanned()" class="px-3 py-2 rounded-lg border border-slate-700 text-slate-400 text-xs font-semibold hover:bg-slate-800/50">Clear</button>
+                            </div>
+                            <div id="auditCamWrap" class="hidden relative aspect-video bg-slate-900 rounded-lg overflow-hidden">
+                                <video id="auditVideo" class="w-full h-full object-cover" autoplay playsinline></video>
+                                <canvas id="auditCanvas" class="hidden"></canvas>
+                            </div>
+                            <p id="auditScanStatus" class="text-[11px] text-slate-500"></p>
+                        </div>
+
+                        <div class="rounded-lg border border-slate-800 p-3" style="background-color: var(--bg-main);">
+                            <div class="flex items-center justify-between mb-2">
+                                <span class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Scanned copies</span>
+                                <span id="scannedCount" class="text-xs text-cyan-400 font-bold">0</span>
+                            </div>
+                            <div id="scannedList" class="space-y-1 max-h-56 overflow-y-auto text-xs text-slate-300"></div>
+                        </div>
+                    </div>
+
+                    <button type="button" onclick="runAuditCompare()" class="w-full bg-cyan-600/20 text-cyan-400 border border-cyan-600/30 px-4 py-3 rounded-lg text-sm font-semibold hover:bg-cyan-600/30 transition-colors">
+                        <i class="fa-solid fa-scale-balanced mr-1"></i> Compare against expected holdings
+                    </button>
+
+                    <div id="auditReport" class="hidden rounded-lg border border-slate-800 p-4 space-y-3" style="background-color: var(--bg-main);"></div>
+                </div>
+
+                {% elif tab == 'history' %}
+                <!-- ── Movement history: actor, reason, source for every change ── -->
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="border-b border-slate-800/80 text-[10px] font-bold tracking-wider text-slate-500 uppercase bg-slate-900/5">
+                                <th class="py-3 px-6">When</th>
+                                <th class="py-3 px-6">Copy</th>
+                                <th class="py-3 px-6">Action</th>
+                                <th class="py-3 px-6">Change</th>
+                                <th class="py-3 px-6">Actor</th>
+                                <th class="py-3 px-6">Reason / Source</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-800/40 text-xs text-slate-300">
+                            {% for m in movements %}
+                            <tr class="hover:bg-slate-800/10 transition-colors">
+                                <td class="py-3 px-6 text-slate-400 whitespace-nowrap">{{ m.timestamp|date:"M d, Y H:i" }}</td>
+                                <td class="py-3 px-6 font-medium text-slate-200">{{ m.inventory_record.display_title }}</td>
+                                <td class="py-3 px-6">
+                                    <span class="text-[10px] font-bold px-2 py-1 rounded-full
+                                        {% if m.action == 'Received' %}bg-emerald-950/50 text-emerald-300 border border-emerald-800/50
+                                        {% elif m.action == 'Deaccession' %}bg-rose-950/50 text-rose-300 border border-rose-800/50
+                                        {% elif m.action == 'AuditAdjustment' %}bg-amber-950/50 text-amber-300 border border-amber-800/50
+                                        {% else %}bg-slate-800/60 text-slate-300 border border-slate-700/50{% endif %}">
+                                        {{ m.get_action_display }}
+                                    </span>
+                                </td>
+                                <td class="py-3 px-6 text-slate-400">
+                                    {% if m.condition_before and m.condition_after and m.condition_before != m.condition_after %}
+                                        {{ m.condition_before }} &rarr; {{ m.condition_after }}
+                                    {% elif m.condition_after %}{{ m.condition_after }}{% else %}&mdash;{% endif %}
+                                </td>
+                                <td class="py-3 px-6 text-slate-400">{{ m.actor_name|default:"—" }}</td>
+                                <td class="py-3 px-6 text-slate-400">
+                                    {{ m.reason|default:"—" }}
+                                    {% if m.source %}<span class="block text-[10px] text-slate-600">Source: {{ m.source }}</span>{% endif %}
+                                </td>
+                            </tr>
+                            {% empty %}
+                            <tr><td colspan="6" class="py-10 text-center text-slate-500 text-xs">No stock movements recorded yet.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% if movements.has_other_pages %}
+                <div class="px-6 py-4 flex items-center justify-between text-xs text-slate-400 border-t border-slate-800/60">
+                    <span>Page {{ movements.number }} of {{ movements.paginator.num_pages }}</span>
+                    <div class="flex gap-2">
+                        {% if movements.has_previous %}<a href="?tab=history&mpage={{ movements.previous_page_number }}" class="px-3 py-1.5 rounded border border-slate-800 hover:bg-slate-800/20">&larr; Prev</a>{% endif %}
+                        {% if movements.has_next %}<a href="?tab=history&mpage={{ movements.next_page_number }}" class="px-3 py-1.5 rounded border border-slate-800 hover:bg-slate-800/20">Next &rarr;</a>{% endif %}
+                    </div>
+                </div>
+                {% endif %}
+
+                {% else %}
+                <!-- ── Stock list ── -->
+                <form method="get" class="px-5 py-3.5 bg-slate-900/20 border-b border-slate-800/60 flex flex-col lg:flex-row lg:items-center gap-3">
+                    <div class="relative flex-1">
+                        <i class="fa-solid fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-xs"></i>
+                        <input type="text" name="q" value="{{ q }}" placeholder="Search by title, label, or source reference..." class="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-4 py-2 text-xs text-slate-300 focus:outline-none focus:border-cyan-800 placeholder-slate-600">
+                    </div>
+                    <select name="condition" onchange="this.form.submit()" class="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-400 focus:outline-none min-w-[130px]">
+                        <option value="">All conditions</option>
+                        {% for value, label in condition_choices %}<option value="{{ value }}" {% if value == condition_filter %}selected{% endif %}>{{ label }}</option>{% endfor %}
+                    </select>
+                    <select name="source" onchange="this.form.submit()" class="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-400 focus:outline-none min-w-[120px]">
+                        <option value="">All sources</option>
+                        {% for value, label in source_choices %}<option value="{{ value }}" {% if value == source_filter %}selected{% endif %}>{{ label }}</option>{% endfor %}
+                    </select>
+                    <button type="submit" class="bg-cyan-600/20 text-cyan-400 border border-cyan-600/30 px-4 py-2 rounded-lg text-xs font-semibold hover:bg-cyan-600/30">Filter</button>
+                </form>
+
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="border-b border-slate-800/80 text-[10px] font-bold tracking-wider text-slate-500 uppercase bg-slate-900/5">
+                                <th class="py-3 px-6">Copy</th>
+                                <th class="py-3 px-6 w-32">Source</th>
+                                <th class="py-3 px-6 w-28">Condition</th>
+                                <th class="py-3 px-6 w-40">Shelf location</th>
+                                <th class="py-3 px-6 w-28">Received</th>
+                                <th class="py-3 px-6 text-center w-44">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-800/40 text-xs text-slate-300">
+                            {% for r in records %}
+                            <tr class="hover:bg-slate-800/10 transition-colors {% if r.status == 'Removed' %}opacity-50{% endif %}">
+                                <td class="py-4 px-6">
+                                    <div class="font-bold text-slate-200">{{ r.display_title }}</div>
+                                    <div class="text-[10px] text-slate-500">
+                                        Copy #{{ r.inventory_id }}
+                                        {% if not r.book %}<span class="text-purple-400">· not catalogued</span>{% endif %}
+                                        {% if r.status == 'Removed' %}<span class="text-rose-400">· removed</span>{% endif %}
+                                    </div>
+                                </td>
+                                <td class="py-4 px-6 text-slate-400">
+                                    {% if r.source == 'Donation' %}Donation{% else %}Shipment{% endif %}
+                                    {% if r.source_detail %}<span class="block text-[10px] text-slate-600">{{ r.source_detail }}</span>{% endif %}
+                                    {% if r.processing_stage %}<span class="block text-[10px] text-purple-400">{{ r.processing_stage }}</span>{% endif %}
+                                </td>
+                                <td class="py-4 px-6">
+                                    <span class="text-[10px] font-bold px-2.5 py-1 rounded-full
+                                        {% if r.condition == 'Good' %}bg-emerald-950/50 text-emerald-300 border border-emerald-800/50
+                                        {% elif r.condition == 'Damaged' %}bg-amber-950/50 text-amber-300 border border-amber-800/50
+                                        {% elif r.condition == 'Lost' %}bg-rose-950/50 text-rose-300 border border-rose-800/50
+                                        {% else %}bg-slate-800/60 text-slate-400 border border-slate-700/50{% endif %}">{{ r.condition }}</span>
+                                </td>
+                                <td class="py-4 px-6 text-slate-400">{{ r.shelf_location|default:"Not shelved" }}</td>
+                                <td class="py-4 px-6 text-slate-400">{{ r.received_date|date:"M d, Y" }}</td>
+                                <td class="py-4 px-6">
+                                    <div class="flex items-center justify-center gap-2">
+                                        <button title="QR label"
+                                            data-id="{{ r.inventory_id }}" data-title="{{ r.display_title }}" data-label="{{ r.qr_label }}"
+                                            onclick="openLabel(this)" class="text-slate-400 hover:text-cyan-400 p-1.5"><i class="fa-solid fa-qrcode"></i></button>
+                                        <button title="Record condition"
+                                            data-id="{{ r.inventory_id }}" data-title="{{ r.display_title }}" data-condition="{{ r.condition }}"
+                                            onclick="openCondition(this)" class="text-slate-400 hover:text-amber-400 p-1.5"><i class="fa-solid fa-clipboard-check"></i></button>
+                                        <button title="Edit details"
+                                            data-id="{{ r.inventory_id }}" data-title="{{ r.display_title }}"
+                                            data-book="{{ r.book.book_id|default:'' }}" data-hint="{{ r.title_hint|default:'' }}"
+                                            data-source="{{ r.source }}" data-supplier="{{ r.supplier|default:'' }}" data-po="{{ r.po_number|default:'' }}"
+                                            data-donor="{{ r.donor_name|default:'' }}" data-stage="{{ r.processing_stage|default:'' }}" data-notes="{{ r.notes|default:'' }}"
+                                            onclick="openEdit(this)" class="text-slate-400 hover:text-cyan-400 p-1.5"><i class="fa-solid fa-pen-to-square"></i></button>
+                                        {% if r.status != 'Removed' %}
+                                        <button title="Deaccession (data-entry error)"
+                                            data-id="{{ r.inventory_id }}" data-title="{{ r.display_title }}"
+                                            onclick="openDeaccession(this)" class="text-slate-400 hover:text-rose-400 p-1.5"><i class="fa-solid fa-eraser"></i></button>
+                                        {% endif %}
+                                    </div>
+                                </td>
+                            </tr>
+                            {% empty %}
+                            <tr><td colspan="6" class="py-10 text-center text-slate-500 text-xs">
+                                No copies in inventory yet. Use <strong class="text-slate-400">Receive Stock</strong> to take delivery of the first one.
+                            </td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% if records.has_other_pages %}
+                <div class="px-6 py-4 flex items-center justify-between text-xs text-slate-400 border-t border-slate-800/60">
+                    <span>Page {{ records.number }} of {{ records.paginator.num_pages }} — {{ paginator.count }} copies</span>
+                    <div class="flex gap-2">
+                        {% if records.has_previous %}<a href="?page={{ records.previous_page_number }}&q={{ q }}&condition={{ condition_filter }}&source={{ source_filter }}" class="px-3 py-1.5 rounded border border-slate-800 hover:bg-slate-800/20">&larr; Prev</a>{% endif %}
+                        {% if records.has_next %}<a href="?page={{ records.next_page_number }}&q={{ q }}&condition={{ condition_filter }}&source={{ source_filter }}" class="px-3 py-1.5 rounded border border-slate-800 hover:bg-slate-800/20">Next &rarr;</a>{% endif %}
+                    </div>
+                </div>
+                {% endif %}
+                {% endif %}
+            </div>
+        </main>
+    </div>
+
+    <!-- Receive stock -->
+    <div id="receiveModal" class="fixed inset-0 z-[60] hidden items-center justify-center p-4 overflow-y-auto" style="background: var(--scrim);">
+        <div class="w-full max-w-lg my-auto rounded-2xl border shadow-2xl" style="background-color: var(--bg-modal); border-color: var(--border-modal);">
+            <div class="flex items-center justify-between px-6 py-4 border-b" style="border-color: var(--border-modal);">
+                <h3 class="text-sm font-bold text-slate-200 tracking-wide">Receive Stock</h3>
+                <button onclick="closeModal('receiveModal')" class="text-slate-500 hover:text-slate-300"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <form method="post" action="{% url 'receive_stock' %}" class="px-6 py-5 space-y-4">
+                {% csrf_token %}
+
+                {# Shipment and donation are separate intakes with their own fields. #}
+                <div>
+                    <label class="field-label">How did this arrive?</label>
+                    <div class="flex items-center gap-1 bg-slate-900/50 rounded-lg p-1 border border-slate-800">
+                        <button type="button" id="srcShipmentBtn" onclick="setSource('Purchase')" class="flex-1 px-4 py-2 rounded-md text-[11px] font-bold transition-colors bg-cyan-700/30 text-cyan-400 border border-cyan-800/50">
+                            <i class="fa-solid fa-truck-ramp-box mr-1"></i> Shipment
+                        </button>
+                        <button type="button" id="srcDonationBtn" onclick="setSource('Donation')" class="flex-1 px-4 py-2 rounded-md text-[11px] font-bold transition-colors text-slate-400 hover:text-slate-200 hover:bg-slate-800/40">
+                            <i class="fa-solid fa-hand-holding-heart mr-1"></i> Donation
+                        </button>
+                    </div>
+                    <input type="hidden" name="source" id="rcvSource" value="Purchase">
+                </div>
+
+                <div>
+                    <label class="field-label">Catalogued title</label>
+                    <select name="book_id" id="rcvBook" class="field-input">
+                        <option value="">— Not catalogued yet —</option>
+                        {% for b in books %}<option value="{{ b.book_id }}">{{ b.title }} — {{ b.author }}</option>{% endfor %}
+                    </select>
+                    <p class="text-[10px] text-slate-500 mt-1">Cataloguing a new title stays in Manage Books; a copy may be received before it exists there.</p>
+                </div>
+                <div>
+                    <label class="field-label">Title (if not catalogued)</label>
+                    <input type="text" name="title_hint" class="field-input" placeholder="Working title for the physical copy">
+                </div>
+
+                <!-- Shipment-only fields -->
+                <div id="shipmentFields" class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="field-label">Supplier</label>
+                        <input type="text" name="supplier" class="field-input" placeholder="Who shipped it">
+                    </div>
+                    <div>
+                        <label class="field-label">PO number</label>
+                        <input type="text" name="po_number" class="field-input" placeholder="PO-2026-001">
+                    </div>
+                </div>
+
+                <!-- Donation-only fields -->
+                <div id="donationFields" class="hidden space-y-4">
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="field-label">Donor name</label>
+                            <input type="text" name="donor_name" id="rcvDonor" class="field-input" placeholder="Who donated it">
+                        </div>
+                        <div>
+                            <label class="field-label">Date donated</label>
+                            <input type="date" name="donated_date" class="field-input" value="{{ today }}">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="field-label">Accessioning stage</label>
+                        <select name="processing_stage" class="field-input">
+                            {% for value, label in stage_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+                        </select>
+                        <p class="text-[10px] text-slate-500 mt-1">Donated copies move Received &rarr; Processing &rarr; Shelved before they are available.</p>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="field-label">Condition on arrival</label>
+                        <select name="condition" class="field-input">
+                            {% for value, label in condition_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+                        </select>
+                    </div>
+                    <div>
+                        <label class="field-label">Number of copies</label>
+                        <input type="number" name="quantity" class="field-input" value="1" min="1" max="100" required>
+                    </div>
+                </div>
+                <div>
+                    <label class="field-label">Notes</label>
+                    <input type="text" name="notes" class="field-input" placeholder="Verified against the delivery note, etc.">
+                </div>
+                <p class="text-[10px] text-slate-500">Each copy gets its own QR label, separate from the catalogue QR on the book record.</p>
+                <div class="flex items-center justify-end gap-2 pt-2">
+                    <button type="button" onclick="closeModal('receiveModal')" class="text-xs font-semibold px-4 py-2 rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800/50">Cancel</button>
+                    <button type="submit" class="text-xs font-bold px-4 py-2 rounded-lg bg-cyan-700/40 text-cyan-300 border border-cyan-700/60 hover:bg-cyan-700/60">Receive</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Record condition -->
+    <div id="conditionModal" class="fixed inset-0 z-[60] hidden items-center justify-center p-4" style="background: var(--scrim);">
+        <div class="w-full max-w-md rounded-2xl border shadow-2xl" style="background-color: var(--bg-modal); border-color: var(--border-modal);">
+            <div class="flex items-center justify-between px-6 py-4 border-b" style="border-color: var(--border-modal);">
+                <h3 class="text-sm font-bold text-slate-200 tracking-wide">Record Condition</h3>
+                <button onclick="closeModal('conditionModal')" class="text-slate-500 hover:text-slate-300"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <form method="post" action="{% url 'update_copy_condition' %}" class="px-6 py-5 space-y-4">
+                {% csrf_token %}
+                <input type="hidden" name="inventory_id" id="condId">
+                <p class="text-xs text-slate-400">Copy: <span id="condTitle" class="text-slate-200 font-semibold"></span></p>
+                <div>
+                    <label class="field-label">New condition</label>
+                    <select name="condition" id="condSelect" class="field-input">
+                        {% for value, label in condition_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label class="field-label">Reason (recorded in the movement history)</label>
+                    <input type="text" name="reason" class="field-input" placeholder="Water damage found during shelving" required>
+                </div>
+                <div class="flex items-center justify-end gap-2 pt-2">
+                    <button type="button" onclick="closeModal('conditionModal')" class="text-xs font-semibold px-4 py-2 rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800/50">Cancel</button>
+                    <button type="submit" class="text-xs font-bold px-4 py-2 rounded-lg bg-amber-700/40 text-amber-300 border border-amber-700/60 hover:bg-amber-700/60">Save condition</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Edit record -->
+    <div id="editModal" class="fixed inset-0 z-[60] hidden items-center justify-center p-4 overflow-y-auto" style="background: var(--scrim);">
+        <div class="w-full max-w-lg my-auto rounded-2xl border shadow-2xl" style="background-color: var(--bg-modal); border-color: var(--border-modal);">
+            <div class="flex items-center justify-between px-6 py-4 border-b" style="border-color: var(--border-modal);">
+                <h3 class="text-sm font-bold text-slate-200 tracking-wide">Update Inventory Record</h3>
+                <button onclick="closeModal('editModal')" class="text-slate-500 hover:text-slate-300"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <form method="post" action="{% url 'update_inventory_record' %}" class="px-6 py-5 space-y-4">
+                {% csrf_token %}
+                <input type="hidden" name="inventory_id" id="editId">
+                <div>
+                    <label class="field-label">Catalogued title</label>
+                    <select name="book_id" id="editBook" class="field-input">
+                        <option value="">— Not catalogued yet —</option>
+                        {% for b in books %}<option value="{{ b.book_id }}">{{ b.title }} — {{ b.author }}</option>{% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label class="field-label">Title (if not catalogued)</label>
+                    <input type="text" name="title_hint" id="editHint" class="field-input">
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="field-label">Source</label>
+                        {# The intake type is fixed at receipt; only its own fields are editable. #}
+                        <input type="text" id="editSourceLabel" class="field-input" readonly>
+                        <input type="hidden" name="source" id="editSource">
+                    </div>
+                    <div id="editShipmentWrap">
+                        <label class="field-label">Supplier</label>
+                        <input type="text" name="supplier" id="editSupplier" class="field-input">
+                    </div>
+                    <div id="editPoWrap">
+                        <label class="field-label">PO number</label>
+                        <input type="text" name="po_number" id="editPo" class="field-input">
+                    </div>
+                    <div id="editDonorWrap" class="hidden">
+                        <label class="field-label">Donor name</label>
+                        <input type="text" name="donor_name" id="editDonor" class="field-input">
+                    </div>
+                    <div id="editStageWrap" class="hidden">
+                        <label class="field-label">Accessioning stage</label>
+                        <select name="processing_stage" id="editStage" class="field-input">
+                            {% for value, label in stage_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+                        </select>
+                    </div>
+                </div>
+                <div>
+                    <label class="field-label">Notes</label>
+                    <input type="text" name="notes" id="editNotes" class="field-input">
+                </div>
+                <div>
+                    <label class="field-label">Reason for the correction</label>
+                    <input type="text" name="reason" class="field-input" placeholder="Wrong donor recorded at intake">
+                </div>
+                <p class="text-[10px] text-slate-500">Editing details never changes the recorded quantity — receive or deaccession copies for that.</p>
+                <div class="flex items-center justify-end gap-2 pt-2">
+                    <button type="button" onclick="closeModal('editModal')" class="text-xs font-semibold px-4 py-2 rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800/50">Cancel</button>
+                    <button type="submit" class="text-xs font-bold px-4 py-2 rounded-lg bg-cyan-700/40 text-cyan-300 border border-cyan-700/60 hover:bg-cyan-700/60">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Deaccession -->
+    <div id="deaccessionModal" class="fixed inset-0 z-[60] hidden items-center justify-center p-4" style="background: var(--scrim);">
+        <div class="w-full max-w-md rounded-2xl border shadow-2xl" style="background-color: var(--bg-modal); border-color: var(--border-modal);">
+            <div class="flex items-center justify-between px-6 py-4 border-b" style="border-color: var(--border-modal);">
+                <h3 class="text-sm font-bold text-slate-200 tracking-wide">Deaccession Copy</h3>
+                <button onclick="closeModal('deaccessionModal')" class="text-slate-500 hover:text-slate-300"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <form method="post" action="{% url 'deaccession_copy' %}" class="px-6 py-5 space-y-4">
+                {% csrf_token %}
+                <input type="hidden" name="inventory_id" id="deaccId">
+                <div class="rounded-lg border border-amber-800/50 bg-amber-950/30 px-3 py-2.5 text-[11px] text-amber-200 leading-relaxed">
+                    Deaccession is for <strong>data-entry mistakes</strong> — a copy recorded twice, or one that never arrived.
+                    A copy that is damaged, lost or pulled from circulation should get a <strong>condition change</strong> instead.
+                </div>
+                <p class="text-xs text-slate-400">Copy: <span id="deaccTitle" class="text-slate-200 font-semibold"></span></p>
+                <div>
+                    <label class="field-label">Reason</label>
+                    <input type="text" name="reason" class="field-input" placeholder="Duplicate entry created during intake" required>
+                </div>
+                <div class="flex items-center justify-end gap-2 pt-2">
+                    <button type="button" onclick="closeModal('deaccessionModal')" class="text-xs font-semibold px-4 py-2 rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800/50">Cancel</button>
+                    <button type="submit" class="text-xs font-bold px-4 py-2 rounded-lg bg-rose-700/40 text-rose-300 border border-rose-700/60 hover:bg-rose-700/60">Deaccession</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- QR label -->
+    <div id="labelModal" class="fixed inset-0 z-[60] hidden items-center justify-center p-4" style="background: var(--scrim);">
+        <div class="w-full max-w-xs rounded-2xl border shadow-2xl" style="background-color: var(--bg-modal); border-color: var(--border-modal);">
+            <div class="flex items-center justify-between px-6 py-4 border-b" style="border-color: var(--border-modal);">
+                <h3 class="text-sm font-bold text-slate-200 tracking-wide">Copy QR Label</h3>
+                <button onclick="closeModal('labelModal')" class="text-slate-500 hover:text-slate-300"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="px-6 py-5 text-center space-y-3">
+                <div class="bg-white rounded-lg p-3 inline-block"><img id="labelImg" alt="Copy QR label" style="width:180px;height:180px"></div>
+                <p id="labelTitle" class="text-xs font-bold text-slate-200"></p>
+                <p id="labelCode" class="text-[10px] text-slate-500 break-all"></p>
+                <a id="labelDownload" class="inline-block text-xs font-bold px-4 py-2 rounded-lg bg-cyan-700/40 text-cyan-300 border border-cyan-700/60 hover:bg-cyan-700/60" download target="_blank">Download label</a>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function toggleSidebar() { document.querySelector('aside')?.classList.toggle('open'); }
+        function show(id) { const m = document.getElementById(id); m.classList.remove('hidden'); m.classList.add('flex'); }
+        function closeModal(id) { const m = document.getElementById(id); m.classList.add('hidden'); m.classList.remove('flex'); }
+
+        // Switch the receive form between the two intakes.
+        function setSource(kind) {
+            const donation = kind === 'Donation';
+            document.getElementById('rcvSource').value = kind;
+            document.getElementById('shipmentFields').classList.toggle('hidden', donation);
+            document.getElementById('donationFields').classList.toggle('hidden', !donation);
+            document.getElementById('rcvDonor').required = donation;
+            const active = ['bg-cyan-700/30', 'text-cyan-400', 'border', 'border-cyan-800/50'];
+            const idle = ['text-slate-400', 'hover:text-slate-200', 'hover:bg-slate-800/40'];
+            const ship = document.getElementById('srcShipmentBtn');
+            const don = document.getElementById('srcDonationBtn');
+            (donation ? don : ship).classList.add(...active);
+            (donation ? don : ship).classList.remove(...idle);
+            (donation ? ship : don).classList.remove(...active);
+            (donation ? ship : don).classList.add(...idle);
+        }
+
+        function openCondition(btn) {
+            document.getElementById('condId').value = btn.dataset.id;
+            document.getElementById('condTitle').textContent = btn.dataset.title;
+            document.getElementById('condSelect').value = btn.dataset.condition;
+            show('conditionModal');
+        }
+        function openEdit(btn) {
+            document.getElementById('editId').value = btn.dataset.id;
+            document.getElementById('editBook').value = btn.dataset.book || '';
+            document.getElementById('editHint').value = btn.dataset.hint || '';
+            const isDonation = (btn.dataset.source || 'Purchase') === 'Donation';
+            document.getElementById('editSource').value = btn.dataset.source || 'Purchase';
+            document.getElementById('editSourceLabel').value = isDonation ? 'Donation' : 'Shipment';
+            document.getElementById('editSupplier').value = btn.dataset.supplier || '';
+            document.getElementById('editPo').value = btn.dataset.po || '';
+            document.getElementById('editDonor').value = btn.dataset.donor || '';
+            if (btn.dataset.stage) document.getElementById('editStage').value = btn.dataset.stage;
+            // Only the fields belonging to this copy's intake are shown.
+            document.getElementById('editShipmentWrap').classList.toggle('hidden', isDonation);
+            document.getElementById('editPoWrap').classList.toggle('hidden', isDonation);
+            document.getElementById('editDonorWrap').classList.toggle('hidden', !isDonation);
+            document.getElementById('editStageWrap').classList.toggle('hidden', !isDonation);
+            document.getElementById('editNotes').value = btn.dataset.notes || '';
+            show('editModal');
+        }
+        function openDeaccession(btn) {
+            document.getElementById('deaccId').value = btn.dataset.id;
+            document.getElementById('deaccTitle').textContent = btn.dataset.title;
+            show('deaccessionModal');
+        }
+        function openLabel(btn) {
+            const code = btn.dataset.label || '';
+            const src = 'https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=' + encodeURIComponent(code);
+            document.getElementById('labelImg').src = src;
+            document.getElementById('labelTitle').textContent = btn.dataset.title;
+            document.getElementById('labelCode').textContent = code;
+            const dl = document.getElementById('labelDownload');
+            dl.href = 'https://api.qrserver.com/v1/create-qr-code/?size=600x600&data=' + encodeURIComponent(code);
+            dl.setAttribute('download', 'copy_label_' + btn.dataset.id + '.png');
+            show('labelModal');
+        }
+
+        function getCookie(name) {
+            const m = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)');
+            return m ? decodeURIComponent(m.pop()) : '';
+        }
+
+        // ── Stock audit ────────────────────────────────────────────────
+        let scannedLabels = [];
+        let auditStream = null, auditInterval = null, lastAuditCode = '';
+
+        function renderScanned() {
+            const list = document.getElementById('scannedList');
+            document.getElementById('scannedCount').textContent = scannedLabels.length;
+            list.innerHTML = scannedLabels.length
+                ? scannedLabels.map(function (l, i) {
+                    return '<div class="flex items-center justify-between gap-2 px-2 py-1 rounded border border-slate-800">'
+                        + '<span class="truncate">' + l + '</span>'
+                        + '<button type="button" onclick="removeScanned(' + i + ')" class="text-slate-500 hover:text-rose-400"><i class="fa-solid fa-xmark"></i></button></div>';
+                  }).join('')
+                : '<p class="text-slate-600">Nothing scanned yet.</p>';
+        }
+        function addScannedLabel(label) {
+            label = (label || '').trim();
+            if (!label) return;
+            if (scannedLabels.indexOf(label) === -1) scannedLabels.push(label);
+            renderScanned();
+        }
+        function removeScanned(i) { scannedLabels.splice(i, 1); renderScanned(); }
+        function clearScanned() { scannedLabels = []; lastAuditCode = ''; renderScanned(); }
+
+        document.addEventListener('DOMContentLoaded', function () {
+            const manual = document.getElementById('auditManual');
+            if (manual) {
+                manual.addEventListener('keydown', function (e) {
+                    if (e.key === 'Enter') { e.preventDefault(); addScannedLabel(this.value); this.value = ''; }
+                });
+                renderScanned();
+            }
+        });
+
+        async function toggleAuditCamera() {
+            const wrap = document.getElementById('auditCamWrap');
+            const status = document.getElementById('auditScanStatus');
+            if (auditStream) {
+                stopAuditCamera();
+                wrap.classList.add('hidden');
+                status.textContent = 'Camera stopped.';
+                return;
+            }
+            try {
+                wrap.classList.remove('hidden');
+                status.textContent = 'Starting camera…';
+                auditStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+                const video = document.getElementById('auditVideo');
+                video.srcObject = auditStream;
+                video.onloadedmetadata = function () {
+                    status.textContent = 'Point the camera at each copy label — scans are added automatically.';
+                    const canvas = document.getElementById('auditCanvas');
+                    const ctx = canvas.getContext('2d');
+                    auditInterval = setInterval(function () {
+                        if (video.readyState !== video.HAVE_ENOUGH_DATA) return;
+                        canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+                        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                        const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                        const code = jsQR(img.data, img.width, img.height);
+                        if (code && code.data && code.data.trim() !== lastAuditCode) {
+                            lastAuditCode = code.data.trim();
+                            addScannedLabel(lastAuditCode);
+                            status.textContent = 'Added ' + lastAuditCode;
+                        }
+                    }, 150);
+                };
+            } catch (err) {
+                status.textContent = 'Camera unavailable — type the labels instead.';
+                wrap.classList.add('hidden');
+            }
+        }
+        function stopAuditCamera() {
+            if (auditInterval) { clearInterval(auditInterval); auditInterval = null; }
+            if (auditStream) { auditStream.getTracks().forEach(function (t) { t.stop(); }); auditStream = null; }
+            const v = document.getElementById('auditVideo');
+            if (v) v.srcObject = null;
+        }
+
+        async function runAuditCompare() {
+            const shelfSel = document.getElementById('auditShelf');
+            const report = document.getElementById('auditReport');
+            const shelfId = shelfSel.value;
+            if (!shelfId) { alert('Pick a shelf to audit first.'); return; }
+
+            const fd = new FormData();
+            fd.append('shelf_id', shelfId);
+            scannedLabels.forEach(function (l) { fd.append('scanned', l); });
+
+            const res = await fetch("{% url 'stock_audit_compare' %}", {
+                method: 'POST', body: fd,
+                headers: { 'X-CSRFToken': getCookie('csrftoken'), 'X-Requested-With': 'XMLHttpRequest' },
+            });
+            const data = await res.json();
+            if (!data.success) { alert(data.error || 'Comparison failed'); return; }
+
+            const shelfName = shelfSel.options[shelfSel.selectedIndex].text;
+            let html = '<div class="grid grid-cols-3 gap-3 text-center">'
+                + '<div><p class="text-[10px] uppercase text-slate-500 font-bold">Expected</p><p class="text-2xl font-bold text-slate-200">' + data.expected_count + '</p></div>'
+                + '<div><p class="text-[10px] uppercase text-slate-500 font-bold">Scanned</p><p class="text-2xl font-bold text-cyan-400">' + data.scanned_count + '</p></div>'
+                + '<div><p class="text-[10px] uppercase text-slate-500 font-bold">Matched</p><p class="text-2xl font-bold text-emerald-400">' + data.found_count + '</p></div>'
+                + '</div>';
+
+            if (data.reconciled) {
+                html += '<p class="text-xs text-emerald-400 font-semibold">Shelf reconciles — nothing to adjust.</p>';
+            } else {
+                if (data.missing.length) {
+                    html += '<div><p class="text-[10px] uppercase font-bold text-rose-400 mb-1">Expected but not scanned (' + data.missing.length + ')</p>'
+                        + '<div class="space-y-1 max-h-40 overflow-y-auto">'
+                        + data.missing.map(function (m) {
+                            return '<label class="flex items-center gap-2 text-xs text-slate-300 px-2 py-1 rounded border border-slate-800">'
+                                + '<input type="checkbox" class="missing-cb" value="' + m.inventory_id + '" checked> '
+                                + '<span class="truncate">' + m.title + ' <span class="text-slate-600">· copy #' + m.inventory_id + '</span></span></label>';
+                          }).join('')
+                        + '</div></div>';
+                }
+                if (data.unexpected.length) {
+                    html += '<div><p class="text-[10px] uppercase font-bold text-amber-400 mb-1">Scanned but not expected here (' + data.unexpected.length + ')</p>'
+                        + '<div class="space-y-1 max-h-40 overflow-y-auto text-xs text-slate-300">'
+                        + data.unexpected.map(function (u) {
+                            return '<div class="px-2 py-1 rounded border border-slate-800 truncate">' + u.title
+                                 + ' <span class="text-slate-600">· belongs to ' + u.belongs_to + '</span></div>';
+                          }).join('')
+                        + '</div><p class="text-[10px] text-slate-500 mt-1">These are reported only — reshelving is handled in Shelf Manager.</p></div>';
+                }
+                if (data.missing.length) {
+                    html += '<div class="pt-2 border-t border-slate-800 space-y-2">'
+                        + '<input type="text" id="auditReason" class="field-input" placeholder="Reason for the adjustment" value="Not found during stock audit">'
+                        + '<label class="flex items-center gap-2 text-[11px] text-amber-300">'
+                        + '<input type="checkbox" id="auditConfirm"> I confirm this discrepancy report and want the ticked copies marked lost.</label>'
+                        + '<button type="button" onclick="applyAudit(\'' + shelfName.replace(/'/g, "") + '\')" class="w-full bg-amber-600/20 text-amber-300 border border-amber-600/40 px-4 py-2.5 rounded-lg text-xs font-bold hover:bg-amber-600/30">Apply adjustment</button>'
+                        + '</div>';
+                }
+            }
+            report.innerHTML = html;
+            report.classList.remove('hidden');
+        }
+
+        async function applyAudit(shelfName) {
+            if (!document.getElementById('auditConfirm').checked) {
+                alert('Tick the confirmation box before the adjustment can be applied.');
+                return;
+            }
+            const ids = [...document.querySelectorAll('.missing-cb:checked')].map(function (c) { return c.value; });
+            if (!ids.length) { alert('No copies ticked.'); return; }
+
+            const fd = new FormData();
+            fd.append('confirm', 'yes');
+            fd.append('reason', document.getElementById('auditReason').value || 'Not found during stock audit');
+            fd.append('shelf_name', shelfName);
+            ids.forEach(function (i) { fd.append('missing_ids', i); });
+
+            const res = await fetch("{% url 'stock_audit_apply' %}", {
+                method: 'POST', body: fd,
+                headers: { 'X-CSRFToken': getCookie('csrftoken'), 'X-Requested-With': 'XMLHttpRequest' },
+            });
+            const data = await res.json();
+            if (!data.success) { alert(data.error || 'Adjustment failed'); return; }
+            alert(data.adjusted + ' copy(ies) marked lost. See Movement History for the trail.');
+            stopAuditCamera();
+            window.location.href = '?tab=history';
+        }
+
+        window.addEventListener('beforeunload', stopAuditCamera);
+    </script>
+    <script src="{% static 'js/admin-enhance.js' %}" defer></script>
+</body>
+</html>
