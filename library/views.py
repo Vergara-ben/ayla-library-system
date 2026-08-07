@@ -1822,8 +1822,12 @@ def download_book_template(request):
     ws = wb.active
     ws.title = "Book Import Template"
     
-    headers = ['title', 'author', 'publication_year', 'ISBN', 'genre', 'shelf_level_id']
+    # Matched by name, so order does not matter and extra columns are ignored.
+    headers = ['Title', 'Author', 'Publication Year', 'ISBN', 'Genre',
+               'Quantity', 'Storage Area']
     ws.append(headers)
+    ws.append(['Example Book Title', 'Surname, First', 2019, '9780000000000',
+               'Fiction', 2, 'Zone 3'])
     
     response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     response['Content-Disposition'] = 'attachment; filename=book_import_template.xlsx'
@@ -1831,77 +1835,191 @@ def download_book_template(request):
     return response
 
 
+def _resolve_storage_area(name):
+    """Find the shelf level a sheet's "Storage Area" refers to, creating it once.
+
+    Sheets record a human label ("Zone 3"), not a database id. Match an existing
+    level or shelf by that label; failing that create the level so the location
+    travels with the import instead of being silently dropped. Returns None only
+    when there is no shelf at all to hang it from.
+    """
+    label = (name or '').strip()
+    if not label:
+        return None
+
+    level = ShelfLevel.objects.filter(category__iexact=label).first()
+    if level is not None:
+        return level
+
+    shelf = Shelf.objects.filter(name__iexact=label).first()
+    if shelf is not None:
+        level = ShelfLevel.objects.filter(shelf=shelf).order_by('level_number').first()
+        if level is not None:
+            return level
+        return ShelfLevel.objects.create(shelf=shelf, level_number=1, category=label)
+
+    shelf = Shelf.objects.order_by('shelf_id').first()
+    if shelf is None:
+        return None
+    next_level = (ShelfLevel.objects.filter(shelf=shelf).count() or 0) + 1
+    return ShelfLevel.objects.create(shelf=shelf, level_number=next_level, category=label)
+
+
 @admin_login_required
 def import_books(request):
+    """Bulk-import books from a spreadsheet.
+
+    Columns are matched by *header name*, not position, so a sheet recorded in
+    a different order still imports. Aliases cover what libraries actually
+    write in their own sheets ("Barcode" for the ISBN, "Year Publish" for the
+    publication year, and so on).
+
+    Quantity creates that many physical copies — the catalogue stores one row
+    per copy — and Storage Area is resolved to a shelf level by name so a sheet
+    can carry its own locations.
+    """
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
-    
+
     if 'excel_file' not in request.FILES:
         return JsonResponse({'success': False, 'error': 'No file uploaded'})
-    
+
     excel_file = request.FILES['excel_file']
-    
     if not excel_file.name.endswith('.xlsx'):
         return JsonResponse({'success': False, 'error': 'Only .xlsx files are allowed'})
-    
+
+    # header text (normalised) -> field. Several spellings map to one field.
+    HEADER_ALIASES = {
+        'title': 'title', 'booktitle': 'title', 'bookname': 'title', 'name': 'title',
+        'author': 'author', 'authors': 'author', 'writer': 'author',
+        'publicationyear': 'publication_year', 'yearpublish': 'publication_year',
+        'yearpublished': 'publication_year', 'year': 'publication_year',
+        'copyright': 'publication_year',
+        'isbn': 'ISBN', 'isbn13': 'ISBN', 'isbn10': 'ISBN', 'barcode': 'ISBN',
+        'accessionnumber': 'ISBN',
+        'genre': 'genre', 'genr': 'genre', 'category': 'genre', 'subject': 'genre',
+        'shelflevelid': 'shelf_level_id', 'shelflevel': 'shelf_level_id',
+        'storagearea': 'storage_area', 'storage': 'storage_area',
+        'location': 'storage_area', 'shelf': 'storage_area', 'zone': 'storage_area',
+        'quantity': 'quantity', 'qty': 'quantity', 'copies': 'quantity',
+        'numberofcopies': 'quantity',
+    }
+
+    def norm(text):
+        return ''.join(ch for ch in str(text or '').lower() if ch.isalnum())
+
+    def clean(value):
+        text = str(value).strip() if value is not None else ''
+        # Sheets write "N/A", "none" or "-" for a blank; treat them as blank.
+        return '' if text.lower() in ('', 'n/a', 'na', 'none', '-', '--') else text
+
     try:
-        wb = openpyxl.load_workbook(excel_file)
+        wb = openpyxl.load_workbook(excel_file, data_only=True)
         ws = wb.active
-        
-        imported_count = 0
-        skipped_count = 0
-        
-        for row in ws.iter_rows(min_row=2):
-            title = row[0].value
-            author = row[1].value
-            publication_year = row[2].value
-            isbn = row[3].value
-            genre = row[4].value
-            shelf_level_id = row[5].value
 
+        header_row = next(ws.iter_rows(min_row=1, max_row=1, values_only=True), None)
+        if not header_row:
+            return JsonResponse({'success': False, 'error': 'The sheet is empty.'})
+
+        columns = {}
+        for index, cell in enumerate(header_row):
+            field = HEADER_ALIASES.get(norm(cell))
+            if field and field not in columns:
+                columns[field] = index
+
+        if 'title' not in columns or 'author' not in columns:
+            found = ', '.join(str(h) for h in header_row if h) or '(none)'
+            return JsonResponse({'success': False, 'error':
+                                 'Could not find a Title and Author column. '
+                                 'Headers found: ' + found})
+
+        def field(row, name):
+            idx = columns.get(name)
+            return clean(row[idx]) if idx is not None and idx < len(row) else ''
+
+        imported = skipped_dup = skipped_blank = copies_created = 0
+        unmatched_areas = set()
+
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            title = field(row, 'title')
+            author = field(row, 'author')
             if not title or not author:
+                skipped_blank += 1
+                continue
+            # A totals row at the foot of a sheet has no real title.
+            if title.lower().startswith('total'):
+                skipped_blank += 1
                 continue
 
+            isbn = field(row, 'ISBN')
             if isbn and Book.objects.filter(ISBN=isbn).exists():
-                skipped_count += 1
+                skipped_dup += 1
                 continue
+
+            raw_year = field(row, 'publication_year')
+            publication_year = None
+            if raw_year:
+                try:
+                    year = int(float(raw_year))
+                    # Ignore impossible years rather than storing them.
+                    if 1000 <= year <= timezone.localdate().year + 1:
+                        publication_year = year
+                except (TypeError, ValueError):
+                    publication_year = None
+
+            quantity = 1
+            raw_qty = field(row, 'quantity')
+            if raw_qty:
+                try:
+                    quantity = max(1, min(int(float(raw_qty)), 50))
+                except (TypeError, ValueError):
+                    quantity = 1
 
             shelf_level = None
-            if shelf_level_id and str(shelf_level_id).strip() not in ['', 'N/A', 'n/a']:
-                shelf_level = ShelfLevel.objects.filter(shelf_level_id=shelf_level_id).first()
+            raw_level_id = field(row, 'shelf_level_id')
+            if raw_level_id:
+                shelf_level = ShelfLevel.objects.filter(shelf_level_id=raw_level_id).first()
+            if shelf_level is None:
+                area = field(row, 'storage_area')
+                if area:
+                    shelf_level = _resolve_storage_area(area)
+                    if shelf_level is None:
+                        unmatched_areas.add(area)
 
-            book = Book.objects.create(
-                title=title,
-                author=author,
-                publication_year=int(publication_year) if publication_year else None,
-                ISBN=isbn,
-                genre=genre,
-                shelf_level=shelf_level,
-                status='Available'
-            )
-            
-            qr = qrcode.QRCode(version=1, box_size=10, border=5)
-            qr.add_data(str(book.book_id))
-            qr.make(fit=True)
-            img = qr.make_image(fill_color="black", back_color="white")
-            
-            qr_dir = os.path.join(settings.MEDIA_ROOT, 'qrcodes', 'books')
-            os.makedirs(qr_dir, exist_ok=True)
-            
-            qr_filename = f'book_qr_{book.book_id}.png'
-            qr_path = os.path.join(qr_dir, qr_filename)
-            img.save(qr_path)
-            
-            book.cover_img_url = f'qrcodes/books/{qr_filename}'
-            book.save()
-            
-            imported_count += 1
-        
+            for copy_no in range(quantity):
+                # Only the first copy carries the ISBN: it is unique to the
+                # title, and the duplicate check above relies on that.
+                book = Book.objects.create(
+                    title=title,
+                    author=author,
+                    publication_year=publication_year,
+                    ISBN=isbn if copy_no == 0 else None,
+                    genre=field(row, 'genre') or None,
+                    shelf_level=shelf_level,
+                    status='Available',
+                    qr_code=str(uuid4()),
+                )
+                imported += 1
+                if copy_no > 0:
+                    copies_created += 1
+
+        parts = [f'Imported {imported} book record(s)']
+        if copies_created:
+            parts.append(f'including {copies_created} extra copy/copies from Quantity')
+        if skipped_dup:
+            parts.append(f'skipped {skipped_dup} row(s) whose ISBN already exists')
+        if skipped_blank:
+            parts.append(f'skipped {skipped_blank} row(s) with no title or author')
+        if unmatched_areas:
+            parts.append('could not match storage area: ' + ', '.join(sorted(unmatched_areas)))
+
         return JsonResponse({
             'success': True,
-            'message': f'Successfully imported {imported_count} books. Skipped {skipped_count} duplicates.'
+            'message': '. '.join(parts) + '.',
+            'imported': imported,
+            'matched_columns': sorted(columns),
         })
-        
+
     except Exception as e:
         return JsonResponse({'success': False, 'error': str(e)})
 
