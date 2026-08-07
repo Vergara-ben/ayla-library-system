@@ -619,7 +619,8 @@
                     method: 'POST',
                     body: formData,
                     headers: {
-                        'X-Requested-With': 'XMLHttpRequest'
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'X-CSRFToken': '{{ csrf_token }}'
                     }
                 })
                 .then(response => response.json())
@@ -632,8 +633,10 @@
                     }
                 })
                 .catch(error => {
-                    console.error('Error:', error);
-                    alert('An error occurred while importing the Excel file');
+                    console.error('Import failed:', error);
+                    alert('The import could not be completed. The server did not return a '
+                        + 'readable response - check that you are still signed in, then try again.\n\n'
+                        + error);
                 });
             }
         }
