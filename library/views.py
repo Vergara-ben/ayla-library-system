@@ -6,6 +6,7 @@ from django.http import HttpResponse, JsonResponse
 from django.conf import settings
 from django.core.paginator import Paginator
 from datetime import datetime, timedelta
+from io import BytesIO
 from decimal import Decimal, InvalidOperation
 import json
 
@@ -5386,3 +5387,60 @@ def flag_inventory_copy_lost(request, book, reason):
     _record_movement(record, 'ConditionChange', request, reason=reason,
                      source='Transactions module', before=before, after='Lost')
     return record
+
+# ─── PATRON LIBRARY CARD ──────────────────────────────────────────────────
+# The printable card the patron carries. Its QR is the same Patron.qr_code the
+# desk scans for borrowing, returning and entry logging, so the card is the
+# physical form of the identity check.
+
+def _qr_data_uri(payload, box_size=10, border=2):
+    """Render `payload` as a QR PNG and return it as a data: URI.
+
+    Generated here rather than fetched from an image service so a card still
+    prints correctly with no internet, which is the normal state of a library
+    front desk mid-brownout.
+    """
+    import base64
+    qr = qrcode.QRCode(
+        version=None,
+        error_correction=qrcode.constants.ERROR_CORRECT_M,
+        box_size=box_size,
+        border=border,
+    )
+    qr.add_data(payload)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color='black', back_color='white')
+    buffer = BytesIO()
+    img.save(buffer, format='PNG')
+    return 'data:image/png;base64,' + base64.b64encode(buffer.getvalue()).decode()
+
+
+def _library_card_context(patron):
+    active_borrows = Transaction.objects.filter(
+        patron=patron, transaction_type='Borrow', return_date__isnull=True).count()
+    return {
+        'patron': patron,
+        'qr_data_uri': _qr_data_uri(patron.qr_code) if patron.qr_code else None,
+        'library_name': getattr(settings, 'LIBRARY_NAME', 'Ayla Public Library'),
+        'library_location': 'Brgy. Sala, Cabuyao, Laguna',
+        'active_borrows': active_borrows,
+        'issued_on': timezone.localdate(),
+    }
+
+
+@admin_login_required
+def patron_library_card(request, patron_id):
+    """The card for any patron — printed at the desk by Staff or the Administrator."""
+    patron = get_object_or_404(Patron, patron_id=patron_id)
+    context = _library_card_context(patron)
+    context['printed_by_staff'] = True
+    return render(request, 'admin/librarycard.html', context)
+
+
+@patron_login_required
+def my_library_card(request):
+    """The signed-in patron's own card, so they can print it themselves."""
+    patron = get_object_or_404(Patron, patron_id=request.session.get('patron_id'))
+    context = _library_card_context(patron)
+    context['printed_by_staff'] = False
+    return render(request, 'admin/librarycard.html', context)

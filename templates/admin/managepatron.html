@@ -364,6 +364,7 @@
                                     </td>
                                     <td class="py-4 px-6 text-center">
                                         <div class="flex items-center justify-center gap-1.5">
+                                            <a title="Library card" href="{% url 'patron_library_card' patron.patron_id %}" target="_blank" class="w-7 h-7 rounded border border-slate-800 text-emerald-500/80 hover:text-emerald-300 hover:bg-slate-800/40 transition-colors flex items-center justify-center"><i class="fa-solid fa-id-card text-[10px]"></i></a>
                                             <button onclick="openModal('edit', '{{ patron.patron_id }}')" class="w-7 h-7 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 transition-colors flex items-center justify-center"><i class="fa-solid fa-pencil text-[10px]"></i></button>
                                             <form method="post" action="{% url 'admin_delete_patron' patron.patron_id %}" class="inline-block">
                                                 {% csrf_token %}

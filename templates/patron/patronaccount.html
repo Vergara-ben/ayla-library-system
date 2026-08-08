@@ -148,7 +148,7 @@
         <div class="qr-title">Present this at the library desk</div>
         <div class="qr-sub">Staff scan it for borrowing, returning, and entry logging.</div>
       </div>
-      <a class="btn-dl" href="https://api.qrserver.com/v1/create-qr-code/?size=400x400&data={{ patron.qr_code|urlencode }}" download="ayla_qr_{{ patron.patron_id }}.png" target="_blank" style="text-decoration:none;">⬇ Save</a>
+      <a class="btn-dl" href="{% url 'my_library_card' %}" style="text-decoration:none;">🪪 My Library Card</a>
     </div>
   </div>
   {% endif %}

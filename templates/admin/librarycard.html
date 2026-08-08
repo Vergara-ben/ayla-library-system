@@ -1,0 +1,234 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Library Card — {{ patron.fullname }}</title>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+<style>
+  /* The card is a physical object, so it is sized in millimetres and its
+     colours are fixed rather than theme-driven — it must look the same on
+     screen, on a colour printer, and photocopied in black and white. */
+  :root {
+    --card-w: 153mm;          /* 85.6 x 54 mm CR80 proportions, scaled 1.8x  */
+    --card-h: 96.5mm;         /* so the QR is large enough to scan reliably  */
+    --ink: #0b1f2a;
+    --muted: #5b7180;
+    --accent: #0e7490;
+    --line: #d6e2e8;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Plus Jakarta Sans', Arial, sans-serif;
+    background: #eef2f5;
+    color: var(--ink);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 18px;
+    padding: 28px 16px 48px;
+    min-height: 100vh;
+  }
+
+  .toolbar {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    justify-content: center;
+  }
+  .btn {
+    font-family: inherit; font-size: 13px; font-weight: 700;
+    padding: 10px 18px; border-radius: 10px; cursor: pointer;
+    border: 1px solid var(--accent); background: var(--accent); color: #fff;
+    text-decoration: none; display: inline-flex; align-items: center; gap: 7px;
+  }
+  .btn.secondary { background: #fff; color: var(--ink); border-color: var(--line); }
+  .hint { font-size: 12px; color: var(--muted); text-align: center; max-width: 560px; line-height: 1.6; }
+
+  /* ── the card ─────────────────────────────────────────────────────── */
+  .card {
+    width: var(--card-w);
+    height: var(--card-h);
+    background: #fff;
+    border-radius: 5mm;
+    border: 1px solid var(--line);
+    box-shadow: 0 10px 34px rgba(11, 31, 42, .16);
+    display: grid;
+    grid-template-columns: 1fr auto;   /* details | QR */
+    overflow: hidden;
+    position: relative;
+  }
+
+  /* A band down the left edge so the card reads as AYLA's at a glance. */
+  .card::before {
+    content: '';
+    position: absolute; left: 0; top: 0; bottom: 0; width: 4mm;
+    background: linear-gradient(180deg, var(--accent), #155e75);
+  }
+
+  .details {
+    padding: 6mm 4mm 5mm 9mm;
+    display: flex; flex-direction: column;
+  }
+
+  .brand { display: flex; align-items: center; gap: 3mm; margin-bottom: 4mm; }
+  .brand img { height: 11mm; width: auto; }
+  .brand-text { line-height: 1.15; }
+  .brand-name {
+    font-family: 'Syne', sans-serif; font-weight: 800;
+    font-size: 3.9mm; letter-spacing: .01em;
+    white-space: nowrap;              /* the library's name never breaks mid-phrase */
+  }
+  .brand-sub { font-size: 2.6mm; color: var(--muted); margin-top: .6mm; }
+
+  .card-label {
+    font-size: 2.4mm; font-weight: 800; letter-spacing: .22em;
+    text-transform: uppercase; color: var(--accent); margin-bottom: 2mm;
+  }
+
+  .holder-name {
+    font-family: 'Syne', sans-serif; font-weight: 800;
+    font-size: 5mm; line-height: 1.15; letter-spacing: -.01em;
+    margin-bottom: 1.8mm;
+    word-break: break-word;
+  }
+
+  .holder-type {
+    display: inline-block; align-self: flex-start;
+    font-size: 2.7mm; font-weight: 700; padding: 1mm 2.6mm;
+    border-radius: 99px; background: #e0f2fe; color: #075985;
+    margin-bottom: 3.5mm;
+  }
+
+  .fields {
+    display: grid; grid-template-columns: auto 1fr; gap: 1.4mm 4mm;
+    font-size: 3mm; margin-top: auto;
+  }
+  .fields dt { color: var(--muted); font-weight: 600; white-space: nowrap; }
+  .fields dd { font-weight: 600; word-break: break-word; }
+
+  /* ── QR panel ─────────────────────────────────────────────────────── */
+  .qr-panel {
+    width: 56mm;
+    background: #f7fbfc;
+    border-left: 1px solid var(--line);
+    padding: 5mm 5mm 4mm;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center;
+  }
+  .qr-box {
+    background: #fff; padding: 2mm; border-radius: 2mm;
+    border: 1px solid var(--line);
+  }
+  .qr-box img { display: block; width: 42mm; height: 42mm; image-rendering: pixelated; }
+  .qr-caption { font-size: 2.5mm; color: var(--muted); margin-top: 2.5mm; line-height: 1.5; }
+  .qr-id {
+    font-family: monospace; font-size: 2.1mm; line-height: 1.35;
+    color: var(--muted); margin-top: 1.2mm;
+    word-break: break-all; max-width: 44mm;
+  }
+  .qr-missing {
+    width: 42mm; height: 42mm; display: flex; align-items: center; justify-content: center;
+    text-align: center; font-size: 3mm; color: #b45309; background: #fffbeb;
+    border: 1px dashed #f59e0b; border-radius: 2mm; padding: 3mm; line-height: 1.5;
+  }
+
+  .footer-strip {
+    grid-column: 1 / -1;
+    border-top: 1px solid var(--line);
+    padding: 2mm 5mm 2mm 9mm;
+    font-size: 2.4mm; color: var(--muted);
+    display: flex; justify-content: space-between; gap: 4mm;
+  }
+
+  /* ── print ────────────────────────────────────────────────────────────
+     Landscape, card centred, everything else hidden. */
+  @page { size: A4 landscape; margin: 12mm; }
+
+  @media print {
+    body { background: #fff; padding: 0; display: block; }
+    .toolbar, .hint { display: none !important; }
+    .card {
+      box-shadow: none;
+      border: 1px solid #94a3b8;   /* a cut line that survives printing */
+      page-break-inside: avoid;
+    }
+    /* Chrome drops backgrounds by default; these carry meaning here. */
+    * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  }
+</style>
+</head>
+<body>
+
+  <div class="toolbar">
+    <button type="button" class="btn" onclick="window.print()">🖨 Print card</button>
+    <a class="btn secondary" id="downloadQr" download="ayla_qr_{{ patron.patron_id }}.png">⬇ Save QR only</a>
+    {% if printed_by_staff %}
+      <a class="btn secondary" href="{% url 'admin_manage_patron' %}">← Back to Manage Patrons</a>
+    {% else %}
+      <a class="btn secondary" href="{% url 'patron_account' %}">← Back to My Account</a>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <div class="details">
+      <div class="brand">
+        <img src="{% static 'images/ayla-logo.png' %}" alt="AYLA">
+        <div class="brand-text">
+          <div class="brand-name">{{ library_name }}</div>
+          <div class="brand-sub">{{ library_location }}</div>
+        </div>
+      </div>
+
+      <div class="card-label">Library Card</div>
+      <div class="holder-name">{{ patron.fullname }}</div>
+      <div class="holder-type">{{ patron.patron_type }}</div>
+
+      <dl class="fields">
+        <dt>Card No.</dt><dd>AYLA-{{ patron.patron_id|stringformat:"05d" }}</dd>
+        <dt>Email</dt><dd>{{ patron.email }}</dd>
+        {% if patron.contact_number %}<dt>Contact</dt><dd>{{ patron.contact_number }}</dd>{% endif %}
+        {% if patron.address %}<dt>Address</dt><dd>{{ patron.address }}</dd>{% endif %}
+        <dt>Member since</dt><dd>{{ patron.registration_date|date:"F Y" }}</dd>
+      </dl>
+      {# Account status is deliberately left off: it changes over an account's #}
+      {# life, and a printed card cannot follow it. The desk reads the live #}
+      {# status from the scan instead. #}
+    </div>
+
+    <div class="qr-panel">
+      {% if qr_data_uri %}
+        <div class="qr-box"><img id="qrImage" src="{{ qr_data_uri }}" alt="Patron QR code"></div>
+        <div class="qr-caption">Present this at the library desk</div>
+        <div class="qr-id">{{ patron.qr_code }}</div>
+      {% else %}
+        <div class="qr-missing">
+          No QR code yet — this account is awaiting approval by an administrator.
+        </div>
+      {% endif %}
+    </div>
+
+    <div class="footer-strip">
+      <span>Issued {{ issued_on|date:"F d, Y" }}</span>
+      <span>Non-transferable · Report loss to the library</span>
+    </div>
+  </div>
+
+  <p class="hint">
+    Print at <strong>100% scale</strong> on A4 landscape — the card measures 153 × 96.5 mm,
+    the proportions of a standard ID card enlarged so the QR scans reliably from a phone.
+    Cut along the border.
+  </p>
+
+  <script>
+    // The "Save QR only" link points at the same image the card shows, so what
+    // is downloaded and what is printed can never disagree.
+    (function () {
+      const img = document.getElementById('qrImage');
+      const link = document.getElementById('downloadQr');
+      if (img && link) { link.href = img.src; } else if (link) { link.style.display = 'none'; }
+    })();
+  </script>
+</body>
+</html>
