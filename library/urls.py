@@ -35,6 +35,7 @@ urlpatterns = [
     path('library-staff/shelf-manager/', views.staff_shelf, name='staff_shelf'),
     path('library-staff/indoor-map/', views.staff_indoor_map, name='staff_indoor_map'),
     path('library-staff/receiving/', views.staff_inventory_receive, name='staff_inventory_receive'),
+    path('library-staff/patrons/', views.staff_manage_patron, name='staff_manage_patron'),
     # Inventory Management (Administrator-only)
     path('admin-portal/inventory/', views.inventory_management, name='inventory_management'),
     path('admin-portal/inventory/receive/', views.receive_stock, name='receive_stock'),

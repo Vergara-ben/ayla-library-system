@@ -1,6 +1,7 @@
 from django.shortcuts import redirect, render, get_object_or_404
 from django.contrib import messages
 from django.db.models import Count, Q
+from django.db import transaction
 from django.utils import timezone
 from django.http import HttpResponse, JsonResponse
 from django.conf import settings
@@ -880,7 +881,20 @@ def admin_add_book(request):
     return render(request, 'admin/managebooks.html', context)
 
 
-@admin_only_required
+def _patron_page_redirect(request):
+    """Staff land back on their patron desk, Administrators on the full module."""
+    if request.session.get('admin_role') == 'Staff':
+        return redirect('staff_manage_patron')
+    return redirect('admin_manage_patron')
+
+
+def _patron_page_template(request):
+    if request.session.get('admin_role') == 'Staff':
+        return 'library_staff/managepatron.html'
+    return 'admin/managepatron.html'
+
+
+@admin_or_module_required('patrons')
 def admin_add_patron(request):
     error = None
     initial = {}
@@ -934,7 +948,7 @@ def admin_add_patron(request):
             log_admin_action(request, 'Create', 'Patron', patron.patron_id,
                              f'Added "{patron.fullname}" — physical ID presented and '
                              f'checked at the desk')
-            return redirect('admin_manage_patron')
+            return _patron_page_redirect(request)
 
     # Get patron list context
     patrons = Patron.objects.annotate(
@@ -967,10 +981,10 @@ def admin_add_patron(request):
         'error': error,
         'initial': initial,
     }
-    return render(request, 'admin/managepatron.html', context)
+    return render(request, _patron_page_template(request), context)
 
 
-@admin_only_required
+@admin_or_module_required('patrons')
 def approve_patron(request, patron_id):
     """Approve a pending registration once its uploaded ID has been reviewed.
 
@@ -979,21 +993,21 @@ def approve_patron(request, patron_id):
     that a document is on file and that the reviewer confirms having opened it
     - the same check the desk performs face to face, done on screen."""
     if request.method != 'POST':
-        return redirect('admin_manage_patron')
+        return _patron_page_redirect(request)
     patron = Patron.objects.filter(patron_id=patron_id, account_status='Pending').first()
     if patron is None:
         messages.error(request, 'Pending patron not found.')
-        return redirect('admin_manage_patron')
+        return _patron_page_redirect(request)
 
     if not patron.credential_document:
         messages.error(request, f'{patron.fullname} has no ID on file, so their identity '
                                 f'cannot be verified. Reject the application and ask them '
                                 f'to register again with a valid ID attached.')
-        return redirect('admin_manage_patron')
+        return _patron_page_redirect(request)
     if (request.POST.get('id_reviewed') or '').strip() not in ('1', 'true', 'on', 'yes'):
         messages.error(request, 'Open and review the uploaded ID before approving '
                                 'this registration.')
-        return redirect('admin_manage_patron')
+        return _patron_page_redirect(request)
 
     reviewer = User.objects.filter(admin_id=request.session.get('admin_id')).first()
     patron.account_status = 'Active'
@@ -1008,18 +1022,18 @@ def approve_patron(request, patron_id):
                      f'reviewed and accepted')
     registration_approved_email(patron)
     messages.success(request, f'{patron.fullname} approved. Their QR code is now active.')
-    return redirect('admin_manage_patron')
+    return _patron_page_redirect(request)
 
 
-@admin_only_required
+@admin_or_module_required('patrons')
 def reject_patron(request, patron_id):
     """Reject a pending registration: notify the applicant and remove the row."""
     if request.method != 'POST':
-        return redirect('admin_manage_patron')
+        return _patron_page_redirect(request)
     patron = Patron.objects.filter(patron_id=patron_id, account_status='Pending').first()
     if patron is None:
         messages.error(request, 'Pending patron not found.')
-        return redirect('admin_manage_patron')
+        return _patron_page_redirect(request)
 
     reason = (request.POST.get('reason') or '').strip() or None
     fullname, email = patron.fullname, patron.email
@@ -1034,11 +1048,26 @@ def reject_patron(request, patron_id):
     patron.delete()
     registration_rejected_email(email, fullname, reason)
     messages.success(request, f'Registration of {fullname} rejected.')
-    return redirect('admin_manage_patron')
+    return _patron_page_redirect(request)
 
 
 @admin_only_required
 def admin_manage_patron(request):
+    return _patrons_page(request, 'admin/managepatron.html')
+
+
+@module_required('patrons')
+def staff_manage_patron(request):
+    """The Library Staff patron desk.
+
+    Deliberately not the full module: the same list and the same review of
+    pending sign-ups, but editing, deleting and bulk import stay with the
+    Administrator, who owns the record itself.
+    """
+    return _patrons_page(request, 'library_staff/managepatron.html')
+
+
+def _patrons_page(request, template):
     search_query = request.GET.get('search', '').strip()
     
     # Handle AJAX search requests
@@ -1109,7 +1138,7 @@ def admin_manage_patron(request):
         'search_query': search_query,
         'querystring': urlencode({'search': search_query}) if search_query else '',
     }
-    return render(request, 'admin/managepatron.html', context)
+    return render(request, template, context)
 
 
 @admin_only_required
@@ -5008,38 +5037,91 @@ def _receiving_redirect(request):
     return redirect('inventory_management')
 
 
+def _resolve_intake_book(item, source):
+    """Return the catalogue record a received line belongs to, creating it if new.
+
+    Book details are entered at the receiving desk, so they have to land
+    somewhere usable: the catalogue is the only place that holds title, author,
+    ISBN, year and genre, and putting them there means nobody retypes the
+    delivery note later. An existing title is matched on ISBN first (the only
+    real identifier a book carries) and on title + author otherwise, so a second
+    box of the same book adds copies instead of a duplicate catalogue entry.
+
+    Raises ValueError with a message meant for the operator.
+    """
+    book_id = str(item.get('book_id') or '').strip()
+    if book_id:
+        book = Book.objects.filter(book_id=book_id).first()
+        if book is None:
+            raise ValueError('One of the titles is no longer in the catalogue.')
+        return book, False
+
+    title = (item.get('title') or '').strip()
+    if not title:
+        raise ValueError('Every line needs either a catalogued title or a new title.')
+    author = (item.get('author') or '').strip()
+    isbn = (item.get('isbn') or '').strip()
+    genre = (item.get('genre') or '').strip()
+    year = None
+    raw_year = str(item.get('publication_year') or '').strip()
+    if raw_year:
+        try:
+            year = int(raw_year)
+        except ValueError:
+            raise ValueError('Publication year must be a number (got "' + raw_year + '").')
+        if year < 1000 or year > timezone.localdate().year + 1:
+            raise ValueError('Publication year ' + raw_year + ' is out of range.')
+
+    existing = None
+    if isbn:
+        existing = Book.objects.filter(ISBN__iexact=isbn).first()
+    if existing is None and author:
+        existing = Book.objects.filter(title__iexact=title, author__iexact=author).first()
+    if existing is not None:
+        return existing, False
+
+    book = Book.objects.create(
+        title=title,
+        author=author or 'Unknown',
+        ISBN=isbn or None,
+        genre=genre or None,
+        publication_year=year,
+        # A donated title is not lendable until accessioning reaches Shelved,
+        # which is where the Donations page flips it to Available.
+        status='Donated' if source == 'Donation' else 'Available',
+        qr_code=str(uuid4()),
+        shelf_level=None,           # shelving is a separate, deliberate step
+    )
+    return book, True
+
+
 @admin_or_module_required('inventory')
 def receive_stock(request):
-    """Intake new copies.
+    """Intake a delivery: one source, one or many titles, many copies each.
 
-    Shipments and donations are separate intakes with their own fields: a
-    shipment records supplier and PO number, a donation records donor and date
-    plus the Received/Processing/Shelved accessioning stage from Ch.1 ¶258.
+    A delivery arrives as a box, not as a single book, so the source details are
+    entered once and every title in that box is added to a list before anything
+    is written. Shipments and donations remain separate intakes with their own
+    fields: a shipment records supplier and PO number, a donation records donor
+    and date plus the Received/Processing/Shelved accessioning stage (Ch.1 ¶258).
     """
     if request.method != 'POST':
         return _receiving_redirect(request)
 
-    book_id = (request.POST.get('book_id') or '').strip()
-    title_hint = (request.POST.get('title_hint') or '').strip()
     source = (request.POST.get('source') or 'Purchase').strip()
-    condition = (request.POST.get('condition') or 'Good').strip()
-    notes = (request.POST.get('notes') or '').strip()
-    try:
-        quantity = int(request.POST.get('quantity') or 1)
-    except ValueError:
-        quantity = 0
-
     if source not in dict(InventoryRecord.SOURCE_CHOICES):
         source = 'Purchase'
-    if condition not in dict(InventoryRecord.CONDITION_CHOICES):
-        condition = 'Good'
-    if quantity < 1 or quantity > 100:
-        messages.error(request, 'Quantity must be between 1 and 100.')
-        return _receiving_redirect(request)
+    notes = (request.POST.get('notes') or '').strip()
 
-    book = Book.objects.filter(book_id=book_id).first() if book_id else None
-    if book is None and not title_hint:
-        messages.error(request, 'Pick a catalogued title, or type a title for the uncatalogued copy.')
+    try:
+        items = json.loads(request.POST.get('items') or '[]')
+    except ValueError:
+        items = None
+    if not isinstance(items, list) or not items:
+        messages.error(request, 'Add at least one title to the delivery before receiving it.')
+        return _receiving_redirect(request)
+    if len(items) > 50:
+        messages.error(request, 'That is more than 50 titles — split it into two deliveries.')
         return _receiving_redirect(request)
 
     # Only the fields belonging to the chosen intake are kept, so a donation
@@ -5067,38 +5149,83 @@ def receive_stock(request):
         supplier = (request.POST.get('supplier') or '').strip() or None
         po_number = (request.POST.get('po_number') or '').strip() or None
 
+    # Validate the whole delivery before writing any of it — a bad line halfway
+    # down should not leave the first half already received.
+    parsed = []
+    total_copies = 0
+    for index, item in enumerate(items, start=1):
+        if not isinstance(item, dict):
+            messages.error(request, 'The delivery list was malformed. Please rebuild it.')
+            return _receiving_redirect(request)
+        raw_quantity = item.get('quantity')
+        try:
+            # Not `or 1`: a submitted 0 is falsy and would silently become one
+            # copy instead of being rejected.
+            quantity = 1 if raw_quantity in (None, '') else int(raw_quantity)
+        except (TypeError, ValueError):
+            quantity = 0
+        if quantity < 1 or quantity > 100:
+            messages.error(request, 'Line ' + str(index) + ': quantity must be between 1 and 100.')
+            return _receiving_redirect(request)
+        condition = (item.get('condition') or 'Good').strip()
+        if condition not in dict(InventoryRecord.CONDITION_CHOICES):
+            condition = 'Good'
+        parsed.append((item, quantity, condition))
+        total_copies += quantity
+
+    if total_copies > 500:
+        messages.error(request, 'That is ' + str(total_copies) + ' copies in one go — '
+                                'split it into smaller deliveries.')
+        return _receiving_redirect(request)
+
     admin = User.objects.filter(admin_id=request.session.get('admin_id')).first()
-    created = []
-    for _ in range(quantity):
-        record = InventoryRecord.objects.create(
-            book=book,
-            title_hint=title_hint or None,
-            source=source,
-            supplier=supplier,
-            po_number=po_number,
-            donor_name=donor_name,
-            donated_date=donated_date,
-            processing_stage=processing_stage,
-            condition=condition,
-            status='In Stock',
-            qr_label=str(uuid4()),      # copy-level label, not the catalogue QR
-            received_by=admin,
-            notes=notes or None,
-        )
-        _record_movement(record, 'Received', request,
-                         reason='Received in ' + condition.lower() + ' condition',
-                         source=record.source_detail or source, after=condition)
-        # A catalogued donation immediately joins the accessioning queue.
-        _sync_donation_row(record)
-        created.append(record)
+    titles_received = []
+    new_titles = 0
+    try:
+        with transaction.atomic():
+            for item, quantity, condition in parsed:
+                book, was_created = _resolve_intake_book(item, source)
+                if was_created:
+                    new_titles += 1
+                # Four copies of one donated title are one thing to accession,
+                # not four, so every copy of a title shares its Donation row.
+                donation_row = None
+                for _ in range(quantity):
+                    record = InventoryRecord.objects.create(
+                        book=book,
+                        source=source,
+                        supplier=supplier,
+                        po_number=po_number,
+                        donor_name=donor_name,
+                        donated_date=donated_date,
+                        processing_stage=processing_stage,
+                        donation=donation_row,
+                        condition=condition,
+                        status='In Stock',
+                        qr_label=str(uuid4()),   # copy-level label, not the catalogue QR
+                        received_by=admin,
+                        notes=notes or None,
+                    )
+                    _record_movement(record, 'Received', request,
+                                     reason='Received in ' + condition.lower() + ' condition',
+                                     source=record.source_detail or source, after=condition)
+                    if source == 'Donation' and donation_row is None:
+                        # Opens the accessioning row on the first copy; the rest
+                        # were created already pointing at it.
+                        donation_row = _sync_donation_row(record)
+                titles_received.append((book.title, quantity))
+    except ValueError as exc:
+        messages.error(request, str(exc))
+        return _receiving_redirect(request)
 
     label = 'donation' if source == 'Donation' else 'shipment'
+    summary = ('Received ' + str(total_copies) + ' copy(ies) across '
+               + str(len(titles_received)) + ' title(s) by ' + label)
     log_admin_action(request, 'Create', 'Inventory', None,
-                     'Received ' + str(len(created)) + ' copy(ies) of "'
-                     + created[0].display_title + '" by ' + label)
-    messages.success(request,
-                     'Received ' + str(len(created)) + ' copy(ies) by ' + label
-                     + '. Print the QR labels from the list.')
+                     summary + ': ' + ', '.join(t + ' x' + str(q) for t, q in titles_received))
+    if new_titles:
+        summary += ' (' + str(new_titles) + ' new to the catalogue)'
+    messages.success(request, summary + '. Print the QR labels from the list.')
     return _receiving_redirect(request)
 
 

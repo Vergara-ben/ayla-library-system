@@ -26,6 +26,11 @@ STAFF_MODULES = [
     # deaccession, condition changes and movement history stay Administrator-only.
     ('inventory', 'Stock Receiving',
      'Receive shipments and donations into inventory', 'fa-truck-ramp-box'),
+    # The desk half of patron management: registering the walk-in in front of
+    # you and reviewing the IDs uploaded by online applicants. Editing and
+    # deleting patron records stay Administrator-only.
+    ('patrons', 'Patron Registration & Review',
+     'Register walk-ins and review online sign-ups', 'fa-user-check'),
 ]
 
 MODULE_KEYS = [key for key, _label, _desc, _icon in STAFF_MODULES]

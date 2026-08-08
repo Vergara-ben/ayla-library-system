@@ -346,7 +346,7 @@
                 <h3 class="text-sm font-bold text-slate-200 tracking-wide">Receive Stock</h3>
                 <button onclick="closeModal('receiveModal')" class="text-slate-500 hover:text-slate-300"><i class="fa-solid fa-xmark"></i></button>
             </div>
-            <form method="post" action="{% url 'receive_stock' %}" class="px-6 py-5 space-y-4">
+            <form onsubmit="return packIntake()" method="post" action="{% url 'receive_stock' %}" class="px-6 py-5 space-y-4">
                 {% csrf_token %}
 
                 {# Shipment and donation are separate intakes with their own fields. #}
@@ -363,18 +363,6 @@
                     <input type="hidden" name="source" id="rcvSource" value="Purchase">
                 </div>
 
-                <div>
-                    <label class="field-label">Catalogued title</label>
-                    <select name="book_id" id="rcvBook" class="field-input">
-                        <option value="">— Not catalogued yet —</option>
-                        {% for b in books %}<option value="{{ b.book_id }}">{{ b.title }} — {{ b.author }}</option>{% endfor %}
-                    </select>
-                    <p class="text-[10px] text-slate-500 mt-1">Cataloguing a new title stays in Manage Books; a copy may be received before it exists there.</p>
-                </div>
-                <div>
-                    <label class="field-label">Title (if not catalogued)</label>
-                    <input type="text" name="title_hint" class="field-input" placeholder="Working title for the physical copy">
-                </div>
 
                 <!-- Shipment-only fields -->
                 <div id="shipmentFields" class="grid grid-cols-2 gap-4">
@@ -409,18 +397,76 @@
                     </div>
                 </div>
 
-                <div class="grid grid-cols-2 gap-4">
+                <!-- Books in this delivery: built up as a list, written in one go. -->
+                <div class="rounded-lg border border-slate-800 bg-slate-900/30 p-4 space-y-3">
+                    <p class="text-[11px] uppercase font-bold tracking-wider text-cyan-500">Books in this delivery</p>
+
                     <div>
-                        <label class="field-label">Condition on arrival</label>
-                        <select name="condition" class="field-input">
-                            {% for value, label in condition_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+                        <label class="field-label">Already catalogued?</label>
+                        <select id="rcvBook" class="field-input" onchange="onPickCatalogued()">
+                            <option value="">&mdash; New title, enter its details below &mdash;</option>
+                            {% for b in books %}<option value="{{ b.book_id }}" data-title="{{ b.title }}" data-author="{{ b.author }}">{{ b.title }} &mdash; {{ b.author }}</option>{% endfor %}
                         </select>
                     </div>
-                    <div>
-                        <label class="field-label">Number of copies</label>
-                        <input type="number" name="quantity" class="field-input" value="1" min="1" max="100" required>
+
+                    <div id="newTitleFields" class="space-y-3">
+                        <div>
+                            <label class="field-label">Title</label>
+                            <input type="text" id="rcvTitle" class="field-input" placeholder="As printed on the book">
+                        </div>
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="field-label">Author</label>
+                                <input type="text" id="rcvAuthor" class="field-input" placeholder="Surname, First name">
+                            </div>
+                            <div>
+                                <label class="field-label">ISBN</label>
+                                <input type="text" id="rcvIsbn" class="field-input" placeholder="978-...">
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="field-label">Publication year</label>
+                                <input type="number" id="rcvYear" class="field-input" placeholder="2024" min="1000" max="2100">
+                            </div>
+                            <div>
+                                <label class="field-label">Genre</label>
+                                <input type="text" id="rcvGenre" class="field-input" placeholder="Fiction, Reference, ...">
+                            </div>
+                        </div>
+                        <p class="text-[10px] text-slate-500">A title that is not catalogued yet is added to the catalogue when this delivery is received. Matching ISBNs are reused, so a repeat delivery adds copies rather than a duplicate record.</p>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="field-label">Condition on arrival</label>
+                            <select id="rcvCondition" class="field-input">
+                                {% for value, label in condition_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+                            </select>
+                        </div>
+                        <div>
+                            <label class="field-label">Number of copies</label>
+                            <input type="number" id="rcvQty" class="field-input" value="1" min="1" max="100">
+                        </div>
+                    </div>
+
+                    <p id="rcvItemError" class="hidden text-[11px] text-rose-400 font-semibold"></p>
+                    <button type="button" onclick="addIntakeItem()" class="w-full bg-cyan-600/20 text-cyan-400 border border-cyan-600/30 px-4 py-2 rounded-lg text-xs font-bold hover:bg-cyan-600/30 transition-colors">
+                        <i class="fa-solid fa-plus mr-1"></i> Add to delivery
+                    </button>
+                </div>
+
+                <div>
+                    <div class="flex items-center justify-between mb-2">
+                        <label class="field-label mb-0">Delivery list</label>
+                        <span id="rcvTotals" class="text-[10px] font-bold text-slate-500">Nothing added yet</span>
+                    </div>
+                    <div id="rcvList" class="rounded-lg border border-slate-800 divide-y divide-slate-800/60 max-h-52 overflow-y-auto">
+                        <p class="px-3 py-4 text-[11px] text-slate-600 text-center">Add each title in the box, then receive them together.</p>
                     </div>
                 </div>
+
+                <input type="hidden" name="items" id="rcvItemsField" value="">
                 <div>
                     <label class="field-label">Notes</label>
                     <input type="text" name="notes" class="field-input" placeholder="Verified against the delivery note, etc.">
@@ -590,6 +636,110 @@
             (donation ? don : ship).classList.remove(...idle);
             (donation ? ship : don).classList.remove(...active);
             (donation ? ship : don).classList.add(...idle);
+        }
+
+        // ── Building up a delivery ───────────────────────────────────────
+        // A box holds several titles, so nothing is written until the whole
+        // list is assembled and submitted once. Everything lives in this array
+        // until then; the hidden field is packed on submit.
+        let rcvItems = [];
+
+        function onPickCatalogued() {
+            const picked = document.getElementById('rcvBook').value !== '';
+            document.getElementById('newTitleFields').classList.toggle('hidden', picked);
+        }
+
+        function rcvItemError(msg) {
+            const box = document.getElementById('rcvItemError');
+            if (!msg) { box.classList.add('hidden'); return; }
+            box.textContent = msg;
+            box.classList.remove('hidden');
+        }
+
+        function addIntakeItem() {
+            const sel = document.getElementById('rcvBook');
+            const bookId = sel.value;
+            const qty = parseInt(document.getElementById('rcvQty').value, 10);
+            if (!(qty >= 1 && qty <= 100)) { rcvItemError('Copies must be between 1 and 100.'); return; }
+
+            const item = { quantity: qty, condition: document.getElementById('rcvCondition').value };
+            if (bookId) {
+                const opt = sel.options[sel.selectedIndex];
+                item.book_id = bookId;
+                item.label = opt.dataset.title;
+                item.sub = opt.dataset.author;
+                item.isNew = false;
+            } else {
+                const title = document.getElementById('rcvTitle').value.trim();
+                if (!title) { rcvItemError('Enter the title, or pick one from the catalogue.'); return; }
+                item.title = title;
+                item.author = document.getElementById('rcvAuthor').value.trim();
+                item.isbn = document.getElementById('rcvIsbn').value.trim();
+                item.publication_year = document.getElementById('rcvYear').value.trim();
+                item.genre = document.getElementById('rcvGenre').value.trim();
+                item.label = title;
+                item.sub = [item.author, item.isbn].filter(Boolean).join(' · ') || 'New to the catalogue';
+                item.isNew = true;
+            }
+            rcvItems.push(item);
+            rcvItemError('');
+            clearIntakeInputs();
+            renderIntake();
+        }
+
+        function clearIntakeInputs() {
+            document.getElementById('rcvBook').value = '';
+            ['rcvTitle', 'rcvAuthor', 'rcvIsbn', 'rcvYear', 'rcvGenre'].forEach(function (id) {
+                document.getElementById(id).value = '';
+            });
+            document.getElementById('rcvQty').value = 1;
+            onPickCatalogued();
+        }
+
+        function removeIntakeItem(i) {
+            rcvItems.splice(i, 1);
+            renderIntake();
+        }
+
+        function renderIntake() {
+            const list = document.getElementById('rcvList');
+            const totals = document.getElementById('rcvTotals');
+            if (!rcvItems.length) {
+                list.innerHTML = '<p class="px-3 py-4 text-[11px] text-slate-600 text-center">Add each title in the box, then receive them together.</p>';
+                totals.textContent = 'Nothing added yet';
+                return;
+            }
+            let copies = 0;
+            list.innerHTML = rcvItems.map(function (it, i) {
+                copies += it.quantity;
+                const badge = it.isNew
+                    ? '<span class="text-[9px] font-bold text-amber-400 border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 rounded">NEW</span>'
+                    : '';
+                return '<div class="flex items-center gap-3 px-3 py-2">'
+                     + '<div class="flex-1 min-w-0">'
+                     + '<div class="text-[11px] font-bold text-slate-200 truncate">' + escapeIntake(it.label) + ' ' + badge + '</div>'
+                     + '<div class="text-[10px] text-slate-500 truncate">' + escapeIntake(it.sub) + ' · ' + it.condition + '</div>'
+                     + '</div>'
+                     + '<span class="text-[11px] font-bold text-slate-300 shrink-0">x' + it.quantity + '</span>'
+                     + '<button type="button" onclick="removeIntakeItem(' + i + ')" class="text-slate-600 hover:text-rose-400 shrink-0" title="Remove"><i class="fa-solid fa-xmark text-[11px]"></i></button>'
+                     + '</div>';
+            }).join('');
+            totals.textContent = rcvItems.length + ' title(s) · ' + copies + ' copy(ies)';
+        }
+
+        function escapeIntake(s) {
+            return String(s == null ? '' : s).replace(/[&<>"]/g, function (ch) {
+                return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch];
+            });
+        }
+
+        function packIntake() {
+            if (!rcvItems.length) {
+                rcvItemError('Add at least one title before receiving the delivery.');
+                return false;
+            }
+            document.getElementById('rcvItemsField').value = JSON.stringify(rcvItems);
+            return true;
         }
 
         function openCondition(btn) {
