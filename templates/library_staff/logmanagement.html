@@ -405,23 +405,14 @@
                     <p class="text-[10px] uppercase font-bold tracking-wider text-amber-500">
                         <i class="fa-solid fa-id-card text-[10px]"></i> Identity Validation
                     </p>
-                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                        <div class="space-y-1.5">
-                            <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">ID Presented</label>
-                            <select id="lgIdType" class="w-full rounded-lg px-3 py-2 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700" style="background-color: var(--bg-input);">
-                                <option value="">Select ID type…</option>
-                                {% for value, label in id_type_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
-                            </select>
-                        </div>
-                        <div class="space-y-1.5">
-                            <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">ID Number</label>
-                            <input type="text" id="lgIdNumber" placeholder="As shown on the ID" class="w-full rounded-lg px-3 py-2 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 placeholder-slate-600" style="background-color: var(--bg-input);">
-                        </div>
-                    </div>
+                    <p class="text-[11px] text-slate-400 leading-relaxed">
+                        Ask the visitor to present a valid ID and check it against what they gave you.
+                        Nothing from the ID is copied or kept.
+                    </p>
                     <label class="flex items-start gap-2.5 cursor-pointer select-none">
                         <input type="checkbox" id="lgIdConfirmed" class="mt-0.5 w-4 h-4 rounded border-slate-600 bg-slate-900 text-amber-600 focus:ring-amber-700 focus:ring-offset-0">
                         <span class="text-[11px] text-slate-300 leading-relaxed">
-                            I have seen the physical ID and confirm it matches the patron in front of me.
+                            I have seen a valid physical ID and confirm it matches the patron in front of me.
                         </span>
                     </label>
                 </div>
@@ -554,8 +545,6 @@
                 document.getElementById(f).value = '';
             });
             document.getElementById('lgPatronType').value = '';
-            document.getElementById('lgIdType').value = '';
-            document.getElementById('lgIdNumber').value = '';
             document.getElementById('lgIdConfirmed').checked = false;
             document.getElementById('lgActionError').classList.add('hidden');
             document.getElementById('lgRegError').classList.add('hidden');
@@ -630,8 +619,6 @@
                     email: document.getElementById('lgRegEmail').value.trim(),
                     contact_number: document.getElementById('lgContact').value.trim(),
                     address: document.getElementById('lgAddress').value.trim(),
-                    id_type: document.getElementById('lgIdType').value,
-                    id_number: document.getElementById('lgIdNumber').value.trim(),
                     id_confirmed: document.getElementById('lgIdConfirmed').checked ? '1' : '',
                     patron_type: document.getElementById('lgPatronType').value,
                     school: document.getElementById('lgSchool').value.trim(),

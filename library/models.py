@@ -408,19 +408,6 @@ class Patron(models.Model):
         ('Inactive', 'Inactive'),
     ]
 
-    # Physical IDs a walk-in patron can present at the desk. Kept broad because
-    # Ayla serves students, teachers, parents and general visitors alike.
-    ID_TYPE_CHOICES = [
-        ('National ID', 'National ID (PhilSys)'),
-        ('School ID', 'School ID'),
-        ('Barangay ID', 'Barangay ID'),
-        ("Driver's Licence", "Driver's Licence"),
-        ('Postal ID', 'Postal ID'),
-        ('UMID', 'UMID / SSS / GSIS'),
-        ('Passport', 'Passport'),
-        ('Other', 'Other government-issued ID'),
-    ]
-
     REGISTRATION_CHANNEL_CHOICES = [
         ('Online', 'Online'),
         ('On-site', 'On-site'),
@@ -450,15 +437,16 @@ class Patron(models.Model):
         choices=REGISTRATION_CHANNEL_CHOICES,
         default='On-site'
     )
-    # Uploaded ID / proof of residency (media-relative path). Online sign-ups
-    # attach it themselves; on-site the desk may photograph the ID presented.
+    # Uploaded ID / proof of residency (media-relative path). Only online
+    # sign-ups carry one: nobody sees the applicant, so the upload is the only
+    # identity evidence there is and a reviewer must open it before approving.
+    # On-site registrations have none by design - see below.
     credential_document = models.CharField(max_length=255, blank=True, null=True)
-    # On-site identity validation (Ch.1 ¶242, Fig. 5): the patron "presents a
-    # physical ID" and it is verified on the spot. Recording what was seen, by
-    # whom and when is what makes that check auditable rather than assumed.
-    id_type = models.CharField(
-        max_length=50, choices=ID_TYPE_CHOICES, blank=True, null=True)
-    id_number = models.CharField(max_length=100, blank=True, null=True)
+    # Who validated this patron's identity, and when. On-site that is the desk
+    # staff who looked at the physical ID; online it is whoever reviewed the
+    # uploaded one before approving. Deliberately the *only* thing kept about
+    # the check: the library records that an ID was verified, never the ID
+    # itself, so a data breach cannot leak anyone's identity documents.
     identity_verified_by = models.ForeignKey(
         'User',
         on_delete=models.SET_NULL,

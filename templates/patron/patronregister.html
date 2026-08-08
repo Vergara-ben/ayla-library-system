@@ -314,13 +314,18 @@
           <input type="password" id="confirmPassword" name="confirm_password" placeholder="Repeat password" required>
         </div>
         <div class="form-group" style="margin-bottom:24px">
-          <label>Valid ID / Proof of Residency</label>
+          <label>Valid ID <span style="color:#f59e0b">(required)</span></label>
           <input type="file" id="credentialDocument" name="credential_document" accept=".jpg,.jpeg,.png,.pdf" style="padding:9px 14px;" required>
-          <div style="font-size:11px;color:var(--muted);margin-top:6px;">JPG, PNG, or PDF — max 5 MB. Reviewed by the library administrator.</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:6px;">
+            JPG, PNG, or PDF &mdash; max 5 MB. Because you are registering online rather than
+            at the desk, library staff check this ID against the details above before your
+            account is activated. Make sure your name is readable.
+          </div>
         </div>
         <div style="font-size:12px;color:var(--muted);background:var(--glass);border-radius:10px;padding:12px 14px;border:1px solid var(--glass-border);margin-bottom:8px">
           📋 By registering, you agree to the library's borrowing policy and terms of use.
-          After email verification, your account will be reviewed by an administrator before activation.
+          After email verification, library staff review your uploaded ID before your account
+          is activated. You will be emailed once it is approved.
         </div>
         <div class="btn-row">
           <button type="button" class="btn-secondary" onclick="goStep(2)">← Back</button>

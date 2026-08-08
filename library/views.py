@@ -246,8 +246,15 @@ def patron_register(request):
         else:
             return _form_error('Email already exists')
 
+    # Nobody sees an online applicant, so the uploaded ID is the whole identity
+    # check. The form marks the field required, but that is only a browser hint
+    # - a request that skips it must be refused here too.
+    uploaded_id = request.FILES.get('credential_document')
+    if uploaded_id is None:
+        return _form_error('Please attach a photo or scan of your valid ID. '
+                           'The library reviews it before activating your account.')
     try:
-        credential_path = _save_credential_document(request.FILES.get('credential_document'), email)
+        credential_path = _save_credential_document(uploaded_id, email)
     except ValueError as exc:
         return _form_error(str(exc))
 
@@ -886,9 +893,9 @@ def admin_add_patron(request):
         address = request.POST.get('address', '').strip()
         password = request.POST.get('password', '').strip()
         account_status = request.POST.get('account_status', 'Active').strip()
-        # On-site identity validation (Ch.1 ¶242, Fig. 5).
-        id_type = request.POST.get('id_type', '').strip()
-        id_number = request.POST.get('id_number', '').strip()
+        # On-site identity validation (Ch.1 ¶242, Fig. 5). The patron presents
+        # a physical ID across the desk; nothing about the document is stored,
+        # only the fact that a named staff member checked it at a given time.
         id_confirmed = request.POST.get('id_confirmed', '').strip() in ('1', 'true', 'on', 'yes')
 
         initial = {
@@ -898,27 +905,14 @@ def admin_add_patron(request):
             'contact_number': contact_number,
             'address': address,
             'account_status': account_status,
-            'id_type': id_type,
-            'id_number': id_number,
         }
 
-        credential_path = None
         if not all([fullname, patron_type, email, password]):
             error = 'Full name, patron type, email, and password are required.'
         elif Patron.objects.filter(email=email).exists():
             error = 'A patron with that email already exists.'
-        elif id_type not in dict(Patron.ID_TYPE_CHOICES):
-            error = 'Select the type of ID the patron presented.'
-        elif not id_number:
-            error = 'Enter the ID number shown on the presented ID.'
         elif not id_confirmed:
-            error = 'Confirm that you checked the physical ID before registering this patron.'
-        else:
-            try:
-                credential_path = _save_credential_document(
-                    request.FILES.get('credential_document'), email)
-            except ValueError as exc:
-                error = str(exc)
+            error = 'Confirm that you checked the patron\'s physical ID before registering them.'
 
         if error is None:
             hashed_password = hash_password(password)
@@ -934,15 +928,12 @@ def admin_add_patron(request):
                 registration_channel='On-site',
                 qr_code=str(uuid4()),
                 otp_verified=True,
-                id_type=id_type,
-                id_number=id_number,
-                credential_document=credential_path,
                 identity_verified_by=verifier,
                 identity_verified_at=timezone.now(),
             )
             log_admin_action(request, 'Create', 'Patron', patron.patron_id,
-                             f'Added "{patron.fullname}" — identity verified against '
-                             f'{id_type} {id_number}')
+                             f'Added "{patron.fullname}" — physical ID presented and '
+                             f'checked at the desk')
             return redirect('admin_manage_patron')
 
     # Get patron list context
@@ -975,14 +966,18 @@ def admin_add_patron(request):
         'add_mode': True,
         'error': error,
         'initial': initial,
-        'id_type_choices': Patron.ID_TYPE_CHOICES,
     }
     return render(request, 'admin/managepatron.html', context)
 
 
 @admin_only_required
 def approve_patron(request, patron_id):
-    """Approve a pending registration: activate, generate the identity QR, email."""
+    """Approve a pending registration once its uploaded ID has been reviewed.
+
+    An online applicant is never seen in person, so the ID they uploaded is the
+    only identity evidence the library has. Approval therefore requires both
+    that a document is on file and that the reviewer confirms having opened it
+    - the same check the desk performs face to face, done on screen."""
     if request.method != 'POST':
         return redirect('admin_manage_patron')
     patron = Patron.objects.filter(patron_id=patron_id, account_status='Pending').first()
@@ -990,12 +985,27 @@ def approve_patron(request, patron_id):
         messages.error(request, 'Pending patron not found.')
         return redirect('admin_manage_patron')
 
+    if not patron.credential_document:
+        messages.error(request, f'{patron.fullname} has no ID on file, so their identity '
+                                f'cannot be verified. Reject the application and ask them '
+                                f'to register again with a valid ID attached.')
+        return redirect('admin_manage_patron')
+    if (request.POST.get('id_reviewed') or '').strip() not in ('1', 'true', 'on', 'yes'):
+        messages.error(request, 'Open and review the uploaded ID before approving '
+                                'this registration.')
+        return redirect('admin_manage_patron')
+
+    reviewer = User.objects.filter(admin_id=request.session.get('admin_id')).first()
     patron.account_status = 'Active'
     if not patron.qr_code:
         patron.qr_code = str(uuid4())
-    patron.save(update_fields=['account_status', 'qr_code'])
+    patron.identity_verified_by = reviewer
+    patron.identity_verified_at = timezone.now()
+    patron.save(update_fields=['account_status', 'qr_code',
+                               'identity_verified_by', 'identity_verified_at'])
     log_admin_action(request, 'Update', 'Patron', patron.patron_id,
-                     f'Approved registration of "{patron.fullname}"')
+                     f'Approved registration of "{patron.fullname}" — uploaded ID '
+                     f'reviewed and accepted')
     registration_approved_email(patron)
     messages.success(request, f'{patron.fullname} approved. Their QR code is now active.')
     return redirect('admin_manage_patron')
@@ -1098,7 +1108,6 @@ def admin_manage_patron(request):
         'paginator': paginator,
         'search_query': search_query,
         'querystring': urlencode({'search': search_query}) if search_query else '',
-        'id_type_choices': Patron.ID_TYPE_CHOICES,
     }
     return render(request, 'admin/managepatron.html', context)
 
@@ -1186,7 +1195,6 @@ def admin_edit_patron(request, patron_id):
         'error': error,
         'success': success,
         'initial': initial,
-        'id_type_choices': Patron.ID_TYPE_CHOICES,
     }
     return render(request, 'admin/managepatron.html', context)
 
@@ -1709,7 +1717,6 @@ def _logs_page(request, template):
         'status': status,
         'querystring': urlencode(params),
         'patron_types': [choice[0] for choice in Patron.PATRON_TYPE_CHOICES],
-        'id_type_choices': Patron.ID_TYPE_CHOICES,
     }
     return render(request, template, context)
 
@@ -4569,9 +4576,8 @@ def entry_log_register(request):
     purpose = (request.POST.get('purpose_of_visit') or '').strip()
 
     # On-site identity validation (Ch.1 ¶242, Fig. 5): the patron presents a
-    # physical ID and the desk verifies it on the spot. Record what was seen.
-    id_type = (request.POST.get('id_type') or '').strip()
-    id_number = (request.POST.get('id_number') or '').strip()
+    # physical ID and the desk verifies it on the spot. Nothing about the
+    # document is stored - only that a named staff member checked it.
     id_confirmed = (request.POST.get('id_confirmed') or '').strip() in ('1', 'true', 'on', 'yes')
 
     valid_types = [choice[0] for choice in Patron.PATRON_TYPE_CHOICES]
@@ -4579,10 +4585,6 @@ def entry_log_register(request):
         return JsonResponse({'success': False, 'error': 'All fields are required.'})
     if patron_type not in valid_types:
         return JsonResponse({'success': False, 'error': 'Please choose a valid patron type.'})
-    if id_type not in dict(Patron.ID_TYPE_CHOICES):
-        return JsonResponse({'success': False, 'error': 'Select the type of ID the patron presented.'})
-    if not id_number:
-        return JsonResponse({'success': False, 'error': 'Enter the ID number shown on the presented ID.'})
     if not id_confirmed:
         return JsonResponse({'success': False,
                              'error': 'Confirm that you checked the physical ID before registering.'})
@@ -4611,14 +4613,12 @@ def entry_log_register(request):
         registration_channel='On-site',
         qr_code=str(uuid4()),
         otp_verified=True,
-        id_type=id_type,
-        id_number=id_number,
         identity_verified_by=verifier,
         identity_verified_at=timezone.now(),
     )
     log_admin_action(request, 'Create', 'Patron', patron.patron_id,
-                     f'On-site registration of "{patron.fullname}" — identity verified '
-                     f'against {id_type} {id_number}')
+                     f'On-site registration of "{patron.fullname}" — physical ID '
+                     f'presented and checked at the desk')
     log = PatronLog.objects.create(
         patron=patron,
         school=school or None,

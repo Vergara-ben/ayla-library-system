@@ -193,28 +193,27 @@
                                 </td>
                                 <td class="py-4 px-6 text-center">
                                     {% if p.credential_document %}
-                                        <a href="/media/{{ p.credential_document }}" target="_blank" class="text-cyan-400 hover:text-cyan-300 text-[10px] font-bold underline">View ID</a>
+                                        <span class="inline-block bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 px-2 py-0.5 rounded text-[10px] font-bold">Uploaded</span>
                                     {% else %}
-                                        <span class="text-slate-600 text-[10px]">None</span>
+                                        <span class="inline-block bg-rose-500/10 text-rose-400 border border-rose-500/20 px-2 py-0.5 rounded text-[10px] font-bold">Missing</span>
                                     {% endif %}
                                 </td>
                                 <td class="py-4 px-6 text-slate-400">{{ p.registration_date|date:'M j, Y' }}</td>
                                 <td class="py-4 px-6 text-center">
-                                    <div class="flex items-center justify-center gap-1.5">
-                                        <form method="post" action="{% url 'approve_patron' p.patron_id %}" class="inline-block" onsubmit="return confirm('Approve {{ p.fullname|escapejs }}? Their QR code will be generated and they will be emailed.')">
-                                            {% csrf_token %}
-                                            <button type="submit" class="bg-emerald-700/30 text-emerald-400 border border-emerald-800/80 hover:bg-emerald-700/50 text-[10px] font-bold px-3 py-1.5 rounded-lg transition-colors">
-                                                <i class="fa-solid fa-check text-[9px]"></i> Approve
-                                            </button>
-                                        </form>
-                                        <form method="post" action="{% url 'reject_patron' p.patron_id %}" class="inline-block" onsubmit="var r=prompt('Reason for rejecting {{ p.fullname|escapejs }} (optional):'); if(r===null) return false; this.querySelector('[name=reason]').value=r; return true;">
-                                            {% csrf_token %}
-                                            <input type="hidden" name="reason" value="">
-                                            <button type="submit" class="bg-rose-700/20 text-rose-400 border border-rose-900/60 hover:bg-rose-700/40 text-[10px] font-bold px-3 py-1.5 rounded-lg transition-colors">
-                                                <i class="fa-solid fa-xmark text-[9px]"></i> Reject
-                                            </button>
-                                        </form>
-                                    </div>
+                                    <button type="button" onclick="openReview(this)"
+                                            data-patron-id="{{ p.patron_id }}"
+                                            data-name="{{ p.fullname }}"
+                                            data-type="{{ p.patron_type }}"
+                                            data-email="{{ p.email }}"
+                                            data-contact="{{ p.contact_number|default:'' }}"
+                                            data-address="{{ p.address|default:'' }}"
+                                            data-applied="{{ p.registration_date|date:'M j, Y' }}"
+                                            data-doc="{{ p.credential_document|default:'' }}"
+                                            data-approve-url="{% url 'approve_patron' p.patron_id %}"
+                                            data-reject-url="{% url 'reject_patron' p.patron_id %}"
+                                            class="bg-amber-700/30 text-amber-300 border border-amber-800/80 hover:bg-amber-700/50 text-[10px] font-bold px-3 py-1.5 rounded-lg transition-colors">
+                                        <i class="fa-solid fa-id-card text-[9px]"></i> Review ID
+                                    </button>
                                 </td>
                             </tr>
                             {% endfor %}
@@ -323,7 +322,7 @@
                                                 Joined {{ patron.registration_date|date:'M Y' }}
                                                 {# Evidence the on-site ID check actually happened. #}
                                                 {% if patron.identity_verified_at %}
-                                                    · <span class="text-emerald-500" title="{{ patron.id_type }} {{ patron.id_number }} — verified {{ patron.identity_verified_at|date:'M d, Y H:i' }}{% if patron.identity_verified_by %} by {{ patron.identity_verified_by.fullname }}{% endif %}"><i class="fa-solid fa-id-card"></i> ID verified</span>
+                                                    · <span class="text-emerald-500" title="Identity verified {{ patron.identity_verified_at|date:'M d, Y H:i' }}{% if patron.identity_verified_by %} by {{ patron.identity_verified_by.fullname }}{% endif %}"><i class="fa-solid fa-id-card"></i> ID verified</span>
                                                 {% elif patron.registration_channel == 'On-site' %}
                                                     · <span class="text-amber-500" title="Registered before identity capture was required"><i class="fa-solid fa-triangle-exclamation"></i> no ID on record</span>
                                                 {% endif %}
@@ -342,12 +341,16 @@
                                         <span class="block text-[10px] text-slate-600">{{ patron.registration_channel|default:"-" }}</span>
                                     </td>
                                     <td class="py-4 px-6 text-slate-400">
-                                        {% if patron.id_type %}
-                                            {{ patron.id_type }}
-                                            <span class="block text-[10px] font-mono text-slate-600">{{ patron.id_number|default:"-" }}</span>
-                                            {% if patron.identity_verified_by %}<span class="block text-[10px] text-emerald-500">by {{ patron.identity_verified_by.fullname }}</span>{% endif %}
+                                        {% if patron.identity_verified_at %}
+                                            <span class="text-emerald-500 font-semibold">
+                                                <i class="fa-solid fa-circle-check text-[10px]"></i>
+                                                {% if patron.registration_channel == 'On-site' %}ID presented{% else %}ID reviewed{% endif %}
+                                            </span>
+                                            <span class="block text-[10px] text-slate-600">{{ patron.identity_verified_at|date:"M d, Y" }}</span>
+                                            {% if patron.identity_verified_by %}<span class="block text-[10px] text-slate-600">by {{ patron.identity_verified_by.fullname }}</span>{% endif %}
+                                            {% if patron.credential_document %}<a href="/media/{{ patron.credential_document }}" target="_blank" class="text-cyan-400 hover:text-cyan-300 text-[10px] font-bold underline">View ID</a>{% endif %}
                                         {% else %}
-                                            <span class="text-slate-600">Not recorded</span>
+                                            <span class="text-slate-600">Not verified</span>
                                         {% endif %}
                                     </td>
                                     <td class="py-4 px-6 text-center font-semibold text-slate-400">
@@ -414,6 +417,82 @@
     </div>
 
     <!-- Modal Overlay -->
+
+    {# Reviewing an online application means looking at the ID that was uploaded, #}
+    {# so the document is shown here beside the details it is supposed to match. #}
+    <div id="reviewOverlay" class="modal-overlay fixed inset-0 bg-black/70 z-50 items-center justify-center p-4 overflow-y-auto">
+        <div class="rounded-2xl border border-slate-700/60 shadow-2xl w-full max-w-4xl my-8" style="background-color: var(--bg-card);">
+            <div class="p-5 border-b border-slate-800 flex items-center gap-2.5">
+                <i class="fa-solid fa-id-card text-amber-500 text-sm"></i>
+                <h3 class="text-base font-bold text-slate-100 tracking-wide">Review Registration</h3>
+                <button type="button" onclick="closeReview()" class="ml-auto text-slate-500 hover:text-slate-300 text-lg leading-none px-1">&times;</button>
+            </div>
+
+            {# Document and details sit side by side wherever there is room: comparing #}
+            {# the two is the whole job, and scrolling between them invites skimming. #}
+            <div class="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500 mb-3">Uploaded ID</p>
+                    <div id="rvDocWrap" class="rounded-xl border border-slate-700/60 bg-slate-900/40 overflow-hidden">
+                        <img id="rvDocImage" src="" alt="Uploaded identification document" class="w-full max-h-[420px] object-contain bg-black/30 hidden">
+                        <div id="rvDocPdf" class="hidden p-8 text-center">
+                            <i class="fa-solid fa-file-pdf text-rose-400 text-4xl mb-3"></i>
+                            <p class="text-xs text-slate-400 mb-4">This applicant uploaded a PDF.</p>
+                            <a id="rvDocPdfLink" href="#" target="_blank" class="inline-block bg-cyan-700 hover:bg-cyan-600 text-white text-[11px] font-bold px-4 py-2 rounded-lg">Open PDF</a>
+                        </div>
+                        <div id="rvDocNone" class="hidden p-8 text-center">
+                            <i class="fa-solid fa-triangle-exclamation text-amber-500 text-3xl mb-3"></i>
+                            <p class="text-xs text-slate-400">No ID was uploaded with this application, so it cannot be approved.</p>
+                        </div>
+                    </div>
+                    <a id="rvDocFull" href="#" target="_blank" class="mt-2 inline-block text-cyan-400 hover:text-cyan-300 text-[10px] font-bold underline">Open full size in a new tab</a>
+                </div>
+
+                <div class="flex flex-col">
+                    <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500 mb-3">What they entered</p>
+                    <dl class="text-xs space-y-2.5">
+                        <div class="flex gap-3"><dt class="w-24 shrink-0 text-slate-500 font-semibold">Full name</dt><dd id="rvName" class="text-slate-200 font-bold"></dd></div>
+                        <div class="flex gap-3"><dt class="w-24 shrink-0 text-slate-500 font-semibold">Patron type</dt><dd id="rvType" class="text-slate-300"></dd></div>
+                        <div class="flex gap-3"><dt class="w-24 shrink-0 text-slate-500 font-semibold">Email</dt><dd id="rvEmail" class="text-slate-300 font-mono break-all"></dd></div>
+                        <div class="flex gap-3"><dt class="w-24 shrink-0 text-slate-500 font-semibold">Contact</dt><dd id="rvContact" class="text-slate-300"></dd></div>
+                        <div class="flex gap-3"><dt class="w-24 shrink-0 text-slate-500 font-semibold">Address</dt><dd id="rvAddress" class="text-slate-300"></dd></div>
+                        <div class="flex gap-3"><dt class="w-24 shrink-0 text-slate-500 font-semibold">Applied</dt><dd id="rvApplied" class="text-slate-300"></dd></div>
+                    </dl>
+
+                    <div class="mt-5 rounded-xl border border-amber-500/20 bg-amber-500/5 p-4">
+                        <label class="flex items-start gap-2.5 cursor-pointer select-none">
+                            <input type="checkbox" id="rvConfirm" onchange="syncReviewButton()" class="mt-0.5 w-4 h-4 rounded border-slate-600 bg-slate-900 text-amber-600 focus:ring-amber-700 focus:ring-offset-0">
+                            <span class="text-[11px] text-slate-300 leading-relaxed">
+                                I have opened the uploaded ID and confirm it is valid and matches
+                                the name and details above.
+                            </span>
+                        </label>
+                    </div>
+
+                    <div class="mt-4 space-y-1.5">
+                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Reason (only if rejecting)</label>
+                        <textarea id="rvReason" rows="2" placeholder="e.g. the ID is unreadable, or the name does not match" class="w-full rounded-lg px-3 py-2 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-rose-800 text-[11px] placeholder-slate-600" style="background-color: var(--bg-input);"></textarea>
+                    </div>
+
+                    <div class="mt-5 flex items-center justify-end gap-2.5">
+                        <button type="button" onclick="closeReview()" class="px-4 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:text-slate-100 hover:bg-slate-800/40 text-xs font-semibold tracking-wide transition-colors">Cancel</button>
+                        <button type="button" id="rvRejectBtn" onclick="submitReview('reject')" class="bg-rose-700/20 text-rose-400 border border-rose-900/60 hover:bg-rose-700/40 text-xs font-bold px-4 py-2.5 rounded-lg transition-colors">
+                            <i class="fa-solid fa-xmark text-[10px]"></i> Reject
+                        </button>
+                        <button type="button" id="rvApproveBtn" onclick="submitReview('approve')" disabled class="bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-bold px-4 py-2.5 rounded-lg transition-colors">
+                            <i class="fa-solid fa-check text-[10px]"></i> Approve &amp; Activate
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <form id="reviewForm" method="post" class="hidden">
+        {% csrf_token %}
+        <input type="hidden" name="id_reviewed" value="1">
+        <input type="hidden" name="reason" id="rvReasonField" value="">
+    </form>
     <div id="modalOverlay" class="modal-overlay fixed inset-0 bg-black/60 z-40 items-center justify-center p-4 overflow-y-auto">
         <div class="w-full max-w-lg rounded-2xl border p-6 flex flex-col gap-5 shadow-2xl relative my-auto"
              style="background-color: var(--bg-modal); border-color: var(--border-modal);">
@@ -496,32 +575,14 @@
                         <i class="fa-solid fa-id-card text-[10px]"></i> Identity Validation
                     </p>
                     <p class="text-[11px] text-slate-400 leading-relaxed">
-                        On-site registration requires the patron to present a physical ID. Record what you checked.
+                        Ask the patron to present a valid ID across the desk and check it against
+                        the details above. Nothing from the ID is copied or kept &mdash; only your
+                        confirmation that you saw it, and when.
                     </p>
-                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <div class="space-y-1.5">
-                            <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">ID Presented</label>
-                            <select id="idType" name="id_type" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium appearance-none pr-10 cursor-pointer tracking-wide" style="background-color: var(--bg-input);">
-                                <option value="">Select ID type…</option>
-                                {% for value, label in id_type_choices %}
-                                <option value="{{ value }}" {% if value == initial.id_type %}selected{% endif %}>{{ label }}</option>
-                                {% endfor %}
-                            </select>
-                        </div>
-                        <div class="space-y-1.5">
-                            <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">ID Number</label>
-                            <input type="text" id="idNumber" name="id_number" value="{{ initial.id_number|default:'' }}" placeholder="As shown on the ID" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium placeholder-slate-600 tracking-wide" style="background-color: var(--bg-input);">
-                        </div>
-                    </div>
-                    <div class="space-y-1.5">
-                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Photo of the ID (optional)</label>
-                        <input type="file" name="credential_document" accept=".jpg,.jpeg,.png,.pdf" class="w-full rounded-lg px-3 py-2 text-slate-300 border border-slate-700/60 text-[11px]" style="background-color: var(--bg-input);">
-                        <p class="text-[10px] text-slate-500">JPG, PNG or PDF, max 5 MB. Kept with the patron record as evidence of the check.</p>
-                    </div>
                     <label class="flex items-start gap-2.5 cursor-pointer select-none">
                         <input type="checkbox" name="id_confirmed" value="1" class="mt-0.5 w-4 h-4 rounded border-slate-600 bg-slate-900 text-amber-600 focus:ring-amber-700 focus:ring-offset-0">
                         <span class="text-[11px] text-slate-300 leading-relaxed">
-                            I have seen the physical ID above and confirm it matches the patron in front of me.
+                            I have seen a valid physical ID and confirm it matches the patron in front of me.
                         </span>
                     </label>
                 </div>
@@ -590,6 +651,80 @@
         function closeModal() {
             const modal = document.getElementById('modalOverlay');
             modal.classList.remove('active');
+        }
+
+        // ── Reviewing a pending online registration ──────────────────────
+        // Approve stays disabled until the reviewer ticks that they opened the
+        // uploaded ID, so activating an account is always a deliberate act
+        // rather than one click on a row.
+        let rvPatron = null;
+
+        function openReview(btn) {
+            rvPatron = {
+                id: btn.dataset.patronId,
+                doc: btn.dataset.doc || '',
+                approveUrl: btn.dataset.approveUrl,
+                rejectUrl: btn.dataset.rejectUrl,
+                name: btn.dataset.name,
+            };
+            document.getElementById('rvName').textContent = btn.dataset.name;
+            document.getElementById('rvType').textContent = btn.dataset.type;
+            document.getElementById('rvEmail').textContent = btn.dataset.email;
+            document.getElementById('rvContact').textContent = btn.dataset.contact || '—';
+            document.getElementById('rvAddress').textContent = btn.dataset.address || '—';
+            document.getElementById('rvApplied').textContent = btn.dataset.applied;
+            document.getElementById('rvReason').value = '';
+
+            const img = document.getElementById('rvDocImage');
+            const pdf = document.getElementById('rvDocPdf');
+            const none = document.getElementById('rvDocNone');
+            const full = document.getElementById('rvDocFull');
+            img.classList.add('hidden'); pdf.classList.add('hidden'); none.classList.add('hidden');
+            full.classList.add('hidden');
+
+            if (!rvPatron.doc) {
+                none.classList.remove('hidden');
+            } else {
+                const url = '/media/' + rvPatron.doc;
+                full.href = url;
+                full.classList.remove('hidden');
+                if (rvPatron.doc.toLowerCase().endsWith('.pdf')) {
+                    document.getElementById('rvDocPdfLink').href = url;
+                    pdf.classList.remove('hidden');
+                } else {
+                    img.src = url;
+                    img.classList.remove('hidden');
+                }
+            }
+
+            const cb = document.getElementById('rvConfirm');
+            cb.checked = false;
+            cb.disabled = !rvPatron.doc;
+            syncReviewButton();
+            document.getElementById('reviewOverlay').classList.add('active');
+        }
+
+        function syncReviewButton() {
+            const ok = document.getElementById('rvConfirm').checked && rvPatron && rvPatron.doc;
+            document.getElementById('rvApproveBtn').disabled = !ok;
+        }
+
+        function closeReview() {
+            document.getElementById('reviewOverlay').classList.remove('active');
+            rvPatron = null;
+        }
+
+        function submitReview(action) {
+            if (!rvPatron) return;
+            const form = document.getElementById('reviewForm');
+            if (action === 'reject') {
+                if (!confirm('Reject the registration of ' + rvPatron.name + '? Their application and uploaded ID will be deleted.')) return;
+                document.getElementById('rvReasonField').value = document.getElementById('rvReason').value.trim();
+                form.action = rvPatron.rejectUrl;
+            } else {
+                form.action = rvPatron.approveUrl;
+            }
+            form.submit();
         }
 
         function loadPatronData(patronId) {
