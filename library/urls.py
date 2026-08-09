@@ -1,5 +1,6 @@
 from django.urls import path
 from . import views
+from . import desk
 
 urlpatterns = [
     path('patron/login/', views.patron_login, name='patron_login'),
@@ -36,6 +37,17 @@ urlpatterns = [
     path('library-staff/indoor-map/', views.staff_indoor_map, name='staff_indoor_map'),
     path('library-staff/receiving/', views.staff_inventory_receive, name='staff_inventory_receive'),
     path('library-staff/patrons/', views.staff_manage_patron, name='staff_manage_patron'),
+
+    # ─── Front-desk attendance screen (public, outside the portal) ────────
+    path('desk/', desk.desk_attendance, name='desk_attendance'),
+    path('desk/arm/', desk.arm_desk_mode, name='desk_arm'),
+    path('desk/unlock/', desk.unlock_desk_mode, name='desk_unlock'),
+    path('desk/scan/', desk.desk_scan, name='desk_scan'),
+    path('desk/lookup/', desk.desk_lookup, name='desk_lookup'),
+    path('desk/visitor/', desk.desk_visitor, name='desk_visitor'),
+    path('desk/register-request/', desk.desk_registration_request, name='desk_registration_request'),
+    path('admin-portal/desk-settings/', desk.desk_settings, name='desk_settings'),
+    path('admin-portal/close-open-visits/', desk.close_open_visits_now, name='close_open_visits'),
     # Inventory Management (Administrator-only)
     path('admin-portal/inventory/', views.inventory_management, name='inventory_management'),
     path('admin-portal/inventory/receive/', views.receive_stock, name='receive_stock'),
@@ -61,6 +73,7 @@ urlpatterns = [
     path('admin-portal/delete-patron/<int:patron_id>/', views.admin_delete_patron, name='admin_delete_patron'),
     path('admin-portal/approve-patron/<int:patron_id>/', views.approve_patron, name='approve_patron'),
     path('admin-portal/reject-patron/<int:patron_id>/', views.reject_patron, name='reject_patron'),
+    path('admin-portal/promote-visitor/<int:patron_id>/', views.promote_visitor, name='promote_visitor'),
     path('admin-portal/book-detail/', views.admin_book_detail, name='admin_book_detail'),
     path('admin-portal/edit-book/<int:book_id>/', views.admin_edit_book, name='admin_edit_book'),
     path('admin-portal/delete-book/<int:book_id>/', views.admin_delete_book, name='admin_delete_book'),

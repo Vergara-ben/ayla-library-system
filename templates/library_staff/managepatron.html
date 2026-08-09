@@ -192,7 +192,10 @@
                                     {% endif %}
                                 </td>
                                 <td class="py-4 px-6 text-center">
-                                    {% if p.credential_document %}
+                                    {% if p.registration_channel != 'Online' %}
+                                        {# Signed up at the desk, so the ID is checked in person. #}
+                                        <span class="inline-block bg-slate-700/30 text-slate-300 border border-slate-600/40 px-2 py-0.5 rounded text-[10px] font-bold">At desk</span>
+                                    {% elif p.credential_document %}
                                         <span class="inline-block bg-violet-500/10 text-violet-400 border border-violet-500/20 px-2 py-0.5 rounded text-[10px] font-bold">Uploaded</span>
                                     {% else %}
                                         <span class="inline-block bg-rose-500/10 text-rose-400 border border-rose-500/20 px-2 py-0.5 rounded text-[10px] font-bold">Missing</span>
@@ -209,6 +212,7 @@
                                             data-address="{{ p.address|default:'' }}"
                                             data-applied="{{ p.registration_date|date:'M j, Y' }}"
                                             data-doc="{{ p.credential_document|default:'' }}"
+                                            data-channel="{{ p.registration_channel }}"
                                             data-approve-url="{% url 'approve_patron' p.patron_id %}"
                                             data-reject-url="{% url 'reject_patron' p.patron_id %}"
                                             class="bg-amber-700/30 text-amber-300 border border-amber-800/80 hover:bg-amber-700/50 text-[10px] font-bold px-3 py-1.5 rounded-lg transition-colors">
@@ -253,6 +257,13 @@
                         <i class="fa-solid fa-address-book text-amber-600 text-xs"></i>
                         <h4 class="text-sm font-bold text-slate-200 tracking-wide">Patron Directory</h4>
                     </div>
+                    <div class="flex items-center gap-1 bg-slate-900/50 rounded-lg p-1 border border-slate-800 self-start">
+                            {# Visitors used the library without joining it, so they are counted #}
+                            {# apart — folding them into the directory makes every membership #}
+                            {# figure quietly wrong. #}
+                            <a href="{% url 'staff_manage_patron' %}" class="px-3 py-1.5 rounded-md text-[11px] font-bold transition-colors {% if not show_visitors %}bg-violet-700/30 text-violet-400 border border-violet-800/50{% else %}text-slate-400 hover:text-slate-200{% endif %}">Members</a>
+                            <a href="{% url 'staff_manage_patron' %}?view=visitors" class="px-3 py-1.5 rounded-md text-[11px] font-bold transition-colors {% if show_visitors %}bg-violet-700/30 text-violet-400 border border-violet-800/50{% else %}text-slate-400 hover:text-slate-200{% endif %}">Visitors{% if visitor_count %} ({{ visitor_count }}){% endif %}</a>
+                        </div>
                     <div class="flex items-center gap-2 self-end sm:self-auto">
                         <button onclick="openModal('add')" class="inline-flex items-center justify-center bg-violet-700/30 text-violet-400 border border-violet-800/80 hover:bg-violet-700/50 text-[11px] font-bold px-3 py-1.5 rounded-lg gap-1.5 transition-colors">
                             <i class="fa-solid fa-plus text-[10px]"></i> Add Patron
@@ -360,7 +371,18 @@
                                     </td>
                                     <td class="py-4 px-6 text-center">
                                         <div class="flex items-center justify-center gap-1.5">
+                                            {% if patron.account_status == 'Visitor' %}
+                                            {# A visitor keeps this same row when they join, so the #}
+                                            {# visits they already made stay attached to them. #}
+                                            <form method="post" action="{% url 'promote_visitor' patron.patron_id %}" class="inline-block" onsubmit="return confirm('Move {{ patron.fullname|escapejs }} to Pending Registrations? You will check their physical ID before the account is activated.')">
+                                                {% csrf_token %}
+                                                <button type="submit" class="text-[10px] font-bold px-2.5 py-1.5 rounded-lg bg-violet-700/25 text-violet-400 border border-violet-800/70 hover:bg-violet-700/45 transition-colors whitespace-nowrap">
+                                                    <i class="fa-solid fa-user-plus text-[9px]"></i> Register as member
+                                                </button>
+                                            </form>
+                                            {% else %}
                                             <a title="Library card" href="{% url 'patron_library_card' patron.patron_id %}" target="_blank" class="w-7 h-7 rounded border border-slate-800 text-emerald-500/80 hover:text-emerald-300 hover:bg-slate-800/40 transition-colors flex items-center justify-center"><i class="fa-solid fa-id-card text-[10px]"></i></a>
+                                            {% endif %}
                                         </div>
                                     </td>
                                 </tr>
@@ -432,6 +454,13 @@
                             <i class="fa-solid fa-triangle-exclamation text-amber-500 text-3xl mb-3"></i>
                             <p class="text-xs text-slate-400">No ID was uploaded with this application, so it cannot be approved.</p>
                         </div>
+                        {# Someone handed over by the sign-in screen is standing at the desk, #}
+                        {# so there is no upload to open — you check the ID in their hand. #}
+                        <div id="rvDocDesk" class="hidden p-8 text-center">
+                            <i class="fa-solid fa-id-card text-violet-400 text-3xl mb-3"></i>
+                            <p class="text-xs text-slate-300 font-bold mb-1">Signed up at the front desk</p>
+                            <p class="text-[11px] text-slate-500 leading-relaxed">They typed these details on the sign-in screen. Ask for a valid physical ID and check it against them before approving.</p>
+                        </div>
                     </div>
                     <a id="rvDocFull" href="#" target="_blank" class="mt-2 inline-block text-violet-400 hover:text-violet-300 text-[10px] font-bold underline">Open full size in a new tab</a>
                 </div>
@@ -451,8 +480,10 @@
                         <label class="flex items-start gap-2.5 cursor-pointer select-none">
                             <input type="checkbox" id="rvConfirm" onchange="syncReviewButton()" class="mt-0.5 w-4 h-4 rounded border-slate-600 bg-slate-900 text-amber-600 focus:ring-amber-700 focus:ring-offset-0">
                             <span class="text-[11px] text-slate-300 leading-relaxed">
-                                I have opened the uploaded ID and confirm it is valid and matches
-                                the name and details above.
+                                <span id="rvTickOnline">I have opened the uploaded ID and confirm it is valid and matches
+                                the name and details above.</span>
+                                <span id="rvTickDesk" class="hidden">I have seen this person's physical ID and confirm it is valid and
+                                matches the name and details above.</span>
                             </span>
                         </label>
                     </div>
@@ -651,6 +682,7 @@
             rvPatron = {
                 id: btn.dataset.patronId,
                 doc: btn.dataset.doc || '',
+                channel: btn.dataset.channel || 'Online',
                 approveUrl: btn.dataset.approveUrl,
                 rejectUrl: btn.dataset.rejectUrl,
                 name: btn.dataset.name,
@@ -666,12 +698,18 @@
             const img = document.getElementById('rvDocImage');
             const pdf = document.getElementById('rvDocPdf');
             const none = document.getElementById('rvDocNone');
+            const deskNote = document.getElementById('rvDocDesk');
             const full = document.getElementById('rvDocFull');
             img.classList.add('hidden'); pdf.classList.add('hidden'); none.classList.add('hidden');
-            full.classList.add('hidden');
+            deskNote.classList.add('hidden'); full.classList.add('hidden');
+
+            // Which ID the reviewer is looking at depends on how they applied.
+            const atDesk = rvPatron.channel !== 'Online';
+            document.getElementById('rvTickOnline').classList.toggle('hidden', atDesk);
+            document.getElementById('rvTickDesk').classList.toggle('hidden', !atDesk);
 
             if (!rvPatron.doc) {
-                none.classList.remove('hidden');
+                (atDesk ? deskNote : none).classList.remove('hidden');
             } else {
                 const url = '/media/' + rvPatron.doc;
                 full.href = url;
@@ -687,13 +725,16 @@
 
             const cb = document.getElementById('rvConfirm');
             cb.checked = false;
-            cb.disabled = !rvPatron.doc;
+            // An online applicant without an upload cannot be verified at all;
+            // a desk applicant is standing right there, so there is nothing to wait for.
+            cb.disabled = !(rvPatron.doc || atDesk);
             syncReviewButton();
             document.getElementById('reviewOverlay').classList.add('active');
         }
 
         function syncReviewButton() {
-            const ok = document.getElementById('rvConfirm').checked && rvPatron && rvPatron.doc;
+            const hasEvidence = rvPatron && (rvPatron.doc || rvPatron.channel !== 'Online');
+            const ok = document.getElementById('rvConfirm').checked && hasEvidence;
             document.getElementById('rvApproveBtn').disabled = !ok;
         }
 

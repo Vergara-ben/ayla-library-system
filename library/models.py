@@ -1,5 +1,6 @@
 from django.db import models
 from django.utils import timezone
+from datetime import time
 
 from .modules import MODULE_KEYS, MODULE_LABELS, clean_module_keys
 
@@ -406,6 +407,11 @@ class Patron(models.Model):
         ('Active', 'Active'),
         ('Suspended', 'Suspended'),
         ('Inactive', 'Inactive'),
+        # Walked in and used the library without joining it. Has no password,
+        # no QR and no borrowing rights — the row exists so that a repeat
+        # visitor is recognised, and so that their visit history follows them
+        # if they later register rather than being stranded as loose names.
+        ('Visitor', 'Visitor'),
     ]
 
     REGISTRATION_CHANNEL_CHOICES = [
@@ -420,7 +426,7 @@ class Patron(models.Model):
         choices=PATRON_TYPE_CHOICES,
         default='Student'
     )
-    email = models.EmailField(max_length=255, unique=True)
+    email = models.EmailField(max_length=255, unique=True, blank=True, null=True)
     contact_number = models.CharField(max_length=255, blank=True, null=True)
     address = models.TextField(blank=True, null=True)
     account_status = models.CharField(
@@ -528,12 +534,61 @@ class PatronLog(models.Model):
     purpose_of_visit = models.CharField(max_length=255, blank=True, null=True)
     entry_time = models.DateTimeField(default=timezone.now)
     exit_time = models.DateTimeField(blank=True, null=True)
+    # People leave without logging out. The nightly sweep stamps those visits
+    # with the library's closing time, and flags them here so a guessed exit is
+    # never mistaken for a real one — visit durations built on assumed exits
+    # have to be readable as assumptions.
+    auto_closed = models.BooleanField(default=False)
 
     class Meta:
         db_table = 'Patron_Logs'
 
     def __str__(self):
         return f"{self.patron} — entry {self.entry_time}"
+
+
+class DeskSettings(models.Model):
+    """Settings for the front-desk computer, which is the library's only one.
+
+    That machine is both the staff workstation and the screen a patron touches
+    to log their visit, so it has to be able to become patron-facing on demand:
+    `pin_hash` is what a staff member types to take it back, and `closing_time`
+    is when visits still open at the end of the day are assumed to have ended.
+
+    A single row is used, fetched through `load()`.
+    """
+
+    setting_id = models.AutoField(primary_key=True)
+    # Null until an Administrator sets one. Desk mode cannot be armed before
+    # then: a lock with no key would strand the machine on the kiosk screen.
+    pin_hash = models.CharField(max_length=255, blank=True, null=True)
+    closing_time = models.TimeField(default=time(17, 0))
+    updated_by = models.ForeignKey(
+        'User',
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        db_column='updated_by',
+        related_name='desk_settings_updates',
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'Desk_Settings'
+
+    def __str__(self):
+        return f"Desk settings (closes {self.closing_time})"
+
+    @classmethod
+    def load(cls):
+        row = cls.objects.first()
+        if row is None:
+            row = cls.objects.create()
+        return row
+
+    @property
+    def pin_is_set(self):
+        return bool(self.pin_hash)
 
 
 # ─── 17. BORROWING RULES (ADMIN-CONFIGURABLE) ─────────────────

@@ -30,6 +30,7 @@ from .auth_utils import (
     admin_or_module_required,
 )
 from .modules import STAFF_MODULES, clean_module_keys
+from .desk import close_stale_visits
 
 # Map admin page-URL names to their Library Staff equivalents so that shared
 # action endpoints can return whichever portal the current user belongs to.
@@ -62,7 +63,7 @@ from .emails import (
     registration_rejected_email,
 )
 from .reports import REPORT_TYPES, parse_date_range, build_report, render_report_pdf, render_report_excel
-from .models import Book, Patron, PatronLog, Transaction, User, ShelfLevel, Donation, Announcement, FloorPlan, Shelf, Room, Door, Waypoint, BLEBeacon, WaypointConnection, SystemLog, BorrowingRule, PasswordResetOTP, InventoryRecord, StockMovement
+from .models import Book, Patron, PatronLog, Transaction, User, ShelfLevel, Donation, Announcement, FloorPlan, Shelf, Room, Door, Waypoint, BLEBeacon, WaypointConnection, SystemLog, BorrowingRule, PasswordResetOTP, InventoryRecord, StockMovement, DeskSettings
 
 # Patron views
 def patron_login(request):
@@ -989,9 +990,13 @@ def approve_patron(request, patron_id):
     """Approve a pending registration once its uploaded ID has been reviewed.
 
     An online applicant is never seen in person, so the ID they uploaded is the
-    only identity evidence the library has. Approval therefore requires both
-    that a document is on file and that the reviewer confirms having opened it
-    - the same check the desk performs face to face, done on screen."""
+    only identity evidence the library has: approval requires both that a
+    document is on file and that the reviewer confirms having opened it.
+
+    Someone handed over by the desk screen is standing right there instead, so
+    there is no upload to open and the reviewer checks the physical ID the same
+    way they would for any walk-in. Either way the account is only activated by
+    a person who has looked at an ID and said so."""
     if request.method != 'POST':
         return _patron_page_redirect(request)
     patron = Patron.objects.filter(patron_id=patron_id, account_status='Pending').first()
@@ -999,14 +1004,15 @@ def approve_patron(request, patron_id):
         messages.error(request, 'Pending patron not found.')
         return _patron_page_redirect(request)
 
-    if not patron.credential_document:
-        messages.error(request, f'{patron.fullname} has no ID on file, so their identity '
-                                f'cannot be verified. Reject the application and ask them '
-                                f'to register again with a valid ID attached.')
+    applied_online = patron.registration_channel == 'Online'
+    if applied_online and not patron.credential_document:
+        messages.error(request, f'{patron.fullname} applied online with no ID attached, so '
+                                f'their identity cannot be verified. Reject the application '
+                                f'and ask them to register again with a valid ID.')
         return _patron_page_redirect(request)
     if (request.POST.get('id_reviewed') or '').strip() not in ('1', 'true', 'on', 'yes'):
-        messages.error(request, 'Open and review the uploaded ID before approving '
-                                'this registration.')
+        messages.error(request, 'Check the applicant\'s ID before approving this '
+                                'registration.')
         return _patron_page_redirect(request)
 
     reviewer = User.objects.filter(admin_id=request.session.get('admin_id')).first()
@@ -1017,11 +1023,37 @@ def approve_patron(request, patron_id):
     patron.identity_verified_at = timezone.now()
     patron.save(update_fields=['account_status', 'qr_code',
                                'identity_verified_by', 'identity_verified_at'])
+    how = 'uploaded ID reviewed' if applied_online else 'physical ID checked at the desk'
     log_admin_action(request, 'Update', 'Patron', patron.patron_id,
-                     f'Approved registration of "{patron.fullname}" — uploaded ID '
-                     f'reviewed and accepted')
+                     f'Approved registration of "{patron.fullname}" — {how}')
     registration_approved_email(patron)
     messages.success(request, f'{patron.fullname} approved. Their QR code is now active.')
+    return _patron_page_redirect(request)
+
+
+@admin_or_module_required('patrons')
+def promote_visitor(request, patron_id):
+    """Turn a visitor into a membership application.
+
+    The same row is reused rather than a fresh one created, so every visit they
+    already made stays attached to them. It becomes a pending on-site
+    registration, which puts it through exactly the same ID check as any other
+    walk-in instead of quietly granting borrowing rights.
+    """
+    if request.method != 'POST':
+        return _patron_page_redirect(request)
+    visitor = Patron.objects.filter(patron_id=patron_id, account_status='Visitor').first()
+    if visitor is None:
+        messages.error(request, 'Visitor not found.')
+        return _patron_page_redirect(request)
+
+    visitor.account_status = 'Pending'
+    visitor.registration_channel = 'On-site'
+    visitor.save(update_fields=['account_status', 'registration_channel'])
+    log_admin_action(request, 'Update', 'Patron', visitor.patron_id,
+                     f'"{visitor.fullname}" moved from visitor to a pending membership')
+    messages.success(request, f'{visitor.fullname} is now awaiting an ID check in '
+                              f'Pending Registrations.')
     return _patron_page_redirect(request)
 
 
@@ -1068,6 +1100,9 @@ def staff_manage_patron(request):
 
 
 def _patrons_page(request, template):
+    # Visits left open on earlier days are closed before any count is shown,
+    # so "currently inside" never accumulates people who simply went home.
+    close_stale_visits()
     search_query = request.GET.get('search', '').strip()
     
     # Handle AJAX search requests
@@ -1087,8 +1122,13 @@ def _patrons_page(request, template):
         
         return JsonResponse({'patrons': patron_list})
     
-    # Regular page load
-    patrons_queryset = Patron.objects.annotate(
+    # Regular page load. Visitors used the library without joining it, so they
+    # are kept out of the member directory and counted on their own tab —
+    # mixing the two would make every membership figure wrong.
+    show_visitors = request.GET.get('view') == 'visitors'
+    base_patrons = (Patron.objects.filter(account_status='Visitor') if show_visitors
+                    else Patron.objects.exclude(account_status='Visitor'))
+    patrons_queryset = base_patrons.annotate(
         active_borrows=Count(
             'transaction',
             filter=Q(transaction__transaction_type='Borrow', transaction__return_date__isnull=True)
@@ -1108,8 +1148,9 @@ def _patrons_page(request, template):
     active_patrons = Patron.objects.filter(account_status='Active').count()
     patrons_with_borrows = patrons_queryset.filter(active_borrows__gt=0).count()
     patrons_overdue = patrons_queryset.filter(overdue_count__gt=0).count()
+    visitor_count = Patron.objects.filter(account_status='Visitor').count()
 
-    # Online registrations awaiting Administrator approval.
+    # Registrations awaiting review — online sign-ups and desk hand-offs alike.
     pending_patrons = Patron.objects.filter(account_status='Pending').order_by('-registration_date')
 
     # Apply the search filter to the table list.
@@ -1133,6 +1174,8 @@ def _patrons_page(request, template):
         'patrons_with_borrows': patrons_with_borrows,
         'patrons_overdue': patrons_overdue,
         'pending_patrons': pending_patrons,
+        'visitor_count': visitor_count,
+        'show_visitors': show_visitors,
         'pending_transactions_count': pending_transactions_count,
         'paginator': paginator,
         'search_query': search_query,
@@ -1695,6 +1738,7 @@ def _logs_page(request, template):
     from datetime import datetime
     from urllib.parse import urlencode
 
+    close_stale_visits()
     today = timezone.localdate()
     q = (request.GET.get('q') or '').strip()
     status = (request.GET.get('status') or '').strip().lower()   # '', 'inside', 'completed'
@@ -1719,11 +1763,18 @@ def _logs_page(request, template):
     paginator = Paginator(logs_qs, 20)
     logs = paginator.get_page(request.GET.get('page', 1))
     log_count = paginator.count
+    desk_settings_row = DeskSettings.load()
 
     # Stat cards reflect today's overall activity, independent of the table filters.
     todays_entries = PatronLog.objects.filter(entry_time__date=today).count()
     todays_exits = PatronLog.objects.filter(exit_time__date=today).count()
     currently_inside = PatronLog.objects.filter(exit_time__isnull=True).count()
+    # "How many members used the library" and "how many people came in" are
+    # different questions, and the answer to one should not stand in for the other.
+    todays_member_visits = PatronLog.objects.filter(
+        entry_time__date=today).exclude(patron__account_status='Visitor').count()
+    todays_visitor_visits = PatronLog.objects.filter(
+        entry_time__date=today, patron__account_status='Visitor').count()
 
     params = {}
     if q:
@@ -1737,6 +1788,9 @@ def _logs_page(request, template):
         'logs': logs,
         'paginator': paginator,
         'log_count': log_count,
+        'todays_member_visits': todays_member_visits,
+        'todays_visitor_visits': todays_visitor_visits,
+        'desk': desk_settings_row,
         'todays_entries': todays_entries,
         'todays_exits': todays_exits,
         'currently_inside': currently_inside,

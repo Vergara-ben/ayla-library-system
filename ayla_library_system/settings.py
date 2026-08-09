@@ -65,6 +65,8 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    # Suspends the portal in a browser that has been handed to the public.
+    'library.middleware.DeskModeMiddleware',
 ]
 
 ROOT_URLCONF = 'ayla_library_system.urls'

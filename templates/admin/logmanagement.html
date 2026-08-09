@@ -148,6 +148,13 @@
                     <p class="text-3xl font-bold text-amber-500 mt-2">{{ currently_inside }}</p>
                     <p class="text-[10px] text-slate-500 mt-1">Current occupancy</p>
                 </div>
+                {# "How many members used the library" and "how many people came in" #}
+                {# are different questions; one must not stand in for the other. #}
+                <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
+                    <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Members / Visitors</p>
+                    <p class="text-3xl font-bold text-slate-200 mt-2">{{ todays_member_visits }} <span class="text-slate-600 text-xl">/</span> <span class="text-amber-500">{{ todays_visitor_visits }}</span></p>
+                    <p class="text-[10px] text-slate-500 mt-1">Today's visits by membership</p>
+                </div>
             </div>
 
             <div class="rounded-xl border border-slate-800/80 overflow-hidden shadow-2xl flex flex-col" style="background-color: var(--bg-card);">
@@ -161,6 +168,14 @@
                         <button onclick="openNewLogModal()" class="bg-cyan-700/30 text-cyan-400 border border-cyan-800/80 hover:bg-cyan-700/50 text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
                             <i class="fa-solid fa-plus text-[10px]"></i> New Log
                         </button>
+                        {# Patrons sign themselves in on this same computer; arming desk #}
+                        {# mode is what stops them landing in an open staff session. #}
+                        <form method="post" action="{% url 'desk_arm' %}" class="inline-block" onsubmit="return confirm('Hand this computer to the front desk? The library system will be locked until the desk PIN is entered.')">
+                            {% csrf_token %}
+                            <button type="submit" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-amber-500/90 text-[11px] font-semibold px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors">
+                                <i class="fa-solid fa-desktop"></i> Desk Mode
+                            </button>
+                        </form>
                         <a href="{% url 'download_log_template' %}" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-emerald-500/90 text-[11px] font-semibold px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors">
                             <i class="fa-solid fa-file-excel"></i> Download Template
                         </a>
@@ -211,13 +226,13 @@
                             {% for log in logs %}
                                 <tr class="hover:bg-slate-800/10 transition-colors">
                                     <td class="py-4 px-6 font-mono text-slate-500">#LOG-{{ log.log_id }}</td>
-                                    <td class="py-4 px-6 font-bold text-slate-200">{{ log.patron.fullname }}</td>
+                                    <td class="py-4 px-6 font-bold text-slate-200">{{ log.patron.fullname }}{% if log.patron.account_status == 'Visitor' %}<span class="ml-1.5 text-[9px] font-bold text-amber-400 border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 rounded align-middle">VISITOR</span>{% endif %}</td>
                                     <td class="py-4 px-6 font-mono text-slate-500">{{ log.patron.email|default:"—" }}</td>
                                     <td class="py-4 px-6 text-slate-400">{{ log.patron.patron_type|default:"—" }}</td>
                                     <td class="py-4 px-6 text-slate-400">{{ log.school|default:"—" }}</td>
                                     <td class="py-4 px-6 text-slate-400">{{ log.purpose_of_visit|default:"—" }}</td>
                                     <td class="py-4 px-6 text-slate-300 font-medium">{{ log.entry_time|date:"M j, Y" }} · {{ log.entry_time|time:"h:i A" }}</td>
-                                    <td class="py-4 px-6 text-slate-300 font-medium">{% if log.exit_time %}{{ log.exit_time|date:"M j, Y" }} · {{ log.exit_time|time:"h:i A" }}{% else %}<span class="text-slate-600">—</span>{% endif %}</td>
+                                    <td class="py-4 px-6 text-slate-300 font-medium">{% if log.exit_time %}{{ log.exit_time|date:"M j, Y" }} · {{ log.exit_time|time:"h:i A" }}{% if log.auto_closed %}<span class="block text-[9px] font-bold text-amber-500/90" title="Nobody signed this visit out. It was closed at the library's closing time, so the exit is an assumption rather than a record.">ASSUMED</span>{% endif %}{% else %}<span class="text-slate-600">—</span>{% endif %}</td>
                                     <td class="py-4 px-6 text-center">
                                         {% if log.exit_time %}
                                             <span class="inline-block bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-0.5 rounded text-[10px] font-bold tracking-wide">Completed</span>
