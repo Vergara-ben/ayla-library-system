@@ -250,6 +250,35 @@ def desk_sign(request):
     return JsonResponse(result)
 
 
+def desk_sign_out(request):
+    """Sign out by pressing the button on your own row.
+
+    Making someone retype their name and number to leave is asking them to
+    identify themselves twice for one visit — and the second time they are
+    staring at a table that already has their name in it. Their open visit is
+    the only thing that needs naming, so the row names it.
+    """
+    blocked = _require_armed_or_staff(request)
+    if blocked:
+        return blocked
+
+    log = PatronLog.objects.filter(log_id=request.POST.get('log_id')).first()
+    if log is None:
+        return JsonResponse({'success': False, 'error': 'That visit is no longer on file.'})
+    if log.exit_time is not None:
+        return JsonResponse({'success': False,
+                             'error': log.patron.fullname.split(' ')[0]
+                                      + ' has already been signed out.'})
+
+    log.exit_time = timezone.now()
+    log.save(update_fields=['exit_time'])
+    minutes = int((log.exit_time - log.entry_time).total_seconds() // 60)
+    stay = (f'{minutes // 60}h {minutes % 60}m' if minutes >= 60 else f'{minutes}m')
+    return JsonResponse({'success': True, 'action': 'exit', 'name': log.patron.fullname,
+                         'message': ('Goodbye, ' + log.patron.fullname.split(' ')[0]
+                                     + ' — you were here for ' + stay + '.')})
+
+
 def desk_scan(request):
     """A library card was held up to the scanner. The QR is unique."""
     blocked = _require_armed_or_staff(request)

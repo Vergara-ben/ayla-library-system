@@ -139,7 +139,7 @@
                     <i class="fa-solid fa-book-open-reader text-amber-400 text-2xl"></i>
                     <div class="flex-1">
                         <p class="text-sm font-bold text-slate-100">Welcome to Ayla Public Library</p>
-                        <p class="text-[11px] text-slate-300 mt-0.5">Sign in on the first row of the table below, or press <strong>Scan Card</strong> if you have your library card.</p>
+                        <p class="text-[11px] text-slate-300 mt-0.5">Signing in? Use the first row of the table below, or press <strong>Scan Card</strong>. Leaving? Find your name in the table and press <strong>Sign out</strong> &mdash; no need to type it again.</p>
                     </div>
                     <button type="button" onclick="deskOpenUnlock()" class="text-[11px] font-bold px-3 py-2 rounded-lg border border-slate-600 text-slate-300 hover:bg-slate-800/50">
                         <i class="fa-solid fa-lock text-[10px]"></i> Librarian
@@ -316,8 +316,25 @@
                                         {% endif %}
                                     </td>
                                     <td class="py-4 px-6 text-center">
-                                        {% if desk_mode %}<span class="text-slate-700">&mdash;</span>{% else %}
+                                        {% if desk_mode %}{% if not log.exit_time %}
+                                        {# Leaving should not mean identifying yourself a second #}
+                                        {# time: your name is already on this row. #}
+                                        <button type="button" onclick="deskSignOut(this)"
+                                                data-log-id="{{ log.log_id }}"
+                                                data-name="{{ log.patron.fullname }}"
+                                                class="bg-violet-700 hover:bg-violet-600 text-white text-[10px] font-bold px-2.5 py-1.5 rounded-lg transition-colors whitespace-nowrap">
+                                            <i class="fa-solid fa-right-from-bracket text-[9px]"></i> Sign out
+                                        </button>
+                                        {% else %}<span class="text-slate-700">&mdash;</span>{% endif %}{% else %}
                                         <div class="flex items-center justify-center gap-1.5">
+                                            {% if not log.exit_time %}
+                                            <button type="button" onclick="deskSignOut(this)"
+                                                    data-log-id="{{ log.log_id }}"
+                                                    data-name="{{ log.patron.fullname }}"
+                                                    class="w-7 h-7 rounded border border-slate-800 text-violet-500/80 hover:text-violet-300 hover:bg-slate-800/40 transition-colors" title="Sign out">
+                                                <i class="fa-solid fa-right-from-bracket text-[10px]"></i>
+                                            </button>
+                                            {% endif %}
                                             <button data-log-id="{{ log.log_id }}"
                                                     data-school="{{ log.school|default:'' }}"
                                                     data-purpose="{{ log.purpose_of_visit|default:'' }}"
@@ -539,7 +556,8 @@
         // The first row of the table is the form. Nothing to open, nothing to
         // close: a patron walks up, types, and presses Enter.
         const DESK_URLS = { sign: "{% url 'desk_sign' %}", scan: "{% url 'desk_scan' %}",
-                            unlock: "{% url 'desk_unlock' %}" };
+                            unlock: "{% url 'desk_unlock' %}",
+                            signOut: "{% url 'desk_sign_out' %}" };
 
         async function deskPost(url, data) {
             const r = await fetch(url, {
@@ -597,6 +615,17 @@
                 if (e.key === 'Enter') { e.preventDefault(); deskSign(); }
             });
         });
+
+
+        async function deskSignOut(btn) {
+            const name = btn.dataset.name || 'this visitor';
+            if (!confirm('Sign out ' + name + '?')) return;
+            btn.disabled = true;
+            const r = await deskPost(DESK_URLS.signOut, { log_id: btn.dataset.logId });
+            deskShowMessage(r.success ? r.message : r.error, r.success ? 'ok' : 'error');
+            if (r.success) { setTimeout(function () { window.location.reload(); }, 1200); }
+            else { btn.disabled = false; }
+        }
 
         // ── Scanning a card ─────────────────────────────────────────────
         function deskOpenScan() {
