@@ -28,9 +28,96 @@ from .models import DeskSettings, Patron, PatronLog, User
 
 DESK_SESSION_KEY = 'desk_mode'
 
+# Free-text purposes produce "study", "Study", "studying" and "asdf" in equal
+# measure, none of which can be counted. A short list can be.
+PURPOSE_CHOICES = [
+    'Study',
+    'Research',
+    'Borrow or return a book',
+    'Reading',
+    'Internet use',
+    'Meeting',
+    'Other',
+]
+
 # The one page desk mode leaves reachable, per role.
 ADMIN_LOG_PATH = '/admin-portal/log-management/'
 STAFF_LOG_PATH = '/library-staff/logs/'
+
+
+def _normalise_name(value):
+    """Letters only, lower case — so one person is one person.
+
+    "Juan Dela Cruz", "Juan dela Cruz" and "juan delacruz" are the same visitor
+    typing on different days. Comparing raw strings would file them as three
+    people and scatter their history across three rows.
+    """
+    return ''.join(ch for ch in (value or '').lower() if ch.isalpha())
+
+
+def _digits(value):
+    return ''.join(ch for ch in (value or '') if ch.isdigit())
+
+
+def _find_patron(name, contact):
+    """Work out who is standing at the desk.
+
+    Returns (patron, error). The mobile number is the strongest signal, so it
+    is tried first: someone who spells their name differently this week is
+    still the same person if the number matches, which is what stops the
+    visitor list filling up with near-duplicates.
+    """
+    typed = _normalise_name(name)
+    digits = _digits(contact)
+    is_email = '@' in contact
+
+    people = list(Patron.objects.exclude(account_status__in=('Suspended', 'Inactive'))
+                  .only('patron_id', 'fullname', 'email', 'contact_number',
+                        'account_status', 'patron_type'))
+
+    by_name = [p for p in people if _normalise_name(p.fullname) == typed]
+
+    by_contact = []
+    if is_email:
+        by_contact = [p for p in people if (p.email or '').lower() == contact.lower()]
+    elif len(digits) >= 4:
+        by_contact = [p for p in people
+                      if _digits(p.contact_number) and _digits(p.contact_number)[-4:] == digits[-4:]]
+
+    if contact and by_contact:
+        both = [p for p in by_contact if p in by_name]
+        if len(both) == 1:
+            return both[0], None
+        if not by_name and len(by_contact) == 1:
+            # Same number, name spelled differently: the same person, not a new one.
+            return by_contact[0], None
+        if len(both) > 1:
+            return None, ('More than one record matches. Please see the librarian.')
+
+    if contact and by_name and not by_contact:
+        if len(by_name) > 1:
+            return None, ('That email or number does not match anyone by that name. '
+                          'Please see the librarian.')
+        return by_name[0], None
+
+    if len(by_name) == 1:
+        return by_name[0], None
+    if len(by_name) > 1:
+        # Never say who the others are: a stranger at the desk has no business
+        # learning which people share a name here.
+        return None, ('More than one person uses that name. Add your email or '
+                      'mobile number so we know which is you.')
+    return None, None      # nobody by that name — a first-time visitor
+
+
+def _last_visit_details(patron):
+    """What this person put down last time, so they need not type it again."""
+    previous = (PatronLog.objects.filter(patron=patron)
+                .exclude(school__isnull=True, purpose_of_visit__isnull=True)
+                .order_by('-entry_time').first())
+    if previous is None:
+        return '', ''
+    return (previous.school or ''), (previous.purpose_of_visit or '')
 
 
 def desk_is_armed(request):
@@ -99,13 +186,13 @@ def close_stale_visits():
     computer and nobody to maintain a cron job.
     """
     today = timezone.localdate()
-    closing = DeskSettings.load().closing_time
+    settings_row = DeskSettings.load()
     stale = PatronLog.objects.filter(exit_time__isnull=True, entry_time__date__lt=today)
 
     closed = 0
     for log in stale:
         day = timezone.localtime(log.entry_time).date()
-        assumed = timezone.make_aware(datetime.combine(day, closing))
+        assumed = timezone.make_aware(datetime.combine(day, settings_row.closing_for(day)))
         # Someone who arrived after closing gets a nominal minute, never an
         # exit that precedes their entry.
         if assumed <= log.entry_time:
@@ -119,12 +206,55 @@ def close_stale_visits():
 
 # ─── signing in and out ───────────────────────────────────────────────────
 
-def _toggle_visit(patron, purpose='', school=''):
-    """One action for arriving and leaving: whichever the patron is not doing.
+def _open_visit_for(patron):
+    return (PatronLog.objects
+            .filter(patron=patron, exit_time__isnull=True)
+            .order_by('-entry_time')
+            .first())
 
-    Asking someone at the desk to choose between two buttons invites the wrong
-    one; an open visit can only be ended and a closed one can only be started,
-    so the system already knows which this is.
+
+def _sign_in(patron, purpose='', school=''):
+    """Record an arrival, and only ever an arrival.
+
+    Typing a name used to toggle, which meant someone who went to lunch without
+    signing out was marked as *leaving* when they came back — after which the
+    system believed they were outside while they sat in the reading room. A
+    typed name now means "I have just arrived" and nothing else; departures go
+    through the Sign out button on the visitor's own row, where there is no
+    ambiguity to resolve.
+    """
+    open_visit = _open_visit_for(patron)
+    if open_visit is not None:
+        return {'success': True, 'action': 'already_in', 'name': patron.fullname,
+                'message': (patron.fullname.split(' ')[0] + ', you are already signed in '
+                            'since ' + timezone.localtime(open_visit.entry_time)
+                            .strftime('%I:%M %p') + '. Press Sign out on your row when '
+                            'you leave.')}
+
+    # Blank details are filled from their last visit rather than asked for
+    # again — most people come for the same reason from the same school.
+    if not school or not purpose:
+        remembered_school, remembered_purpose = _last_visit_details(patron)
+        school = school or remembered_school
+        purpose = purpose or remembered_purpose
+
+    log = PatronLog.objects.create(
+        patron=patron,
+        purpose_of_visit=purpose or None,
+        school=school or None,
+        entry_time=timezone.now(),
+    )
+    return {'success': True, 'action': 'entry', 'name': patron.fullname,
+            'message': ('Welcome, ' + patron.fullname.split(' ')[0] + ' — signed in at '
+                        + timezone.localtime(log.entry_time).strftime('%I:%M %p') + '.')}
+
+
+def _toggle_visit(patron, purpose='', school=''):
+    """Arrive or leave, whichever the patron is not doing.
+
+    Only the card scanner uses this: a card holder holds the same card up on
+    the way in and on the way out, so the reader cannot know which it is and
+    the open visit has to decide.
     """
     open_visit = (PatronLog.objects
                   .filter(patron=patron, exit_time__isnull=True)
@@ -172,58 +302,35 @@ def _require_armed_or_staff(request):
 def desk_sign(request):
     """The row a patron typed straight into the table.
 
-    Name is the only thing always asked for. An email or mobile number is used
-    to pick the right person when several share a name, and to recognise a
-    returning visitor; without one, a single exact name match is accepted,
-    because the librarian is standing right there and a misfiled visit is not
-    worth a queue.
+    Always an arrival. Name is the only thing always asked for; an email or
+    mobile number picks the right person when several share a name, and
+    recognises a returning visitor even if they spell their name differently
+    this time. School and purpose are inherited from their last visit when left
+    blank, so a regular only types their name.
     """
     blocked = _require_armed_or_staff(request)
     if blocked:
         return blocked
 
-    name = (request.POST.get('name') or '').strip()
+    name = ' '.join((request.POST.get('name') or '').split())
     contact = (request.POST.get('contact') or '').strip()
-    patron_type = (request.POST.get('patron_type') or 'General Visitor').strip()
+    patron_type = (request.POST.get('patron_type') or 'Student').strip()
     school = (request.POST.get('school') or '').strip()
     purpose = (request.POST.get('purpose') or '').strip()
+    if purpose == 'Other':
+        purpose = (request.POST.get('purpose_other') or '').strip() or 'Other'
 
-    if len(name) < 2:
+    if len(_normalise_name(name)) < 2:
         return JsonResponse({'success': False, 'error': 'Type your full name first.'})
     if patron_type not in dict(Patron.PATRON_TYPE_CHOICES):
-        patron_type = 'General Visitor'
+        patron_type = 'Student'
 
-    matches = list(Patron.objects.filter(fullname__iexact=name)
-                   .exclude(account_status__in=('Suspended', 'Inactive')))
+    patron, error = _find_patron(name, contact)
+    if error:
+        return JsonResponse({'success': False, 'error': error})
 
-    # An email or mobile number, when given, decides which of them it is.
-    if contact and matches:
-        digits = ''.join(ch for ch in contact if ch.isdigit())
-        narrowed = []
-        for patron in matches:
-            if '@' in contact and (patron.email or '').lower() == contact.lower():
-                narrowed.append(patron)
-            elif digits:
-                known = ''.join(ch for ch in (patron.contact_number or '') if ch.isdigit())
-                if known and known[-4:] == digits[-4:]:
-                    narrowed.append(patron)
-        if narrowed:
-            matches = narrowed
-        elif len(matches) > 1:
-            return JsonResponse({'success': False,
-                                 'error': 'That email or number does not match anyone by '
-                                          'that name. Please see the librarian.'})
-
-    if len(matches) > 1:
-        # Never say who the others are: a stranger at the desk has no business
-        # learning which people share a name here.
-        return JsonResponse({'success': False,
-                             'error': 'More than one person uses that name. Add your email '
-                                      'or mobile number so we know which is you.'})
-
-    if matches:
-        patron = matches[0]
-        result = _toggle_visit(patron, purpose, school)
+    if patron is not None:
+        result = _sign_in(patron, purpose, school)
         result['is_visitor'] = patron.account_status == 'Visitor'
         return JsonResponse(result)
 
@@ -241,7 +348,7 @@ def desk_sign(request):
         registration_channel='On-site',
         otp_verified=False,
     )
-    result = _toggle_visit(visitor, purpose, school)
+    result = _sign_in(visitor, purpose, school)
     result['is_visitor'] = True
     result['created_visitor'] = True
     result['message'] = ('Welcome, ' + name.split(' ')[0]
@@ -314,12 +421,22 @@ def desk_settings(request):
         row = DeskSettings.load()
         if request.method == 'POST':
             closing = (request.POST.get('closing_time') or '').strip()
+            weekend = (request.POST.get('weekend_closing_time') or '').strip()
             if closing:
                 try:
                     row.closing_time = datetime.strptime(closing, '%H:%M').time()
                 except ValueError:
                     messages.error(request, 'Closing time must look like 17:00.')
                     return redirect('desk_settings')
+            # Blank means the weekend closes at the same time as a weekday.
+            if weekend:
+                try:
+                    row.weekend_closing_time = datetime.strptime(weekend, '%H:%M').time()
+                except ValueError:
+                    messages.error(request, 'Weekend closing time must look like 12:00.')
+                    return redirect('desk_settings')
+            else:
+                row.weekend_closing_time = None
             row.updated_by = User.objects.filter(
                 admin_id=request.session.get('admin_id')).first()
             row.save()

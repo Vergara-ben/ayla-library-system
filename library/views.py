@@ -30,7 +30,7 @@ from .auth_utils import (
     admin_or_module_required,
 )
 from .modules import STAFF_MODULES, clean_module_keys
-from .desk import close_stale_visits, desk_is_armed
+from .desk import PURPOSE_CHOICES, close_stale_visits, desk_is_armed
 
 # Map admin page-URL names to their Library Staff equivalents so that shared
 # action endpoints can return whichever portal the current user belongs to.
@@ -1806,6 +1806,7 @@ def _logs_page(request, template):
         'log_count': log_count,
         'desk_mode': desk_mode,
         'patron_type_choices': Patron.PATRON_TYPE_CHOICES,
+        'purpose_choices': PURPOSE_CHOICES,
         'todays_member_visits': todays_member_visits,
         'todays_visitor_visits': todays_visitor_visits,
         'desk': desk_settings_row,

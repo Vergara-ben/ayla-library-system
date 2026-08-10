@@ -560,6 +560,9 @@ class DeskSettings(models.Model):
 
     setting_id = models.AutoField(primary_key=True)
     closing_time = models.TimeField(default=time(17, 0))
+    # Libraries keep shorter hours at the weekend. Null means the weekend
+    # closes at the same time as a weekday.
+    weekend_closing_time = models.TimeField(blank=True, null=True)
     updated_by = models.ForeignKey(
         'User',
         on_delete=models.SET_NULL,
@@ -582,6 +585,12 @@ class DeskSettings(models.Model):
         if row is None:
             row = cls.objects.create()
         return row
+
+    def closing_for(self, day):
+        """When the library shut on `day` — the basis for an assumed exit."""
+        if day.weekday() >= 5 and self.weekend_closing_time:
+            return self.weekend_closing_time
+        return self.closing_time
 
 
 

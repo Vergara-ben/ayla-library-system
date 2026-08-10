@@ -159,9 +159,11 @@
                     <p class="text-[10px] text-slate-500 mt-1">Library exits today</p>
                 </div>
                 <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
-                    <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Inside Now</p>
+                    <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Signed In, Not Out</p>
                     <p class="text-3xl font-bold text-amber-500 mt-2">{{ currently_inside }}</p>
-                    <p class="text-[10px] text-slate-500 mt-1">Current occupancy</p>
+                    {# Not the same as occupancy: people leave without signing out, so this #}
+                    {# is an upper bound on who is here, and saying so keeps it honest. #}
+                    <p class="text-[10px] text-slate-500 mt-1" title="People often leave without signing out, so this counts everyone who signed in and has not signed out — an upper bound on how many are actually in the room.">Not the same as occupancy</p>
                 </div>
                 {# "How many members used the library" and "how many people came in" #}
                 {# are different questions; one must not stand in for the other. #}
@@ -272,7 +274,7 @@
                                 </td>
                                 <td class="py-3 px-6">
                                     <select id="deskType" class="w-full min-w-[130px] bg-slate-950 border border-slate-700 rounded-lg px-2 py-2 text-xs text-slate-300 focus:outline-none focus:border-cyan-600">
-                                        {% for value, label in patron_type_choices %}<option value="{{ value }}"{% if value == 'General Visitor' %} selected{% endif %}>{{ label }}</option>{% endfor %}
+                                        {% for value, label in patron_type_choices %}<option value="{{ value }}"{% if value == 'Student' %} selected{% endif %}>{{ label }}</option>{% endfor %}
                                     </select>
                                 </td>
                                 <td class="py-3 px-6">
@@ -280,8 +282,12 @@
                                            class="w-full min-w-[130px] bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-300 placeholder-slate-600 focus:outline-none focus:border-cyan-600">
                                 </td>
                                 <td class="py-3 px-6">
-                                    <input type="text" id="deskPurpose" placeholder="Purpose of visit" autocomplete="off"
-                                           class="w-full min-w-[150px] bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-300 placeholder-slate-600 focus:outline-none focus:border-cyan-600">
+                                    <select id="deskPurpose" onchange="deskPurposeChanged()"
+                                            class="w-full min-w-[150px] bg-slate-950 border border-slate-700 rounded-lg px-2 py-2 text-xs text-slate-300 focus:outline-none focus:border-cyan-600">
+                                        {% for p in purpose_choices %}<option value="{{ p }}">{{ p }}</option>{% endfor %}
+                                    </select>
+                                    <input type="text" id="deskPurposeOther" placeholder="Please say" autocomplete="off"
+                                           class="hidden w-full min-w-[150px] mt-1.5 bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-300 placeholder-slate-600 focus:outline-none focus:border-cyan-600">
                                 </td>
                                 <td class="py-3 px-6 text-slate-500 text-[11px] font-medium">Now</td>
                                 <td class="py-3 px-6 text-slate-600">&mdash;</td>
@@ -577,10 +583,18 @@
             row.classList.remove('hidden');
         }
 
+        function deskPurposeChanged() {
+            const other = document.getElementById('deskPurposeOther');
+            other.classList.toggle('hidden', document.getElementById('deskPurpose').value !== 'Other');
+            if (!other.classList.contains('hidden')) other.focus();
+        }
+
         function deskClearEntryRow() {
-            ['deskName', 'deskContact', 'deskSchool', 'deskPurpose'].forEach(function (id) {
+            ['deskName', 'deskContact', 'deskSchool', 'deskPurposeOther'].forEach(function (id) {
                 document.getElementById(id).value = '';
             });
+            document.getElementById('deskPurpose').selectedIndex = 0;
+            deskPurposeChanged();
             document.getElementById('deskName').focus();
         }
 
@@ -595,7 +609,8 @@
                     contact: document.getElementById('deskContact').value.trim(),
                     patron_type: document.getElementById('deskType').value,
                     school: document.getElementById('deskSchool').value.trim(),
-                    purpose: document.getElementById('deskPurpose').value.trim(),
+                    purpose: document.getElementById('deskPurpose').value,
+                    purpose_other: document.getElementById('deskPurposeOther').value.trim(),
                 });
                 if (!r.success) { deskShowMessage(r.error, 'error'); return; }
                 deskShowMessage(r.message, 'ok');
@@ -609,7 +624,7 @@
         }
 
         // Enter anywhere in the row submits it.
-        ['deskName', 'deskContact', 'deskSchool', 'deskPurpose'].forEach(function (id) {
+        ['deskName', 'deskContact', 'deskSchool', 'deskPurposeOther'].forEach(function (id) {
             const el = document.getElementById(id);
             if (el) el.addEventListener('keydown', function (e) {
                 if (e.key === 'Enter') { e.preventDefault(); deskSign(); }
@@ -648,7 +663,7 @@
                 if (!code) return;
                 const r = await deskPost(DESK_URLS.scan, {
                     code: code,
-                    purpose: document.getElementById('deskPurpose').value.trim(),
+                    purpose: document.getElementById('deskPurpose').value,
                 });
                 deskCloseScan();
                 deskShowMessage(r.success ? r.message : r.error, r.success ? 'ok' : 'error');
