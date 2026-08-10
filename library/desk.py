@@ -1,71 +1,80 @@
-"""The front-desk attendance screen.
+"""Desk mode: the Log Management page, handed to the patron.
 
 Ayla has one computer. It is the staff workstation *and* the screen a patron
-touches on the way in, so attendance capture cannot live inside the portal:
-a visitor standing at an armed administrator session is the problem this
-module exists to remove.
+touches on the way in, so attendance capture cannot sit inside a live
+administrator session — a visitor standing at an armed portal is the problem
+this module exists to remove.
 
-Desk mode is therefore a lock rather than a page. A staff member arms it, the
-portal becomes unreachable in that browser, and only this screen answers until
-someone types the desk PIN. Capture is public and unprivileged; reviewing the
-logs stays in the portal where it belongs.
+Desk mode is a lock, not a separate screen. A staff member arms it and the
+browser is confined to Log Management: every other portal page redirects back
+there until someone types their account password. The patron types their visit
+straight into the table, or clicks Scan and holds up their library card.
 
-Nothing here creates a borrowing account. A walk-in either logs a visit as a
-visitor or leaves their details for a librarian to turn into a membership after
-checking a physical ID — a patron cannot attest to their own identity, which is
-the whole point of the on-site check.
+Nothing here creates a borrowing account. A walk-in is logged as a visitor;
+turning that into a membership needs a librarian to check a physical ID, and
+nobody can attest to their own.
 """
 
 from datetime import datetime, timedelta
-from uuid import uuid4
 
 from django.contrib import messages
 from django.http import JsonResponse
-from django.shortcuts import redirect, render
+from django.shortcuts import redirect
 from django.utils import timezone
 
 from .auth_utils import check_password, hash_password
 from .models import DeskSettings, Patron, PatronLog, User
 
 
-# ─── the lock ─────────────────────────────────────────────────────────────
-
 DESK_SESSION_KEY = 'desk_mode'
+
+# The one page desk mode leaves reachable, per role.
+ADMIN_LOG_PATH = '/admin-portal/log-management/'
+STAFF_LOG_PATH = '/library-staff/logs/'
 
 
 def desk_is_armed(request):
     return bool(request.session.get(DESK_SESSION_KEY))
 
 
+def desk_log_path(request):
+    if request.session.get('admin_role') == 'Staff':
+        return STAFF_LOG_PATH
+    return ADMIN_LOG_PATH
+
+
+# ─── the lock ─────────────────────────────────────────────────────────────
+
 def arm_desk_mode(request):
-    """Hand the machine to the public. Requires a signed-in portal user."""
+    """Hand the machine to the patron. Requires a signed-in portal user."""
     if request.method != 'POST':
-        return redirect('/admin-portal/dashboard/')
+        return redirect(desk_log_path(request))
     if 'admin_id' not in request.session:
         return redirect('/admin-portal/login/')
 
-    settings_row = DeskSettings.load()
-    if not settings_row.pin_is_set:
-        # Arming without a PIN would strand the machine on the kiosk screen
-        # with no way back, so this is refused rather than worked around.
-        messages.error(request, 'Set a desk PIN first — without one there is no way '
-                                'to unlock the computer once desk mode starts.')
-        return redirect('/admin-portal/desk-settings/')
-
     request.session[DESK_SESSION_KEY] = True
     request.session.modified = True
-    return redirect('desk_attendance')
+    return redirect(desk_log_path(request))
 
 
 def unlock_desk_mode(request):
-    """Take the machine back. The PIN is short because this happens all day."""
-    if request.method != 'POST':
-        return redirect('desk_attendance')
+    """Take the machine back with the account password.
 
-    pin = (request.POST.get('pin') or '').strip()
-    settings_row = DeskSettings.load()
-    if not settings_row.pin_is_set or not check_password(pin, settings_row.pin_hash):
-        return JsonResponse({'success': False, 'error': 'That PIN is not correct.'})
+    Checked against the account whose session this is — the person on shift.
+    There is no separate desk PIN to set, forget, or leave written on a sticky
+    note beside the monitor.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST is allowed.'})
+
+    user = User.objects.filter(admin_id=request.session.get('admin_id')).first()
+    password = request.POST.get('password') or ''
+    if user is None:
+        request.session.flush()
+        return JsonResponse({'success': False, 'redirect': '/admin-portal/login/',
+                             'error': 'This session has expired. Please sign in again.'})
+    if not password or not check_password(password, user.password_hash):
+        return JsonResponse({'success': False, 'error': 'That password is not correct.'})
 
     request.session.pop(DESK_SESSION_KEY, None)
     request.session.modified = True
@@ -80,7 +89,7 @@ def unlock_desk_mode(request):
 def close_stale_visits():
     """Close visits left open on days that have already ended.
 
-    People leave without logging out. Left alone, `currently_inside` counts
+    People leave without signing out. Left alone, `currently_inside` counts
     every one of them for ever and the number only climbs, so a month of real
     use would report a crowd in an empty room. Each stale visit is stamped with
     that day's closing time and flagged `auto_closed`, so a guessed exit stays
@@ -108,41 +117,12 @@ def close_stale_visits():
     return closed
 
 
-# ─── the screen ───────────────────────────────────────────────────────────
-
-def desk_attendance(request):
-    """The public attendance screen.
-
-    Only answers in a browser where a staff member armed desk mode, so opening
-    this URL from a phone on the library wi-fi gets the idle notice and nothing
-    else. The session cookie is the token.
-    """
-    if not desk_is_armed(request):
-        return render(request, 'desk/attendance.html', {'armed': False})
-
-    close_stale_visits()
-    return render(request, 'desk/attendance.html', {
-        'armed': True,
-        'inside_now': PatronLog.objects.filter(exit_time__isnull=True).count(),
-        'purpose_choices': ['Study', 'Research', 'Borrow a book', 'Reading',
-                            'Internet use', 'Other'],
-    })
-
-
-# ─── what the screen calls ────────────────────────────────────────────────
-
-def _require_armed(request):
-    if not desk_is_armed(request):
-        return JsonResponse({'success': False, 'error': 'This screen is not in desk mode.'})
-    if request.method != 'POST':
-        return JsonResponse({'success': False, 'error': 'Only POST is allowed.'})
-    return None
-
+# ─── signing in and out ───────────────────────────────────────────────────
 
 def _toggle_visit(patron, purpose='', school=''):
     """One action for arriving and leaving: whichever the patron is not doing.
 
-    Asking someone at the door to choose between two buttons invites the wrong
+    Asking someone at the desk to choose between two buttons invites the wrong
     one; an open visit can only be ended and a closed one can only be started,
     so the system already knows which this is.
     """
@@ -153,19 +133,21 @@ def _toggle_visit(patron, purpose='', school=''):
 
     if open_visit is not None:
         # A second scan seconds after the first is a stutter, not a departure.
-        age = timezone.now() - open_visit.entry_time
-        if age < timedelta(seconds=30):
+        if timezone.now() - open_visit.entry_time < timedelta(seconds=30):
             return {
                 'success': True, 'action': 'already_in',
-                'name': patron.fullname.split(' ')[0],
-                'since': timezone.localtime(open_visit.entry_time).strftime('%I:%M %p'),
+                'name': patron.fullname,
+                'message': (patron.fullname.split(' ')[0] + ', you are already signed in '
+                            + 'since ' + timezone.localtime(open_visit.entry_time)
+                            .strftime('%I:%M %p') + '.'),
             }
         open_visit.exit_time = timezone.now()
         open_visit.save(update_fields=['exit_time'])
         minutes = int((open_visit.exit_time - open_visit.entry_time).total_seconds() // 60)
         stay = (f'{minutes // 60}h {minutes % 60}m' if minutes >= 60 else f'{minutes}m')
-        return {'success': True, 'action': 'exit',
-                'name': patron.fullname.split(' ')[0], 'stay': stay}
+        return {'success': True, 'action': 'exit', 'name': patron.fullname,
+                'message': ('Goodbye, ' + patron.fullname.split(' ')[0]
+                            + ' — you were here for ' + stay + '.')}
 
     log = PatronLog.objects.create(
         patron=patron,
@@ -173,15 +155,104 @@ def _toggle_visit(patron, purpose='', school=''):
         school=school or None,
         entry_time=timezone.now(),
     )
-    return {'success': True, 'action': 'entry',
-            'name': patron.fullname.split(' ')[0],
-            'is_visitor': patron.account_status == 'Visitor',
-            'at': timezone.localtime(log.entry_time).strftime('%I:%M %p')}
+    return {'success': True, 'action': 'entry', 'name': patron.fullname,
+            'message': ('Welcome, ' + patron.fullname.split(' ')[0] + ' — signed in at '
+                        + timezone.localtime(log.entry_time).strftime('%I:%M %p') + '.')}
+
+
+def _require_armed_or_staff(request):
+    """Usable both by a patron in desk mode and by staff working the desk."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST is allowed.'})
+    if 'admin_id' not in request.session:
+        return JsonResponse({'success': False, 'error': 'This screen is not signed in.'})
+    return None
+
+
+def desk_sign(request):
+    """The row a patron typed straight into the table.
+
+    Name is the only thing always asked for. An email or mobile number is used
+    to pick the right person when several share a name, and to recognise a
+    returning visitor; without one, a single exact name match is accepted,
+    because the librarian is standing right there and a misfiled visit is not
+    worth a queue.
+    """
+    blocked = _require_armed_or_staff(request)
+    if blocked:
+        return blocked
+
+    name = (request.POST.get('name') or '').strip()
+    contact = (request.POST.get('contact') or '').strip()
+    patron_type = (request.POST.get('patron_type') or 'General Visitor').strip()
+    school = (request.POST.get('school') or '').strip()
+    purpose = (request.POST.get('purpose') or '').strip()
+
+    if len(name) < 2:
+        return JsonResponse({'success': False, 'error': 'Type your full name first.'})
+    if patron_type not in dict(Patron.PATRON_TYPE_CHOICES):
+        patron_type = 'General Visitor'
+
+    matches = list(Patron.objects.filter(fullname__iexact=name)
+                   .exclude(account_status__in=('Suspended', 'Inactive')))
+
+    # An email or mobile number, when given, decides which of them it is.
+    if contact and matches:
+        digits = ''.join(ch for ch in contact if ch.isdigit())
+        narrowed = []
+        for patron in matches:
+            if '@' in contact and (patron.email or '').lower() == contact.lower():
+                narrowed.append(patron)
+            elif digits:
+                known = ''.join(ch for ch in (patron.contact_number or '') if ch.isdigit())
+                if known and known[-4:] == digits[-4:]:
+                    narrowed.append(patron)
+        if narrowed:
+            matches = narrowed
+        elif len(matches) > 1:
+            return JsonResponse({'success': False,
+                                 'error': 'That email or number does not match anyone by '
+                                          'that name. Please see the librarian.'})
+
+    if len(matches) > 1:
+        # Never say who the others are: a stranger at the desk has no business
+        # learning which people share a name here.
+        return JsonResponse({'success': False,
+                             'error': 'More than one person uses that name. Add your email '
+                                      'or mobile number so we know which is you.'})
+
+    if matches:
+        patron = matches[0]
+        result = _toggle_visit(patron, purpose, school)
+        result['is_visitor'] = patron.account_status == 'Visitor'
+        return JsonResponse(result)
+
+    # Nobody by that name: a first-time visitor, logged without an account.
+    # Anyone may walk into a public library and read; membership is only needed
+    # to take a book home, and that needs a librarian to check an ID.
+    visitor = Patron.objects.create(
+        fullname=name,
+        email=contact if '@' in contact else None,
+        contact_number=None if '@' in contact else (contact or None),
+        patron_type=patron_type,
+        account_status='Visitor',
+        password_hash=hash_password(None),   # unusable: visitors do not sign in
+        qr_code=None,                        # and cannot borrow
+        registration_channel='On-site',
+        otp_verified=False,
+    )
+    result = _toggle_visit(visitor, purpose, school)
+    result['is_visitor'] = True
+    result['created_visitor'] = True
+    result['message'] = ('Welcome, ' + name.split(' ')[0]
+                         + ' — signed in as a visitor. See the librarian with a valid ID '
+                           'if you would like to become a member.')
+    return JsonResponse(result)
 
 
 def desk_scan(request):
-    """A library card was scanned. The QR is unique, so there is nothing to ask."""
-    blocked = _require_armed(request)
+    """A library card was held up to the scanner. The QR is unique."""
+    blocked = _require_armed_or_staff(request)
     if blocked:
         return blocked
 
@@ -191,174 +262,35 @@ def desk_scan(request):
 
     patron = Patron.objects.filter(qr_code=code).first()
     if patron is None:
-        return JsonResponse({'success': False, 'error': 'That card was not recognised. '
-                                                        'Please see the librarian.'})
-    if patron.account_status in ('Suspended', 'Inactive'):
-        return JsonResponse({'success': False, 'error': 'This account is not active. '
-                                                        'Please see the librarian.'})
-    return JsonResponse(_toggle_visit(patron, request.POST.get('purpose', '')))
-
-
-def desk_lookup(request):
-    """Find someone who did not bring their card.
-
-    Deliberately never returns names. Showing a stranger a list of people who
-    use this library would leak who they are and let anyone log in as the one
-    they liked the look of, so the last four digits of the contact number do
-    the disambiguating instead of the patron's own choice.
-    """
-    blocked = _require_armed(request)
-    if blocked:
-        return blocked
-
-    name = (request.POST.get('name') or '').strip()
-    last4 = (request.POST.get('last4') or '').strip()
-    if len(name) < 2:
-        return JsonResponse({'success': False, 'error': 'Please type your full name.'})
-
-    matches = Patron.objects.filter(fullname__iexact=name).exclude(
-        account_status__in=('Suspended', 'Inactive'))
-    if not matches.exists():
-        matches = Patron.objects.filter(fullname__icontains=name).exclude(
-            account_status__in=('Suspended', 'Inactive'))
-
-    count = matches.count()
-    if count == 0:
-        return JsonResponse({'success': True, 'status': 'not_found'})
-
-    if not last4:
-        # One match or ten, the question is the same, so the reply gives away
-        # nothing about how many people share the name.
-        return JsonResponse({'success': True, 'status': 'need_pin'})
-
-    if not (last4.isdigit() and len(last4) == 4):
-        return JsonResponse({'success': True, 'status': 'bad_pin'})
-
-    for patron in matches:
-        digits = ''.join(ch for ch in (patron.contact_number or '') if ch.isdigit())
-        if digits and digits[-4:] == last4:
-            result = _toggle_visit(patron, request.POST.get('purpose', ''))
-            result['status'] = 'logged'
-            return JsonResponse(result)
-
-    return JsonResponse({'success': True, 'status': 'no_match'})
-
-
-def desk_visitor(request):
-    """Log a visit for someone who is not a member and does not want to be.
-
-    Anyone may walk into a public library and read; membership is only needed
-    to take a book home. A returning visitor is matched on name plus the last
-    four digits so their history stays on one row instead of scattering.
-    """
-    blocked = _require_armed(request)
-    if blocked:
-        return blocked
-
-    name = (request.POST.get('name') or '').strip()
-    contact = (request.POST.get('contact_number') or '').strip()
-    purpose = (request.POST.get('purpose') or '').strip()
-    school = (request.POST.get('school') or '').strip()
-    if len(name) < 2:
-        return JsonResponse({'success': False, 'error': 'Please type your full name.'})
-
-    digits = ''.join(ch for ch in contact if ch.isdigit())
-    existing = None
-    if digits:
-        for candidate in Patron.objects.filter(fullname__iexact=name,
-                                               account_status='Visitor'):
-            known = ''.join(ch for ch in (candidate.contact_number or '') if ch.isdigit())
-            if known and known[-4:] == digits[-4:]:
-                existing = candidate
-                break
-
-    if existing is None:
-        existing = Patron.objects.create(
-            fullname=name,
-            email=None,                       # not asked for at the door
-            contact_number=contact or None,
-            patron_type='General Visitor',
-            account_status='Visitor',
-            password_hash=hash_password(None),   # unusable: visitors do not sign in
-            qr_code=None,                        # and cannot borrow
-            registration_channel='On-site',
-            otp_verified=False,
-        )
-
-    result = _toggle_visit(existing, purpose, school)
-    result['status'] = 'logged'
-    return JsonResponse(result)
-
-
-def desk_registration_request(request):
-    """Hand a would-be member to the librarian without losing their typing.
-
-    On-site registration requires a staff member to confirm they have seen a
-    physical ID, and nobody can attest to their own. So the details entered
-    here become a pending registration for the desk to finish, and the visit is
-    logged either way — they came in regardless of whether they end up joining.
-    """
-    blocked = _require_armed(request)
-    if blocked:
-        return blocked
-
-    name = (request.POST.get('name') or '').strip()
-    contact = (request.POST.get('contact_number') or '').strip()
-    email = (request.POST.get('email') or '').strip()
-    purpose = (request.POST.get('purpose') or '').strip()
-    if len(name) < 2:
-        return JsonResponse({'success': False, 'error': 'Please type your full name.'})
-    if email and Patron.objects.filter(email__iexact=email).exists():
         return JsonResponse({'success': False,
-                             'error': 'That email is already registered. '
-                                      'Please see the librarian.'})
+                             'error': 'That card was not recognised. Please see the librarian.'})
+    if patron.account_status in ('Suspended', 'Inactive'):
+        return JsonResponse({'success': False,
+                             'error': 'This account is not active. Please see the librarian.'})
 
-    applicant = Patron.objects.create(
-        fullname=name,
-        email=email or None,
-        contact_number=contact or None,
-        patron_type='General Visitor',
-        account_status='Pending',
-        password_hash=hash_password(None),
-        qr_code=None,
-        registration_channel='On-site',
-        otp_verified=False,
-    )
-    _toggle_visit(applicant, purpose)
-    return JsonResponse({'success': True, 'status': 'handed_off',
-                         'name': applicant.fullname.split(' ')[0]})
+    result = _toggle_visit(patron, (request.POST.get('purpose') or '').strip())
+    result['is_visitor'] = patron.account_status == 'Visitor'
+    return JsonResponse(result)
 
 
 # ─── settings ─────────────────────────────────────────────────────────────
 
 def desk_settings(request):
-    """Administrator page: the desk PIN and the library's closing time."""
+    """Administrator page: closing time, and the state of the desk."""
     from .auth_utils import admin_only_required   # local: avoids a cycle at import
+    from django.shortcuts import render
 
     @admin_only_required
     def _view(request):
         row = DeskSettings.load()
         if request.method == 'POST':
-            pin = (request.POST.get('pin') or '').strip()
-            confirm = (request.POST.get('pin_confirm') or '').strip()
             closing = (request.POST.get('closing_time') or '').strip()
-
-            if pin or confirm:
-                if not (pin.isdigit() and 4 <= len(pin) <= 8):
-                    messages.error(request, 'The desk PIN must be 4 to 8 digits.')
-                    return redirect('desk_settings')
-                if pin != confirm:
-                    messages.error(request, 'The two PINs do not match.')
-                    return redirect('desk_settings')
-                row.pin_hash = hash_password(pin)
-
             if closing:
                 try:
                     row.closing_time = datetime.strptime(closing, '%H:%M').time()
                 except ValueError:
                     messages.error(request, 'Closing time must look like 17:00.')
                     return redirect('desk_settings')
-
             row.updated_by = User.objects.filter(
                 admin_id=request.session.get('admin_id')).first()
             row.save()
@@ -382,9 +314,8 @@ def close_open_visits_now(request):
         if request.method != 'POST':
             return redirect('desk_settings')
         closed = close_stale_visits()
-        today_open = PatronLog.objects.filter(exit_time__isnull=True)
         now = timezone.now()
-        for log in today_open:
+        for log in PatronLog.objects.filter(exit_time__isnull=True):
             log.exit_time = now
             log.auto_closed = True
             log.save(update_fields=['exit_time', 'auto_closed'])

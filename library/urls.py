@@ -38,14 +38,11 @@ urlpatterns = [
     path('library-staff/receiving/', views.staff_inventory_receive, name='staff_inventory_receive'),
     path('library-staff/patrons/', views.staff_manage_patron, name='staff_manage_patron'),
 
-    # ─── Front-desk attendance screen (public, outside the portal) ────────
-    path('desk/', desk.desk_attendance, name='desk_attendance'),
+    # ─── Desk mode: Log Management, handed to the patron ──────────────────
     path('desk/arm/', desk.arm_desk_mode, name='desk_arm'),
     path('desk/unlock/', desk.unlock_desk_mode, name='desk_unlock'),
+    path('desk/sign/', desk.desk_sign, name='desk_sign'),
     path('desk/scan/', desk.desk_scan, name='desk_scan'),
-    path('desk/lookup/', desk.desk_lookup, name='desk_lookup'),
-    path('desk/visitor/', desk.desk_visitor, name='desk_visitor'),
-    path('desk/register-request/', desk.desk_registration_request, name='desk_registration_request'),
     path('admin-portal/desk-settings/', desk.desk_settings, name='desk_settings'),
     path('admin-portal/close-open-visits/', desk.close_open_visits_now, name='close_open_visits'),
     # Inventory Management (Administrator-only)

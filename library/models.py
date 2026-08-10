@@ -551,17 +551,14 @@ class DeskSettings(models.Model):
     """Settings for the front-desk computer, which is the library's only one.
 
     That machine is both the staff workstation and the screen a patron touches
-    to log their visit, so it has to be able to become patron-facing on demand:
-    `pin_hash` is what a staff member types to take it back, and `closing_time`
-    is when visits still open at the end of the day are assumed to have ended.
+    to log their visit. Taking it back is done with the staff member's own
+    account password, so no secret is kept here — only `closing_time`, which is
+    when visits still open at the end of the day are assumed to have ended.
 
     A single row is used, fetched through `load()`.
     """
 
     setting_id = models.AutoField(primary_key=True)
-    # Null until an Administrator sets one. Desk mode cannot be armed before
-    # then: a lock with no key would strand the machine on the kiosk screen.
-    pin_hash = models.CharField(max_length=255, blank=True, null=True)
     closing_time = models.TimeField(default=time(17, 0))
     updated_by = models.ForeignKey(
         'User',
@@ -586,9 +583,6 @@ class DeskSettings(models.Model):
             row = cls.objects.create()
         return row
 
-    @property
-    def pin_is_set(self):
-        return bool(self.pin_hash)
 
 
 # ─── 17. BORROWING RULES (ADMIN-CONFIGURABLE) ─────────────────

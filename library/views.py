@@ -30,7 +30,7 @@ from .auth_utils import (
     admin_or_module_required,
 )
 from .modules import STAFF_MODULES, clean_module_keys
-from .desk import close_stale_visits
+from .desk import close_stale_visits, desk_is_armed
 
 # Map admin page-URL names to their Library Staff equivalents so that shared
 # action endpoints can return whichever portal the current user belongs to.
@@ -1734,6 +1734,14 @@ def staff_indoor_map(request):
     return _indoor_map_page(request, 'library_staff/indoormap.html')
 
 
+def _mask_email(email):
+    """j•••@gmail.com — enough for its owner to recognise, no use to anyone else."""
+    if not email or '@' not in email:
+        return email
+    local, _, domain = email.partition('@')
+    return (local[0] if local else '') + '•' * 3 + '@' + domain
+
+
 def _logs_page(request, template):
     from datetime import datetime
     from urllib.parse import urlencode
@@ -1765,6 +1773,14 @@ def _logs_page(request, template):
     log_count = paginator.count
     desk_settings_row = DeskSettings.load()
 
+    # In desk mode the person reading this table is whoever just walked in, so
+    # the contact details of everyone who visited today are masked. The log is
+    # theirs to add to, not to mine.
+    desk_mode = desk_is_armed(request)
+    for entry in logs:
+        entry.display_email = (_mask_email(entry.patron.email) if desk_mode
+                               else entry.patron.email)
+
     # Stat cards reflect today's overall activity, independent of the table filters.
     todays_entries = PatronLog.objects.filter(entry_time__date=today).count()
     todays_exits = PatronLog.objects.filter(exit_time__date=today).count()
@@ -1788,6 +1804,8 @@ def _logs_page(request, template):
         'logs': logs,
         'paginator': paginator,
         'log_count': log_count,
+        'desk_mode': desk_mode,
+        'patron_type_choices': Patron.PATRON_TYPE_CHOICES,
         'todays_member_visits': todays_member_visits,
         'todays_visitor_visits': todays_visitor_visits,
         'desk': desk_settings_row,

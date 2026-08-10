@@ -111,7 +111,7 @@
 </head>
 <body class="flex h-screen overflow-hidden">
 
-    {% include 'library_staff/_sidebar.html' with active='logs' %}
+    {% if not desk_mode %}{% include 'library_staff/_sidebar.html' with active='logs' %}{% endif %}
 
     <div class="flex-1 flex flex-col overflow-hidden">
         
@@ -123,7 +123,7 @@
                 <h2 class="logo-text text-lg tracking-wider text-slate-200 uppercase">Log Management</h2>
             </div>
             <div class="flex items-center gap-4">
-                <span class="bg-violet-950 text-violet-400 text-xs px-2.5 py-1 rounded font-bold border border-violet-800 tracking-wider">{% if request.session.admin_role == 'Staff' %}STAFF{% else %}ADMIN{% endif %}</span>
+                {% if desk_mode %}<span class="bg-amber-500/15 text-amber-400 text-xs px-2.5 py-1 rounded font-bold border border-amber-600/40 tracking-wider">DESK MODE</span>{% else %}                <span class="bg-violet-950 text-violet-400 text-xs px-2.5 py-1 rounded font-bold border border-violet-800 tracking-wider">{% if request.session.admin_role == 'Staff' %}STAFF{% else %}ADMIN{% endif %}</span>{% endif %}
                 <div class="w-8 h-8 rounded-full bg-violet-900 border border-violet-700 flex items-center justify-center text-xs font-bold text-violet-200">
                     AD
                 </div>
@@ -132,6 +132,21 @@
 
         <main class="flex-1 overflow-y-auto p-8 space-y-6">
             
+            {% if desk_mode %}
+                {# Desk mode: this browser is confined to this page until a librarian #}
+                {# enters their account password. #}
+                <div class="rounded-xl border border-amber-700/50 bg-amber-500/10 px-5 py-4 flex items-center gap-4">
+                    <i class="fa-solid fa-book-open-reader text-amber-400 text-2xl"></i>
+                    <div class="flex-1">
+                        <p class="text-sm font-bold text-slate-100">Welcome to Ayla Public Library</p>
+                        <p class="text-[11px] text-slate-300 mt-0.5">Sign in on the first row of the table below, or press <strong>Scan Card</strong> if you have your library card.</p>
+                    </div>
+                    <button type="button" onclick="deskOpenUnlock()" class="text-[11px] font-bold px-3 py-2 rounded-lg border border-slate-600 text-slate-300 hover:bg-slate-800/50">
+                        <i class="fa-solid fa-lock text-[10px]"></i> Librarian
+                    </button>
+                </div>
+
+                {% endif %}
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
                     <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Today's Entries</p>
@@ -157,7 +172,20 @@
                 </div>
             </div>
 
-            <div class="rounded-xl border border-slate-800/80 overflow-hidden shadow-2xl flex flex-col" style="background-color: var(--bg-card);">
+            {# The scanner is a keyboard. It only listens once Scan Card is pressed, so #}
+                {# a stray barcode cannot sign someone in while staff are typing. #}
+                <div id="deskScanBar" class="hidden rounded-xl border border-violet-800/60 bg-violet-500/[0.06] px-5 py-4 flex items-center gap-4">
+                    <i class="fa-solid fa-qrcode text-violet-400 text-2xl"></i>
+                    <div class="flex-1">
+                        <p class="text-sm font-bold text-slate-100">Hold your library card up to the scanner</p>
+                        <p class="text-[11px] text-slate-400 mt-0.5">The card's QR code signs you in or out straight away.</p>
+                    </div>
+                    <input type="text" id="deskScanField" autocomplete="off"
+                           class="w-px h-px opacity-0 border-0 p-0 absolute" aria-label="Scanner input">
+                    <button type="button" onclick="deskCloseScan()" class="text-slate-400 hover:text-slate-200 text-[11px] font-semibold px-3 py-1.5 rounded-lg border border-slate-700">Cancel</button>
+                </div>
+
+                            <div class="rounded-xl border border-slate-800/80 overflow-hidden shadow-2xl flex flex-col" style="background-color: var(--bg-card);">
                 
                 <div class="p-5 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div class="flex items-center gap-2">
@@ -165,12 +193,16 @@
                         <h4 class="text-sm font-bold text-slate-200 tracking-wide">Entry / Exit Log</h4>
                     </div>
                     <div class="flex items-center gap-2 self-end sm:self-auto">
+                        <button type="button" onclick="deskOpenScan()" class="bg-violet-700/30 text-violet-400 border border-violet-800/80 hover:bg-violet-700/50 text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
+                            <i class="fa-solid fa-qrcode text-[10px]"></i> Scan Card
+                        </button>
+                        {% if not desk_mode %}
                         <button onclick="openNewLogModal()" class="bg-violet-700/30 text-violet-400 border border-violet-800/80 hover:bg-violet-700/50 text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
                             <i class="fa-solid fa-plus text-[10px]"></i> New Log
                         </button>
                         {# Patrons sign themselves in on this same computer; arming desk #}
                         {# mode is what stops them landing in an open staff session. #}
-                        <form method="post" action="{% url 'desk_arm' %}" class="inline-block" onsubmit="return confirm('Hand this computer to the front desk? The library system will be locked until the desk PIN is entered.')">
+                        <form method="post" action="{% url 'desk_arm' %}" class="inline-block" onsubmit="return confirm('Hand this computer to the patron? This browser stays on Log Management until you enter your account password.')">
                             {% csrf_token %}
                             <button type="submit" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-amber-500/90 text-[11px] font-semibold px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors">
                                 <i class="fa-solid fa-desktop"></i> Desk Mode
@@ -191,6 +223,7 @@
                         <button onclick="location.href='{% url 'staff_logs' %}'" class="bg-slate-950 border border-slate-800 hover:bg-slate-900 text-slate-300 text-xs px-3 py-1.5 rounded-lg font-medium transition-colors">
                             Today
                         </button>
+                        {% endif %}
                     </div>
                 </div>
 
@@ -223,11 +256,53 @@
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-slate-800/40 text-xs text-slate-300">
+                            {# The patron types straight into the table: an always-present first row #}
+                            {# rather than a button that opens a form. Card holders click Scan. #}
+                            <tr id="deskEntryRow" class="bg-violet-500/[0.04] border-b-2 border-violet-800/40">
+                                <td class="py-3 px-6">
+                                    <span class="inline-block bg-violet-500/15 text-violet-400 border border-violet-500/30 px-2 py-0.5 rounded text-[9px] font-bold tracking-widest">NEW</span>
+                                </td>
+                                <td class="py-3 px-6">
+                                    <input type="text" id="deskName" placeholder="Your full name" autocomplete="off"
+                                           class="w-full min-w-[170px] bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs font-bold text-slate-100 placeholder-slate-600 focus:outline-none focus:border-violet-600">
+                                </td>
+                                <td class="py-3 px-6">
+                                    <input type="text" id="deskContact" placeholder="Email or mobile" autocomplete="off"
+                                           class="w-full min-w-[160px] bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs font-mono text-slate-300 placeholder-slate-600 focus:outline-none focus:border-violet-600">
+                                </td>
+                                <td class="py-3 px-6">
+                                    <select id="deskType" class="w-full min-w-[130px] bg-slate-950 border border-slate-700 rounded-lg px-2 py-2 text-xs text-slate-300 focus:outline-none focus:border-violet-600">
+                                        {% for value, label in patron_type_choices %}<option value="{{ value }}"{% if value == 'General Visitor' %} selected{% endif %}>{{ label }}</option>{% endfor %}
+                                    </select>
+                                </td>
+                                <td class="py-3 px-6">
+                                    <input type="text" id="deskSchool" placeholder="School / org" autocomplete="off"
+                                           class="w-full min-w-[130px] bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-300 placeholder-slate-600 focus:outline-none focus:border-violet-600">
+                                </td>
+                                <td class="py-3 px-6">
+                                    <input type="text" id="deskPurpose" placeholder="Purpose of visit" autocomplete="off"
+                                           class="w-full min-w-[150px] bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-300 placeholder-slate-600 focus:outline-none focus:border-violet-600">
+                                </td>
+                                <td class="py-3 px-6 text-slate-500 text-[11px] font-medium">Now</td>
+                                <td class="py-3 px-6 text-slate-600">&mdash;</td>
+                                <td class="py-3 px-6 text-center text-slate-600">&mdash;</td>
+                                <td class="py-3 px-6 text-center">
+                                    <button type="button" onclick="deskSign()" id="deskSignBtn"
+                                            class="bg-violet-700 hover:bg-violet-600 text-white text-[11px] font-bold px-3 py-2 rounded-lg transition-colors whitespace-nowrap">
+                                        <i class="fa-solid fa-check text-[10px]"></i> Sign in / out
+                                    </button>
+                                </td>
+                            </tr>
+                            <tr id="deskMsgRow" class="hidden">
+                                <td colspan="10" class="px-6 py-3">
+                                    <div id="deskMsg" class="text-xs font-bold"></div>
+                                </td>
+                            </tr>
                             {% for log in logs %}
                                 <tr class="hover:bg-slate-800/10 transition-colors">
                                     <td class="py-4 px-6 font-mono text-slate-500">#LOG-{{ log.log_id }}</td>
                                     <td class="py-4 px-6 font-bold text-slate-200">{{ log.patron.fullname }}{% if log.patron.account_status == 'Visitor' %}<span class="ml-1.5 text-[9px] font-bold text-amber-400 border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 rounded align-middle">VISITOR</span>{% endif %}</td>
-                                    <td class="py-4 px-6 font-mono text-slate-500">{{ log.patron.email|default:"—" }}</td>
+                                    <td class="py-4 px-6 font-mono text-slate-500">{{ log.display_email|default:"—" }}</td>
                                     <td class="py-4 px-6 text-slate-400">{{ log.patron.patron_type|default:"—" }}</td>
                                     <td class="py-4 px-6 text-slate-400">{{ log.school|default:"—" }}</td>
                                     <td class="py-4 px-6 text-slate-400">{{ log.purpose_of_visit|default:"—" }}</td>
@@ -241,6 +316,7 @@
                                         {% endif %}
                                     </td>
                                     <td class="py-4 px-6 text-center">
+                                        {% if desk_mode %}<span class="text-slate-700">&mdash;</span>{% else %}
                                         <div class="flex items-center justify-center gap-1.5">
                                             <button data-log-id="{{ log.log_id }}"
                                                     data-school="{{ log.school|default:'' }}"
@@ -259,6 +335,7 @@
                                                 </button>
                                             </form>
                                         </div>
+                                        {% endif %}
                                     </td>
                                 </tr>
                             {% empty %}
@@ -302,6 +379,7 @@
     </div>
 
     <!-- Edit Visit Log Modal -->
+{% if not desk_mode %}
     <div id="editLogModal" class="hidden absolute inset-0 bg-black/60 z-40 flex items-center justify-center p-4 overflow-y-auto">
         <div class="w-full max-w-md rounded-2xl border p-6 flex flex-col gap-5 shadow-2xl relative my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color);">
             <div class="flex items-center justify-between">
@@ -453,8 +531,140 @@
 
         </div>
     </div>
+{% endif %}
 
     <script>
+
+        // ── Signing in from the table itself ─────────────────────────────
+        // The first row of the table is the form. Nothing to open, nothing to
+        // close: a patron walks up, types, and presses Enter.
+        const DESK_URLS = { sign: "{% url 'desk_sign' %}", scan: "{% url 'desk_scan' %}",
+                            unlock: "{% url 'desk_unlock' %}" };
+
+        async function deskPost(url, data) {
+            const r = await fetch(url, {
+                method: 'POST',
+                headers: { 'X-CSRFToken': '{{ csrf_token }}',
+                           'Content-Type': 'application/x-www-form-urlencoded' },
+                body: new URLSearchParams(data),
+            });
+            return r.json();
+        }
+
+        function deskShowMessage(text, kind) {
+            const row = document.getElementById('deskMsgRow');
+            const box = document.getElementById('deskMsg');
+            box.textContent = text;
+            box.className = 'text-xs font-bold ' + (kind === 'error' ? 'text-rose-400' : 'text-emerald-400');
+            row.classList.remove('hidden');
+        }
+
+        function deskClearEntryRow() {
+            ['deskName', 'deskContact', 'deskSchool', 'deskPurpose'].forEach(function (id) {
+                document.getElementById(id).value = '';
+            });
+            document.getElementById('deskName').focus();
+        }
+
+        let deskBusy = false;
+        async function deskSign() {
+            if (deskBusy) return;
+            deskBusy = true;
+            document.getElementById('deskSignBtn').disabled = true;
+            try {
+                const r = await deskPost(DESK_URLS.sign, {
+                    name: document.getElementById('deskName').value.trim(),
+                    contact: document.getElementById('deskContact').value.trim(),
+                    patron_type: document.getElementById('deskType').value,
+                    school: document.getElementById('deskSchool').value.trim(),
+                    purpose: document.getElementById('deskPurpose').value.trim(),
+                });
+                if (!r.success) { deskShowMessage(r.error, 'error'); return; }
+                deskShowMessage(r.message, 'ok');
+                deskClearEntryRow();
+                // The table is the record, so it has to show what just happened.
+                setTimeout(function () { window.location.reload(); }, 1600);
+            } finally {
+                deskBusy = false;
+                document.getElementById('deskSignBtn').disabled = false;
+            }
+        }
+
+        // Enter anywhere in the row submits it.
+        ['deskName', 'deskContact', 'deskSchool', 'deskPurpose'].forEach(function (id) {
+            const el = document.getElementById(id);
+            if (el) el.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter') { e.preventDefault(); deskSign(); }
+            });
+        });
+
+        // ── Scanning a card ─────────────────────────────────────────────
+        function deskOpenScan() {
+            document.getElementById('deskScanBar').classList.remove('hidden');
+            const f = document.getElementById('deskScanField');
+            f.value = '';
+            f.focus();
+        }
+        function deskCloseScan() {
+            document.getElementById('deskScanBar').classList.add('hidden');
+        }
+        const deskScanField = document.getElementById('deskScanField');
+        if (deskScanField) {
+            deskScanField.addEventListener('keydown', async function (e) {
+                if (e.key === 'Escape') { deskCloseScan(); return; }
+                if (e.key !== 'Enter') return;
+                e.preventDefault();
+                const code = deskScanField.value.trim();
+                deskScanField.value = '';
+                if (!code) return;
+                const r = await deskPost(DESK_URLS.scan, {
+                    code: code,
+                    purpose: document.getElementById('deskPurpose').value.trim(),
+                });
+                deskCloseScan();
+                deskShowMessage(r.success ? r.message : r.error, r.success ? 'ok' : 'error');
+                if (r.success) setTimeout(function () { window.location.reload(); }, 1600);
+            });
+            // While the scan bar is open the field must keep the keystrokes.
+            deskScanField.addEventListener('blur', function () {
+                if (!document.getElementById('deskScanBar').classList.contains('hidden')) {
+                    setTimeout(function () { deskScanField.focus(); }, 10);
+                }
+            });
+        }
+
+        // ── Leaving desk mode ───────────────────────────────────────────
+        function deskOpenUnlock() {
+            const o = document.getElementById('deskUnlockOverlay');
+            o.classList.remove('hidden');
+            o.classList.add('flex');
+            document.getElementById('deskUnlockPw').focus();
+        }
+        function deskCloseUnlock() {
+            const o = document.getElementById('deskUnlockOverlay');
+            o.classList.add('hidden');
+            o.classList.remove('flex');
+            document.getElementById('deskUnlockPw').value = '';
+            document.getElementById('deskUnlockMsg').classList.add('hidden');
+        }
+        async function deskUnlock() {
+            const msg = document.getElementById('deskUnlockMsg');
+            const r = await deskPost(DESK_URLS.unlock, {
+                password: document.getElementById('deskUnlockPw').value,
+            });
+            if (!r.success) {
+                msg.textContent = r.error;
+                msg.classList.remove('hidden');
+                document.getElementById('deskUnlockPw').value = '';
+                if (r.redirect) window.location.href = r.redirect;
+                return;
+            }
+            window.location.href = r.redirect;
+        }
+        const deskUnlockPw = document.getElementById('deskUnlockPw');
+        if (deskUnlockPw) deskUnlockPw.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') deskUnlock();
+        });
         function toggleSidebar() {
             const sidebar = document.querySelector('aside');
             sidebar.classList.toggle('open');
@@ -748,5 +958,26 @@
         function setLogStatus(s) { __logStatus = s; applyLogFilters(); }
     </script>
     <script src="{% static 'js/admin-enhance.js' %}" defer></script>
+
+    {# Taking the computer back. The account password, not a separate PIN that #}
+    {# would end up on a sticky note beside the monitor. #}
+    <div id="deskUnlockOverlay" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/70 p-4">
+        <div class="rounded-2xl border border-slate-700/60 shadow-2xl w-full max-w-sm" style="background-color: var(--bg-card);">
+            <div class="p-5 border-b border-slate-800 flex items-center gap-2.5">
+                <i class="fa-solid fa-lock text-amber-500 text-sm"></i>
+                <h3 class="text-sm font-bold text-slate-100 tracking-wide">Librarian</h3>
+            </div>
+            <div class="p-6 space-y-4">
+                <p class="text-[11px] text-slate-400 leading-relaxed">Enter your account password to leave desk mode and return to the library system.</p>
+                <input type="password" id="deskUnlockPw" placeholder="Account password" autocomplete="off"
+                       class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-violet-600">
+                <p id="deskUnlockMsg" class="text-[11px] font-bold text-rose-400 hidden"></p>
+                <div class="flex items-center justify-end gap-2">
+                    <button type="button" onclick="deskCloseUnlock()" class="text-xs font-semibold px-4 py-2.5 rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800/50">Cancel</button>
+                    <button type="button" onclick="deskUnlock()" class="bg-violet-700 hover:bg-violet-600 text-white text-xs font-bold px-4 py-2.5 rounded-lg">Unlock</button>
+                </div>
+            </div>
+        </div>
+    </div>
 </body>
 </html>
