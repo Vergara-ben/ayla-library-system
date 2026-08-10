@@ -30,6 +30,7 @@ from .auth_utils import (
     admin_or_module_required,
 )
 from .modules import STAFF_MODULES, clean_module_keys
+from .names import compose_name, parse_name
 from .desk import PURPOSE_CHOICES, close_stale_visits, desk_is_armed
 
 # Map admin page-URL names to their Library Staff equivalents so that shared
@@ -141,6 +142,29 @@ def patron_dashboard(request):
     return render(request, 'patron/patrondashboard.html', context)
 
 
+def _name_from_post(request):
+    """Read first / middle / surname off a form, in that shape or the old one.
+
+    Older forms (and the odd script) still post a single `fullname`; it is
+    split rather than refused, so nothing that used to work stops working.
+    Returns (first, middle, last, error).
+    """
+    first = ' '.join((request.POST.get('first_name') or '').split())
+    middle = ' '.join((request.POST.get('middle_name') or '').split())
+    last = ' '.join((request.POST.get('last_name') or '').split())
+
+    if not (first or last):
+        raw = ' '.join((request.POST.get('fullname') or '').split())
+        if raw:
+            first, middle, last = parse_name(raw)
+
+    if not first:
+        return '', '', '', 'A first name is required.'
+    if not last:
+        return '', '', '', 'A surname is required.'
+    return first, middle, last, None
+
+
 def _new_otp():
     """6-digit numeric one-time password."""
     import random
@@ -224,7 +248,8 @@ def patron_register(request):
                        'info': 'A new code has been sent to your email.'})
 
     # ── Step 1: submit the registration form ────────────────
-    fullname = (request.POST.get('fullname') or '').strip()
+    first_name, middle_name, last_name, name_error = _name_from_post(request)
+    fullname = compose_name(first_name, middle_name, last_name)
     email = (request.POST.get('email') or '').strip()
     password = request.POST.get('password')
     confirm_password = request.POST.get('confirm_password')
@@ -235,6 +260,8 @@ def patron_register(request):
     def _form_error(msg):
         return render(request, 'patron/patronregister.html', {'stage': 'form', 'error': msg})
 
+    if name_error:
+        return _form_error(name_error)
     if not all([fullname, email, password, confirm_password, patron_type, contact_number, address]):
         return _form_error('All fields are required')
     if password != confirm_password:
@@ -262,6 +289,9 @@ def patron_register(request):
 
     patron = Patron.objects.create(
         fullname=fullname,
+        first_name=first_name,
+        middle_name=middle_name,
+        last_name=last_name,
         email=email,
         password_hash=hash_password(password),
         patron_type=patron_type,
@@ -400,13 +430,16 @@ def patron_update_profile(request):
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
     patron = get_object_or_404(Patron, patron_id=request.session.get('patron_id'))
 
-    fullname = (request.POST.get('fullname') or '').strip()
+    first_name, middle_name, last_name, name_error = _name_from_post(request)
+    fullname = compose_name(first_name, middle_name, last_name)
     email = (request.POST.get('email') or '').strip()
     contact_number = (request.POST.get('contact_number') or '').strip()
     address = (request.POST.get('address') or '').strip()
 
-    if not fullname or not email:
-        return JsonResponse({'success': False, 'error': 'Full name and email are required.'})
+    if name_error:
+        return JsonResponse({'success': False, 'error': name_error})
+    if not email:
+        return JsonResponse({'success': False, 'error': 'Email is required.'})
     if Patron.objects.exclude(patron_id=patron.patron_id).filter(email__iexact=email).exists():
         return JsonResponse({'success': False, 'error': 'That email is already in use by another account.'})
 
@@ -414,7 +447,11 @@ def patron_update_profile(request):
     patron.email = email
     patron.contact_number = contact_number or None
     patron.address = address or None
-    patron.save(update_fields=['fullname', 'email', 'contact_number', 'address'])
+    patron.first_name = first_name
+    patron.middle_name = middle_name
+    patron.last_name = last_name
+    patron.save(update_fields=['fullname', 'first_name', 'middle_name', 'last_name',
+                               'email', 'contact_number', 'address'])
     request.session['patron_fullname'] = patron.fullname
     return JsonResponse({'success': True, 'message': 'Profile updated.'})
 
@@ -901,7 +938,8 @@ def admin_add_patron(request):
     initial = {}
 
     if request.method == 'POST':
-        fullname = request.POST.get('fullname', '').strip()
+        first_name, middle_name, last_name, name_error = _name_from_post(request)
+        fullname = compose_name(first_name, middle_name, last_name)
         patron_type = request.POST.get('patron_type', '').strip()
         email = request.POST.get('email', '').strip()
         contact_number = request.POST.get('contact_number', '').strip()
@@ -915,6 +953,9 @@ def admin_add_patron(request):
 
         initial = {
             'fullname': fullname,
+            'first_name': first_name,
+            'middle_name': middle_name,
+            'last_name': last_name,
             'patron_type': patron_type,
             'email': email,
             'contact_number': contact_number,
@@ -922,8 +963,10 @@ def admin_add_patron(request):
             'account_status': account_status,
         }
 
-        if not all([fullname, patron_type, email, password]):
-            error = 'Full name, patron type, email, and password are required.'
+        if name_error:
+            error = name_error
+        elif not all([patron_type, email, password]):
+            error = 'Patron type, email, and password are required.'
         elif Patron.objects.filter(email=email).exists():
             error = 'A patron with that email already exists.'
         elif not id_confirmed:
@@ -934,6 +977,9 @@ def admin_add_patron(request):
             verifier = User.objects.filter(admin_id=request.session.get('admin_id')).first()
             patron = Patron.objects.create(
                 fullname=fullname,
+                first_name=first_name,
+                middle_name=middle_name,
+                last_name=last_name,
                 email=email,
                 password_hash=hashed_password,
                 patron_type=patron_type,
@@ -1194,6 +1240,9 @@ def admin_edit_patron(request, patron_id):
     success = None
     initial = {
         'fullname': patron.fullname,
+        'first_name': patron.first_name,
+        'middle_name': patron.middle_name,
+        'last_name': patron.last_name,
         'patron_type': patron.patron_type,
         'email': patron.email,
         'contact_number': patron.contact_number,
@@ -1202,7 +1251,8 @@ def admin_edit_patron(request, patron_id):
     }
 
     if request.method == 'POST':
-        fullname = request.POST.get('fullname', '').strip()
+        first_name, middle_name, last_name, name_error = _name_from_post(request)
+        fullname = compose_name(first_name, middle_name, last_name)
         patron_type = request.POST.get('patron_type', '').strip()
         email = request.POST.get('email', '').strip()
         contact_number = request.POST.get('contact_number', '').strip()
@@ -1210,12 +1260,17 @@ def admin_edit_patron(request, patron_id):
         password = request.POST.get('password', '').strip()
         account_status = request.POST.get('account_status', 'Active').strip()
 
-        if not all([fullname, patron_type, email]):
-            error = 'Full name, patron type, and email are required.'
+        if name_error:
+            error = name_error
+        elif not all([patron_type, email]):
+            error = 'Patron type and email are required.'
         elif Patron.objects.exclude(patron_id=patron_id).filter(email=email).exists():
             error = 'A different patron already uses that email.'
         else:
             patron.fullname = fullname
+            patron.first_name = first_name
+            patron.middle_name = middle_name
+            patron.last_name = last_name
             patron.patron_type = patron_type
             patron.email = email
             patron.contact_number = contact_number
@@ -1228,6 +1283,9 @@ def admin_edit_patron(request, patron_id):
             success = 'Patron updated successfully.'
             initial.update({
                 'fullname': fullname,
+                'first_name': first_name,
+                'middle_name': middle_name,
+                'last_name': last_name,
                 'patron_type': patron_type,
                 'email': email,
                 'contact_number': contact_number,
@@ -2138,7 +2196,8 @@ def download_patron_template(request):
     ws = wb.active
     ws.title = "Patron Import Template"
     
-    headers = ['fullname', 'patron_type', 'email', 'contact_number', 'address', 'account_status']
+    headers = ['first_name', 'middle_name', 'last_name', 'patron_type', 'email',
+               'contact_number', 'address', 'account_status']
     ws.append(headers)
     
     response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
@@ -2168,12 +2227,20 @@ def import_patrons(request):
         skipped_count = 0
         
         for row in ws.iter_rows(min_row=2):
-            fullname = row[0].value
-            patron_type = row[1].value
-            email = row[2].value
-            contact_number = row[3].value
-            address = row[4].value
-            account_status = row[5].value
+            # Three name columns now; a file made with the old single-column
+            # template still imports, since a lone name splits the same way a
+            # walk-in typed at the desk does.
+            first_name = (row[0].value or '') if row[0].value else ''
+            middle_name = (row[1].value or '') if len(row) > 1 and row[1].value else ''
+            last_name = (row[2].value or '') if len(row) > 2 and row[2].value else ''
+            if not last_name and first_name and ' ' in str(first_name).strip():
+                first_name, middle_name, last_name = parse_name(str(first_name))
+            fullname = compose_name(str(first_name), str(middle_name), str(last_name))
+            patron_type = row[3].value
+            email = row[4].value
+            contact_number = row[5].value
+            address = row[6].value if len(row) > 6 else None
+            account_status = row[7].value if len(row) > 7 else None
             
             if not fullname or not email:
                 continue
@@ -2184,6 +2251,9 @@ def import_patrons(request):
             
             patron = Patron.objects.create(
                 fullname=fullname,
+                first_name=str(first_name).strip(),
+                middle_name=str(middle_name).strip(),
+                last_name=str(last_name).strip(),
                 patron_type=patron_type if patron_type else 'Student',
                 email=email,
                 contact_number=contact_number,
@@ -4666,8 +4736,9 @@ def entry_log_register(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
 
-    firstname = (request.POST.get('firstname') or '').strip()
-    lastname = (request.POST.get('lastname') or '').strip()
+    firstname = ' '.join((request.POST.get('firstname') or '').split())
+    middlename = ' '.join((request.POST.get('middlename') or '').split())
+    lastname = ' '.join((request.POST.get('lastname') or '').split())
     email = (request.POST.get('email') or '').strip()
     contact_number = (request.POST.get('contact_number') or '').strip()
     address = (request.POST.get('address') or '').strip()
@@ -4701,7 +4772,10 @@ def entry_log_register(request):
 
     verifier = User.objects.filter(admin_id=request.session.get('admin_id')).first()
     patron = Patron.objects.create(
-        fullname=f'{firstname} {lastname}',
+        fullname=compose_name(firstname, middlename, lastname),
+        first_name=firstname,
+        middle_name=middlename,
+        last_name=lastname,
         email=email,
         contact_number=contact_number,
         address=address,

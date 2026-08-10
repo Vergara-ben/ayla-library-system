@@ -212,12 +212,20 @@
     <div class="section-title" style="margin-bottom:16px">⚙️ Account Information</div>
     <div class="form-grid">
       <div class="form-group">
-        <label>Full Name</label>
-        <input type="text" value="{{ patron.fullname }}" id="firstName" disabled>
+        <label>First Name</label>
+        <input type="text" value="{{ patron.first_name }}" id="firstName" disabled>
+      </div>
+      <div class="form-group">
+        <label>Middle Name</label>
+        <input type="text" value="{{ patron.middle_name }}" id="middleName" placeholder="Optional" disabled>
+      </div>
+      <div class="form-group">
+        <label>Surname</label>
+        <input type="text" value="{{ patron.last_name }}" id="lastName" disabled>
       </div>
       <div class="form-group">
         <label>Patron Type</label>
-        <input type="text" value="{{ patron.patron_type }}" id="lastName" disabled>
+        <input type="text" value="{{ patron.patron_type }}" id="patronType" disabled>
       </div>
     </div>
     <div class="form-group">
@@ -282,8 +290,8 @@ function postForm(url, data){
 }
 
 let editing = false;
-// 'lastName' holds the patron type — not self-editable, so it stays disabled.
-const EDITABLE = ['firstName','email','phone','address'];
+// Patron type is set by the library, so it stays disabled.
+const EDITABLE = ['firstName','middleName','lastName','email','phone','address'];
 function toggleEdit(){
   editing = !editing;
   EDITABLE.forEach(id=>{ document.getElementById(id).disabled = !editing; });
@@ -292,7 +300,9 @@ function toggleEdit(){
 }
 function saveChanges(){
   postForm('{% url 'patron_update_profile' %}', {
-    fullname: document.getElementById('firstName').value.trim(),
+    first_name: document.getElementById('firstName').value.trim(),
+    middle_name: document.getElementById('middleName').value.trim(),
+    last_name: document.getElementById('lastName').value.trim(),
     email: document.getElementById('email').value.trim(),
     contact_number: document.getElementById('phone').value.trim(),
     address: document.getElementById('address').value.trim(),

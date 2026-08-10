@@ -389,7 +389,11 @@
                                             </form>
                                             {% else %}
                                             <a title="Library card" href="{% url 'patron_library_card' patron.patron_id %}" target="_blank" class="w-7 h-7 rounded border border-slate-800 text-emerald-500/80 hover:text-emerald-300 hover:bg-slate-800/40 transition-colors flex items-center justify-center"><i class="fa-solid fa-id-card text-[10px]"></i></a>
-                                            <button onclick="openModal('edit', '{{ patron.patron_id }}')" class="w-7 h-7 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 transition-colors flex items-center justify-center"><i class="fa-solid fa-pencil text-[10px]"></i></button>
+                                            <button onclick="openModal('edit', '{{ patron.patron_id }}')"
+                                                    data-first="{{ patron.first_name }}"
+                                                    data-middle="{{ patron.middle_name }}"
+                                                    data-last="{{ patron.last_name }}"
+                                                    class="w-7 h-7 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 transition-colors flex items-center justify-center"><i class="fa-solid fa-pencil text-[10px]"></i></button>
                                             <form method="post" action="{% url 'admin_delete_patron' patron.patron_id %}" class="inline-block">
                                                 {% csrf_token %}
                                                 <button type="submit" class="w-7 h-7 rounded border border-slate-800 text-rose-500/70 hover:text-rose-400 hover:bg-rose-950/20 transition-colors flex items-center justify-center"><i class="fa-solid fa-trash-can text-[10px]"></i></button>
@@ -548,8 +552,22 @@
                 {% endif %}
 
                 <div class="space-y-1.5">
-                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Full Name</label>
-                    <input type="text" id="fullname" name="fullname" placeholder="Full name" value="{{ initial.fullname|default:'' }}" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium placeholder-slate-600 tracking-wide" style="background-color: var(--bg-input);" required>
+                                        {# Kept in parts so the front desk can read the name back in #}
+                    {# whatever order a patron types it. #}
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div class="space-y-1.5">
+                            <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">First Name</label>
+                            <input type="text" id="firstName" name="first_name" placeholder="Juan" value="{{ initial.first_name|default:'' }}" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium placeholder-slate-600 tracking-wide" style="background-color: var(--bg-input);" required>
+                        </div>
+                        <div class="space-y-1.5">
+                            <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Middle Name</label>
+                            <input type="text" id="middleName" name="middle_name" placeholder="Optional" value="{{ initial.middle_name|default:'' }}" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium placeholder-slate-600 tracking-wide" style="background-color: var(--bg-input);">
+                        </div>
+                        <div class="space-y-1.5">
+                            <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Surname</label>
+                            <input type="text" id="lastName" name="last_name" placeholder="Dela Cruz" value="{{ initial.last_name|default:'' }}" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium placeholder-slate-600 tracking-wide" style="background-color: var(--bg-input);" required>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -775,8 +793,9 @@
                 const editBtn = row.querySelector('button[onclick*="' + patronId + '"]');
                 if (editBtn) {
                     const cells = row.querySelectorAll('td');
-                    const fullname = cells[0].querySelector('.font-bold').textContent;
-                    document.getElementById('fullname').value = fullname;
+                    document.getElementById('firstName').value = editBtn.dataset.first || '';
+                    document.getElementById('middleName').value = editBtn.dataset.middle || '';
+                    document.getElementById('lastName').value = editBtn.dataset.last || '';
                     document.getElementById('patronType').value = cells[2].querySelector('span').textContent;
                     document.getElementById('email').value = cells[4].textContent;
                     document.getElementById('address').value = cells[3].textContent;
@@ -824,7 +843,9 @@
             document.addEventListener('DOMContentLoaded', function() {
                 openModal('edit', '{{ patron.patron_id }}');
                 // Pre-fill form with server-side data
-                document.getElementById('fullname').value = '{{ initial.fullname|default:''|escapejs }}';
+                document.getElementById('firstName').value = '{{ initial.first_name|default:''|escapejs }}';
+                document.getElementById('middleName').value = '{{ initial.middle_name|default:''|escapejs }}';
+                document.getElementById('lastName').value = '{{ initial.last_name|default:''|escapejs }}';
                 document.getElementById('patronType').value = '{{ initial.patron_type|default:''|escapejs }}';
                 document.getElementById('email').value = '{{ initial.email|default:''|escapejs }}';
                 document.getElementById('contactNumber').value = '{{ initial.contact_number|default:''|escapejs }}';

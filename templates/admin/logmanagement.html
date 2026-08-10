@@ -273,7 +273,8 @@
                                     <span class="inline-block bg-cyan-500/15 text-cyan-400 border border-cyan-500/30 px-2 py-0.5 rounded text-[9px] font-bold tracking-widest">NEW</span>
                                 </td>
                                 <td class="py-3 px-6">
-                                    <input type="text" id="deskName" placeholder="Your full name" autocomplete="off"
+                                    <input type="text" id="deskName" placeholder="Juan A. Delacruz" autocomplete="off"
+                                           title="Type your name however you like — Juan Delacruz, Delacruz, Juan, or juan a. delacruz all work."
                                            class="w-full min-w-[170px] bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs font-bold text-slate-100 placeholder-slate-600 focus:outline-none focus:border-cyan-600">
                                 </td>
                                 <td class="py-3 px-6">
@@ -505,6 +506,10 @@
                     <div class="space-y-1.5">
                         <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">First Name</label>
                         <input type="text" id="lgFirstname" class="w-full rounded-lg px-3 py-2 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700" style="background-color: var(--bg-input);">
+                    </div>
+                    <div class="space-y-1.5">
+                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Middle Name</label>
+                        <input type="text" id="lgMiddlename" placeholder="Optional" class="w-full rounded-lg px-3 py-2 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700" style="background-color: var(--bg-input);">
                     </div>
                     <div class="space-y-1.5">
                         <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Last Name</label>
@@ -851,7 +856,7 @@
 
         function lgReset() {
             lgSetMode('Entry');
-            ['lgName', 'lgEmail', 'lgSchool', 'lgPurpose', 'lgFirstname', 'lgLastname', 'lgRegEmail', 'lgContact', 'lgAddress'].forEach(function (f) {
+            ['lgName', 'lgEmail', 'lgSchool', 'lgPurpose', 'lgFirstname', 'lgMiddlename', 'lgLastname', 'lgRegEmail', 'lgContact', 'lgAddress'].forEach(function (f) {
                 document.getElementById(f).value = '';
             });
             document.getElementById('lgPatronType').value = '';
@@ -906,6 +911,7 @@
                     // Not registered -> prefill registration form and switch panels.
                     const parts = name.split(' ');
                     document.getElementById('lgFirstname').value = parts.shift() || '';
+                    document.getElementById('lgMiddlename').value = parts.length > 1 ? parts.shift() : '';
                     document.getElementById('lgLastname').value = parts.join(' ');
                     document.getElementById('lgRegEmail').value = email;
                     document.getElementById('lgRegError').classList.add('hidden');
@@ -925,6 +931,7 @@
             try {
                 const payload = {
                     firstname: document.getElementById('lgFirstname').value.trim(),
+                    middlename: document.getElementById('lgMiddlename').value.trim(),
                     lastname: document.getElementById('lgLastname').value.trim(),
                     email: document.getElementById('lgRegEmail').value.trim(),
                     contact_number: document.getElementById('lgContact').value.trim(),

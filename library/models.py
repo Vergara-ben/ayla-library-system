@@ -3,6 +3,7 @@ from django.utils import timezone
 from datetime import time
 
 from .modules import MODULE_KEYS, MODULE_LABELS, clean_module_keys
+from .names import compose_name, name_matches, parse_name
 
 
 class ActiveLocationManager(models.Manager):
@@ -420,6 +421,17 @@ class Patron(models.Model):
     ]
 
     patron_id = models.AutoField(primary_key=True)
+    # The name is kept in parts because that is what makes it readable back.
+    # "Juan Perez Dela Cruz" in one box gives no way to know whether "Dela"
+    # belongs to the middle name or the surname; last_name = "Dela Cruz" says
+    # so outright, which is what lets the front desk recognise someone who
+    # types "Cruz, Juan" or "juan p. delacruz".
+    first_name = models.CharField(max_length=100, blank=True, default='')
+    middle_name = models.CharField(max_length=100, blank=True, default='')
+    last_name = models.CharField(max_length=100, blank=True, default='')
+    # Derived from the three above on save: "Juan P. Dela Cruz". Kept as a
+    # stored column because every table, card, receipt and export in the system
+    # already reads it, and none of them should have to learn about the parts.
     fullname = models.CharField(max_length=255)
     patron_type = models.CharField(
         max_length=50,
@@ -466,6 +478,17 @@ class Patron(models.Model):
     otp_code = models.CharField(max_length=6, blank=True, null=True)
     otp_expires_at = models.DateTimeField(blank=True, null=True)
     otp_verified = models.BooleanField(default=False)
+
+    def save(self, *args, **kwargs):
+        composed = compose_name(self.first_name, self.middle_name, self.last_name)
+        if composed:
+            self.fullname = composed
+        elif self.fullname and not (self.first_name or self.last_name):
+            # A name that arrived as one string — a walk-in typed at the desk,
+            # or a row imported from a spreadsheet — is split so it can be
+            # matched later. A librarian can correct the guess on the record.
+            self.first_name, self.middle_name, self.last_name = parse_name(self.fullname)
+        super().save(*args, **kwargs)
 
     class Meta:
         db_table = 'Patron'

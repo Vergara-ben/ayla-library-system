@@ -24,6 +24,7 @@ from django.utils import timezone
 
 from .auth_utils import check_password, hash_password
 from .models import Patron, PatronLog, User
+from .names import name_matches, parse_name, tokenise
 
 
 DESK_SESSION_KEY = 'desk_mode'
@@ -50,16 +51,6 @@ ADMIN_LOG_PATH = '/admin-portal/log-management/'
 STAFF_LOG_PATH = '/library-staff/logs/'
 
 
-def _normalise_name(value):
-    """Letters only, lower case — so one person is one person.
-
-    "Juan Dela Cruz", "Juan dela Cruz" and "juan delacruz" are the same visitor
-    typing on different days. Comparing raw strings would file them as three
-    people and scatter their history across three rows.
-    """
-    return ''.join(ch for ch in (value or '').lower() if ch.isalpha())
-
-
 def _digits(value):
     return ''.join(ch for ch in (value or '') if ch.isdigit())
 
@@ -67,20 +58,23 @@ def _digits(value):
 def _find_patron(name, contact):
     """Work out who is standing at the desk.
 
-    Returns (patron, error). The mobile number is the strongest signal, so it
-    is tried first: someone who spells their name differently this week is
-    still the same person if the number matches, which is what stops the
-    visitor list filling up with near-duplicates.
+    Returns (patron, error). The name is read in any order or spelling against
+    the parts on file; the mobile number is the tiebreak when several people
+    answer to what was typed, and it also rescues someone whose name is written
+    differently from how it was registered.
     """
-    typed = _normalise_name(name)
     digits = _digits(contact)
     is_email = '@' in contact
 
     people = list(Patron.objects.exclude(account_status__in=('Suspended', 'Inactive'))
-                  .only('patron_id', 'fullname', 'email', 'contact_number',
+                  .only('patron_id', 'fullname', 'first_name', 'middle_name',
+                        'last_name', 'email', 'contact_number',
                         'account_status', 'patron_type'))
 
-    by_name = [p for p in people if _normalise_name(p.fullname) == typed]
+    # However they wrote it — "Cruz, Juan", "juan p. cruz", "Juan Delacruz" —
+    # it is read against the parts the patron registered with.
+    by_name = [p for p in people
+               if name_matches(name, p.first_name, p.middle_name, p.last_name)]
 
     by_contact = []
     if is_email:
@@ -346,7 +340,7 @@ def desk_sign(request):
     if purpose == 'Other':
         purpose = (request.POST.get('purpose_other') or '').strip() or 'Other'
 
-    if len(_normalise_name(name)) < 2:
+    if len(''.join(tokenise(name))) < 2:
         return JsonResponse({'success': False, 'error': 'Type your full name first.'})
     if patron_type not in dict(Patron.PATRON_TYPE_CHOICES):
         patron_type = 'Student'
@@ -363,8 +357,14 @@ def desk_sign(request):
     # Nobody by that name: a first-time visitor, logged without an account.
     # Anyone may walk into a public library and read; membership is only needed
     # to take a book home, and that needs a librarian to check an ID.
+    # Split what they typed so they are recognised however they write it next
+    # time; the librarian can correct the guess when the record is reviewed.
+    first, middle, last = parse_name(name)
     visitor = Patron.objects.create(
         fullname=name,
+        first_name=first,
+        middle_name=middle,
+        last_name=last,
         email=contact if '@' in contact else None,
         contact_number=None if '@' in contact else (contact or None),
         patron_type=patron_type,
