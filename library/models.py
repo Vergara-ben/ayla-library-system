@@ -547,53 +547,6 @@ class PatronLog(models.Model):
         return f"{self.patron} — entry {self.entry_time}"
 
 
-class DeskSettings(models.Model):
-    """Settings for the front-desk computer, which is the library's only one.
-
-    That machine is both the staff workstation and the screen a patron touches
-    to log their visit. Taking it back is done with the staff member's own
-    account password, so no secret is kept here — only `closing_time`, which is
-    when visits still open at the end of the day are assumed to have ended.
-
-    A single row is used, fetched through `load()`.
-    """
-
-    setting_id = models.AutoField(primary_key=True)
-    closing_time = models.TimeField(default=time(17, 0))
-    # Libraries keep shorter hours at the weekend. Null means the weekend
-    # closes at the same time as a weekday.
-    weekend_closing_time = models.TimeField(blank=True, null=True)
-    updated_by = models.ForeignKey(
-        'User',
-        on_delete=models.SET_NULL,
-        blank=True,
-        null=True,
-        db_column='updated_by',
-        related_name='desk_settings_updates',
-    )
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        db_table = 'Desk_Settings'
-
-    def __str__(self):
-        return f"Desk settings (closes {self.closing_time})"
-
-    @classmethod
-    def load(cls):
-        row = cls.objects.first()
-        if row is None:
-            row = cls.objects.create()
-        return row
-
-    def closing_for(self, day):
-        """When the library shut on `day` — the basis for an assumed exit."""
-        if day.weekday() >= 5 and self.weekend_closing_time:
-            return self.weekend_closing_time
-        return self.closing_time
-
-
-
 # ─── 17. BORROWING RULES (ADMIN-CONFIGURABLE) ─────────────────
 class BorrowingRule(models.Model):
     """Library-wide borrowing policy. A single active row is used; edit it

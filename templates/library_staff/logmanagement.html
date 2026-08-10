@@ -204,6 +204,14 @@
                         </button>
                         {# Patrons sign themselves in on this same computer; arming desk #}
                         {# mode is what stops them landing in an open staff session. #}
+                        {# Closing up: whoever can see the room is empty is the one who #}
+                        {# should be able to say so, on the table it corrects. #}
+                        <form method="post" action="{% url 'close_open_visits' %}" class="inline-block" onsubmit="return confirm('Close every visit that is still open? They will be recorded as assumed exits.')">
+                            {% csrf_token %}
+                            <button type="submit" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-slate-400 text-[11px] font-semibold px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors">
+                                <i class="fa-solid fa-door-closed"></i> Close Open Visits
+                            </button>
+                        </form>
                         <form method="post" action="{% url 'desk_arm' %}" class="inline-block" onsubmit="return confirm('Hand this computer to the patron? This browser stays on Log Management until you enter your account password.')">
                             {% csrf_token %}
                             <button type="submit" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-amber-500/90 text-[11px] font-semibold px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors">
@@ -420,7 +428,10 @@
                 </div>
                 <div class="space-y-1.5">
                     <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Purpose of Visit</label>
-                    <input type="text" id="editLogPurpose" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);">
+                    <select id="editLogPurpose" onchange="syncPurposeOther('editLogPurpose')" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);">
+                        {% for p in purpose_choices %}<option value="{{ p }}">{{ p }}</option>{% endfor %}
+                    </select>
+                    <input type="text" id="editLogPurposeOther" placeholder="Please say" class="hidden w-full mt-2 rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium placeholder-slate-600" style="background-color: var(--bg-input);">
                 </div>
                 <div class="space-y-1.5">
                     <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Entry Time</label>
@@ -474,7 +485,10 @@
                     </div>
                     <div class="space-y-1.5">
                         <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Purpose of Visit</label>
-                        <input type="text" id="lgPurpose" placeholder="e.g., Research, Reading, Borrowing" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium placeholder-slate-600" style="background-color: var(--bg-input);">
+                        <select id="lgPurpose" onchange="syncPurposeOther('lgPurpose')" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);">
+                            {% for p in purpose_choices %}<option value="{{ p }}">{{ p }}</option>{% endfor %}
+                        </select>
+                        <input type="text" id="lgPurposeOther" placeholder="Please say" class="hidden w-full mt-2 rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium placeholder-slate-600" style="background-color: var(--bg-input);">
                     </div>
                 </div>
                 <button type="button" id="lgActionBtn" onclick="lgSubmitAction()" class="w-full bg-violet-700 hover:bg-violet-600 text-white font-bold px-5 py-2.5 rounded-lg flex items-center justify-center gap-2 tracking-wide transition-colors">
@@ -558,6 +572,37 @@
 
     <script>
 
+
+        // A short list is countable; free text is not. "Other" keeps the escape
+        // hatch without turning the column back into prose.
+        function syncPurposeOther(selectId) {
+            const other = document.getElementById(selectId + 'Other');
+            if (!other) return;
+            other.classList.toggle('hidden', document.getElementById(selectId).value !== 'Other');
+            if (!other.classList.contains('hidden')) other.focus();
+        }
+
+        function purposeValue(selectId) {
+            const sel = document.getElementById(selectId);
+            if (!sel) return '';
+            if (sel.value !== 'Other') return sel.value;
+            const other = document.getElementById(selectId + 'Other');
+            return (other && other.value.trim()) || 'Other';
+        }
+
+        function setPurposeValue(selectId, value) {
+            const sel = document.getElementById(selectId);
+            const other = document.getElementById(selectId + 'Other');
+            if (!sel) return;
+            const known = Array.from(sel.options).some(function (o) { return o.value === value; });
+            sel.value = known && value ? value : 'Other';
+            if (other) {
+                other.value = known || !value ? '' : value;
+                other.classList.toggle('hidden', sel.value !== 'Other');
+            }
+            if (!value) { sel.selectedIndex = 0; if (other) other.classList.add('hidden'); }
+        }
+
         // ── Signing in from the table itself ─────────────────────────────
         // The first row of the table is the form. Nothing to open, nothing to
         // close: a patron walks up, types, and presses Enter.
@@ -583,11 +628,7 @@
             row.classList.remove('hidden');
         }
 
-        function deskPurposeChanged() {
-            const other = document.getElementById('deskPurposeOther');
-            other.classList.toggle('hidden', document.getElementById('deskPurpose').value !== 'Other');
-            if (!other.classList.contains('hidden')) other.focus();
-        }
+        function deskPurposeChanged() { syncPurposeOther('deskPurpose'); }
 
         function deskClearEntryRow() {
             ['deskName', 'deskContact', 'deskSchool', 'deskPurposeOther'].forEach(function (id) {
@@ -858,7 +899,7 @@
                 const r = await lgPost(LG_URLS.entry, {
                     name: name, email: email,
                     school: document.getElementById('lgSchool').value.trim(),
-                    purpose_of_visit: document.getElementById('lgPurpose').value.trim(),
+                    purpose_of_visit: purposeValue('lgPurpose'),
                 });
                 if (!r.success) { lgActionErr(r.error || 'Could not log entry.'); return; }
                 if (r.found === false) {
@@ -891,7 +932,7 @@
                     id_confirmed: document.getElementById('lgIdConfirmed').checked ? '1' : '',
                     patron_type: document.getElementById('lgPatronType').value,
                     school: document.getElementById('lgSchool').value.trim(),
-                    purpose_of_visit: document.getElementById('lgPurpose').value.trim(),
+                    purpose_of_visit: purposeValue('lgPurpose'),
                 };
                 const r = await lgPost(LG_URLS.register, payload);
                 if (!r.success) {
@@ -969,7 +1010,7 @@
                 const r = await lgPost("{% url 'edit_patron_log' %}", {
                     log_id: document.getElementById('editLogId').value,
                     school: document.getElementById('editLogSchool').value.trim(),
-                    purpose_of_visit: document.getElementById('editLogPurpose').value.trim(),
+                    purpose_of_visit: purposeValue('editLogPurpose'),
                     entry_time: entry,
                     exit_time: document.getElementById('editLogExit').value,
                 });

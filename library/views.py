@@ -63,7 +63,7 @@ from .emails import (
     registration_rejected_email,
 )
 from .reports import REPORT_TYPES, parse_date_range, build_report, render_report_pdf, render_report_excel
-from .models import Book, Patron, PatronLog, Transaction, User, ShelfLevel, Donation, Announcement, FloorPlan, Shelf, Room, Door, Waypoint, BLEBeacon, WaypointConnection, SystemLog, BorrowingRule, PasswordResetOTP, InventoryRecord, StockMovement, DeskSettings
+from .models import Book, Patron, PatronLog, Transaction, User, ShelfLevel, Donation, Announcement, FloorPlan, Shelf, Room, Door, Waypoint, BLEBeacon, WaypointConnection, SystemLog, BorrowingRule, PasswordResetOTP, InventoryRecord, StockMovement
 
 # Patron views
 def patron_login(request):
@@ -1771,7 +1771,6 @@ def _logs_page(request, template):
     paginator = Paginator(logs_qs, 20)
     logs = paginator.get_page(request.GET.get('page', 1))
     log_count = paginator.count
-    desk_settings_row = DeskSettings.load()
 
     # In desk mode the person reading this table is whoever just walked in, so
     # the contact details of everyone who visited today are masked. The log is
@@ -1809,7 +1808,6 @@ def _logs_page(request, template):
         'purpose_choices': PURPOSE_CHOICES,
         'todays_member_visits': todays_member_visits,
         'todays_visitor_visits': todays_visitor_visits,
-        'desk': desk_settings_row,
         'todays_entries': todays_entries,
         'todays_exits': todays_exits,
         'currently_inside': currently_inside,

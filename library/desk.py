@@ -15,7 +15,7 @@ turning that into a membership needs a librarian to check a physical ID, and
 nobody can attest to their own.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 
 from django.contrib import messages
 from django.http import JsonResponse
@@ -23,13 +23,18 @@ from django.shortcuts import redirect
 from django.utils import timezone
 
 from .auth_utils import check_password, hash_password
-from .models import DeskSettings, Patron, PatronLog, User
+from .models import Patron, PatronLog, User
 
 
 DESK_SESSION_KEY = 'desk_mode'
 
 # Free-text purposes produce "study", "Study", "studying" and "asdf" in equal
 # measure, none of which can be counted. A short list can be.
+# How long an open visit has to have been running before typing the same name
+# again is read as a return rather than a double-tap. Short enough that lunch
+# counts as leaving, long enough that a stutter at the keyboard does not.
+RETURN_THRESHOLD = timedelta(minutes=5)
+
 PURPOSE_CHOICES = [
     'Study',
     'Research',
@@ -178,23 +183,26 @@ def close_stale_visits():
 
     People leave without signing out. Left alone, `currently_inside` counts
     every one of them for ever and the number only climbs, so a month of real
-    use would report a crowd in an empty room. Each stale visit is stamped with
-    that day's closing time and flagged `auto_closed`, so a guessed exit stays
-    legible as a guess.
+    use would report a crowd in an empty room.
+
+    The visit is closed at the end of the day it began and flagged
+    `auto_closed`, which the log shows as ASSUMED. There is deliberately no
+    closing time to configure: whatever hour were chosen, the exit would still
+    be a guess, and one honest rule nobody has to maintain beats a setting that
+    dresses the guess up as a measurement.
 
     Runs on page load rather than from a scheduler: the library has one
     computer and nobody to maintain a cron job.
     """
     today = timezone.localdate()
-    settings_row = DeskSettings.load()
     stale = PatronLog.objects.filter(exit_time__isnull=True, entry_time__date__lt=today)
 
     closed = 0
     for log in stale:
         day = timezone.localtime(log.entry_time).date()
-        assumed = timezone.make_aware(datetime.combine(day, settings_row.closing_for(day)))
-        # Someone who arrived after closing gets a nominal minute, never an
-        # exit that precedes their entry.
+        assumed = timezone.make_aware(datetime.combine(day, time(23, 59)))
+        # Someone who arrived in the last minute of the day still leaves after
+        # they arrived, never before.
         if assumed <= log.entry_time:
             assumed = log.entry_time + timedelta(minutes=1)
         log.exit_time = assumed
@@ -223,13 +231,25 @@ def _sign_in(patron, purpose='', school=''):
     through the Sign out button on the visitor's own row, where there is no
     ambiguity to resolve.
     """
+    returned_from = None
     open_visit = _open_visit_for(patron)
     if open_visit is not None:
-        return {'success': True, 'action': 'already_in', 'name': patron.fullname,
-                'message': (patron.fullname.split(' ')[0] + ', you are already signed in '
-                            'since ' + timezone.localtime(open_visit.entry_time)
-                            .strftime('%I:%M %p') + '. Press Sign out on your row when '
-                            'you leave.')}
+        age = timezone.now() - open_visit.entry_time
+        if age < RETURN_THRESHOLD:
+            # Typed twice in the same breath: one arrival, not two.
+            return {'success': True, 'action': 'already_in', 'name': patron.fullname,
+                    'message': (patron.fullname.split(' ')[0] + ', you are already signed in '
+                                'since ' + timezone.localtime(open_visit.entry_time)
+                                .strftime('%I:%M %p') + '. Press Sign out on your row when '
+                                'you leave.')}
+        # They went out — for lunch, for an errand — and did not sign out on
+        # the way. Signing in again is a second visit, so the first one is
+        # closed and flagged as an assumed exit rather than being stretched
+        # across the gap, and this becomes a session of its own.
+        open_visit.exit_time = timezone.now()
+        open_visit.auto_closed = True
+        open_visit.save(update_fields=['exit_time', 'auto_closed'])
+        returned_from = timezone.localtime(open_visit.entry_time).strftime('%I:%M %p')
 
     # Blank details are filled from their last visit rather than asked for
     # again — most people come for the same reason from the same school.
@@ -244,9 +264,15 @@ def _sign_in(patron, purpose='', school=''):
         school=school or None,
         entry_time=timezone.now(),
     )
+    at = timezone.localtime(log.entry_time).strftime('%I:%M %p')
+    if returned_from:
+        message = ('Welcome back, ' + patron.fullname.split(' ')[0] + ' — new visit started at '
+                   + at + '. Your earlier visit from ' + returned_from
+                   + ' has been closed.')
+    else:
+        message = 'Welcome, ' + patron.fullname.split(' ')[0] + ' — signed in at ' + at + '.'
     return {'success': True, 'action': 'entry', 'name': patron.fullname,
-            'message': ('Welcome, ' + patron.fullname.split(' ')[0] + ' — signed in at '
-                        + timezone.localtime(log.entry_time).strftime('%I:%M %p') + '.')}
+            'returned': bool(returned_from), 'message': message}
 
 
 def _toggle_visit(patron, purpose='', school=''):
@@ -409,56 +435,18 @@ def desk_scan(request):
     return JsonResponse(result)
 
 
-# ─── settings ─────────────────────────────────────────────────────────────
-
-def desk_settings(request):
-    """Administrator page: closing time, and the state of the desk."""
-    from .auth_utils import admin_only_required   # local: avoids a cycle at import
-    from django.shortcuts import render
-
-    @admin_only_required
-    def _view(request):
-        row = DeskSettings.load()
-        if request.method == 'POST':
-            closing = (request.POST.get('closing_time') or '').strip()
-            weekend = (request.POST.get('weekend_closing_time') or '').strip()
-            if closing:
-                try:
-                    row.closing_time = datetime.strptime(closing, '%H:%M').time()
-                except ValueError:
-                    messages.error(request, 'Closing time must look like 17:00.')
-                    return redirect('desk_settings')
-            # Blank means the weekend closes at the same time as a weekday.
-            if weekend:
-                try:
-                    row.weekend_closing_time = datetime.strptime(weekend, '%H:%M').time()
-                except ValueError:
-                    messages.error(request, 'Weekend closing time must look like 12:00.')
-                    return redirect('desk_settings')
-            else:
-                row.weekend_closing_time = None
-            row.updated_by = User.objects.filter(
-                admin_id=request.session.get('admin_id')).first()
-            row.save()
-            messages.success(request, 'Desk settings saved.')
-            return redirect('desk_settings')
-
-        return render(request, 'admin/desksettings.html', {
-            'desk': row,
-            'open_visits': PatronLog.objects.filter(exit_time__isnull=True).count(),
-        })
-
-    return _view(request)
-
-
 def close_open_visits_now(request):
-    """Manual sweep, for when staff know the room is empty."""
+    """Manual sweep, for when staff can see the room is empty.
+
+    Lives on the log page rather than a settings screen: it is something a
+    librarian does at closing time, looking at the same table it corrects.
+    """
     from .auth_utils import admin_login_required
 
     @admin_login_required
     def _view(request):
         if request.method != 'POST':
-            return redirect('desk_settings')
+            return redirect(desk_log_path(request))
         closed = close_stale_visits()
         now = timezone.now()
         for log in PatronLog.objects.filter(exit_time__isnull=True):
@@ -466,7 +454,7 @@ def close_open_visits_now(request):
             log.auto_closed = True
             log.save(update_fields=['exit_time', 'auto_closed'])
             closed += 1
-        messages.success(request, f'Closed {closed} open visit(s).')
-        return redirect(request.POST.get('next') or 'desk_settings')
+        messages.success(request, f'Closed {closed} open visit(s), marked as assumed exits.')
+        return redirect(desk_log_path(request))
 
     return _view(request)

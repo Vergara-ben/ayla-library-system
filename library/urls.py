@@ -44,7 +44,6 @@ urlpatterns = [
     path('desk/sign/', desk.desk_sign, name='desk_sign'),
     path('desk/sign-out/', desk.desk_sign_out, name='desk_sign_out'),
     path('desk/scan/', desk.desk_scan, name='desk_scan'),
-    path('admin-portal/desk-settings/', desk.desk_settings, name='desk_settings'),
     path('admin-portal/close-open-visits/', desk.close_open_visits_now, name='close_open_visits'),
     # Inventory Management (Administrator-only)
     path('admin-portal/inventory/', views.inventory_management, name='inventory_management'),
