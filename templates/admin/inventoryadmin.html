@@ -126,13 +126,13 @@
                 </div>
 
                 {% if tab == 'audit' %}
-                <!-- ── Stock audit: expected holdings vs what is physically scanned ── -->
+                <!-- ── Stock audit: what should be on the shelf vs what is on it ── -->
                 <div class="p-5 space-y-4">
                     <p class="text-xs text-slate-400 leading-relaxed">
-                        Pick a shelf, scan every copy on it, then compare. Copies out on loan are
-                        accounted for automatically. Anything still unexplained is flagged
-                        <strong class="text-slate-300">Missing</strong> &mdash; not lost: books turn up. Writing one
-                        off is a separate decision, made later on the Missing Stock tab.
+                        Pick a shelf and scan every copy on it. Books that are borrowed right now are
+                        counted for you. Anything you still cannot find is marked
+                        <strong class="text-slate-300">Missing</strong> &mdash; not lost, because books turn up.
+                        Giving up on one is a separate step, done later on the Missing Stock tab.
                     </p>
 
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -178,8 +178,12 @@
                     </div>
 
                     <button type="button" onclick="runAuditCompare()" class="w-full bg-cyan-600/20 text-cyan-400 border border-cyan-600/30 px-4 py-3 rounded-lg text-sm font-semibold hover:bg-cyan-600/30 transition-colors">
-                        <i class="fa-solid fa-scale-balanced mr-1"></i> Compare against expected holdings
+                        <i class="fa-solid fa-clipboard-check mr-1"></i> Done scanning &mdash; check this shelf
                     </button>
+                    <p class="text-[11px] text-slate-500 -mt-2">
+                        Shows what is on the shelf, what is borrowed, and what could not be found.
+                        Nothing is saved until you file the count.
+                    </p>
 
                     <div id="auditReport" class="hidden rounded-lg border border-slate-800 p-4 space-y-3" style="background-color: var(--bg-main);"></div>
                 </div>
@@ -246,8 +250,8 @@
                 <!-- ── Audit history: when each shelf was counted, and what it showed ── -->
                 <div class="p-5 space-y-4">
                     <p class="text-xs text-slate-400 leading-relaxed">
-                        Every stock-take that has been filed. This is what answers &ldquo;when was this
-                        section last checked, by whom, and what did we find&rdquo;.
+                        Every shelf count that has been filed &mdash; when the shelf was last checked,
+                        who checked it, and what they found.
                     </p>
                     <div class="overflow-x-auto rounded-lg border border-slate-800">
                         <table class="w-full text-left border-collapse">
@@ -256,11 +260,11 @@
                                     <th class="py-3 px-4 w-36">Counted</th>
                                     <th class="py-3 px-4">Shelf</th>
                                     <th class="py-3 px-4">Auditor</th>
-                                    <th class="py-3 px-4 w-20 text-center">Expected</th>
-                                    <th class="py-3 px-4 w-20 text-center">On shelf</th>
-                                    <th class="py-3 px-4 w-20 text-center">On loan</th>
-                                    <th class="py-3 px-4 w-24 text-center">Missing</th>
-                                    <th class="py-3 px-4 w-24 text-center">Recovered</th>
+                                    <th class="py-3 px-4 w-20 text-center">Should be there</th>
+                                    <th class="py-3 px-4 w-20 text-center">Found</th>
+                                    <th class="py-3 px-4 w-20 text-center">Borrowed</th>
+                                    <th class="py-3 px-4 w-24 text-center">Not found</th>
+                                    <th class="py-3 px-4 w-24 text-center">Turned up</th>
                                     <th class="py-3 px-4">Notes</th>
                                 </tr>
                             </thead>
@@ -280,7 +284,7 @@
                                     <td class="py-3 px-4 text-slate-500 text-[11px]">{{ a.notes|default:"—" }}</td>
                                 </tr>
                                 {% empty %}
-                                <tr><td colspan="9" class="py-8 px-4 text-center text-slate-500">No stock-take has been filed yet.</td></tr>
+                                <tr><td colspan="9" class="py-8 px-4 text-center text-slate-500">No shelf count has been filed yet.</td></tr>
                                 {% endfor %}
                             </tbody>
                         </table>
@@ -426,7 +430,7 @@
                                             data-donor="{{ r.donor_name|default:'' }}" data-stage="{{ r.processing_stage|default:'' }}" data-notes="{{ r.notes|default:'' }}"
                                             onclick="openEdit(this)" class="text-slate-400 hover:text-cyan-400 p-1.5"><i class="fa-solid fa-pen-to-square"></i></button>
                                         {% if r.status != 'Removed' %}
-                                        <button title="Deaccession (data-entry error)"
+                                        <button title="Remove this copy from the records (data-entry mistake)"
                                             data-id="{{ r.inventory_id }}" data-title="{{ r.display_title }}"
                                             onclick="openDeaccession(this)" class="text-slate-400 hover:text-rose-400 p-1.5"><i class="fa-solid fa-eraser"></i></button>
                                         {% endif %}
@@ -680,7 +684,7 @@
                     <label class="field-label">Reason for the correction</label>
                     <input type="text" name="reason" class="field-input" placeholder="Wrong donor recorded at intake">
                 </div>
-                <p class="text-[10px] text-slate-500">Editing details never changes the recorded quantity — receive or deaccession copies for that.</p>
+                <p class="text-[10px] text-slate-500">Editing details never changes how many copies are on record — receive or remove copies for that.</p>
                 <div class="flex items-center justify-end gap-2 pt-2">
                     <button type="button" onclick="closeModal('editModal')" class="text-xs font-semibold px-4 py-2 rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800/50">Cancel</button>
                     <button type="submit" class="text-xs font-bold px-4 py-2 rounded-lg bg-cyan-700/40 text-cyan-300 border border-cyan-700/60 hover:bg-cyan-700/60">Save</button>
@@ -693,14 +697,14 @@
     <div id="deaccessionModal" class="fixed inset-0 z-[60] hidden items-center justify-center p-4" style="background: var(--scrim);">
         <div class="w-full max-w-md rounded-2xl border shadow-2xl" style="background-color: var(--bg-modal); border-color: var(--border-modal);">
             <div class="flex items-center justify-between px-6 py-4 border-b" style="border-color: var(--border-modal);">
-                <h3 class="text-sm font-bold text-slate-200 tracking-wide">Deaccession Copy</h3>
+                <h3 class="text-sm font-bold text-slate-200 tracking-wide">Remove Copy From Records</h3>
                 <button onclick="closeModal('deaccessionModal')" class="text-slate-500 hover:text-slate-300"><i class="fa-solid fa-xmark"></i></button>
             </div>
             <form method="post" action="{% url 'deaccession_copy' %}" class="px-6 py-5 space-y-4">
                 {% csrf_token %}
                 <input type="hidden" name="inventory_id" id="deaccId">
                 <div class="rounded-lg border border-amber-800/50 bg-amber-950/30 px-3 py-2.5 text-[11px] text-amber-200 leading-relaxed">
-                    Deaccession is for <strong>data-entry mistakes</strong> — a copy recorded twice, or one that never arrived.
+                    This is for <strong>data-entry mistakes</strong> — a copy recorded twice, or one that never arrived.
                     A copy that is damaged, lost or pulled from circulation should get a <strong>condition change</strong> instead.
                 </div>
                 <p class="text-xs text-slate-400">Copy: <span id="deaccTitle" class="text-slate-200 font-semibold"></span></p>
@@ -710,7 +714,7 @@
                 </div>
                 <div class="flex items-center justify-end gap-2 pt-2">
                     <button type="button" onclick="closeModal('deaccessionModal')" class="text-xs font-semibold px-4 py-2 rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800/50">Cancel</button>
-                    <button type="submit" class="text-xs font-bold px-4 py-2 rounded-lg bg-rose-700/40 text-rose-300 border border-rose-700/60 hover:bg-rose-700/60">Deaccession</button>
+                    <button type="submit" class="text-xs font-bold px-4 py-2 rounded-lg bg-rose-700/40 text-rose-300 border border-rose-700/60 hover:bg-rose-700/60">Remove from records</button>
                 </div>
             </form>
         </div>
@@ -1040,19 +1044,19 @@
             const shelfName = shelfSel.options[shelfSel.selectedIndex].text;
             lastAuditData = data;
             let html = '<div class="grid grid-cols-2 sm:grid-cols-5 gap-3 text-center">'
-                + '<div><p class="text-[10px] uppercase text-slate-500 font-bold">Expected</p><p class="text-2xl font-bold text-slate-200">' + data.expected_count + '</p></div>'
-                + '<div><p class="text-[10px] uppercase text-slate-500 font-bold">Scanned</p><p class="text-2xl font-bold text-cyan-400">' + data.scanned_count + '</p></div>'
-                + '<div><p class="text-[10px] uppercase text-slate-500 font-bold">On shelf</p><p class="text-2xl font-bold text-emerald-400">' + data.found_count + '</p></div>'
-                + '<div><p class="text-[10px] uppercase text-slate-500 font-bold">On loan</p><p class="text-2xl font-bold text-blue-400">' + data.on_loan_count + '</p></div>'
-                + '<div><p class="text-[10px] uppercase text-slate-500 font-bold">Unexplained</p><p class="text-2xl font-bold ' + (data.missing.length ? 'text-amber-400' : 'text-slate-500') + '">' + data.missing.length + '</p></div>'
+                + '<div><p class="text-[10px] uppercase text-slate-500 font-bold">Should be here</p><p class="text-2xl font-bold text-slate-200">' + data.expected_count + '</p></div>'
+                + '<div><p class="text-[10px] uppercase text-slate-500 font-bold">You scanned</p><p class="text-2xl font-bold text-cyan-400">' + data.scanned_count + '</p></div>'
+                + '<div><p class="text-[10px] uppercase text-slate-500 font-bold">Found</p><p class="text-2xl font-bold text-emerald-400">' + data.found_count + '</p></div>'
+                + '<div><p class="text-[10px] uppercase text-slate-500 font-bold">Borrowed</p><p class="text-2xl font-bold text-blue-400">' + data.on_loan_count + '</p></div>'
+                + '<div><p class="text-[10px] uppercase text-slate-500 font-bold">Not found</p><p class="text-2xl font-bold ' + (data.missing.length ? 'text-amber-400' : 'text-slate-500') + '">' + data.missing.length + '</p></div>'
                 + '</div>';
 
             if (data.on_loan_count) {
                 html += '<p class="text-[11px] text-blue-300/80">'
-                     + data.on_loan_count + ' copy(ies) are out on loan, so they are not expected on the shelf.</p>';
+                     + data.on_loan_count + ' copy(ies) are borrowed right now, so they should not be on the shelf.</p>';
             }
             if (data.recovered.length) {
-                html += '<div><p class="text-[10px] uppercase font-bold text-emerald-400 mb-1">Found again (' + data.recovered.length + ')</p>'
+                html += '<div><p class="text-[10px] uppercase font-bold text-emerald-400 mb-1">Turned up again (' + data.recovered.length + ')</p>'
                     + '<div class="space-y-1 max-h-32 overflow-y-auto text-xs text-slate-300">'
                     + data.recovered.map(function (r) {
                         return '<div class="px-2 py-1 rounded border border-emerald-900/60 truncate">' + r.title
@@ -1063,10 +1067,10 @@
             }
 
             if (data.reconciled) {
-                html += '<p class="text-xs text-emerald-400 font-semibold">Shelf reconciles — nothing to adjust.</p>';
+                html += '<p class="text-xs text-emerald-400 font-semibold">Every copy is accounted for — nothing is missing.</p>';
             } else {
                 if (data.missing.length) {
-                    html += '<div><p class="text-[10px] uppercase font-bold text-amber-400 mb-1">Not on the shelf and not on loan (' + data.missing.length + ')</p>'
+                    html += '<div><p class="text-[10px] uppercase font-bold text-amber-400 mb-1">Could not be found (' + data.missing.length + ')</p>'
                         + '<div class="space-y-1 max-h-40 overflow-y-auto">'
                         + data.missing.map(function (m) {
                             const history = m.already_missing
@@ -1079,7 +1083,7 @@
                         + '</div></div>';
                 }
                 if (data.unexpected.length) {
-                    html += '<div><p class="text-[10px] uppercase font-bold text-amber-400 mb-1">Scanned but not expected here (' + data.unexpected.length + ')</p>'
+                    html += '<div><p class="text-[10px] uppercase font-bold text-amber-400 mb-1">On the wrong shelf (' + data.unexpected.length + ')</p>'
                         + '<div class="space-y-1 max-h-40 overflow-y-auto text-xs text-slate-300">'
                         + data.unexpected.map(function (u) {
                             return '<div class="px-2 py-1 rounded border border-slate-800 truncate">' + u.title
