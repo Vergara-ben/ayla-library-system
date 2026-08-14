@@ -114,8 +114,10 @@
             <div class="rounded-xl border border-slate-800/80 overflow-hidden" style="background-color: var(--bg-card);">
                 <div class="px-5 py-3 border-b border-slate-800/60 flex flex-wrap items-center justify-between gap-3">
                     <div class="flex items-center gap-1">
-                        <a href="?tab=stock" class="tab-btn {% if tab != 'audit' and tab != 'history' %}active{% endif %}"><i class="fa-solid fa-boxes-stacked mr-1"></i> Stock</a>
+                        <a href="?tab=stock" class="tab-btn {% if tab == 'stock' %}active{% endif %}"><i class="fa-solid fa-boxes-stacked mr-1"></i> Stock</a>
                         <a href="?tab=audit" class="tab-btn {% if tab == 'audit' %}active{% endif %}"><i class="fa-solid fa-clipboard-check mr-1"></i> Stock Audit</a>
+                        <a href="?tab=missing" class="tab-btn {% if tab == 'missing' %}active{% endif %}"><i class="fa-solid fa-magnifying-glass mr-1"></i> Missing Stock{% if missing_count %} <span class="ml-1 text-[10px] font-bold text-amber-400">{{ missing_count }}</span>{% endif %}</a>
+                        <a href="?tab=audits" class="tab-btn {% if tab == 'audits' %}active{% endif %}"><i class="fa-solid fa-list-check mr-1"></i> Audit History</a>
                         <a href="?tab=history" class="tab-btn {% if tab == 'history' %}active{% endif %}"><i class="fa-solid fa-clock-rotate-left mr-1"></i> Movement History</a>
                     </div>
                     <button type="button" onclick="show('receiveModal')" class="bg-cyan-600/20 text-cyan-400 border border-cyan-600/30 px-4 py-2 rounded-lg text-xs font-semibold hover:bg-cyan-600/30 transition-colors flex items-center gap-2">
@@ -127,8 +129,10 @@
                 <!-- ── Stock audit: expected holdings vs what is physically scanned ── -->
                 <div class="p-5 space-y-4">
                     <p class="text-xs text-slate-400 leading-relaxed">
-                        Pick a shelf, scan every copy on it, then compare. The discrepancy report below is
-                        <strong class="text-slate-300">not applied until you confirm it</strong>.
+                        Pick a shelf, scan every copy on it, then compare. Copies out on loan are
+                        accounted for automatically. Anything still unexplained is flagged
+                        <strong class="text-slate-300">Missing</strong> &mdash; not lost: books turn up. Writing one
+                        off is a separate decision, made later on the Missing Stock tab.
                     </p>
 
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -138,7 +142,9 @@
                                 <select id="auditShelf" class="field-input">
                                     <option value="">Select a shelf…</option>
                                     {% for s in shelves %}
-                                    <option value="{{ s.shelf_id }}">{{ s.name }}{% if s.room %} — {{ s.room.name }}{% endif %}</option>
+                                    {# Last counted matters more than the name: it is how staff #}
+                                    {# decide which shelf to walk next. #}
+                                    <option value="{{ s.shelf_id }}">{{ s.name }}{% if s.room %} — {{ s.room.name }}{% endif %} · {% if s.last_audited %}last counted {{ s.last_audited|date:"M j, Y" }}{% else %}never counted{% endif %}</option>
                                     {% endfor %}
                                 </select>
                             </div>
@@ -176,6 +182,116 @@
                     </button>
 
                     <div id="auditReport" class="hidden rounded-lg border border-slate-800 p-4 space-y-3" style="background-color: var(--bg-main);"></div>
+                </div>
+
+                {% elif tab == 'missing' %}
+                <!-- ── Missing stock: absent, but not yet written off ─────────── -->
+                <div class="p-5 space-y-4">
+                    <p class="text-xs text-slate-400 leading-relaxed">
+                        Copies a stock-take could not find and no loan explains. They are still the
+                        library's, and they still turn up &mdash; scanning one during a later count puts it
+                        straight back. Write a copy off only when it has been gone long enough that
+                        you no longer expect it, and the write-off is permanent.
+                    </p>
+
+                    {% if missing_copies %}
+                    <form method="post" action="{% url 'write_off_missing' %}"
+                          onsubmit="return confirmWriteOff(this);">
+                        {% csrf_token %}
+                        <div class="overflow-x-auto rounded-lg border border-slate-800">
+                            <table class="w-full text-left border-collapse">
+                                <thead>
+                                    <tr class="border-b border-slate-800/80 text-[10px] font-bold tracking-wider text-slate-500 uppercase bg-slate-900/20">
+                                        <th class="py-3 px-4 w-10"><input type="checkbox" onclick="toggleAllMissing(this)"></th>
+                                        <th class="py-3 px-4">Title</th>
+                                        <th class="py-3 px-4 w-40">Shelf</th>
+                                        <th class="py-3 px-4 w-32">Missing since</th>
+                                        <th class="py-3 px-4 w-28 text-center">Counts missed</th>
+                                        <th class="py-3 px-4 w-28">Copy label</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-slate-800/40 text-xs text-slate-300">
+                                    {% for copy in missing_copies %}
+                                    <tr class="hover:bg-slate-800/10">
+                                        <td class="py-3 px-4"><input type="checkbox" name="inventory_ids" value="{{ copy.inventory_id }}" class="missing-writeoff"></td>
+                                        <td class="py-3 px-4 font-bold text-slate-200">{{ copy.display_title }}<span class="block text-[10px] font-normal text-slate-600">copy #{{ copy.inventory_id }} · {{ copy.condition }}</span></td>
+                                        <td class="py-3 px-4 text-slate-400">{{ copy.shelf_location|default:"Not shelved" }}</td>
+                                        <td class="py-3 px-4 text-slate-400">
+                                            {% if copy.missing_since %}{{ copy.missing_since|date:"M j, Y" }}
+                                                {# How long it has been gone is the whole basis for writing it off. #}
+                                                <span class="block text-[10px] {% if copy.days_missing >= 90 %}text-rose-400{% elif copy.days_missing >= 30 %}text-amber-400{% else %}text-slate-600{% endif %}">{{ copy.days_missing }} day(s)</span>
+                                            {% else %}&mdash;{% endif %}
+                                        </td>
+                                        <td class="py-3 px-4 text-center font-bold {% if copy.audit_misses >= 3 %}text-rose-400{% else %}text-slate-300{% endif %}">{{ copy.audit_misses }}</td>
+                                        <td class="py-3 px-4 font-mono text-[10px] text-slate-600 truncate">{{ copy.qr_label|default:"—" }}</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <div class="mt-4 space-y-2">
+                            <input type="text" name="reason" class="field-input" placeholder="Reason for writing these off — required">
+                            <button type="submit" class="w-full bg-rose-600/15 text-rose-300 border border-rose-700/50 px-4 py-2.5 rounded-lg text-xs font-bold hover:bg-rose-600/25 transition-colors">
+                                <i class="fa-solid fa-triangle-exclamation mr-1"></i> Write off the ticked copies as lost
+                            </button>
+                        </div>
+                    </form>
+                    {% else %}
+                    <p class="text-xs text-slate-500 py-8 text-center">Nothing is missing. Every copy is either on its shelf or out on loan.</p>
+                    {% endif %}
+                </div>
+
+                {% elif tab == 'audits' %}
+                <!-- ── Audit history: when each shelf was counted, and what it showed ── -->
+                <div class="p-5 space-y-4">
+                    <p class="text-xs text-slate-400 leading-relaxed">
+                        Every stock-take that has been filed. This is what answers &ldquo;when was this
+                        section last checked, by whom, and what did we find&rdquo;.
+                    </p>
+                    <div class="overflow-x-auto rounded-lg border border-slate-800">
+                        <table class="w-full text-left border-collapse">
+                            <thead>
+                                <tr class="border-b border-slate-800/80 text-[10px] font-bold tracking-wider text-slate-500 uppercase bg-slate-900/20">
+                                    <th class="py-3 px-4 w-36">Counted</th>
+                                    <th class="py-3 px-4">Shelf</th>
+                                    <th class="py-3 px-4">Auditor</th>
+                                    <th class="py-3 px-4 w-20 text-center">Expected</th>
+                                    <th class="py-3 px-4 w-20 text-center">On shelf</th>
+                                    <th class="py-3 px-4 w-20 text-center">On loan</th>
+                                    <th class="py-3 px-4 w-24 text-center">Missing</th>
+                                    <th class="py-3 px-4 w-24 text-center">Recovered</th>
+                                    <th class="py-3 px-4">Notes</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-slate-800/40 text-xs text-slate-300">
+                                {% for a in audits %}
+                                <tr class="hover:bg-slate-800/10">
+                                    <td class="py-3 px-4 text-slate-300 font-medium">{{ a.audited_at|date:"M j, Y" }}<span class="block text-[10px] text-slate-600">{{ a.audited_at|time:"h:i A" }}</span></td>
+                                    <td class="py-3 px-4 font-bold text-slate-200">{{ a.shelf_name|default:"—" }}</td>
+                                    <td class="py-3 px-4 text-slate-400">{{ a.audited_by.fullname|default:"—" }}</td>
+                                    <td class="py-3 px-4 text-center">{{ a.expected_count }}</td>
+                                    <td class="py-3 px-4 text-center text-emerald-400">{{ a.found_count }}</td>
+                                    <td class="py-3 px-4 text-center text-blue-400">{{ a.on_loan_count }}</td>
+                                    <td class="py-3 px-4 text-center {% if a.missing_count %}text-amber-400 font-bold{% else %}text-slate-600{% endif %}">
+                                        {{ a.missing_count }}{% if a.missing_count %}<span class="block text-[10px] font-normal text-slate-600">{{ a.discrepancy_rate }}%</span>{% endif %}
+                                    </td>
+                                    <td class="py-3 px-4 text-center {% if a.recovered_count %}text-emerald-400 font-bold{% else %}text-slate-600{% endif %}">{{ a.recovered_count }}</td>
+                                    <td class="py-3 px-4 text-slate-500 text-[11px]">{{ a.notes|default:"—" }}</td>
+                                </tr>
+                                {% empty %}
+                                <tr><td colspan="9" class="py-8 px-4 text-center text-slate-500">No stock-take has been filed yet.</td></tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% if audits.has_other_pages %}
+                    <div class="flex items-center justify-center gap-2 text-xs text-slate-400">
+                        {% if audits.has_previous %}<a href="?tab=audits&apage={{ audits.previous_page_number }}" class="px-3 py-1.5 rounded border border-slate-800 hover:bg-slate-800/20">&larr; Prev</a>{% endif %}
+                        <span>Page {{ audits.number }} of {{ audits.paginator.num_pages }}</span>
+                        {% if audits.has_next %}<a href="?tab=audits&apage={{ audits.next_page_number }}" class="px-3 py-1.5 rounded border border-slate-800 hover:bg-slate-800/20">Next &rarr;</a>{% endif %}
+                    </div>
+                    {% endif %}
                 </div>
 
                 {% elif tab == 'history' %}
@@ -789,6 +905,19 @@
             return m ? decodeURIComponent(m.pop()) : '';
         }
 
+        // ── Missing stock write-off ────────────────────────────────────
+        function toggleAllMissing(box) {
+            document.querySelectorAll('.missing-writeoff').forEach(function (cb) { cb.checked = box.checked; });
+        }
+
+        function confirmWriteOff(form) {
+            const n = form.querySelectorAll('.missing-writeoff:checked').length;
+            if (!n) { alert('Tick at least one copy to write off.'); return false; }
+            if (!form.reason.value.trim()) { alert('A write-off needs a reason.'); return false; }
+            return confirm('Write off ' + n + ' copy(ies) as lost? This is permanent — '
+                + 'a written-off copy is no longer looked for during stock-takes.');
+        }
+
         // ── Stock audit ────────────────────────────────────────────────
         let scannedLabels = [];
         let auditStream = null, auditInterval = null, lastAuditCode = '';
@@ -803,7 +932,11 @@
                         + '<button type="button" onclick="removeScanned(' + i + ')" class="text-slate-500 hover:text-rose-400"><i class="fa-solid fa-xmark"></i></button></div>';
                   }).join('')
                 : '<p class="text-slate-600">Nothing scanned yet.</p>';
+            persistScanned();
         }
+
+        // Pick up where the last sitting left off.
+        if (document.getElementById('scannedList')) { restoreScanned(); }
         function addScannedLabel(label) {
             label = (label || '').trim();
             if (!label) return;
@@ -811,7 +944,27 @@
             renderScanned();
         }
         function removeScanned(i) { scannedLabels.splice(i, 1); renderScanned(); }
-        function clearScanned() { scannedLabels = []; lastAuditCode = ''; renderScanned(); }
+        // Walking a shelf of 500 books is not one sitting, so the scan list is
+        // kept in the browser rather than lost with the tab.
+        const AUDIT_CACHE = 'ayla.audit.scanned';
+
+        function persistScanned() {
+            try { localStorage.setItem(AUDIT_CACHE, JSON.stringify(scannedLabels)); } catch (e) {}
+        }
+
+        function restoreScanned() {
+            try {
+                const saved = JSON.parse(localStorage.getItem(AUDIT_CACHE) || '[]');
+                if (Array.isArray(saved) && saved.length) { scannedLabels = saved; renderScanned(); }
+            } catch (e) {}
+        }
+
+        function clearScanned() {
+            scannedLabels = [];
+            lastAuditCode = '';
+            try { localStorage.removeItem(AUDIT_CACHE); } catch (e) {}
+            renderScanned();
+        }
 
         document.addEventListener('DOMContentLoaded', function () {
             const manual = document.getElementById('auditManual');
@@ -885,22 +1038,43 @@
             if (!data.success) { alert(data.error || 'Comparison failed'); return; }
 
             const shelfName = shelfSel.options[shelfSel.selectedIndex].text;
-            let html = '<div class="grid grid-cols-3 gap-3 text-center">'
+            lastAuditData = data;
+            let html = '<div class="grid grid-cols-2 sm:grid-cols-5 gap-3 text-center">'
                 + '<div><p class="text-[10px] uppercase text-slate-500 font-bold">Expected</p><p class="text-2xl font-bold text-slate-200">' + data.expected_count + '</p></div>'
                 + '<div><p class="text-[10px] uppercase text-slate-500 font-bold">Scanned</p><p class="text-2xl font-bold text-cyan-400">' + data.scanned_count + '</p></div>'
-                + '<div><p class="text-[10px] uppercase text-slate-500 font-bold">Matched</p><p class="text-2xl font-bold text-emerald-400">' + data.found_count + '</p></div>'
+                + '<div><p class="text-[10px] uppercase text-slate-500 font-bold">On shelf</p><p class="text-2xl font-bold text-emerald-400">' + data.found_count + '</p></div>'
+                + '<div><p class="text-[10px] uppercase text-slate-500 font-bold">On loan</p><p class="text-2xl font-bold text-blue-400">' + data.on_loan_count + '</p></div>'
+                + '<div><p class="text-[10px] uppercase text-slate-500 font-bold">Unexplained</p><p class="text-2xl font-bold ' + (data.missing.length ? 'text-amber-400' : 'text-slate-500') + '">' + data.missing.length + '</p></div>'
                 + '</div>';
+
+            if (data.on_loan_count) {
+                html += '<p class="text-[11px] text-blue-300/80">'
+                     + data.on_loan_count + ' copy(ies) are out on loan, so they are not expected on the shelf.</p>';
+            }
+            if (data.recovered.length) {
+                html += '<div><p class="text-[10px] uppercase font-bold text-emerald-400 mb-1">Found again (' + data.recovered.length + ')</p>'
+                    + '<div class="space-y-1 max-h-32 overflow-y-auto text-xs text-slate-300">'
+                    + data.recovered.map(function (r) {
+                        return '<div class="px-2 py-1 rounded border border-emerald-900/60 truncate">' + r.title
+                             + (r.missing_since ? ' <span class="text-slate-600">· missing since ' + r.missing_since + '</span>' : '')
+                             + '</div>';
+                      }).join('')
+                    + '</div></div>';
+            }
 
             if (data.reconciled) {
                 html += '<p class="text-xs text-emerald-400 font-semibold">Shelf reconciles — nothing to adjust.</p>';
             } else {
                 if (data.missing.length) {
-                    html += '<div><p class="text-[10px] uppercase font-bold text-rose-400 mb-1">Expected but not scanned (' + data.missing.length + ')</p>'
+                    html += '<div><p class="text-[10px] uppercase font-bold text-amber-400 mb-1">Not on the shelf and not on loan (' + data.missing.length + ')</p>'
                         + '<div class="space-y-1 max-h-40 overflow-y-auto">'
                         + data.missing.map(function (m) {
+                            const history = m.already_missing
+                                ? ' <span class="text-amber-500/80">· missing since ' + (m.missing_since || '?') + ', ' + m.audit_misses + ' previous count(s)</span>'
+                                : '';
                             return '<label class="flex items-center gap-2 text-xs text-slate-300 px-2 py-1 rounded border border-slate-800">'
                                 + '<input type="checkbox" class="missing-cb" value="' + m.inventory_id + '" checked> '
-                                + '<span class="truncate">' + m.title + ' <span class="text-slate-600">· copy #' + m.inventory_id + '</span></span></label>';
+                                + '<span class="truncate">' + m.title + ' <span class="text-slate-600">· copy #' + m.inventory_id + '</span>' + history + '</span></label>';
                           }).join('')
                         + '</div></div>';
                 }
@@ -913,42 +1087,64 @@
                           }).join('')
                         + '</div><p class="text-[10px] text-slate-500 mt-1">These are reported only — reshelving is handled in Shelf Manager.</p></div>';
                 }
-                if (data.missing.length) {
-                    html += '<div class="pt-2 border-t border-slate-800 space-y-2">'
-                        + '<input type="text" id="auditReason" class="field-input" placeholder="Reason for the adjustment" value="Not found during stock audit">'
-                        + '<label class="flex items-center gap-2 text-[11px] text-amber-300">'
-                        + '<input type="checkbox" id="auditConfirm"> I confirm this discrepancy report and want the ticked copies marked lost.</label>'
-                        + '<button type="button" onclick="applyAudit(\'' + shelfName.replace(/'/g, "") + '\')" class="w-full bg-amber-600/20 text-amber-300 border border-amber-600/40 px-4 py-2.5 rounded-lg text-xs font-bold hover:bg-amber-600/30">Apply adjustment</button>'
-                        + '</div>';
-                }
             }
+            html += '<div class="pt-2 border-t border-slate-800 space-y-2">'
+                + '<input type="text" id="auditNotes" class="field-input" placeholder="Notes for this count (optional)">'
+                + (data.missing.length
+                    ? '<input type="text" id="auditReason" class="field-input" placeholder="Reason" value="Not found during stock audit">'
+                      + '<label class="flex items-center gap-2 text-[11px] text-amber-300">'
+                      + '<input type="checkbox" id="auditConfirm"> I confirm this count. The ticked copies will be flagged '
+                      + '<strong>Missing</strong> &mdash; not written off.</label>'
+                    : '<label class="flex items-center gap-2 text-[11px] text-emerald-300">'
+                      + '<input type="checkbox" id="auditConfirm"> I confirm this count and want it filed.</label>')
+                + '<button type="button" onclick="applyAudit(\'' + shelfName.replace(/'/g, "") + '\')" class="w-full bg-cyan-600/20 text-cyan-300 border border-cyan-600/40 px-4 py-2.5 rounded-lg text-xs font-bold hover:bg-cyan-600/30">File this count</button>'
+                + '</div>';
             report.innerHTML = html;
             report.classList.remove('hidden');
         }
 
+        // Filing a count records the count itself, flags what could not be
+        // found, and puts back anything that turned up. Nothing is written off.
+        let lastAuditData = null;
+
         async function applyAudit(shelfName) {
             if (!document.getElementById('auditConfirm').checked) {
-                alert('Tick the confirmation box before the adjustment can be applied.');
+                alert('Tick the confirmation box before this count can be filed.');
                 return;
             }
-            const ids = [...document.querySelectorAll('.missing-cb:checked')].map(function (c) { return c.value; });
-            if (!ids.length) { alert('No copies ticked.'); return; }
+            if (!lastAuditData) { alert('Run the comparison first.'); return; }
 
             const fd = new FormData();
             fd.append('confirm', 'yes');
-            fd.append('reason', document.getElementById('auditReason').value || 'Not found during stock audit');
+            fd.append('shelf_id', document.getElementById('auditShelf').value);
             fd.append('shelf_name', shelfName);
-            ids.forEach(function (i) { fd.append('missing_ids', i); });
+            const reasonEl = document.getElementById('auditReason');
+            fd.append('reason', (reasonEl && reasonEl.value) || 'Not found during stock audit');
+            const notesEl = document.getElementById('auditNotes');
+            if (notesEl && notesEl.value.trim()) fd.append('notes', notesEl.value.trim());
+
+            [...document.querySelectorAll('.missing-cb:checked')]
+                .forEach(function (c) { fd.append('missing_ids', c.value); });
+            // Everything scanned goes up too, so a copy previously written down
+            // as missing is put back rather than staying flagged for ever.
+            (lastAuditData.recovered || []).forEach(function (r) {
+                fd.append('found_ids', r.inventory_id);
+            });
+            ['expected_count', 'scanned_count', 'found_count', 'on_loan_count']
+                .forEach(function (k) { fd.append(k, lastAuditData[k]); });
+            fd.append('unexpected_count', lastAuditData.unexpected.length);
 
             const res = await fetch("{% url 'stock_audit_apply' %}", {
                 method: 'POST', body: fd,
                 headers: { 'X-CSRFToken': getCookie('csrftoken'), 'X-Requested-With': 'XMLHttpRequest' },
             });
             const data = await res.json();
-            if (!data.success) { alert(data.error || 'Adjustment failed'); return; }
-            alert(data.adjusted + ' copy(ies) marked lost. See Movement History for the trail.');
+            if (!data.success) { alert(data.error || 'Filing the count failed'); return; }
+            alert('Count filed. ' + data.flagged + ' flagged missing, '
+                + data.recovered + ' found again.');
             stopAuditCamera();
-            window.location.href = '?tab=history';
+            clearScanned();
+            window.location.href = '?tab=audits';
         }
 
         window.addEventListener('beforeunload', stopAuditCamera);

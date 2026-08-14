@@ -54,6 +54,7 @@ urlpatterns = [
     path('admin-portal/inventory/search-by-qr/', views.search_inventory_by_qr, name='search_inventory_by_qr'),
     path('admin-portal/inventory/audit/compare/', views.stock_audit_compare, name='stock_audit_compare'),
     path('admin-portal/inventory/audit/apply/', views.stock_audit_apply, name='stock_audit_apply'),
+    path('admin-portal/inventory/write-off-missing/', views.write_off_missing, name='write_off_missing'),
     # User Management (Admin-only: manage Library Staff accounts)
     path('admin-portal/users/', views.user_management, name='user_management'),
     path('admin-portal/users/create/', views.create_staff, name='create_staff'),

@@ -570,6 +570,62 @@ class PatronLog(models.Model):
         return f"{self.patron} — entry {self.entry_time}"
 
 
+class StockAudit(models.Model):
+    """One stock-take of one shelf.
+
+    A library counts its shelves so it can answer "when was this section last
+    checked, by whom, and what did we find" — questions a pile of adjustments
+    cannot answer on its own. Each run is kept with its counts so the shelf has
+    a history and the discrepancy rate can be watched over time.
+    """
+
+    audit_id = models.AutoField(primary_key=True)
+    shelf = models.ForeignKey(
+        'Shelf',
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        db_column='shelf_id',
+        related_name='stock_audits',
+    )
+    shelf_name = models.CharField(max_length=255, blank=True, default='')
+    audited_by = models.ForeignKey(
+        'User',
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        db_column='audited_by',
+        related_name='stock_audits',
+    )
+    audited_at = models.DateTimeField(default=timezone.now)
+    expected_count = models.IntegerField(default=0)
+    scanned_count = models.IntegerField(default=0)
+    found_count = models.IntegerField(default=0)
+    on_loan_count = models.IntegerField(default=0)
+    missing_count = models.IntegerField(default=0)
+    recovered_count = models.IntegerField(default=0)
+    unexpected_count = models.IntegerField(default=0)
+    notes = models.TextField(blank=True, null=True)
+
+    class Meta:
+        db_table = 'Stock_Audits'
+        ordering = ['-audited_at']
+
+    def __str__(self):
+        return f"Audit of {self.shelf_name or 'shelf'} on {self.audited_at:%Y-%m-%d}"
+
+    @property
+    def accounted_for(self):
+        """Copies the shelf could explain: on it, or out on loan."""
+        return self.found_count + self.on_loan_count
+
+    @property
+    def discrepancy_rate(self):
+        if not self.expected_count:
+            return 0
+        return round(self.missing_count * 100.0 / self.expected_count, 1)
+
+
 # ─── 17. BORROWING RULES (ADMIN-CONFIGURABLE) ─────────────────
 class BorrowingRule(models.Model):
     """Library-wide borrowing policy. A single active row is used; edit it
@@ -718,7 +774,12 @@ class InventoryRecord(models.Model):
 
     STATUS_CHOICES = [
         ('In Stock', 'In Stock'),
-        ('Removed', 'Removed'),        # audit adjustment or deaccession
+        # Not on the shelf where it should be, and not explained by a loan.
+        # A stock-take cannot tell "gone" from "mis-shelved, on a trolley, or
+        # in someone's hands two aisles away", so it says so and waits. Only a
+        # deliberate write-off later turns this into a loss.
+        ('Missing', 'Missing'),
+        ('Removed', 'Removed'),        # write-off or deaccession
     ]
 
     inventory_id = models.AutoField(primary_key=True)
@@ -755,6 +816,11 @@ class InventoryRecord(models.Model):
     condition = models.CharField(max_length=20, choices=CONDITION_CHOICES, default='Good')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='In Stock')
     qr_label = models.CharField(max_length=255, unique=True, blank=True, null=True)
+    # Set the first time a stock-take fails to find the copy, and cleared the
+    # moment it turns up again. `audit_misses` counts consecutive stock-takes
+    # that could not find it — one miss is a mislaid book, four is a loss.
+    missing_since = models.DateField(blank=True, null=True)
+    audit_misses = models.IntegerField(default=0)
     received_date = models.DateField(default=timezone.localdate)
     received_by = models.ForeignKey(
         'User',
@@ -820,6 +886,7 @@ class StockMovement(models.Model):
         ('Received', 'Received'),
         ('ConditionChange', 'Condition Change'),
         ('AuditAdjustment', 'Audit Adjustment'),
+        ('Found', 'Found During Audit'),
         ('Correction', 'Correction'),
         ('Deaccession', 'Deaccession'),
     ]

@@ -1,6 +1,6 @@
 from django.shortcuts import redirect, render, get_object_or_404
 from django.contrib import messages
-from django.db.models import Count, Q
+from django.db.models import Count, Max, Q
 from django.db import transaction
 from django.utils import timezone
 from django.http import HttpResponse, JsonResponse
@@ -64,7 +64,7 @@ from .emails import (
     registration_rejected_email,
 )
 from .reports import REPORT_TYPES, parse_date_range, build_report, render_report_pdf, render_report_excel
-from .models import Book, Patron, PatronLog, Transaction, User, ShelfLevel, Donation, Announcement, FloorPlan, Shelf, Room, Door, Waypoint, BLEBeacon, WaypointConnection, SystemLog, BorrowingRule, PasswordResetOTP, InventoryRecord, StockMovement
+from .models import Book, Patron, PatronLog, Transaction, User, ShelfLevel, Donation, Announcement, FloorPlan, Shelf, Room, Door, Waypoint, BLEBeacon, WaypointConnection, SystemLog, BorrowingRule, PasswordResetOTP, InventoryRecord, StockMovement, StockAudit
 
 # Patron views
 def patron_login(request):
@@ -5129,11 +5129,35 @@ def inventory_management(request):
     move_paginator = Paginator(movements, 25)
     move_page = move_paginator.get_page(request.GET.get('mpage', 1))
 
+    # Copies a count could not find, oldest absence first — the ones most
+    # likely to be genuinely gone rather than merely mislaid.
+    missing_copies = (InventoryRecord.objects
+                      .select_related('book', 'book__shelf_level', 'book__shelf_level__shelf')
+                      .filter(status='Missing')
+                      .order_by('missing_since', 'inventory_id'))
+    today = timezone.localdate()
+    for copy in missing_copies:
+        copy.days_missing = (today - copy.missing_since).days if copy.missing_since else 0
+
+    audits = (StockAudit.objects.select_related('shelf', 'audited_by').all())
+    audit_page = Paginator(audits, 15).get_page(request.GET.get('apage', 1))
+
+    # When each shelf was last counted — the question a stock-take exists to answer.
+    last_audited = {}
+    for row in StockAudit.objects.values('shelf_id').annotate(last=Max('audited_at')):
+        last_audited[row['shelf_id']] = row['last']
+    shelf_list = list(Shelf.objects.filter(is_active=True).select_related('room').order_by('name'))
+    for shelf in shelf_list:
+        shelf.last_audited = last_audited.get(shelf.shelf_id)
+
     context = {
         'tab': tab,
         'records': page_obj,
         'paginator': paginator,
         'movements': move_page,
+        'missing_copies': missing_copies,
+        'missing_count': len(missing_copies),
+        'audits': audit_page,
         'q': q,
         'condition_filter': condition,
         'source_filter': source,
@@ -5142,7 +5166,7 @@ def inventory_management(request):
         'stage_choices': InventoryRecord.STAGE_CHOICES,
         'today': timezone.localdate().isoformat(),
         'books': Book.objects.order_by('title'),
-        'shelves': Shelf.objects.filter(is_active=True).select_related('room').order_by('name'),
+        'shelves': shelf_list,
         'pending_transactions_count': Transaction.objects.filter(
             transaction_type='Borrow', return_date__isnull=True).count(),
     }
@@ -5536,12 +5560,36 @@ def search_inventory_by_qr(request):
 
 
 def _expected_copies_for_shelf(shelf_id):
-    """Copies the system believes are on this shelf right now."""
+    """Copies the shelf should be able to account for.
+
+    Includes copies already flagged Missing: a stock-take is exactly when a
+    mislaid book turns up again, and leaving them out would mean never
+    recovering one.
+    """
     return (InventoryRecord.objects
             .select_related('book', 'book__shelf_level', 'book__shelf_level__shelf')
-            .filter(status='In Stock',
+            .filter(status__in=['In Stock', 'Missing'],
                     condition__in=['Good', 'Damaged'],
                     book__shelf_level__shelf__shelf_id=shelf_id))
+
+
+def _open_loans_by_book(book_ids):
+    """How many copies of each title are out on loan right now.
+
+    Loans are recorded against the title, not the individual copy, so the
+    stock-take cannot know *which* copy a patron is holding — only how many are
+    legitimately off the shelf. Without this, every borrowed book is reported
+    missing, and a library with twenty books out would write off twenty books
+    on its first count.
+    """
+    counts = {}
+    rows = (Transaction.objects
+            .filter(book_id__in=book_ids, transaction_type='Borrow', return_date__isnull=True)
+            .values('book_id')
+            .annotate(n=Count('transaction_id')))
+    for row in rows:
+        counts[row['book_id']] = row['n']
+    return counts
 
 
 @admin_only_required
@@ -5563,7 +5611,7 @@ def stock_audit_compare(request):
     expected = list(_expected_copies_for_shelf(shelf.shelf_id))
     expected_by_label = {r.qr_label: r for r in expected}
 
-    found, missing, unexpected = [], [], []
+    found, unexpected, recovered = [], [], []
     seen = set()
     for label in scanned_labels:
         if label in seen:
@@ -5572,6 +5620,14 @@ def stock_audit_compare(request):
         record = expected_by_label.get(label)
         if record is not None:
             found.append(record)
+            if record.status == 'Missing':
+                # Turned up. Worth calling out: it is the good news in a count,
+                # and it is what undoes an earlier miss.
+                recovered.append({
+                    'inventory_id': record.inventory_id,
+                    'title': record.display_title,
+                    'missing_since': record.missing_since.isoformat() if record.missing_since else None,
+                })
         else:
             other = InventoryRecord.objects.select_related('book').filter(qr_label=label).first()
             unexpected.append({
@@ -5581,15 +5637,31 @@ def stock_audit_compare(request):
                 'belongs_to': (other.shelf_location or 'Not shelved') if other else '-',
             })
 
+    # Anything not scanned is unaccounted for until a loan explains it.
     found_ids = {r.inventory_id for r in found}
-    for record in expected:
-        if record.inventory_id not in found_ids:
-            missing.append({
+    unaccounted = [r for r in expected if r.inventory_id not in found_ids]
+
+    loans = _open_loans_by_book([r.book_id for r in unaccounted if r.book_id])
+    on_loan, missing = [], []
+    for record in unaccounted:
+        remaining = loans.get(record.book_id, 0)
+        if remaining > 0:
+            # A copy of this title is with a patron, so one absence is expected.
+            loans[record.book_id] = remaining - 1
+            on_loan.append({
                 'inventory_id': record.inventory_id,
-                'qr_label': record.qr_label,
                 'title': record.display_title,
-                'condition': record.condition,
             })
+            continue
+        missing.append({
+            'inventory_id': record.inventory_id,
+            'qr_label': record.qr_label,
+            'title': record.display_title,
+            'condition': record.condition,
+            'already_missing': record.status == 'Missing',
+            'missing_since': record.missing_since.isoformat() if record.missing_since else None,
+            'audit_misses': record.audit_misses,
+        })
 
     return JsonResponse({
         'success': True,
@@ -5597,7 +5669,10 @@ def stock_audit_compare(request):
         'expected_count': len(expected),
         'scanned_count': len(seen),
         'found_count': len(found),
+        'on_loan': on_loan,
+        'on_loan_count': len(on_loan),
         'missing': missing,
+        'recovered': recovered,
         'unexpected': unexpected,
         'reconciled': not missing and not unexpected,
     })
@@ -5605,36 +5680,129 @@ def stock_audit_compare(request):
 
 @admin_only_required
 def stock_audit_apply(request):
-    """Apply an audit result after the Administrator confirms it."""
+    """Close a stock-take: record it, flag what is missing, recover what turned up.
+
+    Nothing is written off here. A copy that could not be found is flagged
+    Missing and its miss counted; declaring it lost is a separate, later
+    decision made against how long it has been gone (see write_off_missing).
+    A shelf-read finds mislaid books more often than it finds thefts, and a
+    process that goes straight to "lost" on one pass would destroy that.
+    """
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
 
     if (request.POST.get('confirm') or '').strip() != 'yes':
         return JsonResponse({'success': False,
-                             'error': 'Confirm the discrepancy report before it is applied'})
+                             'error': 'Confirm the discrepancy report before it is filed'})
 
-    ids = [i for i in request.POST.getlist('missing_ids') if str(i).strip().isdigit()]
-    reason = (request.POST.get('reason') or '').strip() or 'Not found during stock audit'
-    shelf_name = (request.POST.get('shelf_name') or '').strip()
+    shelf_id = (request.POST.get('shelf_id') or '').strip()
+    shelf = Shelf.objects.filter(shelf_id=shelf_id).first() if shelf_id.isdigit() else None
+    shelf_name = (request.POST.get('shelf_name') or '').strip() or (shelf.name if shelf else '')
+    reason = ((request.POST.get('reason') or '').strip()
+              or 'Not found during stock audit')
+    source = ('Stock audit - ' + shelf_name) if shelf_name else 'Stock audit'
+
+    missing_ids = [int(i) for i in request.POST.getlist('missing_ids') if str(i).strip().isdigit()]
+    found_ids = [int(i) for i in request.POST.getlist('found_ids') if str(i).strip().isdigit()]
+
+    def _int(name):
+        raw = (request.POST.get(name) or '0').strip()
+        return int(raw) if raw.lstrip('-').isdigit() else 0
+
+    today = timezone.localdate()
+    flagged = recovered = 0
+    with transaction.atomic():
+        for record in InventoryRecord.objects.filter(inventory_id__in=missing_ids):
+            if record.status == 'Removed':
+                continue
+            before = record.status
+            record.status = 'Missing'
+            record.audit_misses = (record.audit_misses or 0) + 1
+            if record.missing_since is None:
+                record.missing_since = today
+            record.save(update_fields=['status', 'audit_misses', 'missing_since'])
+            _record_movement(record, 'AuditAdjustment', request, reason=reason, source=source,
+                             before=before, after='Missing')
+            flagged += 1
+
+        # Anything scanned that had been written down as missing is back.
+        for record in InventoryRecord.objects.filter(inventory_id__in=found_ids,
+                                                     status='Missing'):
+            gone_since = record.missing_since
+            record.status = 'In Stock'
+            record.missing_since = None
+            record.audit_misses = 0
+            record.save(update_fields=['status', 'missing_since', 'audit_misses'])
+            _record_movement(
+                record, 'Found', request,
+                reason=('Found on the shelf during stock audit'
+                        + (' — missing since ' + gone_since.strftime('%b %d, %Y')
+                           if gone_since else '')),
+                source=source, before='Missing', after='In Stock')
+            recovered += 1
+
+        audit = StockAudit.objects.create(
+            shelf=shelf,
+            shelf_name=shelf_name,
+            audited_by=User.objects.filter(admin_id=request.session.get('admin_id')).first(),
+            expected_count=_int('expected_count'),
+            scanned_count=_int('scanned_count'),
+            found_count=_int('found_count'),
+            on_loan_count=_int('on_loan_count'),
+            missing_count=flagged,
+            recovered_count=recovered,
+            unexpected_count=_int('unexpected_count'),
+            notes=(request.POST.get('notes') or '').strip() or None,
+        )
+
+    log_admin_action(request, 'Create', 'Inventory', audit.audit_id,
+                     'Stock audit of ' + (shelf_name or 'shelf') + ': '
+                     + str(flagged) + ' flagged missing, '
+                     + str(recovered) + ' recovered')
+    return JsonResponse({'success': True, 'flagged': flagged, 'recovered': recovered,
+                         'audit_id': audit.audit_id})
+
+
+@admin_only_required
+def write_off_missing(request):
+    """Declare copies that have stayed missing to be lost.
+
+    Deliberately separate from the stock-take. A book absent from one count is
+    usually mislaid; a book absent from several counts over months is gone, and
+    only a person looking at how long it has been missing should be the one to
+    say so.
+    """
+    if request.method != 'POST':
+        return redirect('inventory_management')
+
+    ids = [int(i) for i in request.POST.getlist('inventory_ids') if str(i).strip().isdigit()]
+    reason = (request.POST.get('reason') or '').strip()
     if not ids:
-        return JsonResponse({'success': False, 'error': 'Nothing to adjust'})
+        messages.error(request, 'Select at least one missing copy to write off.')
+        return redirect('/admin-portal/inventory/?tab=missing')
+    if not reason:
+        messages.error(request, 'A write-off needs a reason — it is a permanent correction.')
+        return redirect('/admin-portal/inventory/?tab=missing')
 
-    adjusted = 0
-    for record in InventoryRecord.objects.filter(inventory_id__in=ids):
-        before = record.condition
-        if before == 'Lost':
-            continue
-        record.condition = 'Lost'
-        record.save(update_fields=['condition'])
-        _record_movement(record, 'AuditAdjustment', request, reason=reason,
-                         source=('Stock audit - ' + shelf_name) if shelf_name else 'Stock audit',
-                         before=before, after='Lost')
-        adjusted += 1
+    written_off = 0
+    with transaction.atomic():
+        for record in InventoryRecord.objects.filter(inventory_id__in=ids, status='Missing'):
+            since = record.missing_since
+            record.condition = 'Lost'
+            record.status = 'Removed'
+            record.save(update_fields=['condition', 'status'])
+            _record_movement(
+                record, 'Deaccession', request,
+                reason=(reason + (' (missing since ' + since.strftime('%b %d, %Y') + ')'
+                                  if since else '')),
+                source='Write-off of missing stock',
+                before='Missing', after='Lost')
+            written_off += 1
 
     log_admin_action(request, 'Update', 'Inventory', None,
-                     'Stock audit on ' + (shelf_name or 'shelf') + ': '
-                     + str(adjusted) + ' copy(ies) marked lost')
-    return JsonResponse({'success': True, 'adjusted': adjusted})
+                     str(written_off) + ' missing copy(ies) written off as lost — ' + reason)
+    messages.success(request, str(written_off) + ' copy(ies) written off as lost.')
+    return redirect('/admin-portal/inventory/?tab=missing')
 
 
 def flag_inventory_copy_lost(request, book, reason):
