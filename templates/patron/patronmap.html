@@ -559,13 +559,50 @@ function trilaterate() {
   if (isFinite(x) && isFinite(y)) setPatronPosition({ x: x, y: y });
 }
 
+// Three different things stop Bluetooth working here, and they need three
+// different fixes. Rolling them into one "not supported" message sends whoever
+// is setting this up to look at the phone when the problem is the address bar.
+function bleUnavailableReason() {
+  // Checked first, and deliberately so: on an insecure origin the browser hides
+  // navigator.bluetooth entirely, so every other check would blame the device
+  // for what is really a http:// URL.
+  if (!window.isSecureContext) return 'insecure';
+  if (!('bluetooth' in navigator)) return 'unsupported';
+  if (!navigator.bluetooth.requestLEScan) return 'noscanning';
+  return null;
+}
+
+const BLE_HELP = {
+  insecure: {
+    status: 'Needs a secure (https) address',
+    message: 'Bluetooth only works on a secure address. This page was opened over '
+           + 'http://, so the browser will not allow it — nothing is wrong with your phone.'
+           + '\n\nOpen the library map using its https:// address and try again. '
+           + 'The floor plan and shelf locations work either way.',
+  },
+  unsupported: {
+    status: 'BLE not supported by this browser',
+    message: 'This browser cannot use Bluetooth, so your position cannot be shown here. '
+           + 'The floor plan and shelf locations are still available.'
+           + '\n\nOn iPhone and iPad no browser can do this, including Chrome — Apple does '
+           + 'not allow it. Live positioning needs Chrome on Android, or Chrome or Edge on a '
+           + 'computer.',
+  },
+  noscanning: {
+    status: 'Bluetooth scanning is switched off',
+    message: 'This browser supports Bluetooth but not the beacon scanning it needs, which is '
+           + 'usually a setting rather than a limitation.'
+           + '\n\nIn Chrome, open chrome://flags, turn on "Experimental Web Platform '
+           + 'features", and restart the browser. Ask the librarian if you would rather not.',
+  },
+};
+
 async function enableBLE() {
   closeBTModal();
-  if (!('bluetooth' in navigator) || !navigator.bluetooth.requestLEScan) {
-    setStatus('amber', 'BLE not supported on this device');
-    alert('This browser cannot scan for Bluetooth beacons, so your position cannot be '
-        + 'determined here. The floor plan and shelf locations are still available.\n\n'
-        + 'Live positioning needs Chrome on Android or desktop with Web Bluetooth scanning enabled.');
+  const reason = bleUnavailableReason();
+  if (reason) {
+    setStatus('amber', BLE_HELP[reason].status);
+    alert(BLE_HELP[reason].message);
     return;
   }
   try {
