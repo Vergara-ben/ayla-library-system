@@ -626,6 +626,110 @@ class StockAudit(models.Model):
         return round(self.missing_count * 100.0 / self.expected_count, 1)
 
 
+class Conversation(models.Model):
+    """One patron's enquiry thread with the library — "Ask a Librarian".
+
+    Deliberately a help desk rather than instant messaging. Ayla has one
+    computer and one librarian, who cannot sit in a live chat while also
+    working the desk; a patron asks a question, gets on with their day, and is
+    emailed when someone answers. `status` is what makes that workable: it is
+    the queue of questions still waiting for a reply, which is the only thing
+    stopping an enquiry from being quietly lost.
+    """
+
+    STATUS_CHOICES = [
+        ('Open', 'Waiting for a reply'),
+        ('Answered', 'Answered'),
+        ('Closed', 'Closed'),
+    ]
+
+    # Asked at the start so the librarian can see what a thread is about before
+    # opening it, and so enquiries can be counted by kind rather than guessed at.
+    TOPIC_CHOICES = [
+        ('Book enquiry', 'Looking for a book'),
+        ('Borrowing', 'Borrowing, returning or fines'),
+        ('Account', 'My account or library card'),
+        ('Facilities', 'Opening hours or facilities'),
+        ('Other', 'Something else'),
+    ]
+
+    conversation_id = models.AutoField(primary_key=True)
+    patron = models.ForeignKey(
+        'Patron',
+        on_delete=models.CASCADE,
+        db_column='patron_id',
+        related_name='conversations',
+    )
+    topic = models.CharField(max_length=40, choices=TOPIC_CHOICES, default='Other')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Open')
+    created_at = models.DateTimeField(default=timezone.now)
+    last_message_at = models.DateTimeField(default=timezone.now)
+    closed_at = models.DateTimeField(blank=True, null=True)
+    closed_by = models.ForeignKey(
+        'User',
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        db_column='closed_by',
+        related_name='closed_conversations',
+    )
+    # When the patron last had the thread open. A reply sent while they are
+    # reading it does not need an email, and this is how that is known.
+    patron_last_seen_at = models.DateTimeField(blank=True, null=True)
+    # When they were last emailed about a reply, so a librarian typing three
+    # short answers in a row does not send three emails.
+    last_notified_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        db_table = 'Conversations'
+        ordering = ['-last_message_at']
+
+    def __str__(self):
+        return f"{self.patron.fullname} — {self.topic} ({self.status})"
+
+    @property
+    def is_awaiting_reply(self):
+        return self.status == 'Open'
+
+
+class ChatMessage(models.Model):
+    """A single message in an enquiry thread."""
+
+    SENDER_CHOICES = [
+        ('Patron', 'Patron'),
+        ('Staff', 'Library staff'),
+    ]
+
+    message_id = models.AutoField(primary_key=True)
+    conversation = models.ForeignKey(
+        Conversation,
+        on_delete=models.CASCADE,
+        db_column='conversation_id',
+        related_name='messages',
+    )
+    sender_type = models.CharField(max_length=10, choices=SENDER_CHOICES)
+    # Who answered, for the same reason every other action here records an
+    # actor: a patron told the wrong thing should be traceable to whoever said it.
+    staff = models.ForeignKey(
+        'User',
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        db_column='staff_id',
+        related_name='chat_replies',
+    )
+    body = models.TextField()
+    sent_at = models.DateTimeField(default=timezone.now)
+    read_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        db_table = 'Chat_Messages'
+        ordering = ['sent_at', 'message_id']
+
+    def __str__(self):
+        return f"{self.sender_type}: {self.body[:40]}"
+
+
 # ─── 17. BORROWING RULES (ADMIN-CONFIGURABLE) ─────────────────
 class BorrowingRule(models.Model):
     """Library-wide borrowing policy. A single active row is used; edit it

@@ -1,0 +1,214 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en" data-module="admin">
+<head>
+    <meta charset="UTF-8">
+    <meta name="theme-color" content="#ffffff">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ayla Admin Panel - Messages</title>
+    <script src="{% static 'js/theme.js' %}"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="{% static 'js/tailwind-theme.js' %}"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@400;700&display=swap" rel="stylesheet">
+
+    <link rel="stylesheet" href="{% static 'css/theme.css' %}">
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: var(--bg-main); color: var(--text-primary); }
+        .logo-text { font-family: 'Rowdies', sans-serif; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: var(--bg-main); }
+        ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
+        .mobile-menu-btn {
+            display: none; align-items: center; justify-content: center;
+            width: 2.5rem; height: 2.5rem; border-radius: 0.5rem;
+            background: var(--bg-card); border: 1px solid var(--border-color);
+            color: var(--text-primary); cursor: pointer; margin-right: 0.75rem;
+        }
+        @media (max-width: 1024px) {
+            aside { position: fixed; left: -100%; top: 0; height: 100vh; z-index: 50; transition: left 0.3s ease; }
+            aside.open { left: 0; }
+            .mobile-menu-btn { display: flex !important; }
+            main { padding: 1rem; }
+        }
+    </style>
+    <link rel="stylesheet" href="{% static 'css/admin-enhance.css' %}">
+    <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
+    <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
+    <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
+</head>
+<body class="flex h-screen overflow-hidden">
+
+    {% include 'admin/_sidebar.html' with active='chat' %}
+
+    <div class="flex-1 flex flex-col overflow-hidden">
+        <header class="h-16 flex-shrink-0 flex items-center justify-between px-8" style="background-color: var(--bg-main);">
+            <div class="flex items-center">
+                <button class="mobile-menu-btn" onclick="toggleSidebar()"><i class="fa-solid fa-bars"></i></button>
+                <h2 class="logo-text text-lg tracking-wider text-slate-200 uppercase">Messages</h2>
+                {% if open_count %}<span class="ml-3 bg-amber-500/15 text-amber-400 text-[11px] px-2.5 py-1 rounded font-bold border border-amber-600/40">{{ open_count }} waiting</span>{% endif %}
+            </div>
+            <div class="flex items-center gap-4">
+                <span class="bg-cyan-950 text-cyan-400 text-xs px-2.5 py-1 rounded font-bold border border-cyan-800 tracking-wider">{% if request.session.admin_role == 'Staff' %}STAFF{% else %}ADMIN{% endif %}</span>
+                <div class="w-8 h-8 rounded-full bg-cyan-900 border border-cyan-700 flex items-center justify-center text-xs font-bold text-cyan-200">AD</div>
+            </div>
+        </header>
+
+        <main class="flex-1 overflow-hidden p-6">
+            <div class="h-full grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-4">
+
+                {# The queue. Threads still waiting for an answer come first, because #}
+                {# an unanswered question is the only thing here that needs doing. #}
+                <div class="rounded-xl border border-slate-800/80 overflow-hidden flex flex-col" style="background-color: var(--bg-card);">
+                    <div class="p-4 border-b border-slate-800 flex items-center gap-1">
+                        <a href="?status=active" class="px-2.5 py-1 rounded-md text-[11px] font-bold {% if status_filter == 'active' %}bg-cyan-700/30 text-cyan-400 border border-cyan-800/50{% else %}text-slate-400 hover:text-slate-200{% endif %}">Active</a>
+                        <a href="?status=open" class="px-2.5 py-1 rounded-md text-[11px] font-bold {% if status_filter == 'open' %}bg-cyan-700/30 text-cyan-400 border border-cyan-800/50{% else %}text-slate-400 hover:text-slate-200{% endif %}">Waiting</a>
+                        <a href="?status=closed" class="px-2.5 py-1 rounded-md text-[11px] font-bold {% if status_filter == 'closed' %}bg-cyan-700/30 text-cyan-400 border border-cyan-800/50{% else %}text-slate-400 hover:text-slate-200{% endif %}">Closed</a>
+                    </div>
+                    <div class="flex-1 overflow-y-auto divide-y divide-slate-800/40">
+                        {% for c in conversations %}
+                        <a href="?status={{ status_filter }}&c={{ c.conversation_id }}" class="block px-4 py-3 hover:bg-slate-800/20 transition-colors {% if selected and c.conversation_id == selected.conversation_id %}bg-slate-800/30 border-l-2 border-cyan-500{% endif %}">
+                            <div class="flex items-center justify-between gap-2">
+                                <span class="text-xs font-bold text-slate-200 truncate">{{ c.patron.fullname }}</span>
+                                {% if c.unread %}<span class="bg-rose-500/20 text-rose-400 text-[10px] px-1.5 py-0.5 rounded-full font-bold shrink-0">{{ c.unread }}</span>{% endif %}
+                            </div>
+                            <div class="text-[10px] text-slate-500 mt-0.5 truncate">{{ c.get_topic_display }}</div>
+                            <div class="flex items-center justify-between gap-2 mt-1">
+                                <span class="text-[10px] {% if c.status == 'Open' %}text-amber-400 font-bold{% elif c.status == 'Answered' %}text-emerald-500{% else %}text-slate-600{% endif %}">{{ c.get_status_display }}</span>
+                                <span class="text-[10px] text-slate-600">{{ c.last_message_at|date:"M j" }}</span>
+                            </div>
+                        </a>
+                        {% empty %}
+                        <p class="px-4 py-10 text-center text-xs text-slate-500">No conversations here.</p>
+                        {% endfor %}
+                    </div>
+                </div>
+
+                <div class="rounded-xl border border-slate-800/80 overflow-hidden flex flex-col" style="background-color: var(--bg-card);">
+                    {% if selected %}
+                    <div class="p-4 border-b border-slate-800 flex items-center justify-between gap-3">
+                        <div class="min-w-0">
+                            <p class="text-sm font-bold text-slate-200 truncate">{{ selected.patron.fullname }}</p>
+                            <p class="text-[10px] text-slate-500">{{ selected.get_topic_display }} · asked {{ selected.created_at|date:"M j, Y" }}{% if selected.patron.email %} · {{ selected.patron.email }}{% endif %}</p>
+                        </div>
+                        {% if selected.status != 'Closed' %}
+                        <form method="post" action="{% url 'close_conversation' %}" onsubmit="return confirm('Close this enquiry? A new question from {{ selected.patron.fullname|escapejs }} will reopen it.')">
+                            {% csrf_token %}
+                            <input type="hidden" name="conversation_id" value="{{ selected.conversation_id }}">
+                            <button type="submit" class="text-[11px] font-semibold px-3 py-1.5 rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800/50 whitespace-nowrap">Mark resolved</button>
+                        </form>
+                        {% else %}
+                        <span class="text-[11px] text-slate-500 whitespace-nowrap">Closed {{ selected.closed_at|date:"M j, Y" }}</span>
+                        {% endif %}
+                    </div>
+
+                    {# Rendered here as well as by the poll, so the conversation is #}
+                    {# on the page the moment it loads and survives a dead script. #}
+                    <div id="thread" class="flex-1 overflow-y-auto p-5 space-y-3">
+                        {% for m in thread %}
+                        <div class="flex {% if m.sender_type == 'Staff' %}justify-end{% else %}justify-start{% endif %}">
+                            <div class="max-w-[80%] rounded-xl px-3.5 py-2.5 text-xs leading-relaxed whitespace-pre-wrap break-words {% if m.sender_type == 'Staff' %}bg-cyan-700/30 border border-cyan-800/60 text-slate-100{% else %}bg-slate-800/50 border border-slate-700/50 text-slate-200{% endif %}">{{ m.body }}<div class="text-[9px] text-slate-500 mt-1.5">{% if m.sender_type == 'Staff' %}{{ m.staff.fullname|default:"Library" }}{% else %}Patron{% endif %} · {{ m.sent_at|date:"M d, Y" }} · {{ m.sent_at|time:"h:i A" }}</div></div>
+                        </div>
+                        {% empty %}
+                        <p class="m-auto text-xs text-slate-500">No messages in this thread yet.</p>
+                        {% endfor %}
+                    </div>
+
+                    {% if selected.status != 'Closed' %}
+                    <div class="p-4 border-t border-slate-800 space-y-2">
+                        <textarea id="replyBody" rows="3" placeholder="Type your reply…" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 text-sm placeholder-slate-600" style="background-color: var(--bg-input);"></textarea>
+                        <div class="flex items-center justify-between gap-3">
+                            <p id="replyHint" class="text-[10px] text-slate-500">The patron is emailed when you reply, unless they are reading this right now.</p>
+                            <button type="button" id="replyBtn" onclick="sendReply()" class="bg-cyan-700 hover:bg-cyan-600 text-white text-xs font-bold px-4 py-2.5 rounded-lg whitespace-nowrap">Send reply</button>
+                        </div>
+                    </div>
+                    {% endif %}
+                    {% else %}
+                    <p class="m-auto text-xs text-slate-500">Pick a conversation on the left.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        function toggleSidebar() { document.querySelector('aside').classList.toggle('open'); }
+
+        const CHAT = {
+            id: {% if selected %}{{ selected.conversation_id }}{% else %}null{% endif %},
+            reply: "{% url 'staff_reply' %}",
+            poll: "{% url 'staff_poll_messages' %}",
+            csrf: '{{ csrf_token }}',
+        };
+
+        function esc(s) {
+            return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
+                return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+            });
+        }
+
+        function renderThread(messages) {
+            const box = document.getElementById('thread');
+            if (!box) return;
+            box.innerHTML = messages.map(function (m) {
+                const mine = m.sender === 'Staff';
+                return '<div class="flex ' + (mine ? 'justify-end' : 'justify-start') + '">'
+                     + '<div class="max-w-[80%] rounded-xl px-3.5 py-2.5 text-xs leading-relaxed whitespace-pre-wrap break-words '
+                     + (mine ? 'bg-cyan-700/30 border border-cyan-800/60 text-slate-100'
+                             : 'bg-slate-800/50 border border-slate-700/50 text-slate-200') + '">'
+                     + esc(m.body)
+                     + '<div class="text-[9px] text-slate-500 mt-1.5">'
+                     + (mine ? esc(m.staff || 'Library') : 'Patron') + ' · ' + esc(m.sent_at)
+                     + '</div></div></div>';
+            }).join('');
+            box.scrollTop = box.scrollHeight;
+        }
+
+        let sending = false;
+        async function sendReply() {
+            if (sending || !CHAT.id) return;
+            const field = document.getElementById('replyBody');
+            const body = field.value.trim();
+            if (!body) { field.focus(); return; }
+
+            sending = true;
+            document.getElementById('replyBtn').disabled = true;
+            try {
+                const r = await fetch(CHAT.reply, {
+                    method: 'POST',
+                    headers: { 'X-CSRFToken': CHAT.csrf,
+                               'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: new URLSearchParams({ conversation_id: CHAT.id, body: body }),
+                });
+                const data = await r.json();
+                const hint = document.getElementById('replyHint');
+                if (!data.success) { hint.textContent = data.error; return; }
+                field.value = '';
+                renderThread(data.messages);
+                // Whether the email actually went is worth saying: silence here
+                // is how a librarian assumes a patron was told when they were not.
+                hint.textContent = data.emailed
+                    ? 'Reply sent, and the patron has been emailed.'
+                    : 'Reply sent. No email — they are reading this now, or were emailed a moment ago.';
+            } finally {
+                sending = false;
+                document.getElementById('replyBtn').disabled = false;
+            }
+        }
+
+        async function poll() {
+            try {
+                const url = CHAT.poll + (CHAT.id ? '?conversation_id=' + CHAT.id : '');
+                const r = await fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+                const data = await r.json();
+                if (data.messages) renderThread(data.messages);
+            } catch (e) { /* offline; the next tick will catch up */ }
+        }
+        poll();
+        setInterval(poll, 6000);
+    </script>
+    <script src="{% static 'js/admin-enhance.js' %}" defer></script>
+</body>
+</html>

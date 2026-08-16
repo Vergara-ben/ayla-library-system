@@ -64,6 +64,13 @@ active keys: dashboard, indoor_map, transactions, logs, books, patrons,
                     <i class="fa-solid fa-bullhorn w-5 text-sm"></i>
                     <span class="text-sm {% if active != 'announcements' %}font-medium{% endif %}">Announcements</span>
                 </a>
+                <a href="{% url 'admin_messages' %}" class="flex items-center justify-between px-3 py-2 rounded-lg {% if active == 'chat' %}bg-slate-800/50 text-cyan-400 font-medium border border-slate-700/50{% else %}text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors{% endif %}">
+                    <div class="flex items-center gap-3">
+                        <i class="fa-solid fa-comments w-5 text-sm"></i>
+                        <span class="text-sm {% if active != 'chat' %}font-medium{% endif %}">Messages</span>
+                    </div>
+                    {% if unanswered_messages %}<span class="bg-rose-500/20 text-rose-400 text-xs px-2 py-0.5 rounded-full font-semibold">{{ unanswered_messages }}</span>{% endif %}
+                </a>
                 <a href="{% url 'floorplan_management' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg {% if active == 'floorplans' %}bg-slate-800/50 text-cyan-400 font-medium border border-slate-700/50{% else %}text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors{% endif %}">
                     <i class="fa-solid fa-layer-group w-5 text-sm"></i>
                     <span class="text-sm {% if active != 'floorplans' %}font-medium{% endif %}">Floor Plans</span>

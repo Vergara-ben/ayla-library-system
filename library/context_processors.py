@@ -1,6 +1,6 @@
 """Template context shared across the portal templates."""
 
-from .models import User
+from .models import Conversation, User
 
 
 def staff_modules(request):
@@ -16,4 +16,10 @@ def staff_modules(request):
     user = User.objects.filter(admin_id=admin_id).first()
     if user is None:
         return {}
-    return {'allowed_modules': user.module_keys}
+    # Surfaced on every portal page: an enquiry nobody has answered should be
+    # visible from wherever the librarian happens to be working, not only from
+    # the Messages page they have no reason to open.
+    return {
+        'allowed_modules': user.module_keys,
+        'unanswered_messages': Conversation.objects.filter(status='Open').count(),
+    }

@@ -1,6 +1,7 @@
 from django.urls import path
 from . import views
 from . import desk
+from . import chat
 
 urlpatterns = [
     path('patron/login/', views.patron_login, name='patron_login'),
@@ -37,6 +38,15 @@ urlpatterns = [
     path('library-staff/indoor-map/', views.staff_indoor_map, name='staff_indoor_map'),
     path('library-staff/receiving/', views.staff_inventory_receive, name='staff_inventory_receive'),
     path('library-staff/patrons/', views.staff_manage_patron, name='staff_manage_patron'),
+
+    # ─── Ask a Librarian ─────────────────────────────────────────────────
+    path('patron/messages/', chat.patron_messages, name='patron_messages'),
+    path('patron/messages/send/', chat.patron_send_message, name='patron_send_message'),
+    path('patron/messages/poll/', chat.patron_poll_messages, name='patron_poll_messages'),
+    path('admin-portal/messages/', chat.admin_messages, name='admin_messages'),
+    path('admin-portal/messages/reply/', chat.staff_reply, name='staff_reply'),
+    path('admin-portal/messages/close/', chat.close_conversation, name='close_conversation'),
+    path('admin-portal/messages/poll/', chat.staff_poll_messages, name='staff_poll_messages'),
 
     # ─── Desk mode: Log Management, handed to the patron ──────────────────
     path('desk/arm/', desk.arm_desk_mode, name='desk_arm'),

@@ -31,6 +31,10 @@ STAFF_MODULES = [
     # deleting patron records stay Administrator-only.
     ('patrons', 'Patron Registration & Review',
      'Register walk-ins and review online sign-ups', 'fa-user-check'),
+    # Answering patron enquiries. Kept a module of its own because a reply
+    # from the library carries the library's authority, whoever typed it.
+    ('chat', 'Messages',
+     'Answer questions patrons send to the library', 'fa-comments'),
 ]
 
 MODULE_KEYS = [key for key, _label, _desc, _icon in STAFF_MODULES]

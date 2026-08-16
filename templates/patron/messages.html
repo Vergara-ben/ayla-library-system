@@ -1,0 +1,199 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en" data-module="patron">
+<head>
+<meta charset="UTF-8">
+<meta name="theme-color" content="#ffffff">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AYLA Library — Ask a Librarian</title>
+<script src="{% static 'js/theme.js' %}"></script>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{% static 'css/theme.css' %}">
+<style>
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;padding-bottom:80px;}
+
+  .navbar{position:sticky;top:0;z-index:100;background:var(--nav-bg);backdrop-filter:blur(20px);border-bottom:1px solid var(--border);padding:14px 20px;display:flex;align-items:center;gap:12px;}
+  .back-btn{width:36px;height:36px;border-radius:10px;border:1px solid var(--border);background:var(--surface2);display:flex;align-items:center;justify-content:center;cursor:pointer;text-decoration:none;color:var(--text);font-size:16px;}
+  .nav-title{font-family:'Syne',sans-serif;font-size:18px;font-weight:800;flex:1;}
+
+  .page{max-width:600px;margin:0 auto;padding:20px;}
+
+  .intro{background:var(--tint-accent);border:1px solid var(--border);border-radius:14px;padding:16px 18px;margin-bottom:18px;}
+  .intro h2{font-family:'Syne',sans-serif;font-size:16px;margin-bottom:6px;}
+  .intro p{font-size:12.5px;color:var(--muted);line-height:1.6;}
+
+  .status-pill{display:inline-block;font-size:11px;font-weight:700;padding:3px 10px;border-radius:99px;margin-top:10px;}
+  .st-open{background:var(--tint-warn,rgba(245,158,11,.15));color:#b45309;}
+  .st-answered{background:rgba(5,150,105,.15);color:#047857;}
+
+  .thread{display:flex;flex-direction:column;gap:12px;margin-bottom:20px;}
+  .bubble{max-width:85%;padding:12px 14px;border-radius:14px;font-size:13.5px;line-height:1.6;white-space:pre-wrap;word-break:break-word;}
+  .from-me{align-self:flex-end;background:var(--accent);color:var(--on-accent);border-bottom-right-radius:4px;}
+  .from-library{align-self:flex-start;background:var(--surface2);border:1px solid var(--border);border-bottom-left-radius:4px;}
+  .meta{font-size:10.5px;color:var(--muted);margin-top:5px;}
+  .from-me .meta{color:var(--on-accent);opacity:.8;}
+
+  .empty{text-align:center;color:var(--muted);font-size:13px;padding:30px 10px;line-height:1.7;}
+
+  label{display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:6px;}
+  select,textarea{width:100%;font-family:inherit;font-size:14px;padding:12px 14px;border:1px solid var(--border);border-radius:11px;background:var(--surface2);color:var(--text);resize:vertical;}
+  select:focus,textarea:focus{outline:none;border-color:var(--accent);}
+  .field{margin-bottom:14px;}
+
+  .send-btn{width:100%;padding:14px;border:none;border-radius:11px;background:var(--accent);color:var(--on-accent);font-family:inherit;font-weight:700;font-size:14px;cursor:pointer;}
+  .send-btn:disabled{opacity:.5;cursor:not-allowed;}
+  .hint{font-size:11px;color:var(--muted);margin-top:8px;line-height:1.6;}
+
+  .history{margin-top:26px;}
+  .history h3{font-family:'Syne',sans-serif;font-size:14px;margin-bottom:10px;}
+  .past{border:1px solid var(--border);border-radius:11px;padding:12px 14px;margin-bottom:8px;font-size:12.5px;color:var(--muted);}
+
+  .bottom-nav{position:fixed;bottom:0;left:0;right:0;z-index:100;background:var(--nav-bg);backdrop-filter:blur(20px);border-top:1px solid var(--border);display:flex;padding:10px 0 calc(10px + env(safe-area-inset-bottom));}
+  .nav-item{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;cursor:pointer;color:var(--muted);text-decoration:none;}
+  .nav-item.active{color:var(--accent);}
+  .nav-icon{font-size:20px;}.nav-label{font-size:10px;font-weight:500;}
+</style>
+<link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
+</head>
+<body>
+
+<nav class="navbar">
+  <a href="{% url 'patron_account' %}" class="back-btn">←</a>
+  <div class="nav-title">Ask a Librarian</div>
+</nav>
+
+<div class="page">
+
+  {# The library is one person at a desk, not a call centre. Saying so up front #}
+  {# is what stops a patron waiting at the screen for an instant answer. #}
+  <div class="intro">
+    <h2>Ask the library a question</h2>
+    <p>Send your question here and a librarian will answer it. We are not always at the
+       computer, so you will get an <strong>email</strong> as soon as someone replies —
+       there is no need to wait on this page.</p>
+    {% if conversation %}
+      {% if conversation.status == 'Open' %}
+        <span class="status-pill st-open">Waiting for a reply</span>
+      {% else %}
+        <span class="status-pill st-answered">Answered</span>
+      {% endif %}
+    {% endif %}
+  </div>
+
+  <div class="thread" id="thread">
+    {% for m in messages %}
+      <div class="bubble {% if m.sender_type == 'Patron' %}from-me{% else %}from-library{% endif %}">
+        {{ m.body }}
+        <div class="meta">{% if m.sender_type == 'Patron' %}You{% else %}{{ m.staff.fullname|default:"The library" }}{% endif %} · {{ m.sent_at|date:"M d, Y" }} · {{ m.sent_at|time:"h:i A" }}</div>
+      </div>
+    {% empty %}
+      <p class="empty">No messages yet.<br>Ask us anything about the library, your account, or a book you are looking for.</p>
+    {% endfor %}
+  </div>
+
+  {% if not conversation %}
+  <div class="field">
+    <label for="topicField">What is it about?</label>
+    <select id="topicField">
+      {% for value, label in topic_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+    </select>
+  </div>
+  {% endif %}
+
+  <div class="field">
+    <label for="bodyField">Your message</label>
+    <textarea id="bodyField" rows="4" placeholder="Type your question here…"></textarea>
+  </div>
+  <button type="button" class="send-btn" id="sendBtn" onclick="sendMessage()">Send to the library</button>
+  <p class="hint" id="hint">The library is open on weekdays. If you write outside opening hours, you will get a reply the next day we are open.</p>
+
+  {% if history %}
+  <div class="history">
+    <h3>Earlier questions</h3>
+    {% for c in history %}
+      <div class="past">{{ c.get_topic_display }} · closed {{ c.closed_at|date:"M d, Y" }}</div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+
+<nav class="bottom-nav">
+  <a href="{% url 'patron_dashboard' %}" class="nav-item"><div class="nav-icon">🏠</div><div class="nav-label">Home</div></a>
+  <a href="{% url 'patron_catalog' %}" class="nav-item"><div class="nav-icon">🔍</div><div class="nav-label">Search</div></a>
+  <a href="{% url 'patron_map' %}" class="nav-item"><div class="nav-icon">🗺️</div><div class="nav-label">Map</div></a>
+  <a href="{% url 'patron_account' %}" class="nav-item"><div class="nav-icon">👤</div><div class="nav-label">Account</div></a>
+</nav>
+
+<form id="csrfForm" style="display:none">{% csrf_token %}</form>
+<script>
+const CSRF = document.querySelector('#csrfForm [name=csrfmiddlewaretoken]').value;
+const URLS = {
+  send: "{% url 'patron_send_message' %}",
+  poll: "{% url 'patron_poll_messages' %}",
+};
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+  });
+}
+
+function renderThread(messages) {
+  const box = document.getElementById('thread');
+  if (!messages.length) return;
+  box.innerHTML = messages.map(function (m) {
+    const mine = m.sender === 'Patron';
+    return '<div class="bubble ' + (mine ? 'from-me' : 'from-library') + '">'
+         + esc(m.body)
+         + '<div class="meta">' + (mine ? 'You' : esc(m.staff || 'The library'))
+         + ' · ' + esc(m.sent_at) + '</div></div>';
+  }).join('');
+  box.scrollIntoView({ block: 'end' });
+}
+
+let sending = false;
+async function sendMessage() {
+  if (sending) return;
+  const field = document.getElementById('bodyField');
+  const body = field.value.trim();
+  if (!body) { field.focus(); return; }
+
+  sending = true;
+  document.getElementById('sendBtn').disabled = true;
+  try {
+    const payload = new URLSearchParams({ body: body });
+    const topic = document.getElementById('topicField');
+    if (topic) payload.append('topic', topic.value);
+
+    const r = await fetch(URLS.send, {
+      method: 'POST',
+      headers: { 'X-CSRFToken': CSRF, 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: payload,
+    });
+    const data = await r.json();
+    if (!data.success) { document.getElementById('hint').textContent = data.error; return; }
+    field.value = '';
+    renderThread(data.messages);
+    document.getElementById('hint').textContent =
+      'Sent. A librarian will reply, and we will email you when they do.';
+    if (topic) topic.closest('.field').remove();
+  } finally {
+    sending = false;
+    document.getElementById('sendBtn').disabled = false;
+  }
+}
+
+// Polled rather than pushed: the deployment has no websockets, and a question
+// answered in hours does not need a socket held open for them.
+async function poll() {
+  try {
+    const r = await fetch(URLS.poll, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+    const data = await r.json();
+    if (data.success && data.messages) renderThread(data.messages);
+  } catch (e) { /* offline; the next tick will catch up */ }
+}
+setInterval(poll, 8000);
+</script>
+</body>
+</html>

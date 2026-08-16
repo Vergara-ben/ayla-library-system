@@ -175,6 +175,30 @@ def registration_approved_email(patron):
     return send_email(f"[{lib}] Registration Approved", body, patron.email)
 
 
+def librarian_reply_email(patron, reply_body):
+    """Tell a patron an answer is waiting for their question.
+
+    The whole point of the enquiry desk: nobody sits watching a chat window, so
+    the reply has to come and find them. A short extract is included so a simple
+    answer needs no trip back to the site at all.
+    """
+    lib = _library_name()
+    extract = reply_body.strip()
+    if len(extract) > 300:
+        extract = extract[:300].rstrip() + '…'
+    body = (
+        f"Dear {patron.fullname},\n\n"
+        f"The library has replied to your message.\n\n"
+        f"----------------------------------------\n"
+        f"{extract}\n"
+        f"----------------------------------------\n\n"
+        f"Log in to your account and open Messages to read the full reply\n"
+        f"or to ask something else.\n\n"
+        f"{lib}"
+    )
+    return send_email(f"[{lib}] The library replied to your message", body, patron.email)
+
+
 def registration_rejected_email(email, fullname, reason=None):
     """Notify an applicant that their registration was rejected."""
     lib = _library_name()
