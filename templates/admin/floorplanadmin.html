@@ -1247,6 +1247,148 @@
         document.addEventListener('keyup', function (e) { if (e.key === 'Shift') freeRotateHeld = false; });
         window.addEventListener('blur', function () { freeRotateHeld = false; });
 
+
+        // ── Copy and paste on the canvas ────────────────────────────────
+        // Laying out a row of identical shelves by hand means retyping the
+        // same size and angle for each one. Ctrl+C / Ctrl+V duplicates the
+        // selected element beside itself, already selected, so it can be
+        // dragged straight into place.
+        let mapSelection = { kind: null, id: null };
+        let mapClipboard = null;
+
+        const PASTE_OFFSET = 26;      // canvas units — clear of the original, still on screen
+
+        function mapToast(text, tone) {
+            let el = document.getElementById('mapToast');
+            if (!el) {
+                el = document.createElement('div');
+                el.id = 'mapToast';
+                el.style.cssText = 'position:fixed;left:50%;bottom:28px;transform:translateX(-50%);'
+                    + 'z-index:9999;padding:10px 18px;border-radius:10px;font-size:12.5px;'
+                    + 'font-weight:700;box-shadow:0 8px 24px rgba(0,0,0,.25);pointer-events:none;'
+                    + 'transition:opacity .25s;';
+                document.body.appendChild(el);
+            }
+            el.textContent = text;
+            el.style.background = tone === 'error' ? '#be123c' : '#0e7490';
+            el.style.color = '#fff';
+            el.style.opacity = '1';
+            clearTimeout(el._t);
+            el._t = setTimeout(function () { el.style.opacity = '0'; }, 2600);
+        }
+
+        function copySelection() {
+            const sel = mapSelection;
+            if (!sel.kind || sel.id == null) { mapToast('Select something to copy first.'); return; }
+
+            if (sel.kind === 'shelf') {
+                const entry = shelfShapes[sel.id];
+                if (!entry) return;
+                const d = entry.data;
+                mapClipboard = { kind: 'shelf', name: d.name, room_id: d.room_id,
+                                 x: d.map_x, y: d.map_y, width: d.width, depth: d.depth,
+                                 rotation: d.rotation };
+                mapToast('Copied shelf "' + (d.name || '') + '". Ctrl+V to paste.');
+            } else if (sel.kind === 'waypoint') {
+                const w = waypointMarkers[sel.id];
+                if (!w) return;
+                mapClipboard = { kind: 'waypoint', label: w.label, x: w.x, y: w.y };
+                mapToast('Copied waypoint. Ctrl+V to paste.');
+            } else if (sel.kind === 'room') {
+                const poly = roomShapes[sel.id];
+                if (!poly) return;
+                const geo = latLngsToGeometry(poly.getLatLngs()[0]);
+                mapClipboard = { kind: 'room', name: poly._aylaRoomName, geometry: geo };
+                mapToast('Copied room "' + (poly._aylaRoomName || '') + '". Ctrl+V to paste.');
+            } else if (sel.kind === 'door') {
+                const d = doorShapes[sel.id];
+                if (!d || !d.data) return;
+                mapClipboard = { kind: 'door', room_id: d.data.room_id, x: d.data.x, y: d.data.y,
+                                 width: d.data.width, swing: d.data.swing };
+                mapToast('Copied door. Ctrl+V to paste.');
+            } else if (sel.kind === 'beacon') {
+                // Deliberately not copyable. Every beacon is matched by the ID
+                // its hardware broadcasts, so a duplicate would either collide
+                // with the original or match nothing at all — and it would look
+                // like faulty hardware rather than a bad paste.
+                mapClipboard = null;
+                mapToast('Beacons carry a unique hardware ID, so each one is added, not copied.', 'error');
+            }
+        }
+
+        async function pasteClipboard() {
+            if (!mapClipboard) { mapToast('Nothing copied yet.'); return; }
+            const c = mapClipboard;
+
+            try {
+                if (c.kind === 'shelf') {
+                    const res = await postData("{% url 'add_shelf' %}", {
+                        room_id: c.room_id, name: nextCopyName(c.name),
+                        map_x: c.x + PASTE_OFFSET, map_y: c.y + PASTE_OFFSET,
+                        width: c.width, depth: c.depth, rotation: c.rotation,
+                    });
+                    if (!res.success) { mapToast(res.error || 'Paste failed', 'error'); return; }
+                } else if (c.kind === 'waypoint') {
+                    const res = await postData("{% url 'add_waypoint' %}", {
+                        floor_plan_id: floorPlanId, label: c.label || '',
+                        map_x: c.x + PASTE_OFFSET, map_y: c.y + PASTE_OFFSET,
+                    });
+                    if (!res.success) { mapToast(res.error || 'Paste failed', 'error'); return; }
+                } else if (c.kind === 'room') {
+                    const moved = c.geometry.map(function (pt) {
+                        return [pt[0] + PASTE_OFFSET, pt[1] + PASTE_OFFSET];
+                    });
+                    const res = await postData("{% url 'add_room' %}", {
+                        floor_plan_id: floorPlanId, name: nextCopyName(c.name),
+                        geometry: JSON.stringify(moved),
+                    });
+                    if (!res.success) { mapToast(res.error || 'Paste failed', 'error'); return; }
+                } else if (c.kind === 'door') {
+                    const res = await postData("{% url 'add_door' %}", {
+                        room_id: c.room_id,
+                        map_x: c.x + PASTE_OFFSET, map_y: c.y + PASTE_OFFSET,
+                        width: c.width, swing: c.swing,
+                    });
+                    if (!res.success) { mapToast(res.error || 'Paste failed', 'error'); return; }
+                } else {
+                    return;
+                }
+                mapToast('Pasted. Drag it where you want it.');
+                // Reloading is how every other change on this canvas lands, so
+                // the copy is drawn by exactly the same path as the original.
+                setTimeout(function () { window.location.reload(); }, 350);
+            } catch (err) {
+                mapToast('Paste failed', 'error');
+            }
+        }
+
+        // "Aisle 3" pastes as "Aisle 3 copy", then "Aisle 3 copy 2" — a shelf
+        // called the same as its neighbour is worse than no copy at all.
+        function nextCopyName(name) {
+            const base = (name || 'Untitled').replace(/ copy( \d+)?$/, '');
+            const taken = new Set();
+            Object.keys(shelfShapes).forEach(function (k) {
+                if (shelfShapes[k].data && shelfShapes[k].data.name) taken.add(shelfShapes[k].data.name);
+            });
+            Object.keys(roomShapes).forEach(function (k) {
+                if (roomShapes[k]._aylaRoomName) taken.add(roomShapes[k]._aylaRoomName);
+            });
+            let candidate = base + ' copy';
+            let n = 2;
+            while (taken.has(candidate)) { candidate = base + ' copy ' + n; n += 1; }
+            return candidate;
+        }
+
+        document.addEventListener('keydown', function (e) {
+            // Never steal the shortcut from a field the Administrator is typing in.
+            const t = e.target;
+            if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+            if (!(e.ctrlKey || e.metaKey)) return;
+            const key = (e.key || '').toLowerCase();
+            if (key === 'c') { e.preventDefault(); copySelection(); }
+            else if (key === 'v') { e.preventDefault(); pasteClipboard(); }
+        });
+
         // ---- Shared "drag the body of a shape" helper ----------------------
         // Leaflet only makes L.Marker natively draggable; polygons and
         // polylines are not, so every body-drag (move a room, move a shelf,
@@ -1501,6 +1643,7 @@
         function numVal(id) { return parseFloat(document.getElementById(id).value); }
 
         function showBeaconInspector(id) {
+            mapSelection = { kind: 'beacon', id: id };
             const b = beaconMarkers[id]; if (!b) return;
             const d = b.data;
             renderInspector('beacon', 'BLE Beacon', id, esc(d.label || 'Beacon'),
@@ -1603,6 +1746,7 @@
         }
 
         function showWaypointInspector(id) {
+            mapSelection = { kind: 'waypoint', id: id };
             const w = waypointMarkers[id]; if (!w) return;
             let connHtml = '';
             Object.keys(connections).forEach(function (cid) {
@@ -1757,7 +1901,13 @@
             // exactly like a shape selected in a design tool.
             let dragStartBox = null;
             makeBodyDraggable(poly, {
-                enabled: function () { return resizeRoomId === r.room_id; },
+                // Selecting a room is enough to move it. Requiring resize mode
+                // first meant three clicks to nudge a room two pixels, and the
+                // handles are for reshaping, which is a different intention.
+                enabled: function () {
+                    return resizeRoomId === r.room_id
+                        || (mapSelection.kind === 'room' && mapSelection.id === r.room_id);
+                },
                 onDragStart: function () { dragStartBox = Object.assign({}, resizeBox); },
                 onMove: function (dx, dy) {
                     resizeBox = {
@@ -1772,6 +1922,7 @@
         }
 
         function showRoomInspector(id) {
+            mapSelection = { kind: 'room', id: id };
             const poly = roomShapes[id]; if (!poly) return;
             const editingPoints = roomEditingId === id;
             const resizing = resizeRoomId === id;
@@ -1945,6 +2096,7 @@
         }
 
         function showDoorInspector(id) {
+            mapSelection = { kind: 'door', id: id };
             const entry = doorShapes[id]; if (!entry) return;
             const d = entry.data;
             renderInspector('door', 'Door', id, esc(d.label || 'Door'),
@@ -2206,6 +2358,7 @@
         }
 
         function showShelfInspector(id) {
+            mapSelection = { kind: 'shelf', id: id };
             const entry = shelfShapes[id]; if (!entry) return;
             const s = entry.data;
             const editing = selectedShelfId === id;

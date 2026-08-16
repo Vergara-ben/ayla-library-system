@@ -3564,6 +3564,16 @@ def add_shelf(request):
     except (TypeError, ValueError):
         x = y = None
 
+    # Optional, and only sent when a shelf is pasted: a copy that arrives as a
+    # default-sized rectangle facing north is not a copy, and would have to be
+    # resized and rotated back by hand every time.
+    def _num(field, fallback):
+        raw = request.POST.get(field)
+        try:
+            return float(raw) if raw not in (None, '') else fallback
+        except (TypeError, ValueError):
+            return fallback
+
     try:
         room = Room.objects.get(room_id=room_id)
         shelf = Shelf.objects.create(
@@ -3571,7 +3581,10 @@ def add_shelf(request):
             name=name,
             map_x=x,
             map_y=y,
-            description=description
+            description=description,
+            width=_num('width', 46),
+            depth=_num('depth', 14),
+            rotation=_num('rotation', 0) % 360,
         )
         return JsonResponse({'success': True, 'shelf_id': shelf.shelf_id})
     except Room.DoesNotExist:
