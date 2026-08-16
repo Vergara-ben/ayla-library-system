@@ -164,44 +164,101 @@ def patron_unread_count(patron_id):
 
 # ─── library side ─────────────────────────────────────────────────────────
 
-def _staff_messages_page(request, template):
-    """Threads waiting for a reply first — that is the whole job."""
-    conversations = (Conversation.objects
-                     .select_related('patron', 'closed_by')
-                     .annotate(
-                         unread=Count('messages', filter=Q(
-                             messages__sender_type='Patron',
-                             messages__read_at__isnull=True)),
-                         latest=Max('messages__sent_at'))
-                     .order_by('-last_message_at'))
+def _patron_directory(query):
+    """Every patron the library can write to, with their thread state attached.
 
-    status = (request.GET.get('status') or 'active').strip()
-    if status == 'closed':
-        conversations = conversations.filter(status='Closed')
-    elif status == 'open':
-        conversations = conversations.filter(status='Open')
-    else:
-        conversations = conversations.exclude(status='Closed')
+    The list is of *people*, not of conversations, because the librarian also
+    needs to start one — telling somebody their reserved book has arrived is
+    the same job as answering a question, and a list of existing threads has
+    nowhere to do it from.
+
+    Counts are gathered separately rather than annotated across two joins,
+    where an unread tally and a conversation count inflate each other.
+    """
+    patrons = Patron.objects.exclude(account_status='Visitor')
+    if query:
+        patrons = patrons.filter(Q(fullname__icontains=query) | Q(email__icontains=query))
+    patrons = list(patrons.order_by('fullname'))
+
+    unread = dict(ChatMessage.objects
+                  .filter(sender_type='Patron', read_at__isnull=True)
+                  .values('conversation__patron_id')
+                  .annotate(n=Count('message_id'))
+                  .values_list('conversation__patron_id', 'n'))
+
+    threads = {}
+    for conversation in (Conversation.objects
+                         .exclude(status='Closed')
+                         .order_by('patron_id', '-last_message_at')):
+        threads.setdefault(conversation.patron_id, conversation)
+
+    last_seen = dict(Conversation.objects
+                     .values('patron_id')
+                     .annotate(last=Max('last_message_at'))
+                     .values_list('patron_id', 'last'))
+
+    latest_body = {}
+    for message in (ChatMessage.objects
+                    .select_related('conversation')
+                    .order_by('conversation__patron_id', '-sent_at')):
+        latest_body.setdefault(message.conversation.patron_id,
+                               (message.sender_type, message.body))
+
+    for patron in patrons:
+        conversation = threads.get(patron.patron_id)
+        patron.thread = conversation
+        patron.unread = unread.get(patron.patron_id, 0)
+        patron.waiting = bool(conversation and conversation.status == 'Open')
+        patron.last_activity = last_seen.get(patron.patron_id)
+        sender, body = latest_body.get(patron.patron_id, (None, ''))
+        patron.preview = (('You: ' if sender == 'Staff' else '') + body) if body else ''
+
+    # Unanswered questions first, then whoever spoke most recently, then the
+    # rest of the directory — so the queue stays on top without a tab to find it.
+    patrons.sort(key=lambda p: (
+        0 if p.waiting else 1,
+        0 if p.unread else 1,
+        -(p.last_activity.timestamp()) if p.last_activity else 0,
+        p.fullname.lower(),
+    ))
+    return patrons
+
+
+def _staff_messages_page(request, template):
+    """One list of everybody, with the unanswered questions floated to the top."""
+    query = (request.GET.get('q') or '').strip()
+    patrons = _patron_directory(query)
+
+    selected_patron = None
+    raw_id = (request.GET.get('p') or '').strip()
+    if raw_id.isdigit():
+        selected_patron = Patron.objects.filter(patron_id=int(raw_id)).first()
+    if selected_patron is None and patrons:
+        selected_patron = patrons[0]
 
     selected = None
     thread = []
-    raw_id = (request.GET.get('c') or '').strip()
-    if raw_id.isdigit():
-        selected = (Conversation.objects.select_related('patron')
-                    .filter(conversation_id=int(raw_id)).first())
-    if selected is None:
-        selected = conversations.first()
-    if selected is not None:
-        thread = list(selected.messages.select_related('staff').all())
-        # Opening a thread is reading it.
-        selected.messages.filter(sender_type='Patron', read_at__isnull=True).update(
-            read_at=timezone.now())
+    if selected_patron is not None:
+        selected = (Conversation.objects
+                    .filter(patron=selected_patron)
+                    .exclude(status='Closed')
+                    .order_by('-last_message_at')
+                    .first())
+        if selected is None:
+            selected = (Conversation.objects.filter(patron=selected_patron)
+                        .order_by('-last_message_at').first())
+        if selected is not None:
+            thread = list(selected.messages.select_related('staff').all())
+            # Opening a thread is reading it.
+            selected.messages.filter(sender_type='Patron', read_at__isnull=True).update(
+                read_at=timezone.now())
 
     return render(request, template, {
-        'conversations': conversations,
+        'patrons': patrons,
+        'selected_patron': selected_patron,
         'selected': selected,
         'thread': thread,
-        'status_filter': status,
+        'query': query,
         'open_count': Conversation.objects.filter(status='Open').count(),
     })
 
@@ -220,23 +277,36 @@ def staff_reply(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST is allowed.'})
 
+    body = (request.POST.get('body') or '').strip()
+    if not body:
+        return JsonResponse({'success': False, 'error': 'Type a message first.'})
+    if len(body) > MAX_MESSAGE_LENGTH:
+        return JsonResponse({'success': False, 'error': 'That message is too long.'})
+
     raw_id = (request.POST.get('conversation_id') or '').strip()
     conversation = (Conversation.objects.select_related('patron')
                     .filter(conversation_id=raw_id).first() if raw_id.isdigit() else None)
-    if conversation is None:
-        return JsonResponse({'success': False, 'error': 'That conversation no longer exists.'})
 
-    body = (request.POST.get('body') or '').strip()
-    if not body:
-        return JsonResponse({'success': False, 'error': 'Type a reply first.'})
-    if len(body) > MAX_MESSAGE_LENGTH:
-        return JsonResponse({'success': False, 'error': 'That reply is too long.'})
+    if conversation is None or conversation.status == 'Closed':
+        # Writing to somebody who has never asked anything — a held book, an
+        # overdue notice — opens the thread rather than refusing.
+        raw_patron = (request.POST.get('patron_id') or '').strip()
+        patron = (Patron.objects.filter(patron_id=int(raw_patron)).first()
+                  if raw_patron.isdigit() else None)
+        if patron is None:
+            return JsonResponse({'success': False, 'error': 'Pick a patron to write to.'})
+        if patron.account_status == 'Visitor':
+            return JsonResponse({'success': False,
+                                 'error': 'Visitors have no account to receive messages.'})
+        conversation = Conversation.objects.create(patron=patron, topic='Other')
 
     staff = User.objects.filter(admin_id=request.session.get('admin_id')).first()
     ChatMessage.objects.create(conversation=conversation, sender_type='Staff',
                                staff=staff, body=body)
 
     now = timezone.now()
+    # Nothing is waiting on the library once it has spoken, whether that was an
+    # answer or the first word.
     conversation.status = 'Answered'
     conversation.last_message_at = now
     conversation.save(update_fields=['status', 'last_message_at'])
@@ -289,7 +359,7 @@ def close_conversation(request):
     conversation.save(update_fields=['status', 'closed_at', 'closed_by'])
     log_admin_action(request, 'Update', 'Conversation', conversation.conversation_id,
                      'Closed the enquiry from "' + conversation.patron.fullname + '"')
-    return redirect('admin_messages')
+    return redirect('/admin-portal/messages/?p=' + str(conversation.patron_id))
 
 
 @admin_login_required

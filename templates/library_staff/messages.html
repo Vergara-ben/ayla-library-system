@@ -57,76 +57,118 @@
         </header>
 
         <main class="flex-1 overflow-hidden p-6">
-            <div class="h-full grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-4">
+            <div class="h-full grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-4">
 
-                {# The queue. Threads still waiting for an answer come first, because #}
-                {# an unanswered question is the only thing here that needs doing. #}
+                {# One list of everybody, because writing to a patron who has never #}
+                {# asked anything — a held book, an overdue notice — is the same job #}
+                {# as answering one, and a list of existing threads has nowhere to #}
+                {# start from. Unanswered questions float to the top. #}
                 <div class="rounded-xl border border-slate-800/80 overflow-hidden flex flex-col" style="background-color: var(--bg-card);">
-                    <div class="p-4 border-b border-slate-800 flex items-center gap-1">
-                        <a href="?status=active" class="px-2.5 py-1 rounded-md text-[11px] font-bold {% if status_filter == 'active' %}bg-violet-700/30 text-violet-400 border border-violet-800/50{% else %}text-slate-400 hover:text-slate-200{% endif %}">Active</a>
-                        <a href="?status=open" class="px-2.5 py-1 rounded-md text-[11px] font-bold {% if status_filter == 'open' %}bg-violet-700/30 text-violet-400 border border-violet-800/50{% else %}text-slate-400 hover:text-slate-200{% endif %}">Waiting</a>
-                        <a href="?status=closed" class="px-2.5 py-1 rounded-md text-[11px] font-bold {% if status_filter == 'closed' %}bg-violet-700/30 text-violet-400 border border-violet-800/50{% else %}text-slate-400 hover:text-slate-200{% endif %}">Closed</a>
+                    <div class="p-3 border-b border-slate-800">
+                        <form method="get" class="relative">
+                            <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-xs"></i>
+                            <input type="text" name="q" value="{{ query }}" placeholder="Search patrons by name or email…"
+                                   class="w-full rounded-lg pl-9 pr-8 py-2.5 text-xs text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 placeholder-slate-600"
+                                   style="background-color: var(--bg-input);">
+                            {% if query %}<a href="?" class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 text-xs"><i class="fa-solid fa-xmark"></i></a>{% endif %}
+                        </form>
                     </div>
+
                     <div class="flex-1 overflow-y-auto divide-y divide-slate-800/40">
-                        {% for c in conversations %}
-                        <a href="?status={{ status_filter }}&c={{ c.conversation_id }}" class="block px-4 py-3 hover:bg-slate-800/20 transition-colors {% if selected and c.conversation_id == selected.conversation_id %}bg-slate-800/30 border-l-2 border-violet-500{% endif %}">
-                            <div class="flex items-center justify-between gap-2">
-                                <span class="text-xs font-bold text-slate-200 truncate">{{ c.patron.fullname }}</span>
-                                {% if c.unread %}<span class="bg-rose-500/20 text-rose-400 text-[10px] px-1.5 py-0.5 rounded-full font-bold shrink-0">{{ c.unread }}</span>{% endif %}
+                        {% for p in patrons %}
+                        <a href="?p={{ p.patron_id }}{% if query %}&q={{ query }}{% endif %}"
+                           class="flex items-start gap-3 px-3.5 py-3 hover:bg-slate-800/20 transition-colors {% if selected_patron and p.patron_id == selected_patron.patron_id %}bg-slate-800/40 border-l-2 border-violet-500{% else %}border-l-2 border-transparent{% endif %}">
+                            <div class="w-9 h-9 rounded-full shrink-0 flex items-center justify-center text-[11px] font-bold {% if p.waiting %}bg-amber-500/15 text-amber-400 border border-amber-600/40{% else %}bg-violet-950 text-violet-400 border border-violet-800/60{% endif %}">
+                                {{ p.first_name|slice:':1'|upper }}{{ p.last_name|slice:':1'|upper }}
                             </div>
-                            <div class="text-[10px] text-slate-500 mt-0.5 truncate">{{ c.get_topic_display }}</div>
-                            <div class="flex items-center justify-between gap-2 mt-1">
-                                <span class="text-[10px] {% if c.status == 'Open' %}text-amber-400 font-bold{% elif c.status == 'Answered' %}text-emerald-500{% else %}text-slate-600{% endif %}">{{ c.get_status_display }}</span>
-                                <span class="text-[10px] text-slate-600">{{ c.last_message_at|date:"M j" }}</span>
+                            <div class="flex-1 min-w-0">
+                                <div class="flex items-center justify-between gap-2">
+                                    <span class="text-xs font-bold text-slate-200 truncate">{{ p.fullname }}</span>
+                                    {% if p.last_activity %}<span class="text-[9px] text-slate-600 shrink-0">{{ p.last_activity|date:"M j" }}</span>{% endif %}
+                                </div>
+                                <div class="flex items-center justify-between gap-2 mt-0.5">
+                                    <span class="text-[10px] truncate {% if p.unread %}text-slate-300 font-semibold{% else %}text-slate-600{% endif %}">
+                                        {% if p.preview %}{{ p.preview|truncatechars:42 }}{% else %}<span class="italic">No messages yet</span>{% endif %}
+                                    </span>
+                                    {% if p.unread %}<span class="bg-rose-500/20 text-rose-400 text-[9px] px-1.5 py-0.5 rounded-full font-bold shrink-0">{{ p.unread }}</span>
+                                    {% elif p.waiting %}<span class="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0"></span>{% endif %}
+                                </div>
                             </div>
                         </a>
                         {% empty %}
-                        <p class="px-4 py-10 text-center text-xs text-slate-500">No conversations here.</p>
+                        <p class="px-4 py-12 text-center text-xs text-slate-500 leading-relaxed">
+                            {% if query %}Nobody matches &ldquo;{{ query }}&rdquo;.{% else %}No patrons registered yet.{% endif %}
+                        </p>
                         {% endfor %}
                     </div>
                 </div>
 
                 <div class="rounded-xl border border-slate-800/80 overflow-hidden flex flex-col" style="background-color: var(--bg-card);">
-                    {% if selected %}
-                    <div class="p-4 border-b border-slate-800 flex items-center justify-between gap-3">
-                        <div class="min-w-0">
-                            <p class="text-sm font-bold text-slate-200 truncate">{{ selected.patron.fullname }}</p>
-                            <p class="text-[10px] text-slate-500">{{ selected.get_topic_display }} · asked {{ selected.created_at|date:"M j, Y" }}{% if selected.patron.email %} · {{ selected.patron.email }}{% endif %}</p>
+                    {% if selected_patron %}
+                    <div class="p-4 border-b border-slate-800 flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-full shrink-0 flex items-center justify-center text-xs font-bold bg-violet-950 text-violet-400 border border-violet-800/60">
+                            {{ selected_patron.first_name|slice:':1'|upper }}{{ selected_patron.last_name|slice:':1'|upper }}
                         </div>
-                        {% if selected.status != 'Closed' %}
-                        <form method="post" action="{% url 'close_conversation' %}" onsubmit="return confirm('Close this enquiry? A new question from {{ selected.patron.fullname|escapejs }} will reopen it.')">
+                        <div class="min-w-0 flex-1">
+                            <p class="text-sm font-bold text-slate-200 truncate">{{ selected_patron.fullname }}</p>
+                            <p class="text-[10px] text-slate-500 truncate">
+                                {{ selected_patron.patron_type }}{% if selected_patron.email %} · {{ selected_patron.email }}{% endif %}{% if selected %} · {{ selected.get_topic_display }}{% endif %}
+                            </p>
+                        </div>
+                        {% if selected and selected.status != 'Closed' %}
+                        <span class="text-[10px] font-bold px-2 py-1 rounded shrink-0 {% if selected.status == 'Open' %}bg-amber-500/15 text-amber-400 border border-amber-600/40{% else %}bg-emerald-500/10 text-emerald-400 border border-emerald-600/30{% endif %}">{{ selected.get_status_display }}</span>
+                        <form method="post" action="{% url 'close_conversation' %}" onsubmit="return confirm('Close this enquiry? A new question from {{ selected_patron.fullname|escapejs }} will start a fresh one.')">
                             {% csrf_token %}
                             <input type="hidden" name="conversation_id" value="{{ selected.conversation_id }}">
-                            <button type="submit" class="text-[11px] font-semibold px-3 py-1.5 rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800/50 whitespace-nowrap">Mark resolved</button>
+                            <button type="submit" class="text-[11px] font-semibold px-3 py-1.5 rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800/50 whitespace-nowrap">Resolve</button>
                         </form>
-                        {% else %}
-                        <span class="text-[11px] text-slate-500 whitespace-nowrap">Closed {{ selected.closed_at|date:"M j, Y" }}</span>
+                        {% elif selected %}
+                        <span class="text-[10px] text-slate-500 whitespace-nowrap shrink-0">Closed {{ selected.closed_at|date:"M j" }}</span>
                         {% endif %}
                     </div>
 
-                    {# Rendered here as well as by the poll, so the conversation is #}
-                    {# on the page the moment it loads and survives a dead script. #}
                     <div id="thread" class="flex-1 overflow-y-auto p-5 space-y-3">
                         {% for m in thread %}
                         <div class="flex {% if m.sender_type == 'Staff' %}justify-end{% else %}justify-start{% endif %}">
-                            <div class="max-w-[80%] rounded-xl px-3.5 py-2.5 text-xs leading-relaxed whitespace-pre-wrap break-words {% if m.sender_type == 'Staff' %}bg-violet-700/30 border border-violet-800/60 text-slate-100{% else %}bg-slate-800/50 border border-slate-700/50 text-slate-200{% endif %}">{{ m.body }}<div class="text-[9px] text-slate-500 mt-1.5">{% if m.sender_type == 'Staff' %}{{ m.staff.fullname|default:"Library" }}{% else %}Patron{% endif %} · {{ m.sent_at|date:"M d, Y" }} · {{ m.sent_at|time:"h:i A" }}</div></div>
+                            <div class="max-w-[75%]">
+                                <div class="rounded-2xl px-4 py-2.5 text-xs leading-relaxed whitespace-pre-wrap break-words {% if m.sender_type == 'Staff' %}bg-violet-700 text-white rounded-br-md{% else %}bg-slate-800/60 border border-slate-700/50 text-slate-200 rounded-bl-md{% endif %}">{{ m.body }}</div>
+                                <div class="text-[9px] text-slate-500 mt-1 {% if m.sender_type == 'Staff' %}text-right{% endif %}">
+                                    {% if m.sender_type == 'Staff' %}{{ m.staff.fullname|default:"Library" }}{% else %}{{ selected_patron.first_name }}{% endif %} · {{ m.sent_at|time:"h:i A" }} · {{ m.sent_at|date:"M j" }}
+                                </div>
+                            </div>
                         </div>
                         {% empty %}
-                        <p class="m-auto text-xs text-slate-500">No messages in this thread yet.</p>
+                        <div class="m-auto text-center max-w-xs">
+                            <i class="fa-regular fa-comments text-slate-700 text-4xl mb-3"></i>
+                            <p class="text-xs text-slate-500 leading-relaxed">No messages with {{ selected_patron.first_name }} yet.<br>Write below to start &mdash; they will get an email.</p>
+                        </div>
                         {% endfor %}
                     </div>
 
-                    {% if selected.status != 'Closed' %}
+                    {% if not selected or selected.status != 'Closed' %}
                     <div class="p-4 border-t border-slate-800 space-y-2">
-                        <textarea id="replyBody" rows="3" placeholder="Type your reply…" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 text-sm placeholder-slate-600" style="background-color: var(--bg-input);"></textarea>
+                        <textarea id="replyBody" rows="2" placeholder="Write to {{ selected_patron.first_name }}…  (Enter to send, Shift+Enter for a new line)"
+                                  class="w-full rounded-xl px-3.5 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 text-sm placeholder-slate-600 resize-none"
+                                  style="background-color: var(--bg-input);"></textarea>
                         <div class="flex items-center justify-between gap-3">
-                            <p id="replyHint" class="text-[10px] text-slate-500">The patron is emailed when you reply, unless they are reading this right now.</p>
-                            <button type="button" id="replyBtn" onclick="sendReply()" class="bg-violet-700 hover:bg-violet-600 text-white text-xs font-bold px-4 py-2.5 rounded-lg whitespace-nowrap">Send reply</button>
+                            <p id="replyHint" class="text-[10px] text-slate-500">
+                                {% if selected_patron.email %}{{ selected_patron.first_name }} is emailed when you write, unless they are reading this now.{% else %}This patron has no email on file, so they will only see it here.{% endif %}
+                            </p>
+                            <button type="button" id="replyBtn" onclick="sendReply()" class="bg-violet-700 hover:bg-violet-600 text-white text-xs font-bold px-5 py-2.5 rounded-lg whitespace-nowrap shrink-0">
+                                <i class="fa-solid fa-paper-plane text-[10px] mr-1"></i> Send
+                            </button>
                         </div>
+                    </div>
+                    {% else %}
+                    <div class="p-4 border-t border-slate-800 text-center">
+                        <p class="text-[11px] text-slate-500">This enquiry is closed. A new question from {{ selected_patron.first_name }} will start a fresh one.</p>
                     </div>
                     {% endif %}
                     {% else %}
-                    <p class="m-auto text-xs text-slate-500">Pick a conversation on the left.</p>
+                    <div class="m-auto text-center">
+                        <i class="fa-regular fa-comments text-slate-700 text-4xl mb-3"></i>
+                        <p class="text-xs text-slate-500">Pick a patron on the left to read or start a conversation.</p>
+                    </div>
                     {% endif %}
                 </div>
             </div>
@@ -138,6 +180,8 @@
 
         const CHAT = {
             id: {% if selected %}{{ selected.conversation_id }}{% else %}null{% endif %},
+            patron: {% if selected_patron %}{{ selected_patron.patron_id }}{% else %}null{% endif %},
+            patronFirst: "{% if selected_patron %}{{ selected_patron.first_name|escapejs }}{% endif %}",
             reply: "{% url 'staff_reply' %}",
             poll: "{% url 'staff_poll_messages' %}",
             csrf: '{{ csrf_token }}',
@@ -152,23 +196,25 @@
         function renderThread(messages) {
             const box = document.getElementById('thread');
             if (!box) return;
+            if (!messages.length) return;
             box.innerHTML = messages.map(function (m) {
                 const mine = m.sender === 'Staff';
                 return '<div class="flex ' + (mine ? 'justify-end' : 'justify-start') + '">'
-                     + '<div class="max-w-[80%] rounded-xl px-3.5 py-2.5 text-xs leading-relaxed whitespace-pre-wrap break-words '
-                     + (mine ? 'bg-violet-700/30 border border-violet-800/60 text-slate-100'
-                             : 'bg-slate-800/50 border border-slate-700/50 text-slate-200') + '">'
-                     + esc(m.body)
-                     + '<div class="text-[9px] text-slate-500 mt-1.5">'
-                     + (mine ? esc(m.staff || 'Library') : 'Patron') + ' · ' + esc(m.sent_at)
-                     + '</div></div></div>';
+                     + '<div class="max-w-[75%]">'
+                     + '<div class="rounded-2xl px-4 py-2.5 text-xs leading-relaxed whitespace-pre-wrap break-words '
+                     + (mine ? 'bg-violet-700 text-white rounded-br-md'
+                             : 'bg-slate-800/60 border border-slate-700/50 text-slate-200 rounded-bl-md') + '">'
+                     + esc(m.body) + '</div>'
+                     + '<div class="text-[9px] text-slate-500 mt-1 ' + (mine ? 'text-right' : '') + '">'
+                     + (mine ? esc(m.staff || 'Library') : esc(CHAT.patronFirst))
+                     + ' · ' + esc(m.sent_at) + '</div></div></div>';
             }).join('');
             box.scrollTop = box.scrollHeight;
         }
 
         let sending = false;
         async function sendReply() {
-            if (sending || !CHAT.id) return;
+            if (sending || !CHAT.patron) return;
             const field = document.getElementById('replyBody');
             const body = field.value.trim();
             if (!body) { field.focus(); return; }
@@ -176,38 +222,56 @@
             sending = true;
             document.getElementById('replyBtn').disabled = true;
             try {
+                const payload = new URLSearchParams({ body: body, patron_id: CHAT.patron });
+                if (CHAT.id) payload.append('conversation_id', CHAT.id);
+
                 const r = await fetch(CHAT.reply, {
                     method: 'POST',
                     headers: { 'X-CSRFToken': CHAT.csrf,
                                'Content-Type': 'application/x-www-form-urlencoded' },
-                    body: new URLSearchParams({ conversation_id: CHAT.id, body: body }),
+                    body: payload,
                 });
                 const data = await r.json();
                 const hint = document.getElementById('replyHint');
                 if (!data.success) { hint.textContent = data.error; return; }
+                // A first message creates the thread, so pick up its id or the
+                // next reply would open a second one.
+                CHAT.id = data.conversation_id;
                 field.value = '';
                 renderThread(data.messages);
                 // Whether the email actually went is worth saying: silence here
                 // is how a librarian assumes a patron was told when they were not.
                 hint.textContent = data.emailed
-                    ? 'Reply sent, and the patron has been emailed.'
-                    : 'Reply sent. No email — they are reading this now, or were emailed a moment ago.';
+                    ? 'Sent, and ' + CHAT.patronFirst + ' has been emailed.'
+                    : 'Sent. No email — they are reading this now, or were emailed a moment ago.';
             } finally {
                 sending = false;
                 document.getElementById('replyBtn').disabled = false;
             }
         }
 
+        const replyField = document.getElementById('replyBody');
+        if (replyField) {
+            // Enter sends, because a reply is usually one line and reaching for
+            // the mouse every time is what makes a desk tool feel slow.
+            replyField.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendReply(); }
+            });
+        }
+
         async function poll() {
+            if (!CHAT.id) return;
             try {
-                const url = CHAT.poll + (CHAT.id ? '?conversation_id=' + CHAT.id : '');
-                const r = await fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+                const r = await fetch(CHAT.poll + '?conversation_id=' + CHAT.id,
+                                      { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
                 const data = await r.json();
                 if (data.messages) renderThread(data.messages);
             } catch (e) { /* offline; the next tick will catch up */ }
         }
-        poll();
         setInterval(poll, 6000);
+
+        const box = document.getElementById('thread');
+        if (box) box.scrollTop = box.scrollHeight;
     </script>
     <script src="{% static 'js/admin-enhance.js' %}" defer></script>
 </body>
