@@ -832,7 +832,7 @@
     <div id="beaconModal" class="hidden absolute inset-0 bg-black/60 z-40 flex items-center justify-center p-4 overflow-y-auto">
         <div class="w-full max-w-md rounded-2xl border p-6 flex flex-col gap-5 shadow-2xl relative my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color);">
             <div class="flex items-center justify-between">
-                <h3 class="text-base font-bold text-slate-200 tracking-wide">Place Beacon</h3>
+                <h3 id="beaconModalTitle" class="text-base font-bold text-slate-200 tracking-wide">Place Beacon</h3>
                 <button type="button" onclick="closeBeaconModal()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40 transition-colors">
                     <i class="fa-solid fa-xmark text-sm"></i>
                 </button>
@@ -1212,6 +1212,7 @@
             unplaceShelf: "{% url 'unplace_shelf' %}",
             addShelf: "{% url 'add_shelf' %}",
             addBeacon: "{% url 'add_beacon' %}",
+            updateBeacon: "{% url 'update_beacon' %}",
             moveBeacon: "{% url 'move_beacon' %}",
             deleteBeacon: "{% url 'delete_beacon' %}",
             addWaypoint: "{% url 'add_waypoint' %}",
@@ -1659,6 +1660,7 @@
                     + (d.tx_power != null ? d.tx_power + ' dBm @ 1 m' : '<span style="color:var(--warning)">not measured</span>')
                     + ' &middot; n=' + (d.path_loss_n != null ? d.path_loss_n : '2.0 (default)') + '</p>'
                 + '<div class="map-actions">'
+                + '<button class="map-action-btn" onclick="mapEditBeacon(' + id + ')"><i class="fa-solid fa-pen"></i> Edit identity &amp; calibration</button>'
                 + '<button class="map-action-btn danger" onclick="mapDeleteBeacon(' + id + ')"><i class="fa-solid fa-trash"></i> Delete beacon</button>'
                 + '</div>'
                 + '<p class="insp-note">Drag the dot on the map to reposition it — it saves as you drop it.</p>');
@@ -1814,6 +1816,9 @@
             document.getElementById('beaconModal').classList.remove('hidden');
         };
         window.closeBeaconModal = function () {
+            editingBeaconId = null;
+            const title = document.getElementById('beaconModalTitle');
+            if (title) title.textContent = 'Place Beacon';
             document.getElementById('beaconModal').classList.add('hidden');
         };
         window.openWaypointModal = function () {
@@ -1833,13 +1838,39 @@
             document.getElementById('beaconEddystoneFields').classList.toggle('hidden', t !== 'Eddystone');
         };
 
+        // Editing reuses the add form rather than a second one, so the fields a
+        // beacon is created with are exactly the fields it can be corrected with.
+        let editingBeaconId = null;
+
+        window.mapEditBeacon = function (id) {
+            const b = beaconMarkers[id];
+            if (!b || !b.data) return;
+            const d = b.data;
+            editingBeaconId = id;
+
+            document.getElementById('beaconUuid').value = d.beacon_uuid || '';
+            document.getElementById('beaconLabel').value = d.label || '';
+            document.getElementById('beaconAdvType').value = d.advertisement_type || 'iBeacon';
+            document.getElementById('beaconMajor').value = (d.major != null) ? d.major : '';
+            document.getElementById('beaconMinor').value = (d.minor != null) ? d.minor : '';
+            document.getElementById('beaconNamespace').value = d.namespace_id || '';
+            document.getElementById('beaconInstance').value = d.instance_id || '';
+            document.getElementById('beaconTxPower').value = (d.tx_power != null) ? d.tx_power : '';
+            document.getElementById('beaconPathLoss').value = (d.path_loss_n != null) ? d.path_loss_n : '';
+            syncBeaconFields();
+
+            const title = document.getElementById('beaconModalTitle');
+            if (title) title.textContent = 'Edit Beacon';
+            openModal('beaconModal');
+        };
+
         window.submitBeacon = async function () {
             const uuid = document.getElementById('beaconUuid').value.trim();
             const label = document.getElementById('beaconLabel').value.trim();
             if (!uuid) { alert('Beacon UUID is required'); return; }
-            if (!pending) return;
-            const r = await postData(URLS.addBeacon, {
-                floor_plan_id: floorPlanId, beacon_uuid: uuid, label: label,
+
+            const fields = {
+                beacon_uuid: uuid, label: label,
                 advertisement_type: document.getElementById('beaconAdvType').value,
                 major: document.getElementById('beaconMajor').value.trim(),
                 minor: document.getElementById('beaconMinor').value.trim(),
@@ -1847,8 +1878,29 @@
                 instance_id: document.getElementById('beaconInstance').value.trim(),
                 tx_power: document.getElementById('beaconTxPower').value.trim(),
                 path_loss_n: document.getElementById('beaconPathLoss').value.trim(),
-                map_x: pending.x, map_y: pending.y,
-            });
+            };
+
+            if (editingBeaconId !== null) {
+                const id = editingBeaconId;
+                const r = await postData(URLS.updateBeacon,
+                                         Object.assign({ beacon_id: id }, fields));
+                if (!r.success) { alert(r.error || 'Failed to save beacon'); return; }
+                // Redraw from the server's own payload so the inspector never
+                // shows something the database did not accept.
+                if (beaconMarkers[id] && beaconMarkers[id].marker) {
+                    lmap.removeLayer(beaconMarkers[id].marker);
+                }
+                delete beaconMarkers[id];
+                addBeaconMarker(r.beacon);
+                closeBeaconModal();
+                showBeaconInspector(id);
+                return;
+            }
+
+            if (!pending) return;
+            const r = await postData(URLS.addBeacon, Object.assign({
+                floor_plan_id: floorPlanId, map_x: pending.x, map_y: pending.y,
+            }, fields));
             if (r.success) { addBeaconMarker(r.beacon); closeBeaconModal(); }
             else alert(r.error || 'Failed to save beacon');
         };

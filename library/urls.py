@@ -170,6 +170,7 @@ urlpatterns = [
     path('admin-portal/add-beacon/', views.add_beacon, name='add_beacon'),
     path('admin-portal/move-beacon/', views.move_beacon, name='move_beacon'),
     path('admin-portal/delete-beacon/', views.delete_beacon, name='delete_beacon'),
+    path('admin-portal/update-beacon/', views.update_beacon, name='update_beacon'),
     path('admin-portal/add-waypoint/', views.add_waypoint, name='add_waypoint'),
     path('admin-portal/move-waypoint/', views.move_waypoint, name='move_waypoint'),
     path('admin-portal/delete-waypoint/', views.delete_waypoint, name='delete_waypoint'),

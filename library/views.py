@@ -4316,6 +4316,81 @@ def move_beacon(request):
 
 
 @admin_only_required
+def update_beacon(request):
+    """Change a beacon's identity or calibration after it has been placed.
+
+    Everything here was settable when the beacon was added and nowhere
+    afterwards, which made the most common correction — realising the hardware
+    advertises as iBeacon rather than a service UUID — impossible without
+    deleting the beacon and losing its position. A beacon matched on the wrong
+    scheme produces no readings at all while looking perfectly configured, so
+    being able to fix it is the difference between a working map and an
+    afternoon spent suspecting the hardware.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
+
+    beacon = BLEBeacon.objects.filter(beacon_id=request.POST.get('beacon_id')).first()
+    if beacon is None:
+        return JsonResponse({'success': False, 'error': 'Beacon not found'})
+
+    uuid_value = (request.POST.get('beacon_uuid') or '').strip()
+    if not uuid_value:
+        return JsonResponse({'success': False, 'error': 'Beacon UUID is required'})
+
+    adv_type = (request.POST.get('advertisement_type') or '').strip()
+    if adv_type not in dict(BLEBeacon.ADVERTISEMENT_TYPE_CHOICES):
+        adv_type = beacon.advertisement_type
+
+    def _int(field):
+        raw = (request.POST.get(field) or '').strip()
+        if raw == '':
+            return None
+        try:
+            return int(raw)
+        except ValueError:
+            return None
+
+    def _float(field):
+        raw = (request.POST.get(field) or '').strip()
+        if raw == '':
+            return None
+        try:
+            return float(raw)
+        except ValueError:
+            return None
+
+    path_loss = _float('path_loss_n')
+    if path_loss is not None and not (1.0 <= path_loss <= 6.0):
+        return JsonResponse({'success': False,
+                             'error': 'Path-loss n is normally between 1.5 and 4. '
+                                      'Free space is 2.0; a room with metal shelving is 2.5-3.5.'})
+    tx_power = _int('tx_power')
+    if tx_power is not None and not (-120 <= tx_power <= 0):
+        return JsonResponse({'success': False,
+                             'error': 'Tx power is an RSSI reading at 1 m, so it is negative '
+                                      '— usually between -55 and -70.'})
+
+    before = beacon.advertisement_type
+    beacon.beacon_uuid = uuid_value
+    beacon.label = (request.POST.get('label') or '').strip() or None
+    beacon.advertisement_type = adv_type
+    beacon.major = _int('major')
+    beacon.minor = _int('minor')
+    beacon.namespace_id = (request.POST.get('namespace_id') or '').strip() or None
+    beacon.instance_id = (request.POST.get('instance_id') or '').strip() or None
+    beacon.tx_power = tx_power
+    beacon.path_loss_n = path_loss
+    beacon.save()
+
+    detail = f'{beacon.label or beacon.beacon_uuid[:8]} — {adv_type}'
+    if before != adv_type:
+        detail += f' (was {before})'
+    log_admin_action(request, 'Update', 'BLEBeacon', beacon.beacon_id, detail)
+    return JsonResponse({'success': True, 'beacon': _beacon_payload(beacon)})
+
+
+@admin_only_required
 def add_waypoint(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
