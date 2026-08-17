@@ -1811,8 +1811,19 @@
 
         // ---- modals ----
         window.openBeaconModal = function () {
-            document.getElementById('beaconUuid').value = '';
-            document.getElementById('beaconLabel').value = '';
+            editingBeaconId = null;
+            const title = document.getElementById('beaconModalTitle');
+            if (title) title.textContent = 'Place Beacon';
+            // Every field, not just the two: leftovers from an edit would
+            // otherwise be saved against the new beacon being placed.
+            ['beaconUuid', 'beaconLabel', 'beaconMajor', 'beaconMinor',
+             'beaconNamespace', 'beaconInstance', 'beaconTxPower', 'beaconPathLoss']
+                .forEach(function (id) {
+                    const el = document.getElementById(id);
+                    if (el) el.value = '';
+                });
+            const type = document.getElementById('beaconAdvType');
+            if (type) { type.value = 'iBeacon'; syncBeaconFields(); }
             document.getElementById('beaconModal').classList.remove('hidden');
         };
         window.closeBeaconModal = function () {
@@ -1861,7 +1872,7 @@
 
             const title = document.getElementById('beaconModalTitle');
             if (title) title.textContent = 'Edit Beacon';
-            openModal('beaconModal');
+            document.getElementById('beaconModal').classList.remove('hidden');
         };
 
         window.submitBeacon = async function () {
