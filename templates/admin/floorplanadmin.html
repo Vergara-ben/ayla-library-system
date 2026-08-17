@@ -264,6 +264,12 @@
                 <h2 class="logo-text text-lg tracking-wider text-slate-200 uppercase">Floor Plan Management</h2>
             </div>
             <div class="flex items-center gap-4">
+                {# Beacons are configured here, so this is where the question #}
+                {# "did that actually work?" gets asked. Kept off the sidebar: #}
+                {# it is a setup instrument, not a daily destination. #}
+                <a href="{% url 'position_test' %}" class="text-xs text-slate-400 hover:text-cyan-400 flex items-center gap-1.5" title="Check positioning against the real beacons">
+                    <i class="fa-solid fa-flask"></i> Position Test
+                </a>
                 <span class="bg-cyan-950 text-cyan-400 text-xs px-2.5 py-1 rounded font-bold border border-cyan-800 tracking-wider">ADMIN</span>
                 <div class="w-8 h-8 rounded-full bg-cyan-900 border border-cyan-700 flex items-center justify-center text-xs font-bold text-cyan-200">
                     AD

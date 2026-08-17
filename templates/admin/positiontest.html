@@ -1,0 +1,561 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en" data-module="admin">
+<head>
+    <meta charset="UTF-8">
+    <meta name="theme-color" content="#ffffff">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ayla Admin Panel - Position Test</title>
+    <script src="{% static 'js/theme.js' %}"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="{% static 'js/tailwind-theme.js' %}"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'css/theme.css' %}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: var(--bg-main); color: var(--text-primary); }
+        .logo-text { font-family: 'Rowdies', sans-serif; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: var(--bg-main); }
+        ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
+        .mobile-menu-btn { display: none; align-items: center; justify-content: center; width: 2.5rem; height: 2.5rem; border-radius: 0.5rem; background: var(--bg-card); border: 1px solid var(--border-color); color: var(--text-primary); cursor: pointer; margin-right: 0.75rem; }
+        @media (max-width: 1024px) {
+            aside { position: fixed; left: -100%; top: 0; height: 100vh; z-index: 50; transition: left 0.3s ease; }
+            aside.open { left: 0; }
+            .mobile-menu-btn { display: flex !important; }
+            main { padding: 1rem; }
+        }
+        .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+        .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 10px; font-weight: 700; letter-spacing: .04em; }
+        .p-ok { background: rgba(16,185,129,.15); color: #10b981; }
+        .p-warn { background: rgba(245,158,11,.15); color: #f59e0b; }
+        .p-bad { background: rgba(239,68,68,.15); color: #ef4444; }
+        .p-idle { background: rgba(148,163,184,.15); color: #94a3b8; }
+        table.diag { width: 100%; border-collapse: collapse; }
+        table.diag th { text-align: left; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); padding: 6px 8px; border-bottom: 1px solid var(--border-color); }
+        table.diag td { padding: 7px 8px; border-bottom: 1px solid var(--border-color); font-size: 12px; vertical-align: top; }
+        .btn { padding: 8px 14px; border-radius: 8px; font-size: 12px; font-weight: 700; letter-spacing: .03em; border: 1px solid transparent; cursor: pointer; }
+        .btn-primary { background: #0e7490; color: #ecfeff; }
+        .btn-primary:disabled { opacity: .45; cursor: not-allowed; }
+        .btn-ghost { background: transparent; color: var(--text-muted); border-color: var(--border-color); }
+    </style>
+    <link rel="stylesheet" href="{% static 'css/admin-enhance.css' %}">
+    <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
+    <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
+    <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
+</head>
+<body class="flex h-screen overflow-hidden">
+
+    {% include 'admin/_sidebar.html' with active='floorplan' %}
+
+    <div class="flex-1 flex flex-col overflow-hidden">
+        <header class="h-16 flex-shrink-0 flex items-center justify-between px-8" style="background-color: var(--bg-main);">
+            <div class="flex items-center">
+                <button class="mobile-menu-btn" onclick="document.querySelector('aside').classList.toggle('open')"><i class="fa-solid fa-bars"></i></button>
+                <h2 class="logo-text text-lg tracking-wider text-slate-200 uppercase">Position Test</h2>
+            </div>
+            <div class="flex items-center gap-4">
+                <span class="bg-cyan-950 text-cyan-400 text-xs px-2.5 py-1 rounded font-bold border border-cyan-800 tracking-wider">{% if request.session.admin_role == 'Staff' %}STAFF{% else %}ADMIN{% endif %}</span>
+            </div>
+        </header>
+
+        <main class="flex-1 overflow-y-auto p-8 space-y-6">
+
+            {# Says plainly what this is for, because a page that reads beacons #}
+            {# looks a lot like the patron map and is not one. #}
+            <div class="rounded-xl border border-slate-800/80 p-4" style="background-color: var(--bg-card);">
+                <div class="flex items-start gap-3">
+                    <i class="fa-solid fa-flask text-cyan-500 mt-1"></i>
+                    <div class="text-xs text-slate-400 leading-relaxed">
+                        <span class="font-bold text-slate-200">Setup instrument, not the patron view.</span>
+                        This runs the same decoding and the same trilateration as the patron map, but
+                        admits beacons through the browser&rsquo;s own device chooser &mdash; which a
+                        setup tool may do and a patron page may not. Use it to confirm a beacon is
+                        configured correctly and that positions come out where you are standing.
+                        <span class="text-slate-500">Patrons never reach this page.</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="rounded-xl border border-slate-800/80 p-4 flex items-center gap-3 flex-wrap" style="background-color: var(--bg-card);">
+                <button id="startBtn" class="btn btn-primary" onclick="startTest()">
+                    <i class="fa-solid fa-play"></i> Start
+                </button>
+                <button id="addBtn" class="btn btn-ghost" onclick="admitBeacon()" style="display:none">
+                    <i class="fa-solid fa-plus"></i> Admit a beacon
+                </button>
+                <button id="stopBtn" class="btn btn-ghost" onclick="stopTest()" disabled>
+                    <i class="fa-solid fa-stop"></i> Stop
+                </button>
+                <span id="status" class="pill p-idle">Idle</span>
+                <span id="detail" class="text-xs text-slate-500"></span>
+            </div>
+
+            <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+                <div class="rounded-xl border border-slate-800/80 overflow-hidden" style="background-color: var(--bg-card);">
+                    <div class="p-4 border-b border-slate-800 flex items-center gap-2">
+                        <i class="fa-solid fa-location-crosshairs text-cyan-600 text-xs"></i>
+                        <h4 class="text-sm font-bold text-slate-200 tracking-wide">Computed position</h4>
+                        <span id="fixNote" class="text-[10px] text-slate-500 ml-auto"></span>
+                    </div>
+                    <div id="testMap" style="height:420px;background:var(--bg-main);"></div>
+                </div>
+
+                <div class="rounded-xl border border-slate-800/80 overflow-hidden" style="background-color: var(--bg-card);">
+                    <div class="p-4 border-b border-slate-800 flex items-center gap-2">
+                        <i class="fa-solid fa-tower-broadcast text-cyan-600 text-xs"></i>
+                        <h4 class="text-sm font-bold text-slate-200 tracking-wide">What the radio is hearing</h4>
+                        <span id="advCount" class="text-[10px] text-slate-500 ml-auto"></span>
+                    </div>
+                    <div style="max-height:420px;overflow:auto">
+                        <table class="diag">
+                            <thead>
+                                <tr><th>Device</th><th>Frame</th><th>RSSI</th><th>Distance</th><th>Matched</th></tr>
+                            </thead>
+                            <tbody id="diagBody">
+                                <tr><td colspan="5" class="text-slate-500 text-xs p-4">Nothing yet. Press Start.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div class="rounded-xl border border-slate-800/80 overflow-hidden" style="background-color: var(--bg-card);">
+                <div class="p-4 border-b border-slate-800 flex items-center gap-2">
+                    <i class="fa-solid fa-list-check text-cyan-600 text-xs"></i>
+                    <h4 class="text-sm font-bold text-slate-200 tracking-wide">Configured beacons</h4>
+                    <a href="{% url 'floorplan_management' %}" class="text-[10px] text-slate-400 hover:text-cyan-400 ml-auto"><i class="fa-solid fa-pen-to-square"></i> Edit beacons</a>
+                </div>
+                <div style="overflow-x:auto">
+                    <table class="diag">
+                        <thead>
+                            <tr><th>Label</th><th>Type</th><th>Identity</th><th>Tx / n</th><th>Position</th><th>Heard</th></tr>
+                        </thead>
+                        <tbody id="configBody">
+                            <tr><td colspan="6" class="text-slate-500 text-xs p-4">Loading&hellip;</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+        </main>
+    </div>
+
+<script>
+const MAP_DATA_URL = "{% url 'get_map_data' %}";
+
+let mapData = null, lmap = null, imgH = 0;
+let meMarker = null, meCircle = null;
+const beaconMarkers = {};
+
+const rssiBuffers = {};          // beacon uuid -> recent RSSI
+const advertisedTxPower = {};    // beacon id -> tx power the packet carried
+const matchedBeacons = new Set();
+const heardDevices = new Map();  // device key -> what it last sent
+const watched = new Set();
+let currentScan = null, tickTimer = null, advCount = 0;
+
+// ── Same arithmetic the patron map uses ─────────────────────────────────
+// Duplicated deliberately rather than shared: if this page ever disagrees
+// with the map, the disagreement should come from a real difference, not
+// from one of them being edited and the other not noticing.
+const DEFAULT_TX_POWER = -59;
+const DEFAULT_PATH_LOSS_N = 2.0;
+const APPLE_COMPANY_ID = 0x004C;
+const EDDYSTONE_SERVICE = '0000feaa-0000-1000-8000-00805f9b34fb';
+
+function rssiToDistance(rssi, txPower, n) {
+  const p = (txPower == null) ? DEFAULT_TX_POWER : txPower;
+  const exp = (n == null || n <= 0) ? DEFAULT_PATH_LOSS_N : n;
+  return Math.pow(10, (p - rssi) / (10 * exp));
+}
+
+function calibrationFor(b) {
+  const tx = (b.tx_power != null) ? b.tx_power : advertisedTxPower[b.beacon_id];
+  return { txPower: (tx == null ? null : tx), n: b.path_loss_n };
+}
+
+function pushRssi(uuid, rssi, win) {
+  const buf = rssiBuffers[uuid] || (rssiBuffers[uuid] = []);
+  buf.push(rssi);
+  if (buf.length > (win || 5)) buf.shift();
+}
+
+function hex(view, from, to) {
+  let out = '';
+  for (let i = from; i < to; i++) out += view.getUint8(i).toString(16).padStart(2, '0');
+  return out;
+}
+
+// The 0x02 0x15 prefix identifies an iBeacon, not the company ID carrying it.
+// Plenty of hardware ships the frame under 0xFFFF or a chipset vendor's ID.
+function parseIBeacon(e) {
+  const md = e.manufacturerData;
+  if (!md || typeof md.forEach !== 'function') return null;
+  let found = null;
+  md.forEach((v, company) => {
+    if (found || !v || v.byteLength < 23) return;
+    if (v.getUint8(0) !== 0x02 || v.getUint8(1) !== 0x15) return;
+    const raw = hex(v, 2, 18);
+    found = {
+      company,
+      uuid: raw.slice(0, 8) + '-' + raw.slice(8, 12) + '-' + raw.slice(12, 16)
+          + '-' + raw.slice(16, 20) + '-' + raw.slice(20),
+      major: v.getUint16(18, false),
+      minor: v.getUint16(20, false),
+      measuredPower: v.getInt8(22),
+    };
+  });
+  return found;
+}
+
+function parseEddystone(e) {
+  const sd = e.serviceData;
+  if (!sd || typeof sd.get !== 'function') return null;
+  const v = sd.get(EDDYSTONE_SERVICE) || sd.get('feaa');
+  if (!v || v.byteLength < 18) return null;
+  if (v.getUint8(0) !== 0x00) return null;
+  return { txPower: v.getInt8(1), namespace: hex(v, 2, 12), instance: hex(v, 12, 18) };
+}
+
+function matchBeacon(e) {
+  if (!mapData) return null;
+  const ib = parseIBeacon(e);
+  const ed = parseEddystone(e);
+  const advUuids = (e.uuids || []).map((u) => String(u).toLowerCase());
+  const name = e.device && e.device.name;
+
+  for (const b of mapData.beacons) {
+    const type = b.advertisement_type || 'iBeacon';
+    const bu = String(b.beacon_uuid || '').toLowerCase();
+    if (type === 'iBeacon' && ib) {
+      if (ib.uuid !== bu) continue;
+      if (b.major != null && b.major !== ib.major) continue;
+      if (b.minor != null && b.minor !== ib.minor) continue;
+      return { beacon: b, advertisedTxPower: ib.measuredPower };
+    }
+    if (type === 'Eddystone' && ed) {
+      if (b.namespace_id && b.namespace_id !== ed.namespace) continue;
+      if (b.instance_id && b.instance_id !== ed.instance) continue;
+      if (!b.namespace_id && !b.instance_id) continue;
+      return { beacon: b, advertisedTxPower: ed.txPower - 41 };
+    }
+    if (type === 'ServiceUUID' && advUuids.includes(bu)) return { beacon: b, advertisedTxPower: null };
+    if (type === 'DeviceName' && name && name === b.label) return { beacon: b, advertisedTxPower: null };
+  }
+  return null;
+}
+
+// ── Receiving ───────────────────────────────────────────────────────────
+function onAdvertisement(e) {
+  try {
+    if (e.rssi == null) return;
+    advCount += 1;
+
+    const ib = parseIBeacon(e);
+    const ed = parseEddystone(e);
+    const hit = matchBeacon(e);
+
+    // Every device is recorded, matched or not. A beacon that is heard but
+    // does not match is the single most common setup fault, and it is
+    // invisible unless the unmatched ones are shown too.
+    const key = (e.device && e.device.id) || (e.device && e.device.name) || 'unknown';
+    let frame = 'not a beacon frame';
+    if (ib) {
+      frame = 'iBeacon ' + ib.uuid.slice(0, 8) + '… major ' + ib.major + ' minor ' + ib.minor
+            + (ib.company !== APPLE_COMPANY_ID
+               ? ' (company 0x' + ib.company.toString(16).toUpperCase().padStart(4, '0') + ')' : '');
+    } else if (ed) {
+      frame = 'Eddystone ns ' + ed.namespace.slice(0, 8) + '… id ' + ed.instance;
+    }
+
+    let distance = null;
+    if (hit) {
+      const cal = calibrationFor(hit.beacon);
+      const tx = (cal.txPower != null) ? cal.txPower
+               : (hit.advertisedTxPower != null ? hit.advertisedTxPower : null);
+      distance = rssiToDistance(e.rssi, tx, cal.n);
+    }
+
+    heardDevices.set(key, {
+      name: (e.device && e.device.name) || '(no name)',
+      frame, rssi: e.rssi, distance,
+      matched: hit ? (hit.beacon.label || ('Beacon #' + hit.beacon.beacon_id)) : null,
+    });
+
+    if (hit) {
+      if (hit.advertisedTxPower != null && advertisedTxPower[hit.beacon.beacon_id] == null) {
+        advertisedTxPower[hit.beacon.beacon_id] = hit.advertisedTxPower;
+      }
+      matchedBeacons.add(hit.beacon.beacon_id);
+      pushRssi(hit.beacon.beacon_uuid, e.rssi);
+    }
+  } catch (_) { /* malformed advertisement */ }
+}
+
+// ── Positioning ─────────────────────────────────────────────────────────
+function trilaterate() {
+  if (!mapData) return null;
+  const scale = mapData.pixels_per_meter;
+  if (!scale || scale <= 0) return { error: 'Map scale is not set — set pixels per metre on the floor plan' };
+
+  const pts = [];
+  mapData.beacons.forEach((b) => {
+    const buf = rssiBuffers[b.beacon_uuid];
+    if (buf && buf.length) {
+      const avg = buf.reduce((a, c) => a + c, 0) / buf.length;
+      const cal = calibrationFor(b);
+      pts.push({ x: b.map_x, y: b.map_y, d: rssiToDistance(avg, cal.txPower, cal.n) * scale });
+    }
+  });
+  if (pts.length < 3) {
+    return { error: matchedBeacons.size + ' of ' + mapData.beacons.length
+                    + ' beacons matched — three are needed to fix a position' };
+  }
+
+  const ref = pts[pts.length - 1];
+  let Sxx = 0, Sxy = 0, Syy = 0, Sxb = 0, Syb = 0;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p = pts[i];
+    const ax = 2 * (p.x - ref.x), ay = 2 * (p.y - ref.y);
+    const bb = p.x * p.x - ref.x * ref.x + p.y * p.y - ref.y * ref.y + ref.d * ref.d - p.d * p.d;
+    Sxx += ax * ax; Sxy += ax * ay; Syy += ay * ay; Sxb += ax * bb; Syb += ay * bb;
+  }
+  const det = Sxx * Syy - Sxy * Sxy;
+  // Beacons in a straight line give no unique solution. Refusing beats
+  // returning a confident-looking point that is somewhere else entirely.
+  if (Math.abs(det) < 1e-6) return { error: 'Beacons are too close to a straight line to fix a position' };
+  return { x: (Sxb * Syy - Syb * Sxy) / det, y: (Sxx * Syb - Sxy * Sxb) / det, used: pts.length };
+}
+
+// ── Drawing ─────────────────────────────────────────────────────────────
+function toLatLng(x, y) { return [imgH - y, x]; }
+
+async function loadMap() {
+  const r = await fetch(MAP_DATA_URL, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+  const d = await r.json();
+  if (!d.success || !d.has_active) {
+    setStatus('bad', 'No active floor plan');
+    return;
+  }
+  mapData = d;
+  imgH = d.canvas_height || 800;
+
+  lmap = L.map('testMap', { crs: L.CRS.Simple, minZoom: -4, maxZoom: 4, attributionControl: false });
+
+  (d.rooms || []).forEach((rm) => {
+    if (!rm.geometry || rm.geometry.length < 3) return;
+    L.polygon(rm.geometry.map((pt) => toLatLng(pt[0], pt[1])), {
+      color: '#0e7490', weight: 1.5, fillColor: '#06b6d4', fillOpacity: 0.08, interactive: false,
+    }).addTo(lmap);
+  });
+
+  (d.shelves || []).forEach((sh) => {
+    if (!sh.placed) return;
+    L.circleMarker(toLatLng(sh.map_x, sh.map_y), {
+      radius: 4, color: '#a855f7', fillColor: '#a855f7', fillOpacity: .5, interactive: false,
+    }).addTo(lmap);
+  });
+
+  const bounds = [];
+  (d.beacons || []).forEach((b) => {
+    if (b.map_x == null || b.map_y == null) return;
+    const ll = toLatLng(b.map_x, b.map_y);
+    bounds.push(ll);
+    beaconMarkers[b.beacon_id] = L.circleMarker(ll, {
+      radius: 7, color: '#f59e0b', fillColor: '#f59e0b', fillOpacity: .35, weight: 2,
+    }).addTo(lmap).bindTooltip(b.label || ('Beacon #' + b.beacon_id), { direction: 'top' });
+  });
+
+  if (bounds.length) lmap.fitBounds(L.latLngBounds(bounds).pad(0.4));
+  else lmap.setView(toLatLng((d.canvas_width || 1000) / 2, imgH / 2), -1);
+
+  renderConfig();
+}
+
+function renderConfig() {
+  const body = document.getElementById('configBody');
+  if (!mapData.beacons.length) {
+    body.innerHTML = '<tr><td colspan="6" class="text-amber-500 text-xs p-4">'
+      + 'No beacons are configured on the active floor plan.</td></tr>';
+    return;
+  }
+  // A duplicate identity is worth calling out here rather than leaving it to
+  // show up as a position that will not move: beacons ship with identical
+  // factory defaults, and three of those can never be told apart.
+  const identity = (b) => [b.advertisement_type, b.beacon_uuid, b.major, b.minor,
+                           b.namespace_id, b.instance_id].join('|').toLowerCase();
+  const counts = {};
+  mapData.beacons.forEach((b) => { counts[identity(b)] = (counts[identity(b)] || 0) + 1; });
+
+  body.innerHTML = mapData.beacons.map((b) => {
+    const dup = counts[identity(b)] > 1;
+    const heard = matchedBeacons.has(b.beacon_id);
+    const ident = (b.advertisement_type === 'Eddystone')
+      ? '<span class="mono">' + (b.namespace_id || '—') + ' / ' + (b.instance_id || '—') + '</span>'
+      : '<span class="mono">' + (b.beacon_uuid || '—').slice(0, 13) + '… ' + (b.major != null ? b.major : '—')
+        + ' / ' + (b.minor != null ? b.minor : '—') + '</span>';
+    return '<tr>'
+      + '<td>' + (b.label || ('#' + b.beacon_id))
+      + (dup ? '<div class="pill p-bad" style="margin-top:4px">duplicate identity</div>' : '') + '</td>'
+      + '<td class="text-slate-400 text-xs">' + (b.advertisement_type || 'iBeacon') + '</td>'
+      + '<td>' + ident + '</td>'
+      + '<td class="mono">' + (b.tx_power != null ? b.tx_power : '—') + ' / '
+        + (b.path_loss_n != null ? b.path_loss_n : '—') + '</td>'
+      + '<td class="mono">' + (b.map_x != null ? Math.round(b.map_x) + ', ' + Math.round(b.map_y) : 'not placed') + '</td>'
+      + '<td><span class="pill ' + (heard ? 'p-ok' : 'p-idle') + '">' + (heard ? 'heard' : 'silent') + '</span></td>'
+      + '</tr>';
+  }).join('');
+}
+
+function renderDiagnostics() {
+  const body = document.getElementById('diagBody');
+  document.getElementById('advCount').textContent =
+    advCount + ' advertisement(s) · ' + heardDevices.size + ' device(s)';
+  if (!heardDevices.size) return;
+  const rows = [...heardDevices.values()].sort((a, b) => b.rssi - a.rssi);
+  body.innerHTML = rows.map((d) =>
+    '<tr>'
+    + '<td>' + escapeHtml(d.name) + '</td>'
+    + '<td class="mono text-slate-400">' + escapeHtml(d.frame) + '</td>'
+    + '<td class="mono">' + d.rssi + ' dBm</td>'
+    + '<td class="mono">' + (d.distance != null ? '~' + d.distance.toFixed(2) + ' m' : '—') + '</td>'
+    + '<td>' + (d.matched
+        ? '<span class="pill p-ok">' + escapeHtml(d.matched) + '</span>'
+        : '<span class="pill p-idle">no</span>') + '</td>'
+    + '</tr>').join('');
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+
+function tick() {
+  renderDiagnostics();
+  renderConfig();
+  const fix = trilaterate();
+  const note = document.getElementById('fixNote');
+  if (!fix) return;
+  if (fix.error) {
+    note.textContent = fix.error;
+    return;
+  }
+  note.textContent = 'fixed from ' + fix.used + ' beacons';
+  const ll = toLatLng(fix.x, fix.y);
+  if (!meMarker) {
+    meMarker = L.circleMarker(ll, { radius: 9, color: '#10b981', fillColor: '#10b981', fillOpacity: .8, weight: 3 })
+      .addTo(lmap).bindTooltip('You are here', { permanent: false, direction: 'top' });
+  } else {
+    meMarker.setLatLng(ll);
+  }
+  setStatus('ok', 'Position fixed');
+}
+
+function setStatus(kind, text) {
+  const el = document.getElementById('status');
+  el.className = 'pill p-' + kind;
+  el.textContent = text;
+}
+
+// ── Starting ────────────────────────────────────────────────────────────
+function withTimeout(promise, ms) {
+  return Promise.race([promise, new Promise((res) => setTimeout(() => res(null), ms))]);
+}
+
+async function startTest() {
+  if (!window.isSecureContext) {
+    setStatus('bad', 'Needs https');
+    alert('Bluetooth needs a secure address. Open this page over https:// or on localhost.');
+    return;
+  }
+  if (!navigator.bluetooth) {
+    setStatus('bad', 'No Web Bluetooth');
+    alert('This browser has no Web Bluetooth at all. Use Chrome on Android or on a computer, '
+        + 'or a Bluetooth-capable browser on iOS.');
+    return;
+  }
+
+  document.getElementById('startBtn').disabled = true;
+  document.getElementById('stopBtn').disabled = false;
+  if (tickTimer) clearInterval(tickTimer);
+  tickTimer = setInterval(tick, 1000);
+
+  // Continuous scanning first: one permission and every beacon arrives.
+  if (navigator.bluetooth.requestLEScan) {
+    setStatus('warn', 'Asking to scan…');
+    try {
+      const scan = await withTimeout(
+        navigator.bluetooth.requestLEScan({ acceptAllAdvertisements: true }), 8000);
+      if (scan) {
+        currentScan = scan;
+        navigator.bluetooth.addEventListener('advertisementreceived', onAdvertisement);
+        setStatus('ok', 'Scanning');
+        document.getElementById('detail').textContent =
+          'Continuous scan — every beacon in range arrives on its own.';
+        return;
+      }
+    } catch (err) {
+      if (/cancel|denied|permission/i.test(String(err))) {
+        setStatus('warn', 'Permission refused');
+        stopTest();
+        return;
+      }
+    }
+  }
+
+  // Otherwise admit each beacon by hand. Legitimate here in a way it is not on
+  // the patron map: whoever is testing installed the hardware.
+  setStatus('warn', 'Admit beacons one at a time');
+  document.getElementById('addBtn').style.display = '';
+  document.getElementById('detail').textContent =
+    'This browser will not scan continuously. Press “Admit a beacon” once per beacon — three are needed.';
+}
+
+async function admitBeacon() {
+  try {
+    const device = await navigator.bluetooth.requestDevice({
+      acceptAllDevices: true,
+      // Without naming these, the browser strips manufacturer and service data
+      // out of every advertisement and no beacon can be identified.
+      optionalManufacturerData: [0xFFFF, 0x004C, 0x0059, 0x00E0, 0x0075, 0x0006, 0x0171, 0x0157, 0x00D2, 0x0499],
+      optionalServices: [EDDYSTONE_SERVICE],
+    });
+    if (watched.has(device.id)) { alert('That beacon is already admitted.'); return; }
+    if (!device.watchAdvertisements) {
+      alert('This browser cannot read advertisements from a chosen device, so positioning '
+          + 'cannot be tested here. Chrome on Android supports both routes.');
+      return;
+    }
+    device.addEventListener('advertisementreceived', onAdvertisement);
+    await device.watchAdvertisements();
+    watched.add(device.id);
+    document.getElementById('detail').textContent =
+      watched.size + ' beacon(s) admitted' + (watched.size < 3 ? ' — three are needed' : '');
+  } catch (err) {
+    if (!/cancel/i.test(String(err))) alert('Could not admit that beacon: ' + err);
+  }
+}
+
+function stopTest() {
+  if (currentScan) { try { currentScan.stop(); } catch (_) {} currentScan = null; }
+  navigator.bluetooth && navigator.bluetooth.removeEventListener &&
+    navigator.bluetooth.removeEventListener('advertisementreceived', onAdvertisement);
+  if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
+  document.getElementById('startBtn').disabled = false;
+  document.getElementById('stopBtn').disabled = true;
+  document.getElementById('addBtn').style.display = 'none';
+  setStatus('idle', 'Stopped');
+}
+
+loadMap();
+</script>
+
+<script>
+  document.addEventListener('ayla:themechange', function () { location.reload(); });
+</script>
+</body>
+</html>

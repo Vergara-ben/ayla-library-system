@@ -116,6 +116,7 @@ urlpatterns = [
     path('admin-portal/delete-announcement/', views.delete_announcement, name='delete_announcement'),
     # Floor Plan Management
     path('admin-portal/floorplan-management/', views.floorplan_management, name='floorplan_management'),
+    path('admin-portal/position-test/', views.position_test, name='position_test'),
     path('admin-portal/set-active-floorplan/', views.set_active_floorplan, name='set_active_floorplan'),
     path('admin-portal/set-floorplan-scale/', views.set_floorplan_scale, name='set_floorplan_scale'),
     path('admin-portal/toggle-renovation/', views.toggle_renovation, name='toggle_renovation'),

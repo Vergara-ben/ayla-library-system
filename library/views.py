@@ -3280,6 +3280,24 @@ def _shelf_page(request, template):
 
 
 @admin_only_required
+def position_test(request):
+    """Check positioning against the real beacons, from the Administrator's side.
+
+    The patron map only ever scans continuously, because the alternative --
+    admitting each beacon through the browser's device chooser -- means putting
+    library hardware in front of a reader, which is not theirs to handle. That
+    leaves whoever installs the beacons no way to tell a bad calibration from a
+    browser that cannot scan, since both look like a map that never moves.
+
+    This is that missing instrument. It runs the same decoding and the same
+    trilateration as the patron map, but admits beacons the way a setup tool
+    may, so the arithmetic can be verified on hardware the patron map cannot
+    use. Nothing here is reachable from a patron session.
+    """
+    return render(request, 'admin/positiontest.html')
+
+
+@admin_only_required
 def shelf_manager(request):
     return _shelf_page(request, 'admin/shelfmanager.html')
 
