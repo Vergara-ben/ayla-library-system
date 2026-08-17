@@ -31,3 +31,4 @@ staticfiles/
 Thumbs.db
 seeded_transactions.json
 seeded_logs.json
+seeded_catalogue.json
