@@ -14,6 +14,8 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@400;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{% static 'css/theme.css' %}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
     <style>
         body { font-family: 'Inter', sans-serif; background-color: var(--bg-main); color: var(--text-primary); }
         .logo-text { font-family: 'Rowdies', sans-serif; }
@@ -85,6 +87,26 @@
                     <button id="tabTable" onclick="switchView('table')" class="px-3 py-1.5 rounded-md text-xs font-bold tracking-wide text-slate-500 hover:text-slate-300 flex items-center gap-2"><i class="fa-solid fa-table-list text-[10px]"></i> Table</button>
                 </div>
                 <p class="text-[11px] text-slate-500">Toggle a switch to show/hide a location from patrons. Inactive items appear dimmed.</p>
+            </div>
+
+            {# A small read-only plan of the active floor, so a shelf can be found #}
+            {# by where it actually is rather than by remembering its name. Editing #}
+            {# stays in Floor Plan Management; this is for locating. #}
+            <div id="miniMapCard" class="rounded-xl border border-slate-800/80 shadow-2xl overflow-hidden" style="background-color: var(--bg-card);">
+                <div class="p-4 border-b border-slate-800 flex items-center gap-2 flex-wrap">
+                    <i class="fa-solid fa-map-location-dot text-cyan-600 text-xs"></i>
+                    <h4 class="text-sm font-bold text-slate-200 tracking-wide">Floor Plan</h4>
+                    <span class="text-[10px] text-slate-500">click a shelf to find it below</span>
+                    <span id="miniMapNote" class="text-[10px] text-amber-500/90 ml-1"></span>
+                    <div class="ml-auto flex items-center gap-2">
+                        <button type="button" onclick="miniMapFit()" class="text-[10px] text-slate-400 hover:text-cyan-400 flex items-center gap-1"><i class="fa-solid fa-expand"></i> Fit</button>
+                        <a href="{% url 'floorplan_management' %}" class="text-[10px] text-slate-400 hover:text-cyan-400 flex items-center gap-1"><i class="fa-solid fa-pen-to-square"></i> Edit layout</a>
+                        <button type="button" onclick="toggleMiniMap()" id="miniMapToggle" class="text-[10px] text-slate-400 hover:text-cyan-400 flex items-center gap-1"><i class="fa-solid fa-chevron-up"></i> Hide</button>
+                    </div>
+                </div>
+                {# Deliberately short. It is a locator beside the list, not a canvas #}
+                {# to work on, and a tall map would push the structure off screen. #}
+                <div id="miniMap" style="height:300px;background:var(--bg-main);"></div>
             </div>
 
             <!-- TREE VIEW -->
@@ -238,6 +260,7 @@
             tree: "{% url 'get_shelf_tree' %}",
             flat: "{% url 'get_shelf_levels_flat' %}",
             toggle: "{% url 'toggle_active' %}",
+            mapData: "{% url 'get_map_data' %}",
             addRoom: "{% url 'add_room' %}", addShelf: "{% url 'add_shelf' %}",
             addLevel: "{% url 'add_shelf_level' %}",
             editRoom: "{% url 'edit_room' %}", editShelf: "{% url 'edit_shelf' %}",
@@ -315,7 +338,8 @@
             const chev = (isBook || !hasKids)
                 ? '<span class="chev leaf">▶</span>'
                 : '<span class="chev' + (open ? ' open' : '') + '" onclick="tChev(this)">▶</span>';
-            const data = 'data-name="' + esc(node.name || '') + '" data-label="' + esc(node.category || '') + '" data-level="' + (node.level_number || '') + '"';
+            const data = 'data-name="' + esc(node.name || '') + '" data-label="' + esc(node.category || '') + '" data-level="' + (node.level_number || '') + '"'
+                + ' data-type="' + node.type + '" data-id="' + node.id + '"';
 
             let html = '<div class="tnode">';
             html += '<div class="trow' + inactive + '" style="padding-left:' + pad + 'px" ' + data + '>';
@@ -338,6 +362,147 @@
             const open = kids.style.display !== 'none';
             kids.style.display = open ? 'none' : 'block';
             el.classList.toggle('open', !open);
+        }
+
+
+        // ── Mini floor plan ─────────────────────────────────────────────
+        // Read-only on purpose: this page is where the hierarchy is managed,
+        // and a second editable canvas would be two places to change the same
+        // thing. Clicking a shelf here just finds it in the tree.
+        let miniMap = null, miniH = 0, miniShelves = {}, miniBounds = null;
+
+        function miniToLatLng(x, y) { return [miniH - y, x]; }
+
+        function miniShelfCorners(cx, cy, rotationDeg, width, depth) {
+            const rad = (rotationDeg || 0) * Math.PI / 180;
+            const cos = Math.cos(rad), sin = Math.sin(rad);
+            const hw = (width || 46) / 2, hd = (depth || 14) / 2;
+            return [[-hw, -hd], [hw, -hd], [hw, hd], [-hw, hd]].map(function (pt) {
+                return miniToLatLng(cx + pt[0] * cos - pt[1] * sin,
+                                    cy + pt[0] * sin + pt[1] * cos);
+            });
+        }
+
+        async function loadMiniMap() {
+            const host = document.getElementById('miniMap');
+            const note = document.getElementById('miniMapNote');
+            if (!host) return;
+
+            let d;
+            try { d = await getJSON(U.mapData); } catch (e) { d = null; }
+            if (!d || !d.success) {
+                document.getElementById('miniMapCard').classList.add('hidden');
+                return;
+            }
+
+            miniH = d.canvas_height || 800;
+            miniMap = L.map('miniMap', {
+                crs: L.CRS.Simple, minZoom: -4, maxZoom: 3,
+                attributionControl: false, zoomControl: true,
+                // The page scrolls; a map that eats the wheel traps the reader.
+                scrollWheelZoom: false,
+            });
+
+            const accent = AylaTheme.color('--accent');
+            const strong = AylaTheme.color('--accent-strong');
+
+            (d.rooms || []).forEach(function (r) {
+                if (!r.geometry || r.geometry.length < 3) return;
+                L.polygon(r.geometry.map(function (pt) { return miniToLatLng(pt[0], pt[1]); }), {
+                    color: strong, weight: 1.5, fillColor: accent, fillOpacity: 0.10,
+                    interactive: false,
+                }).addTo(miniMap).bindTooltip(r.name || 'Room', { direction: 'top', sticky: true });
+            });
+
+            let placed = 0, unplaced = 0;
+            (d.shelves || []).forEach(function (sh) {
+                if (!sh.placed) { unplaced += 1; return; }
+                placed += 1;
+                const poly = L.polygon(
+                    miniShelfCorners(sh.map_x, sh.map_y, sh.rotation, sh.width, sh.depth), {
+                        color: '#a855f7', weight: 1.5, fillColor: '#a855f7', fillOpacity: 0.35,
+                    }).addTo(miniMap);
+                poly.bindTooltip(sh.name || ('Shelf #' + sh.shelf_id),
+                                 { direction: 'top', sticky: true });
+                poly.on('click', function () { focusShelf(sh.shelf_id, poly); });
+                miniShelves[sh.shelf_id] = poly;
+            });
+
+            // A shelf in the list but not on the plan is the thing this panel is
+            // most likely to expose, so it says so rather than just omitting it.
+            note.textContent = unplaced
+                ? unplaced + ' shelf/shelves not placed on the plan yet'
+                : '';
+
+            const layers = Object.keys(miniShelves).map(function (k) { return miniShelves[k]; });
+            if (placed || (d.rooms || []).length) {
+                const group = L.featureGroup(layers.concat(
+                    (d.rooms || []).filter(function (r) { return r.geometry && r.geometry.length > 2; })
+                        .map(function (r) {
+                            return L.polygon(r.geometry.map(function (pt) {
+                                return miniToLatLng(pt[0], pt[1]); }));
+                        })));
+                miniBounds = group.getBounds();
+                miniMap.fitBounds(miniBounds, { padding: [20, 20] });
+            } else {
+                miniMap.setView(miniToLatLng((d.canvas_width || 1000) / 2, miniH / 2), -1);
+            }
+        }
+
+        function miniMapFit() {
+            if (miniMap && miniBounds) miniMap.fitBounds(miniBounds, { padding: [20, 20] });
+        }
+
+        function toggleMiniMap() {
+            const host = document.getElementById('miniMap');
+            const btn = document.getElementById('miniMapToggle');
+            const hidden = host.style.display === 'none';
+            host.style.display = hidden ? '' : 'none';
+            btn.innerHTML = hidden
+                ? '<i class="fa-solid fa-chevron-up"></i> Hide'
+                : '<i class="fa-solid fa-chevron-down"></i> Show';
+            if (hidden && miniMap) setTimeout(function () { miniMap.invalidateSize(); miniMapFit(); }, 60);
+        }
+
+        // ── Clicking a shelf on the plan finds it in the structure ──────
+        function focusShelf(shelfId, poly) {
+            if (currentView !== 'tree') switchView('tree');
+
+            const row = document.querySelector('.trow[data-type="shelf"][data-id="' + shelfId + '"]');
+            if (!row) {
+                // It is on the plan but not under the active floor plan's tree.
+                document.getElementById('miniMapNote').textContent =
+                    'That shelf is not in the structure below.';
+                return;
+            }
+
+            // Open every ancestor, or the row is found but invisible.
+            let node = row.parentElement;
+            while (node && node.id !== 'treeRoot') {
+                if (node.classList && node.classList.contains('tkids')) {
+                    node.style.display = 'block';
+                    const chev = node.parentElement && node.parentElement.querySelector('.chev');
+                    if (chev) chev.classList.add('open');
+                }
+                node = node.parentElement;
+            }
+
+            row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            flashRow(row);
+            if (poly) {
+                const original = poly.options.color;
+                poly.setStyle({ color: '#f59e0b', weight: 3, fillOpacity: 0.55 });
+                setTimeout(function () {
+                    poly.setStyle({ color: original, weight: 1.5, fillOpacity: 0.35 });
+                }, 1600);
+            }
+        }
+
+        function flashRow(row) {
+            const previous = row.style.background;
+            row.style.transition = 'background .25s';
+            row.style.background = 'rgba(245,158,11,.22)';
+            setTimeout(function () { row.style.background = previous || ''; }, 1600);
         }
 
         async function loadTree() {
@@ -452,8 +617,11 @@
             } else { cb.checked = !cb.checked; alert(r.error || 'Failed to toggle'); }
         }
 
+        let currentView = 'tree';
+
         function switchView(v) {
             const tree = v === 'tree';
+            currentView = v;
             document.getElementById('treeView').classList.toggle('hidden', !tree);
             document.getElementById('tableView').classList.toggle('hidden', tree);
             document.getElementById('tabTree').className = 'px-3 py-1.5 rounded-md text-xs font-bold tracking-wide flex items-center gap-2 ' + (tree ? 'bg-cyan-700/30 text-cyan-400 border border-cyan-800/50' : 'text-slate-500 hover:text-slate-300');
@@ -537,6 +705,7 @@
         }
 
         loadTree();
+        loadMiniMap();
         loadFlat();
     </script>
     <script src="{% static 'js/admin-enhance.js' %}" defer></script>
