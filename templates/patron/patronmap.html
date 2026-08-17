@@ -149,6 +149,9 @@
   </div>
   <div class="btn-row">
     <button class="btn-nav" id="navBtn" onclick="showBTModal()">📡 Enable Navigation</button>
+    {# Shown only when continuous scanning is unavailable and beacons have to #}
+    {# be admitted one at a time. Hidden on the path where scanning works. #}
+    <button class="btn-nav" id="pairBtn" style="display:none" onclick="pairOneBeacon()">➕ Add a beacon</button>
   </div>
 </div>
 
@@ -429,24 +432,33 @@ function hex(view, from, to) {
   return out;
 }
 
-// Classic iBeacons advertise no service UUID — their identity lives in Apple
+// Classic iBeacons advertise no service UUID — their identity lives in
 // manufacturer data: 0x02 0x15, 16-byte proximity UUID, major, minor, then the
 // measured power at 1 m. Several beacons normally share one UUID and differ
 // only by major/minor, so all three are read.
+//
+// The frame is conventionally carried under Apple's company ID, but a good
+// deal of hardware uses 0xFFFF or a chipset vendor's ID instead. Matching on
+// the 0x02 0x15 prefix across every company ID is what lets those beacons work
+// at all; requiring Apple's would reject them while they advertise perfectly.
 function parseIBeacon(e) {
   const md = e.manufacturerData;
-  if (!md || typeof md.get !== 'function') return null;
-  const v = md.get(APPLE_COMPANY_ID);
-  if (!v || v.byteLength < 23) return null;
-  if (v.getUint8(0) !== 0x02 || v.getUint8(1) !== 0x15) return null;   // not a proximity beacon
-  const raw = hex(v, 2, 18);
-  return {
-    uuid: raw.slice(0, 8) + '-' + raw.slice(8, 12) + '-' + raw.slice(12, 16)
-        + '-' + raw.slice(16, 20) + '-' + raw.slice(20),
-    major: v.getUint16(18, false),
-    minor: v.getUint16(20, false),
-    measuredPower: v.getInt8(22),
-  };
+  if (!md || typeof md.forEach !== 'function') return null;
+  let found = null;
+  md.forEach((v, company) => {
+    if (found || !v || v.byteLength < 23) return;
+    if (v.getUint8(0) !== 0x02 || v.getUint8(1) !== 0x15) return;   // not a proximity beacon
+    const raw = hex(v, 2, 18);
+    found = {
+      company,
+      uuid: raw.slice(0, 8) + '-' + raw.slice(8, 12) + '-' + raw.slice(12, 16)
+          + '-' + raw.slice(16, 20) + '-' + raw.slice(20),
+      major: v.getUint16(18, false),
+      minor: v.getUint16(20, false),
+      measuredPower: v.getInt8(22),
+    };
+  });
+  return found;
 }
 
 // Eddystone advertises service 0xFEAA on every unit, so the service UUID alone
@@ -568,7 +580,10 @@ function bleUnavailableReason() {
   // for what is really a http:// URL.
   if (!window.isSecureContext) return 'insecure';
   if (!('bluetooth' in navigator)) return 'unsupported';
-  if (!navigator.bluetooth.requestLEScan) return 'noscanning';
+  // Missing requestLEScan is no longer fatal. Admitting beacons one at a time
+  // through the device chooser reaches the same advertisements, and on iOS and
+  // on much of Windows Chrome it is the only route there is.
+  if (!navigator.bluetooth.requestLEScan) return null;
   return null;
 }
 
@@ -584,9 +599,9 @@ const BLE_HELP = {
     status: 'BLE not supported by this browser',
     message: 'This browser cannot use Bluetooth, so your position cannot be shown here. '
            + 'The floor plan and shelf locations are still available.'
-           + '\n\nOn iPhone and iPad no browser can do this, including Chrome — Apple does '
-           + 'not allow it. Live positioning needs Chrome on Android, or Chrome or Edge on a '
-           + 'computer.',
+           + '\n\nOn iPhone and iPad, Safari and Chrome cannot do this — Apple does not '
+           + 'allow it. A Bluetooth-capable browser from the App Store can, and so can '
+           + 'Chrome on Android or a computer.',
   },
   noscanning: {
     status: 'Bluetooth scanning is switched off',
@@ -605,16 +620,124 @@ async function enableBLE() {
     alert(BLE_HELP[reason].message);
     return;
   }
+  // Continuous scanning is the good path: one permission, every beacon, no
+  // further interaction. It exists on Android Chrome and almost nowhere else,
+  // so failing to get it is normal rather than exceptional.
+  if (navigator.bluetooth.requestLEScan) {
+    try {
+      const scan = await withTimeout(
+        navigator.bluetooth.requestLEScan({ acceptAllAdvertisements: true }), 8000);
+      if (scan) {
+        navigator.bluetooth.addEventListener('advertisementreceived', onAdvertisement);
+        setStatus('green', 'BLE: Scanning…');
+        startTrilateration();
+        return;
+      }
+      // Resolved as a timeout: Chrome accepted the call and never started.
+      // Windows does this silently, so fall through rather than hang.
+    } catch (err) {
+      if (/cancel|denied|permission/i.test(String(err))) {
+        setStatus('amber', 'Bluetooth permission refused');
+        alert('Bluetooth was not allowed, so your position cannot be shown. '
+            + 'Press Enable Navigation and allow the permission to try again.');
+        return;
+      }
+    }
+  }
+  await startPerDeviceMode();
+}
+
+// A promise that gives up rather than waiting for ever. requestLEScan on
+// Windows can sit unresolved indefinitely — no error, no rejection — which is
+// indistinguishable from a slow permission prompt unless something times it.
+function withTimeout(promise, ms) {
+  return Promise.race([
+    promise,
+    new Promise((resolve) => setTimeout(() => resolve(null), ms)),
+  ]);
+}
+
+function startTrilateration() {
+  if (bleInterval) clearInterval(bleInterval);
+  bleInterval = setInterval(trilaterate, 1500);
+}
+
+// Watching one chosen device at a time. Three beacons means three prompts the
+// first time; after that the browser remembers them and getDevices() brings
+// them back without asking again.
+const watchedDevices = new Set();
+
+async function watchDevice(device) {
+  if (!device || watchedDevices.has(device.id)) return false;
+  if (!device.watchAdvertisements) return false;
   try {
-    await navigator.bluetooth.requestLEScan({ acceptAllAdvertisements: true });
-    navigator.bluetooth.addEventListener('advertisementreceived', onAdvertisement);
-    setStatus('green', 'BLE: Scanning…');
-    if (bleInterval) clearInterval(bleInterval);
-    bleInterval = setInterval(trilaterate, 1500);
+    device.addEventListener('advertisementreceived', onAdvertisement);
+    await device.watchAdvertisements();
+    watchedDevices.add(device.id);
+    return true;
   } catch (err) {
-    setStatus('amber', 'Bluetooth scanning blocked');
-    alert('Bluetooth scanning was blocked or cancelled, so your position cannot be shown. '
-        + 'Allow the Bluetooth permission and try again.');
+    return false;
+  }
+}
+
+function pairedStatus() {
+  const needed = mapData && mapData.beacons ? mapData.beacons.length : 3;
+  setStatus(watchedDevices.size >= 3 ? 'green' : 'amber',
+            'BLE: ' + watchedDevices.size + ' of ' + needed + ' beacons added');
+}
+
+async function startPerDeviceMode() {
+  const pairBtn = document.getElementById('pairBtn');
+
+  // Devices already permitted on an earlier visit come back silently, so a
+  // returning patron does not repeat the setup.
+  if (navigator.bluetooth.getDevices) {
+    try {
+      const known = await navigator.bluetooth.getDevices();
+      for (const device of known) await watchDevice(device);
+    } catch (err) { /* not supported here; the chooser still works */ }
+  }
+
+  if (!navigator.bluetooth.requestDevice) {
+    setStatus('amber', 'BLE not available in this browser');
+    alert('This browser cannot read Bluetooth beacons, so your position cannot be shown. '
+        + 'The floor plan and shelf locations still work.');
+    return;
+  }
+
+  if (pairBtn) pairBtn.style.display = '';
+  startTrilateration();
+
+  if (watchedDevices.size) {
+    pairedStatus();
+  } else {
+    setStatus('amber', 'Add each beacon once');
+    alert('This browser cannot scan for beacons on its own, so each beacon is added once '
+        + 'by hand.\n\nPress "Add a beacon" and choose one from the list. Repeat until three '
+        + 'have been added — positioning needs three. Next time they are remembered.');
+  }
+}
+
+async function pairOneBeacon() {
+  try {
+    const device = await navigator.bluetooth.requestDevice({
+      acceptAllDevices: true,
+      // Without naming these, the browser strips the payload out of every
+      // advertisement and no beacon can be identified.
+      optionalManufacturerData: [0xFFFF, 0x004C, 0x0059, 0x00E0, 0x0075, 0x0006, 0x0171, 0x0157, 0x00D2, 0x0499],
+      optionalServices: [EDDYSTONE_SERVICE],
+    });
+    const ok = await watchDevice(device);
+    if (!ok) {
+      alert('That device could not be read. It may already be added, or this browser '
+          + 'may not support reading advertisements.');
+      return;
+    }
+    pairedStatus();
+  } catch (err) {
+    if (!/cancel/i.test(String(err))) {
+      alert('Could not add that beacon: ' + err);
+    }
   }
 }
 

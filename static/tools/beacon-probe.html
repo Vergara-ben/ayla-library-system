@@ -113,20 +113,30 @@ function uuidFrom(view, offset) {
         + h.slice(16, 20) + '-' + h.slice(20)).toUpperCase();
 }
 
-// iBeacon rides inside Apple's manufacturer data: 0x02 0x15, then a 16-byte
-// proximity UUID, major, minor, and the RSSI the beacon expects at one metre.
+// iBeacon is 0x02 0x15, a 16-byte proximity UUID, major, minor, and the RSSI
+// the beacon expects at one metre.
+//
+// Apple's company ID is the conventional carrier, but plenty of hardware ships
+// the identical frame under 0xFFFF (the "no company" ID) or a chipset vendor's
+// — HolyIOT units do exactly this. Insisting on 0x004C makes a perfectly good
+// beacon invisible, so every company ID is examined and the 0x02 0x15 prefix
+// does the identifying. That prefix is what actually means "iBeacon".
 function readIBeacon(manufacturerData) {
-  if (!manufacturerData) return null;
-  const v = manufacturerData.get(APPLE_COMPANY_ID);
-  if (!v || v.byteLength < 23) return null;
-  if (v.getUint8(0) !== 0x02 || v.getUint8(1) !== 0x15) return null;
-  return {
-    kind: 'iBeacon',
-    uuid: uuidFrom(v, 2),
-    major: v.getUint16(18, false),
-    minor: v.getUint16(20, false),
-    txAt1m: v.getInt8(22),
-  };
+  if (!manufacturerData || typeof manufacturerData.forEach !== 'function') return null;
+  let found = null;
+  manufacturerData.forEach(function (v, company) {
+    if (found || !v || v.byteLength < 23) return;
+    if (v.getUint8(0) !== 0x02 || v.getUint8(1) !== 0x15) return;
+    found = {
+      kind: 'iBeacon',
+      company: company,
+      uuid: uuidFrom(v, 2),
+      major: v.getUint16(18, false),
+      minor: v.getUint16(20, false),
+      txAt1m: v.getInt8(22),
+    };
+  });
+  return found;
 }
 
 // Eddystone-UID sits in service data under 0xFEAA, frame type 0x00. Its ranging
@@ -169,7 +179,10 @@ function describeRow(r) {
     return '<span class="kind k-ibeacon">iBeacon</span> '
          + '<span class="mono">' + esc(b.uuid) + '</span>'
          + '<div class="mono">major ' + b.major + ' &middot; minor ' + b.minor
-         + ' &middot; ' + b.txAt1m + ' dBm @ 1 m</div>'
+         + ' &middot; ' + b.txAt1m + ' dBm @ 1 m'
+         + (b.company != null && b.company !== APPLE_COMPANY_ID
+            ? ' &middot; company 0x' + b.company.toString(16).toUpperCase().padStart(4, '0')
+            : '') + '</div>'
          + '<div class="paste">type      iBeacon\nUUID      ' + esc(b.uuid)
          + '\nmajor     ' + b.major + '\nminor     ' + b.minor
          + '\ntx power  ' + b.txAt1m + '</div>';
@@ -191,6 +204,12 @@ function describeRow(r) {
           + (r.name === '(no name)' ? ' and no name' : '') + '</div>';
   }
   if (r.mfg) body += '<div class="mono" style="color:#5b7180">mfg ' + esc(r.mfg) + '</div>';
+  // A beacon whose payload cannot be read here can still be matched by name,
+  // provided each one is renamed to something unique in the vendor's app.
+  // Worth offering rather than leaving the row as a dead end.
+  if (r.name && r.name !== '(no name)') {
+    body += '<div class="paste">type      DeviceName\nname      ' + esc(r.name) + '</div>';
+  }
   return body;
 }
 
@@ -323,8 +342,16 @@ document.getElementById('pick').addEventListener('click', async function () {
   }
   try {
     statusEl.textContent = 'Choose a beacon from the list Chrome shows…';
+    // Chrome delivers an advertisement's payload only for the company IDs and
+    // services named here. With an empty list the events still arrive — with
+    // RSSI, with a name, counted correctly — but manufacturerData and
+    // serviceData come back empty, so a working beacon reads as "not a beacon
+    // frame". Naming Apple (iBeacon) and 0xFEAA (Eddystone) is what makes the
+    // contents visible at all.
     const device = await navigator.bluetooth.requestDevice({
-      acceptAllDevices: true, optionalServices: [],
+      acceptAllDevices: true,
+      optionalManufacturerData: [0xFFFF, 0x004C, 0x0059, 0x00E0, 0x0075, 0x0006, 0x0171, 0x0157, 0x00D2, 0x0499],
+      optionalServices: [EDDYSTONE_UUID],
     });
     if (!device.watchAdvertisements) {
       statusEl.innerHTML = '<span class="warn">This Chrome cannot read advertisements from a '

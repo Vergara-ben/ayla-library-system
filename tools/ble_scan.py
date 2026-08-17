@@ -38,30 +38,38 @@ DEFAULT_PATH_LOSS_N = 2.0
 
 
 def decode_ibeacon(manufacturer_data):
-    """Return iBeacon fields, or None if this is some other Apple payload."""
-    payload = manufacturer_data.get(APPLE_COMPANY_ID)
-    # 0x02 0x15 is the iBeacon type-and-length prefix; Apple uses the same
-    # company ID for AirDrop, Handoff and everything else, so without this
-    # check every nearby Mac and iPhone looks like a beacon.
-    if not payload or len(payload) < 23 or payload[0] != 0x02 or payload[1] != 0x15:
-        return None
+    """Return iBeacon fields from any company ID, or None.
 
-    raw_uuid = payload[2:18].hex()
-    return {
-        'kind': 'iBeacon',
-        'uuid': '%s-%s-%s-%s-%s' % (raw_uuid[0:8], raw_uuid[8:12], raw_uuid[12:16],
-                                    raw_uuid[16:20], raw_uuid[20:32]),
-        'major': int.from_bytes(payload[18:20], 'big'),
-        'minor': int.from_bytes(payload[20:22], 'big'),
-        'tx_power': int.from_bytes(payload[22:23], 'big', signed=True),
-        'namespace': None,
-        'instance': None,
-    }
+    The frame is conventionally carried under Apple's company ID, but a great
+    deal of hardware -- HolyIOT among it -- ships the identical payload under
+    0xFFFF, the "no company" ID. Looking only at Apple's makes those beacons
+    invisible while they advertise perfectly, which is indistinguishable from
+    a flat battery. The 0x02 0x15 prefix is what actually identifies an
+    iBeacon, and it is specific enough to carry the check on its own: Apple
+    reuses its company ID for AirDrop and Handoff, and those do not match it.
+    """
+    for company, payload in (manufacturer_data or {}).items():
+        if len(payload) < 23 or payload[0] != 0x02 or payload[1] != 0x15:
+            continue
+
+        raw_uuid = payload[2:18].hex()
+        return {
+            'kind': 'iBeacon',
+            'company': company,
+            'uuid': '%s-%s-%s-%s-%s' % (raw_uuid[0:8], raw_uuid[8:12], raw_uuid[12:16],
+                                        raw_uuid[16:20], raw_uuid[20:32]),
+            'major': int.from_bytes(payload[18:20], 'big'),
+            'minor': int.from_bytes(payload[20:22], 'big'),
+            'tx_power': int.from_bytes(payload[22:23], 'big', signed=True),
+            'namespace': None,
+            'instance': None,
+        }
+    return None
 
 
 def decode_eddystone(service_data):
     """Return Eddystone-UID fields, or None for URL/TLM frames we cannot place."""
-    payload = service_data.get(EDDYSTONE_UUID)
+    payload = (service_data or {}).get(EDDYSTONE_UUID)
     if not payload or len(payload) < 18 or payload[0] != 0x00:
         return None
 
@@ -103,11 +111,26 @@ class Sighting:
         self.first_seen = time.monotonic()
         self.last_seen = self.first_seen
 
-    def record(self, rssi, beacon):
+        self.manufacturer_data = {}
+        self.service_data = {}
+        self.service_uuids = []
+
+    def record(self, rssi, beacon, advertisement_data=None):
         if beacon:
             self.beacon = beacon
         if rssi is not None:
             self.readings.append(rssi)
+        if advertisement_data is not None:
+            # Kept so an unrecognised device can still be identified by hand.
+            # A beacon advertising some vendor format decodes as nothing here,
+            # and without the raw bytes there is no way to tell that apart from
+            # a beacon that is simply switched off.
+            if advertisement_data.manufacturer_data:
+                self.manufacturer_data = dict(advertisement_data.manufacturer_data)
+            if advertisement_data.service_data:
+                self.service_data = dict(advertisement_data.service_data)
+            if advertisement_data.service_uuids:
+                self.service_uuids = list(advertisement_data.service_uuids)
         self.last_seen = time.monotonic()
 
     @property
@@ -142,7 +165,11 @@ def format_table(sightings, path_loss_n, show_all):
         if b['namespace']:
             lines.append('      Namespace     %s' % b['namespace'])
             lines.append('      Instance      %s' % b['instance'])
+        if b.get('company') not in (None, APPLE_COMPANY_ID):
+            lines.append('      Company ID    0x%04X  (not Apple, which is fine)'
+                         % b['company'])
         lines.append('      Tx power      %d dBm  (advertised, at 1 m)' % b['tx_power'])
+        lines.append('      MAC           %s' % s.address)
         lines.append('      Signal        %.1f dBm  (%d packets, spread %d dB)'
                      % (s.mean_rssi, len(s.readings), s.spread))
         if distance is not None:
@@ -150,11 +177,18 @@ def format_table(sightings, path_loss_n, show_all):
 
     if show_all and others:
         lines.append('')
-        lines.append('  Other devices (not beacons):')
+        lines.append('  Other devices (not recognised as beacons):')
         for s in sorted(others, key=lambda s: s.mean_rssi or -999, reverse=True)[:20]:
+            lines.append('')
             lines.append('      %-18s %-24s %s dBm'
                          % (s.address, (s.name or '')[:24],
                             '%.0f' % s.mean_rssi if s.mean_rssi is not None else '?'))
+            for company, payload in s.manufacturer_data.items():
+                lines.append('        mfg 0x%04X  %s' % (company, payload.hex()))
+            for uuid, payload in s.service_data.items():
+                lines.append('        svc %s  %s' % (uuid[:8], payload.hex()))
+            if s.service_uuids:
+                lines.append('        uuids %s' % ', '.join(u[:8] for u in s.service_uuids))
     return '\n'.join(lines)
 
 
@@ -169,7 +203,7 @@ async def scan(seconds, path_loss_n, show_all, watch):
             sightings[key] = Sighting(device.address,
                                       advertisement_data.local_name or device.name,
                                       beacon)
-        sightings[key].record(advertisement_data.rssi, beacon)
+        sightings[key].record(advertisement_data.rssi, beacon, advertisement_data)
 
     print('Scanning for %d seconds. Ctrl+C to stop early.\n' % seconds)
     scanner = BleakScanner(detection_callback=on_detection, scanning_mode='active')
