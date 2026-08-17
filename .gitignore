@@ -29,3 +29,4 @@ staticfiles/
 # OS files
 .DS_Store
 Thumbs.db
+seeded_transactions.json

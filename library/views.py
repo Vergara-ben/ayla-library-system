@@ -1590,7 +1590,10 @@ def _transaction_page(request, template):
     transactions_queryset = transactions_queryset.order_by('-transaction_date')
 
     total_borrowed = Transaction.objects.filter(transaction_type='Borrow').count()
-    total_returned = Transaction.objects.filter(transaction_type='Return').count()
+    # A return is recorded by stamping return_date on the original Borrow row —
+    # nothing in the system ever writes a row of type 'Return'. Counting that
+    # type reported zero returns no matter how many books came back.
+    total_returned = Transaction.objects.filter(return_date__isnull=False).count()
     currently_out = Transaction.objects.filter(transaction_type='Borrow', return_date__isnull=True).count()
     overdue_count = Transaction.objects.filter(overdue_flag=True).count()
     transaction_count = transactions_queryset.count()
