@@ -30,3 +30,4 @@ staticfiles/
 .DS_Store
 Thumbs.db
 seeded_transactions.json
+seeded_logs.json
