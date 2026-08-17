@@ -362,7 +362,7 @@ def close_conversation(request):
     return redirect('/admin-portal/messages/?p=' + str(conversation.patron_id))
 
 
-@admin_login_required
+@granted_module_required('chat')
 def staff_poll_messages(request):
     """New patron messages for the thread on screen, plus the queue size."""
     raw_id = (request.GET.get('conversation_id') or '').strip()

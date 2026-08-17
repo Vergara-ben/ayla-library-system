@@ -26,6 +26,7 @@ from .auth_utils import (
     admin_login_required,
     admin_only_required,
     admin_module_required,
+    granted_module_required,
     staff_only_required,
     module_required,
     admin_or_module_required,
@@ -855,7 +856,7 @@ def staff_manage_books(request):
     return _books_page(request, 'library_staff/managebooks.html')
 
 
-@admin_login_required
+@granted_module_required('books')
 def admin_add_book(request):
     error = None
 
@@ -1341,7 +1342,7 @@ def admin_delete_patron(request, patron_id):
     return redirect('admin_manage_patron')
 
 
-@admin_login_required
+@granted_module_required('books')
 def admin_edit_book(request, book_id):
     book = Book.objects.filter(book_id=book_id).first()
     if book is None:
@@ -1425,7 +1426,7 @@ def admin_edit_book(request, book_id):
     return render(request, 'admin/managebooks.html', context)
 
 
-@admin_login_required
+@granted_module_required('books')
 def admin_delete_book(request, book_id):
     if request.method == 'POST':
         book = Book.objects.filter(book_id=book_id).first()
@@ -1436,7 +1437,7 @@ def admin_delete_book(request, book_id):
     return portal_redirect(request, 'admin_management')
 
 
-@admin_login_required
+@granted_module_required('transactions')
 def transaction_action_preview(request, transaction_id):
     """What Mark Returned / Mark Lost would do, for the confirmation modal.
 
@@ -1474,7 +1475,7 @@ def transaction_action_preview(request, transaction_id):
     return JsonResponse({'success': True, 'preview': data})
 
 
-@admin_login_required
+@granted_module_required('transactions')
 def admin_transaction_action(request, transaction_id):
     if request.method == 'POST':
         action = request.POST.get('action')
@@ -1893,6 +1894,8 @@ def staff_logs(request):
     return _logs_page(request, 'library_staff/logmanagement.html')
 
 
+# Deliberately admin_login_required rather than one module: shared by Manage Books and Shelf Manager,
+# and it only reads data the calling page already gated.
 @admin_login_required
 def admin_book_details_ajax(request, book_id):
     from django.http import JsonResponse
@@ -1920,6 +1923,8 @@ def admin_book_details_ajax(request, book_id):
     return JsonResponse(book_data)
 
 
+# Deliberately admin_login_required rather than one module: shared by Manage Books and Transactions,
+# and it only reads data the calling page already gated.
 @admin_login_required
 def search_book_by_qr(request):
     qr_code = request.GET.get('qr_code', '').strip()
@@ -1949,7 +1954,7 @@ def search_book_by_qr(request):
     return JsonResponse(book_data)
 
 
-@admin_login_required
+@granted_module_required('transactions')
 def search_patron_by_qr(request):
     """Resolve a scanned patron identity QR to a patron record.
 
@@ -1986,7 +1991,7 @@ def search_patron_by_qr(request):
     })
 
 
-@admin_login_required
+@granted_module_required('books')
 def download_book_template(request):
     wb = Workbook()
     ws = wb.active
@@ -2035,7 +2040,7 @@ def _resolve_storage_area(name):
     return ShelfLevel.objects.create(shelf=shelf, level_number=next_level, category=label)
 
 
-@admin_login_required
+@granted_module_required('books')
 def import_books(request):
     """Bulk-import books from a spreadsheet.
 
@@ -2280,7 +2285,7 @@ def import_patrons(request):
         return JsonResponse({'success': False, 'error': str(e)})
 
 
-@admin_login_required
+@admin_module_required('inventory')
 def download_donation_template(request):
     wb = Workbook()
     ws = wb.active
@@ -2295,7 +2300,7 @@ def download_donation_template(request):
     return response
 
 
-@admin_login_required
+@admin_module_required('inventory')
 def import_donations(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
@@ -2431,6 +2436,8 @@ def import_announcements(request):
         return JsonResponse({'success': False, 'error': str(e)})
 
 
+# Deliberately admin_login_required rather than one module: shared by Manage Books and Transactions,
+# and it only reads data the calling page already gated.
 @admin_login_required
 def get_book_by_id(request):
     book_id = request.GET.get('book_id', '').strip()
@@ -2456,7 +2463,7 @@ def get_book_by_id(request):
     return JsonResponse(book_data)
 
 
-@admin_login_required
+@granted_module_required('transactions')
 def process_transaction(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
@@ -2734,7 +2741,7 @@ def staff_donations(request):
     return _donations_page(request, 'library_staff/donationadmin.html')
 
 
-@admin_login_required
+@granted_module_required('donations')
 def update_donation_status(request):
     if request.method == 'POST':
         donation_id = request.POST.get('donation_id')
@@ -2765,7 +2772,7 @@ def update_donation_status(request):
     return portal_redirect(request, 'donation_management')
 
 
-@admin_login_required
+@granted_module_required('donations')
 def delete_donation(request):
     if request.method == 'POST':
         donation_id = request.POST.get('donation_id')
@@ -3052,7 +3059,7 @@ def delete_floorplan(request):
 
 
 # Transaction Import/Export
-@admin_login_required
+@granted_module_required('transactions')
 def download_transaction_template(request):
     wb = Workbook()
     ws = wb.active
@@ -3067,7 +3074,7 @@ def download_transaction_template(request):
     return response
 
 
-@admin_login_required
+@granted_module_required('transactions')
 def import_transactions(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
@@ -3383,7 +3390,7 @@ def staff_shelf(request):
     return _shelf_page(request, 'library_staff/shelfmanager.html')
 
 
-@admin_login_required
+@granted_module_required('shelf')
 def get_books_for_placement(request):
     """Searchable list of books for the shelf-level placement picker."""
     q = (request.GET.get('q') or '').strip()
@@ -3409,7 +3416,7 @@ def get_books_for_placement(request):
     return JsonResponse({'success': True, 'books': data})
 
 
-@admin_login_required
+@granted_module_required('shelf')
 def assign_books_to_level(request):
     """Place the selected books onto a shelf level."""
     if request.method != 'POST':
@@ -3430,7 +3437,7 @@ def assign_books_to_level(request):
     return JsonResponse({'success': True, 'updated': updated})
 
 
-@admin_login_required
+@granted_module_required('shelf')
 def get_shelf_tree(request):
     """Returns full nested hierarchy FloorPlan > Room > Shelf > ShelfLevel > Books"""
     floor_plans = FloorPlan.objects.filter(is_active=True).prefetch_related(
@@ -3506,7 +3513,7 @@ def get_shelf_tree(request):
     return JsonResponse({'tree': tree_data})
 
 
-@admin_login_required
+@granted_module_required('shelf')
 def get_shelf_levels_flat(request):
     """Returns flattened list of all ShelfLevels with breadcrumb path"""
     shelf_levels = ShelfLevel.objects.select_related(
@@ -3544,7 +3551,7 @@ def get_shelf_levels_flat(request):
     return JsonResponse({'shelf_levels': flat_data})
 
 
-@admin_login_required
+@granted_module_required('shelf')
 def add_room(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
@@ -3636,7 +3643,7 @@ def delete_room(request):
     return redirect('floorplan_management')
 
 
-@admin_login_required
+@granted_module_required('shelf')
 def add_shelf(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
@@ -3685,7 +3692,7 @@ def add_shelf(request):
         return JsonResponse({'success': False, 'error': 'Room not found'})
 
 
-@admin_login_required
+@granted_module_required('shelf')
 def edit_shelf(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
@@ -3989,7 +3996,7 @@ def unplace_shelf(request):
     return JsonResponse({'success': True})
 
 
-@admin_login_required
+@granted_module_required('shelf')
 def delete_shelf(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
@@ -4004,7 +4011,7 @@ def delete_shelf(request):
     return redirect('floorplan_management')
 
 
-@admin_login_required
+@granted_module_required('shelf')
 def add_shelf_level(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
@@ -4028,7 +4035,7 @@ def add_shelf_level(request):
         return JsonResponse({'success': False, 'error': 'Shelf not found'})
 
 
-@admin_login_required
+@granted_module_required('shelf')
 def edit_shelf_level(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
@@ -4052,7 +4059,7 @@ def edit_shelf_level(request):
         return JsonResponse({'success': False, 'error': 'Shelf level not found'})
 
 
-@admin_login_required
+@granted_module_required('shelf')
 def delete_shelf_level(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
@@ -4067,7 +4074,7 @@ def delete_shelf_level(request):
     return redirect('floorplan_management')
 
 
-@admin_login_required
+@granted_module_required('shelf')
 def toggle_active(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
@@ -4870,7 +4877,7 @@ def _session_brief(log):
     }
 
 
-@admin_login_required
+@granted_module_required('logs')
 def entry_log_start(request):
     """Entry: verify the patron by name + email, then open a visit session.
 
@@ -4912,7 +4919,7 @@ def entry_log_start(request):
     })
 
 
-@admin_login_required
+@granted_module_required('logs')
 def entry_log_register(request):
     """Register a new patron, then open their first visit session (entry)."""
     if request.method != 'POST':
@@ -4987,7 +4994,7 @@ def entry_log_register(request):
     })
 
 
-@admin_login_required
+@granted_module_required('logs')
 def entry_log_exit(request):
     """Exit: find the patron by name + email and close their open session."""
     if request.method != 'POST':
@@ -5016,7 +5023,7 @@ def entry_log_exit(request):
     })
 
 
-@admin_login_required
+@granted_module_required('logs')
 def edit_patron_log(request):
     """Edit a visit log's school, purpose, and entry/exit times."""
     if request.method != 'POST':
@@ -5064,7 +5071,7 @@ def edit_patron_log(request):
     return JsonResponse({'success': True})
 
 
-@admin_login_required
+@granted_module_required('logs')
 def delete_patron_log(request):
     """Delete a visit log (form POST from the Log Management table)."""
     if request.method == 'POST':
@@ -6052,7 +6059,7 @@ def _library_card_context(patron):
     }
 
 
-@admin_login_required
+@granted_module_required('patrons')
 def patron_library_card(request, patron_id):
     """The card for any patron — printed at the desk by Staff or the Administrator."""
     patron = get_object_or_404(Patron, patron_id=patron_id)
