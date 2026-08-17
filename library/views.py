@@ -2647,10 +2647,13 @@ def _donations_page(request, template):
     donations. It tracks copies received in Inventory through
     Received → Processing → Shelved.
     """
+    # Ordered so the title-lines of one intake sit together: a donor who brings
+    # five titles created five rows, and reading them as five separate
+    # donations is the thing that makes this page misleading.
     donations_queryset = (Donation.objects
                           .select_related('book')
                           .prefetch_related('inventory_copies')
-                          .order_by('-date_donated'))
+                          .order_by('-date_donated', 'donor_name', 'donation_id'))
 
     if request.method == 'POST':
         # Donation intake moved to Inventory; nothing is created here any more.
@@ -2658,9 +2661,40 @@ def _donations_page(request, template):
                                'then tracked here through to Shelved.')
         return portal_redirect(request, 'donation_management')
 
-    # Pagination
+    # One donation is one donor on one day, however many titles came with it.
+    # A library acknowledges the gift, not each title inside it, so the page is
+    # grouped that way and paginated by donation rather than by line.
+    groups = []
+    total_titles = 0
+    total_copies = 0
+    for line in donations_queryset:
+        copies = len(line.inventory_copies.all())    # prefetched; no extra query
+        total_titles += 1
+        total_copies += copies
+        key = (line.donor_name, line.date_donated)
+        if not groups or groups[-1]['key'] != key:
+            groups.append({
+                'key': key,
+                'donor_name': line.donor_name,
+                'date_donated': line.date_donated,
+                'lines': [],
+                'copies': 0,
+                'stages': set(),
+            })
+        line.copy_count = copies
+        groups[-1]['lines'].append(line)
+        groups[-1]['copies'] += copies
+        groups[-1]['stages'].add(line.status)
+
+    for group in groups:
+        stages = group['stages']
+        # One label for the gift as a whole. "Mixed" is the honest answer when
+        # its titles are at different points, rather than picking one of them.
+        group['stage'] = stages.pop() if len(stages) == 1 else 'Mixed'
+        group['title_count'] = len(group['lines'])
+
     page_number = request.GET.get('page', 1)
-    paginator = Paginator(donations_queryset, 15)  # 15 donations per page
+    paginator = Paginator(groups, 10)   # 10 donations per page
     donations = paginator.get_page(page_number)
 
     # Counted here rather than in the template, and counted over the whole
@@ -2679,7 +2713,10 @@ def _donations_page(request, template):
     return render(request, template, {
         'donations': donations,
         'paginator': paginator,
-        'total_donations': paginator.count,
+        # Three different numbers that were all previously called "donations".
+        'total_donations': paginator.count,     # gifts received
+        'total_titles': total_titles,           # accessioning lines
+        'total_copies': total_copies,           # physical books
         'received_count': stage_counts.get('Received', 0),
         'processing_count': stage_counts.get('Processing', 0),
         'shelved_count': stage_counts.get('Shelved', 0),
@@ -2708,10 +2745,17 @@ def update_donation_status(request):
             donation.status = status
             donation.save()
 
-            # If status is Shelved, update book status to Available
-            if status == 'Shelved':
-                donation.book.status = 'Available'
-                donation.book.save()
+            # Shelving the last stage of accessioning normally makes the title
+            # available — but only if nothing else already has a claim on it.
+            # A copy out on loan, marked lost, or being read in the library is
+            # a fact about the physical book, and an accessioning step must not
+            # overwrite it: the catalogue would advertise a book that is in
+            # somebody's bag.
+            if status == 'Shelved' and donation.book:
+                claimed = donation.book.status in ('Borrowed', 'Overdue', 'Being Read', 'Lost')
+                if not claimed:
+                    donation.book.status = 'Available'
+                    donation.book.save()
             # Carry the stage back to the inventory copies this row tracks, so
             # the two never disagree about where a donation has got to.
             donation.inventory_copies.update(processing_stage=status)
@@ -2728,19 +2772,29 @@ def delete_donation(request):
         donation = Donation.objects.filter(donation_id=donation_id).first()
         if donation:
             detail = f'"{donation.book.title}" from {donation.donor_name}' if donation.book else donation.donor_name
-            # The catalogue record may now back physical copies in Inventory —
-            # deleting it would strand them, so deaccession those first.
-            held = InventoryRecord.objects.filter(book=donation.book, status='In Stock').count()
+            # Copies still tracked by this accessioning row would be left with
+            # no record of where they came from, so they are dealt with first.
+            held = donation.inventory_copies.exclude(status='Removed').count()
             if held:
                 messages.error(
                     request,
-                    f'{held} copy(ies) of this title are still in Inventory. '
-                    'Deaccession them there before deleting the donation record.'
+                    f'{held} copy(ies) from this donation are still in Inventory. '
+                    'Deaccession them there before deleting the accessioning record.'
                 )
                 return portal_redirect(request, 'donation_management')
-            # Delete the book as well since it's linked
-            donation.book.delete()
+
+            # Only the accessioning row goes. Deleting the catalogue record here
+            # took its loan history with it -- Transaction.book cascades -- so
+            # removing a mis-keyed donation could erase who had borrowed the
+            # book and when. A catalogue record that should not exist is removed
+            # in Manage Books, where that is the visible, intended consequence.
+            donation.delete()
             log_admin_action(request, 'Delete', 'Donation', donation_id, detail)
+            messages.success(
+                request,
+                f'Accessioning record for {detail} removed. The catalogue entry '
+                'remains — delete it in Manage Books if it was created in error.'
+            )
 
     return portal_redirect(request, 'donation_management')
 

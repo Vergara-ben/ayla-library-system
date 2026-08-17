@@ -120,9 +120,21 @@
                         <a href="?tab=audits" class="tab-btn {% if tab == 'audits' %}active{% endif %}"><i class="fa-solid fa-list-check mr-1"></i> Audit History</a>
                         <a href="?tab=history" class="tab-btn {% if tab == 'history' %}active{% endif %}"><i class="fa-solid fa-clock-rotate-left mr-1"></i> Movement History</a>
                     </div>
-                    <button type="button" onclick="show('receiveModal')" class="bg-cyan-600/20 text-cyan-400 border border-cyan-600/30 px-4 py-2 rounded-lg text-xs font-semibold hover:bg-cyan-600/30 transition-colors flex items-center gap-2">
-                        <i class="fa-solid fa-truck-ramp-box"></i> Receive Stock
-                    </button>
+                    <div class="flex items-center gap-2">
+                        {# Bulk donation intake sits here rather than on the Donations #}
+                        {# page, which tracks accessioning and creates nothing. Two ways #}
+                        {# in was the confusing part, not the spreadsheet itself. #}
+                        <a href="{% url 'download_donation_template' %}" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-emerald-500/90 text-[11px] font-semibold px-3 py-2 rounded-lg flex items-center gap-2 transition-colors" title="Spreadsheet layout for a bulk donation">
+                            <i class="fa-solid fa-file-excel"></i> Donation Template
+                        </a>
+                        <button type="button" onclick="document.getElementById('donationExcelInput').click()" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-cyan-500/90 text-[11px] font-semibold px-3 py-2 rounded-lg flex items-center gap-2 transition-colors" title="Receive many donated titles at once">
+                            <i class="fa-solid fa-upload"></i> Import Donations
+                        </button>
+                        <input type="file" id="donationExcelInput" accept=".xlsx" style="display:none" onchange="uploadDonationExcel(this)">
+                        <button type="button" onclick="show('receiveModal')" class="bg-cyan-600/20 text-cyan-400 border border-cyan-600/30 px-4 py-2 rounded-lg text-xs font-semibold hover:bg-cyan-600/30 transition-colors flex items-center gap-2">
+                            <i class="fa-solid fa-truck-ramp-box"></i> Receive Stock
+                        </button>
+                    </div>
                 </div>
 
                 {% if tab == 'audit' %}
@@ -1152,6 +1164,34 @@
         }
 
         window.addEventListener('beforeunload', stopAuditCamera);
+
+        // Bulk donation intake. Each row becomes a catalogue record, an
+        // accessioning row and a copy in stock, which is the same thing
+        // Receive Stock does one delivery at a time.
+        async function uploadDonationExcel(input) {
+            if (!input.files || !input.files[0]) return;
+            const body = new FormData();
+            body.append('excel_file', input.files[0]);
+            try {
+                const res = await fetch("{% url 'import_donations' %}", {
+                    method: 'POST',
+                    body: body,
+                    headers: { 'X-Requested-With': 'XMLHttpRequest',
+                               'X-CSRFToken': '{{ csrf_token }}' },
+                });
+                const data = await res.json();
+                if (data.success) {
+                    alert(data.message);
+                    window.location.reload();
+                } else {
+                    alert(data.error || 'The import could not be completed.');
+                }
+            } catch (err) {
+                alert('The import could not be completed: ' + err);
+            } finally {
+                input.value = '';   // so the same file can be retried
+            }
+        }
     </script>
     <script src="{% static 'js/admin-enhance.js' %}" defer></script>
 </body>
