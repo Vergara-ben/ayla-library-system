@@ -118,22 +118,22 @@
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
                     <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Total Donations</p>
-                    <p class="text-3xl font-bold text-violet-400 mt-2">{{ donations|length }}</p>
+                    <p class="text-3xl font-bold text-violet-400 mt-2">{{ total_donations }}</p>
                     <p class="text-[10px] text-slate-500 mt-1">All donations</p>
                 </div>
                 <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
                     <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Received</p>
-                    <p class="text-3xl font-bold text-blue-400 mt-2">{{ donations|dictsort:"status"|slice:":1" }}</p>
+                    <p class="text-3xl font-bold text-blue-400 mt-2">{{ received_count }}</p>
                     <p class="text-[10px] text-slate-500 mt-1">Awaiting processing</p>
                 </div>
                 <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
                     <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Processing</p>
-                    <p class="text-3xl font-bold text-amber-500 mt-2">{{ donations|dictsort:"status"|slice:":1" }}</p>
+                    <p class="text-3xl font-bold text-amber-500 mt-2">{{ processing_count }}</p>
                     <p class="text-[10px] text-slate-500 mt-1">Being processed</p>
                 </div>
                 <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
                     <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Shelved</p>
-                    <p class="text-3xl font-bold text-emerald-400 mt-2">{{ donations|dictsort:"status"|slice:":1" }}</p>
+                    <p class="text-3xl font-bold text-emerald-400 mt-2">{{ shelved_count }}</p>
                     <p class="text-[10px] text-slate-500 mt-1">Available on shelves</p>
                 </div>
             </div>
@@ -218,7 +218,7 @@
                 </div>
 
                 <div class="px-5 py-4 border-t border-slate-800/60 flex items-center justify-between text-xs text-slate-500 bg-slate-900/5">
-                    <span class="font-medium">Showing <span class="text-slate-400">{{ donations|length }}</span> of <span class="text-slate-400">{{ donations|length }}</span> donations</span>
+                    <span class="font-medium">Showing <span class="text-slate-400">{{ donations|length }}</span> of <span class="text-slate-400">{{ total_donations }}</span> donations</span>
                     
                     <div class="flex items-center gap-1">
                         {% if donations.has_previous %}

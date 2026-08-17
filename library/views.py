@@ -2663,10 +2663,28 @@ def _donations_page(request, template):
     paginator = Paginator(donations_queryset, 15)  # 15 donations per page
     donations = paginator.get_page(page_number)
 
+    # Counted here rather than in the template, and counted over the whole
+    # queryset rather than the page being shown: a stage total that only
+    # described page one would quietly disagree with itself as you paged.
+    # order_by() is cleared deliberately: an ordering field joins the GROUP BY
+    # of a values().annotate(), so grouping by status alone requires dropping
+    # the date ordering first. Left in, it counts one group per date and every
+    # stage reports 1.
+    stage_counts = {row['status']: row['n'] for row in
+                    donations_queryset.order_by().values('status').annotate(n=Count('status'))}
+
     # Pending transactions count for badge
     pending_transactions_count = Transaction.objects.filter(transaction_type='Borrow', return_date__isnull=True).count()
 
-    return render(request, template, {'donations': donations, 'paginator': paginator, 'pending_transactions_count': pending_transactions_count})
+    return render(request, template, {
+        'donations': donations,
+        'paginator': paginator,
+        'total_donations': paginator.count,
+        'received_count': stage_counts.get('Received', 0),
+        'processing_count': stage_counts.get('Processing', 0),
+        'shelved_count': stage_counts.get('Shelved', 0),
+        'pending_transactions_count': pending_transactions_count,
+    })
 
 
 @admin_module_required('donations')
