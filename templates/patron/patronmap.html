@@ -149,9 +149,6 @@
   </div>
   <div class="btn-row">
     <button class="btn-nav" id="navBtn" onclick="showBTModal()">📡 Enable Navigation</button>
-    {# Shown only when continuous scanning is unavailable and beacons have to #}
-    {# be admitted one at a time. Hidden on the path where scanning works. #}
-    <button class="btn-nav" id="pairBtn" style="display:none" onclick="pairOneBeacon()">➕ Add a beacon</button>
   </div>
 </div>
 
@@ -580,10 +577,10 @@ function bleUnavailableReason() {
   // for what is really a http:// URL.
   if (!window.isSecureContext) return 'insecure';
   if (!('bluetooth' in navigator)) return 'unsupported';
-  // Missing requestLEScan is no longer fatal. Admitting beacons one at a time
-  // through the device chooser reaches the same advertisements, and on iOS and
-  // on much of Windows Chrome it is the only route there is.
-  if (!navigator.bluetooth.requestLEScan) return null;
+  // Reaching beacons without this would mean the patron picking each one out
+  // of a raw Bluetooth device list, which is library equipment they should
+  // never be handling. Better to say positioning is unavailable here.
+  if (!navigator.bluetooth.requestLEScan) return 'noscanning';
   return null;
 }
 
@@ -604,11 +601,12 @@ const BLE_HELP = {
            + 'Chrome on Android or a computer.',
   },
   noscanning: {
-    status: 'Bluetooth scanning is switched off',
-    message: 'This browser supports Bluetooth but not the beacon scanning it needs, which is '
-           + 'usually a setting rather than a limitation.'
-           + '\n\nIn Chrome, open chrome://flags, turn on "Experimental Web Platform '
-           + 'features", and restart the browser. Ask the librarian if you would rather not.',
+    status: 'Live position not available here',
+    message: 'This browser can use Bluetooth but cannot scan for the library beacons, so '
+           + 'your position cannot be shown. The floor plan and shelf locations still work.'
+           + '\n\nLive positioning needs Chrome on an Android phone. On a computer running '
+           + 'Chrome, open chrome://flags, turn on "Experimental Web Platform features", '
+           + 'and restart the browser.',
   },
 };
 
@@ -644,7 +642,13 @@ async function enableBLE() {
       }
     }
   }
-  await startPerDeviceMode();
+  // Nothing further to try. Scanning existed but would not start -- Windows
+  // does this silently -- and the only way round it puts library hardware in
+  // front of the patron.
+  setStatus('amber', 'Live position not available here');
+  alert('Bluetooth scanning did not start, so your position cannot be shown. '
+      + 'The floor plan and shelf locations still work.'
+      + '\n\nLive positioning needs Chrome on an Android phone.');
 }
 
 // A promise that gives up rather than waiting for ever. requestLEScan on
@@ -660,85 +664,6 @@ function withTimeout(promise, ms) {
 function startTrilateration() {
   if (bleInterval) clearInterval(bleInterval);
   bleInterval = setInterval(trilaterate, 1500);
-}
-
-// Watching one chosen device at a time. Three beacons means three prompts the
-// first time; after that the browser remembers them and getDevices() brings
-// them back without asking again.
-const watchedDevices = new Set();
-
-async function watchDevice(device) {
-  if (!device || watchedDevices.has(device.id)) return false;
-  if (!device.watchAdvertisements) return false;
-  try {
-    device.addEventListener('advertisementreceived', onAdvertisement);
-    await device.watchAdvertisements();
-    watchedDevices.add(device.id);
-    return true;
-  } catch (err) {
-    return false;
-  }
-}
-
-function pairedStatus() {
-  const needed = mapData && mapData.beacons ? mapData.beacons.length : 3;
-  setStatus(watchedDevices.size >= 3 ? 'green' : 'amber',
-            'BLE: ' + watchedDevices.size + ' of ' + needed + ' beacons added');
-}
-
-async function startPerDeviceMode() {
-  const pairBtn = document.getElementById('pairBtn');
-
-  // Devices already permitted on an earlier visit come back silently, so a
-  // returning patron does not repeat the setup.
-  if (navigator.bluetooth.getDevices) {
-    try {
-      const known = await navigator.bluetooth.getDevices();
-      for (const device of known) await watchDevice(device);
-    } catch (err) { /* not supported here; the chooser still works */ }
-  }
-
-  if (!navigator.bluetooth.requestDevice) {
-    setStatus('amber', 'BLE not available in this browser');
-    alert('This browser cannot read Bluetooth beacons, so your position cannot be shown. '
-        + 'The floor plan and shelf locations still work.');
-    return;
-  }
-
-  if (pairBtn) pairBtn.style.display = '';
-  startTrilateration();
-
-  if (watchedDevices.size) {
-    pairedStatus();
-  } else {
-    setStatus('amber', 'Add each beacon once');
-    alert('This browser cannot scan for beacons on its own, so each beacon is added once '
-        + 'by hand.\n\nPress "Add a beacon" and choose one from the list. Repeat until three '
-        + 'have been added — positioning needs three. Next time they are remembered.');
-  }
-}
-
-async function pairOneBeacon() {
-  try {
-    const device = await navigator.bluetooth.requestDevice({
-      acceptAllDevices: true,
-      // Without naming these, the browser strips the payload out of every
-      // advertisement and no beacon can be identified.
-      optionalManufacturerData: [0xFFFF, 0x004C, 0x0059, 0x00E0, 0x0075, 0x0006, 0x0171, 0x0157, 0x00D2, 0x0499],
-      optionalServices: [EDDYSTONE_SERVICE],
-    });
-    const ok = await watchDevice(device);
-    if (!ok) {
-      alert('That device could not be read. It may already be added, or this browser '
-          + 'may not support reading advertisements.');
-      return;
-    }
-    pairedStatus();
-  } catch (err) {
-    if (!/cancel/i.test(String(err))) {
-      alert('Could not add that beacon: ' + err);
-    }
-  }
 }
 
 initMap();
