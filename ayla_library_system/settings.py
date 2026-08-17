@@ -44,6 +44,19 @@ if not ALLOWED_HOSTS:
 # "https://ayla.pythonanywhere.com".
 CSRF_TRUSTED_ORIGINS = [o.strip() for o in os.environ.get('CSRF_TRUSTED_ORIGINS', '').split(',') if o.strip()]
 
+# Testing on a phone means an https tunnel, because Web Bluetooth refuses to
+# exist on a plain http:// address and a LAN IP cannot be https. Those services
+# hand out a fresh random hostname every run, so without this every sign-in
+# over the tunnel fails CSRF and the fix is to edit .env and restart — once per
+# tunnel. DEBUG only; a deployment still has to name its own origin.
+if DEBUG:
+    CSRF_TRUSTED_ORIGINS += [
+        'https://*.trycloudflare.com',
+        'https://*.ngrok-free.app',
+        'https://*.ngrok.io',
+        'https://*.loca.lt',
+    ]
+
 
 # Application definition
 
