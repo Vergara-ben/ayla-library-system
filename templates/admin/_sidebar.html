@@ -6,6 +6,10 @@ Usage:  {% include 'admin/_sidebar.html' with active='books' %}
 active keys: dashboard, indoor_map, transactions, logs, books, patrons,
              donations, announcements, floorplans, shelf, reports,
              borrowing_rules, users
+
+The Operations group lists only the modules this Administrator has been
+granted, and is absent entirely when none are. Governing and oversight
+entries above it are always shown -- they are gated by role, not module.
 {% endcomment %}
 <aside class="w-64 flex-shrink-0 flex flex-col" style="background-color: var(--bg-sidebar); border-right: 1px solid var(--border-color);">
     <div class="p-6 flex items-center gap-3" style="border-bottom: 1px solid var(--border-color);">
@@ -30,47 +34,26 @@ active keys: dashboard, indoor_map, transactions, logs, books, patrons,
         </div>
 
         <div>
-            <p class="px-2 text-xs font-bold tracking-widest text-slate-500 uppercase mb-3">Management</p>
+            <p class="px-2 text-xs font-bold tracking-widest text-slate-500 uppercase mb-3">Administration</p>
             <div class="space-y-1">
-                <a href="{% url 'admin_transaction' %}" class="flex items-center justify-between px-3 py-2 rounded-lg {% if active == 'transactions' %}bg-slate-800/50 text-cyan-400 font-medium border border-slate-700/50{% else %}text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors{% endif %}">
-                    <div class="flex items-center gap-3">
-                        <i class="fa-solid fa-file-invoice w-5 text-sm"></i>
-                        <span class="text-sm {% if active != 'transactions' %}font-medium{% endif %}">Transactions</span>
-                    </div>
-                    {% if pending_transactions_count %}<span class="bg-rose-500/20 text-rose-400 text-xs px-2 py-0.5 rounded-full font-semibold">{{ pending_transactions_count }}</span>{% endif %}
+                <a href="{% url 'user_management' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg {% if active == 'users' %}bg-slate-800/50 text-cyan-400 font-medium border border-slate-700/50{% else %}text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors{% endif %}">
+                    <i class="fa-solid fa-user-gear w-5 text-sm"></i>
+                    <span class="text-sm {% if active != 'users' %}font-medium{% endif %}">User Management</span>
                 </a>
-                <a href="{% url 'admin_log_management' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg {% if active == 'logs' %}bg-slate-800/50 text-cyan-400 font-medium border border-slate-700/50{% else %}text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors{% endif %}">
-                    <i class="fa-solid fa-clipboard-list w-5 text-sm"></i>
-                    <span class="text-sm {% if active != 'logs' %}font-medium{% endif %}">Log Management</span>
-                </a>
-                <a href="{% url 'admin_management' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg {% if active == 'books' %}bg-slate-800/50 text-cyan-400 font-medium border border-slate-700/50{% else %}text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors{% endif %}">
-                    <i class="fa-solid fa-book w-5 text-sm"></i>
-                    <span class="text-sm {% if active != 'books' %}font-medium{% endif %}">Manage Books</span>
-                </a>
-                {# Administrator-only: no Library Staff equivalent of this page. #}
-                <a href="{% url 'inventory_management' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg {% if active == 'inventory' %}bg-slate-800/50 text-cyan-400 font-medium border border-slate-700/50{% else %}text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors{% endif %}">
-                    <i class="fa-solid fa-boxes-stacked w-5 text-sm"></i>
-                    <span class="text-sm {% if active != 'inventory' %}font-medium{% endif %}">Inventory</span>
-                </a>
-                <a href="{% url 'admin_manage_patron' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg {% if active == 'patrons' %}bg-slate-800/50 text-cyan-400 font-medium border border-slate-700/50{% else %}text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors{% endif %}">
-                    <i class="fa-solid fa-users w-5 text-sm"></i>
-                    <span class="text-sm {% if active != 'patrons' %}font-medium{% endif %}">Manage Patrons</span>
-                </a>
-                <a href="{% url 'donation_management' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg {% if active == 'donations' %}bg-slate-800/50 text-cyan-400 font-medium border border-slate-700/50{% else %}text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors{% endif %}">
-                    <i class="fa-solid fa-hand-holding-heart w-5 text-sm"></i>
-                    <span class="text-sm {% if active != 'donations' %}font-medium{% endif %}">Donations</span>
+                <a href="{% url 'admin_borrowing_rules' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg {% if active == 'borrowing_rules' %}bg-slate-800/50 text-cyan-400 font-medium border border-slate-700/50{% else %}text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors{% endif %}">
+                    <i class="fa-solid fa-gears w-5 text-sm"></i>
+                    <span class="text-sm {% if active != 'borrowing_rules' %}font-medium{% endif %}">Borrowing Rules</span>
                 </a>
                 <a href="{% url 'announcement_management' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg {% if active == 'announcements' %}bg-slate-800/50 text-cyan-400 font-medium border border-slate-700/50{% else %}text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors{% endif %}">
                     <i class="fa-solid fa-bullhorn w-5 text-sm"></i>
                     <span class="text-sm {% if active != 'announcements' %}font-medium{% endif %}">Announcements</span>
                 </a>
-                <a href="{% url 'admin_messages' %}" class="flex items-center justify-between px-3 py-2 rounded-lg {% if active == 'chat' %}bg-slate-800/50 text-cyan-400 font-medium border border-slate-700/50{% else %}text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors{% endif %}">
-                    <div class="flex items-center gap-3">
-                        <i class="fa-solid fa-comments w-5 text-sm"></i>
-                        <span class="text-sm {% if active != 'chat' %}font-medium{% endif %}">Messages</span>
-                    </div>
-                    {% if unanswered_messages %}<span class="bg-rose-500/20 text-rose-400 text-xs px-2 py-0.5 rounded-full font-semibold">{{ unanswered_messages }}</span>{% endif %}
-                </a>
+            </div>
+        </div>
+
+        <div>
+            <p class="px-2 text-xs font-bold tracking-widest text-slate-500 uppercase mb-3">Library Setup</p>
+            <div class="space-y-1">
                 <a href="{% url 'floorplan_management' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg {% if active == 'floorplans' %}bg-slate-800/50 text-cyan-400 font-medium border border-slate-700/50{% else %}text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors{% endif %}">
                     <i class="fa-solid fa-layer-group w-5 text-sm"></i>
                     <span class="text-sm {% if active != 'floorplans' %}font-medium{% endif %}">Floor Plans</span>
@@ -79,17 +62,72 @@ active keys: dashboard, indoor_map, transactions, logs, books, patrons,
                     <i class="fa-solid fa-folder-tree w-5 text-sm"></i>
                     <span class="text-sm {% if active != 'shelf' %}font-medium{% endif %}">Shelf Manager</span>
                 </a>
+            </div>
+        </div>
+
+        <div>
+            <p class="px-2 text-xs font-bold tracking-widest text-slate-500 uppercase mb-3">Oversight</p>
+            <div class="space-y-1">
                 <a href="{% url 'admin_reports' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg {% if active == 'reports' %}bg-slate-800/50 text-cyan-400 font-medium border border-slate-700/50{% else %}text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors{% endif %}">
-                    <i class="fa-solid fa-chart-line w-5 text-sm"></i><span class="text-sm {% if active != 'reports' %}font-medium{% endif %}">Reports</span>
+                    <i class="fa-solid fa-chart-line w-5 text-sm"></i>
+                    <span class="text-sm {% if active != 'reports' %}font-medium{% endif %}">Reports</span>
                 </a>
-                <a href="{% url 'admin_borrowing_rules' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg {% if active == 'borrowing_rules' %}bg-slate-800/50 text-cyan-400 font-medium border border-slate-700/50{% else %}text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors{% endif %}">
-                    <i class="fa-solid fa-gears w-5 text-sm"></i><span class="text-sm {% if active != 'borrowing_rules' %}font-medium{% endif %}">Borrowing Rules</span>
-                </a>
-                <a href="{% url 'user_management' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg {% if active == 'users' %}bg-slate-800/50 text-cyan-400 font-medium border border-slate-700/50{% else %}text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors{% endif %}">
-                    <i class="fa-solid fa-user-gear w-5 text-sm"></i><span class="text-sm {% if active != 'users' %}font-medium{% endif %}">User Management</span>
+                <a href="{% url 'inventory_management' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg {% if active == 'inventory' %}bg-slate-800/50 text-cyan-400 font-medium border border-slate-700/50{% else %}text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors{% endif %}">
+                    <i class="fa-solid fa-boxes-stacked w-5 text-sm"></i>
+                    <span class="text-sm {% if active != 'inventory' %}font-medium{% endif %}">Inventory</span>
                 </a>
             </div>
         </div>
+
+        {% if allowed_modules %}
+        <div>
+            <p class="px-2 text-xs font-bold tracking-widest text-slate-500 uppercase mb-3">Operations</p>
+            <div class="space-y-1">
+                {% if 'transactions' in allowed_modules %}
+                <a href="{% url 'admin_transaction' %}" class="flex items-center justify-between px-3 py-2 rounded-lg {% if active == 'transactions' %}bg-slate-800/50 text-cyan-400 font-medium border border-slate-700/50{% else %}text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors{% endif %}">
+                    <div class="flex items-center gap-3">
+                        <i class="fa-solid fa-file-invoice w-5 text-sm"></i>
+                        <span class="text-sm {% if active != 'transactions' %}font-medium{% endif %}">Transactions</span>
+                    </div>
+                    {% if pending_transactions_count %}<span class="bg-rose-500/20 text-rose-400 text-xs px-2 py-0.5 rounded-full font-semibold">{{ pending_transactions_count }}</span>{% endif %}
+                </a>
+                {% endif %}
+                {% if 'logs' in allowed_modules %}
+                <a href="{% url 'admin_log_management' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg {% if active == 'logs' %}bg-slate-800/50 text-cyan-400 font-medium border border-slate-700/50{% else %}text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors{% endif %}">
+                    <i class="fa-solid fa-clipboard-list w-5 text-sm"></i>
+                    <span class="text-sm {% if active != 'logs' %}font-medium{% endif %}">Log Management</span>
+                </a>
+                {% endif %}
+                {% if 'books' in allowed_modules %}
+                <a href="{% url 'admin_management' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg {% if active == 'books' %}bg-slate-800/50 text-cyan-400 font-medium border border-slate-700/50{% else %}text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors{% endif %}">
+                    <i class="fa-solid fa-book w-5 text-sm"></i>
+                    <span class="text-sm {% if active != 'books' %}font-medium{% endif %}">Manage Books</span>
+                </a>
+                {% endif %}
+                {% if 'patrons' in allowed_modules %}
+                <a href="{% url 'admin_manage_patron' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg {% if active == 'patrons' %}bg-slate-800/50 text-cyan-400 font-medium border border-slate-700/50{% else %}text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors{% endif %}">
+                    <i class="fa-solid fa-users w-5 text-sm"></i>
+                    <span class="text-sm {% if active != 'patrons' %}font-medium{% endif %}">Manage Patrons</span>
+                </a>
+                {% endif %}
+                {% if 'donations' in allowed_modules %}
+                <a href="{% url 'donation_management' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg {% if active == 'donations' %}bg-slate-800/50 text-cyan-400 font-medium border border-slate-700/50{% else %}text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors{% endif %}">
+                    <i class="fa-solid fa-hand-holding-heart w-5 text-sm"></i>
+                    <span class="text-sm {% if active != 'donations' %}font-medium{% endif %}">Donations</span>
+                </a>
+                {% endif %}
+                {% if 'chat' in allowed_modules %}
+                <a href="{% url 'admin_messages' %}" class="flex items-center justify-between px-3 py-2 rounded-lg {% if active == 'chat' %}bg-slate-800/50 text-cyan-400 font-medium border border-slate-700/50{% else %}text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors{% endif %}">
+                    <div class="flex items-center gap-3">
+                        <i class="fa-solid fa-comments w-5 text-sm"></i>
+                        <span class="text-sm {% if active != 'chat' %}font-medium{% endif %}">Messages</span>
+                    </div>
+                    {% if unanswered_messages %}<span class="bg-rose-500/20 text-rose-400 text-xs px-2 py-0.5 rounded-full font-semibold">{{ unanswered_messages }}</span>{% endif %}
+                </a>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
 
         <div>
             <p class="px-2 text-xs font-bold tracking-widest text-slate-500 uppercase mb-3">Account</p>

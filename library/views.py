@@ -25,6 +25,7 @@ from .auth_utils import (
     patron_login_required,
     admin_login_required,
     admin_only_required,
+    admin_module_required,
     staff_only_required,
     module_required,
     admin_or_module_required,
@@ -844,7 +845,7 @@ def _books_page(request, template):
     return render(request, template, context)
 
 
-@admin_only_required
+@admin_module_required('books')
 def admin_management(request):
     return _books_page(request, 'admin/managebooks.html')
 
@@ -1129,7 +1130,7 @@ def reject_patron(request, patron_id):
     return _patron_page_redirect(request)
 
 
-@admin_only_required
+@admin_module_required('patrons')
 def admin_manage_patron(request):
     return _patrons_page(request, 'admin/managepatron.html')
 
@@ -1230,7 +1231,7 @@ def _patrons_page(request, template):
     return render(request, template, context)
 
 
-@admin_only_required
+@admin_module_required('patrons')
 def admin_edit_patron(request, patron_id):
     patron = Patron.objects.filter(patron_id=patron_id).first()
     if patron is None:
@@ -1329,7 +1330,7 @@ def admin_edit_patron(request, patron_id):
     return render(request, 'admin/managepatron.html', context)
 
 
-@admin_only_required
+@admin_module_required('patrons')
 def admin_delete_patron(request, patron_id):
     if request.method == 'POST':
         patron = Patron.objects.filter(patron_id=patron_id).first()
@@ -1544,7 +1545,7 @@ def _book_detail_page(request, template):
     return render(request, template, context)
 
 
-@admin_only_required
+@admin_module_required('books')
 def admin_book_detail(request):
     return _book_detail_page(request, 'admin/bookdetail.html')
 
@@ -1621,7 +1622,7 @@ def _transaction_page(request, template):
     return render(request, template, context)
 
 
-@admin_only_required
+@admin_module_required('transactions')
 def admin_transaction(request):
     return _transaction_page(request, 'admin/transaction.html')
 
@@ -1879,7 +1880,7 @@ def _logs_page(request, template):
     return render(request, template, context)
 
 
-@admin_only_required
+@admin_module_required('logs')
 def admin_log_management(request):
     return _logs_page(request, 'admin/logmanagement.html')
 
@@ -2190,7 +2191,7 @@ def import_books(request):
         return JsonResponse({'success': False, 'error': str(e)})
 
 
-@admin_only_required
+@admin_module_required('patrons')
 def download_patron_template(request):
     wb = Workbook()
     ws = wb.active
@@ -2206,7 +2207,7 @@ def download_patron_template(request):
     return response
 
 
-@admin_only_required
+@admin_module_required('patrons')
 def import_patrons(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
@@ -2665,7 +2666,7 @@ def _donations_page(request, template):
     return render(request, template, {'donations': donations, 'paginator': paginator, 'pending_transactions_count': pending_transactions_count})
 
 
-@admin_only_required
+@admin_module_required('donations')
 def donation_management(request):
     return _donations_page(request, 'admin/donationadmin.html')
 
@@ -5051,8 +5052,10 @@ def create_staff(request):
         messages.error(request, 'An account with that email already exists.')
         return redirect('user_management')
 
-    # Module grants apply to Staff only — Admins always have every module.
-    module_keys = clean_module_keys(request.POST.get('modules', '')) if role == 'Staff' else []
+    # Both roles carry module grants. Staff need at least one or the account
+    # can do nothing; an Administrator may hold none, which is the default and
+    # leaves them the governing and oversight pages.
+    module_keys = clean_module_keys(request.POST.get('modules', ''))
     if role == 'Staff' and not module_keys:
         messages.error(request, 'Select at least one module for this staff account.')
         return redirect('user_management')
@@ -5105,7 +5108,7 @@ def edit_staff(request, user_id):
             messages.error(request, 'Cannot change this account — it is the last active administrator.')
             return redirect('user_management')
 
-    module_keys = clean_module_keys(request.POST.get('modules', '')) if role == 'Staff' else []
+    module_keys = clean_module_keys(request.POST.get('modules', ''))
     if role == 'Staff' and not module_keys:
         messages.error(request, 'Select at least one module for this staff account.')
         return redirect('user_management')

@@ -348,8 +348,8 @@ class User(models.Model):
         choices=STATUS_CHOICES,
         default='Active'
     )
-    # Modules this Staff account may open, as comma-separated keys from
-    # library/modules.py. Ignored for Admins, who always have every module.
+    # Modules this account may open, as comma-separated keys from
+    # library/modules.py. Applies to both roles.
     modules = models.TextField(blank=True, default='')
 
     class Meta:
@@ -360,9 +360,21 @@ class User(models.Model):
 
     @property
     def module_keys(self):
-        """The modules this account may open (every module for an Admin)."""
-        if self.role != 'Staff':
-            return list(MODULE_KEYS)
+        """The operational modules this account may open.
+
+        An Administrator is not given every module implicitly. The role exists
+        to govern the system -- accounts, configuration, oversight -- and those
+        views are gated by role rather than by module, so they stay available
+        whatever is granted here. What this controls is the day-to-day desk
+        work: circulation, logs, cataloguing, donations, patron records and
+        messages.
+
+        Granting none by default keeps an Administrator's daily surface to
+        administration instead of every screen in the system at once, which is
+        the whole point of having two roles. It is a grant rather than a
+        removal because a library with one computer and a small team still
+        needs someone able to work the desk when staffing requires it.
+        """
         return clean_module_keys(self.modules)
 
     @property

@@ -165,7 +165,11 @@
     <button type="button" class="btn" onclick="window.print()">🖨 Print card</button>
     <a class="btn secondary" id="downloadQr" download="ayla_qr_{{ patron.patron_id }}.png">⬇ Save QR only</a>
     {% if printed_by_staff %}
-      <a class="btn secondary" href="{% url 'admin_manage_patron' %}">← Back to Manage Patrons</a>
+      {# Whoever printed this may not hold the patrons module -- a card can be #}
+      {# printed from elsewhere -- and a back link that bounces is worse than none. #}
+      {% if 'patrons' in allowed_modules %}
+        <a class="btn secondary" href="{% url 'admin_manage_patron' %}">← Back to Manage Patrons</a>
+      {% endif %}
     {% else %}
       <a class="btn secondary" href="{% url 'patron_account' %}">← Back to My Account</a>
     {% endif %}

@@ -19,7 +19,7 @@ from django.shortcuts import redirect, render
 from django.utils import timezone
 
 from .audit import log_admin_action
-from .auth_utils import (admin_login_required, admin_or_module_required,
+from .auth_utils import (admin_login_required, granted_module_required,
                          patron_login_required)
 from .emails import librarian_reply_email
 from .models import ChatMessage, Conversation, Patron, User
@@ -263,7 +263,7 @@ def _staff_messages_page(request, template):
     })
 
 
-@admin_or_module_required('chat')
+@granted_module_required('chat')
 def admin_messages(request):
     template = ('library_staff/messages.html'
                 if request.session.get('admin_role') == 'Staff'
@@ -271,7 +271,7 @@ def admin_messages(request):
     return _staff_messages_page(request, template)
 
 
-@admin_or_module_required('chat')
+@granted_module_required('chat')
 def staff_reply(request):
     """Answer a patron, and let them know an answer is waiting."""
     if request.method != 'POST':
@@ -340,7 +340,7 @@ def _notify_patron(conversation, body, now):
     return True
 
 
-@admin_or_module_required('chat')
+@granted_module_required('chat')
 def close_conversation(request):
     """Mark an enquiry finished. A new question from the patron reopens it."""
     if request.method != 'POST':

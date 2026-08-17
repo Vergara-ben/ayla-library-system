@@ -174,7 +174,7 @@
                                 {% else %}
                                     <span class="text-[10px] font-bold px-2.5 py-1 rounded-full bg-cyan-950/50 text-cyan-300 border border-cyan-800/50">Library Staff</span>
                                     <div class="mt-1.5 text-[10px] text-slate-500 leading-snug">
-                                        {% if u.module_labels %}{{ u.module_labels|join:" · " }}{% else %}<span class="text-amber-500">No modules granted</span>{% endif %}
+                                        {% if u.module_labels %}{{ u.module_labels|join:" · " }}{% elif u.role == 'Staff' %}<span class="text-amber-500">No modules granted</span>{% else %}<span class="text-slate-500">Administration only</span>{% endif %}
                                     </div>
                                 {% endif %}
                             </td>
@@ -276,7 +276,7 @@
                         </div>
                     </div>
                     <input type="hidden" name="modules" id="f_modules" value="">
-                    <p class="text-[10px] text-slate-500 mt-2">The Dashboard is always available. Everything else must be granted here — a staff member only sees the modules listed on the left.</p>
+                    <p id="modHint" class="text-[10px] text-slate-500 mt-2">The Dashboard is always available. Everything else must be granted here — a staff member only sees the modules listed on the left.</p>
                 </div>
 
                 <div class="flex items-center justify-end gap-2 pt-2">
@@ -374,10 +374,20 @@
             renderModuleLists();
         }
 
-        // Admins hold every module implicitly, so the picker only applies to Staff.
+        // Both roles carry module grants. An Administrator governs the system
+        // whatever is granted here -- accounts, configuration, reports and the
+        // rest are gated by role. What this adds is desk work, and none of it is
+        // granted by default.
         function syncModulesVisibility() {
             const isStaff = document.getElementById('f_role').value === 'Staff';
-            document.getElementById('modulesWrap').style.display = isStaff ? '' : 'none';
+            document.getElementById('modulesWrap').style.display = '';
+            document.getElementById('modHint').innerHTML = isStaff
+                ? 'The Dashboard is always available. Everything else must be granted here '
+                  + '&mdash; a staff member only sees the modules listed on the left.'
+                : 'An Administrator always has User Management, Borrowing Rules, '
+                  + 'Announcements, Floor Plans, Shelf Manager, Reports and Inventory. '
+                  + 'Grant modules here only if this Administrator also works the front '
+                  + 'desk; leaving none granted keeps the account to administration.';
         }
         document.getElementById('f_role').addEventListener('change', syncModulesVisibility);
 

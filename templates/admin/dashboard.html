@@ -621,8 +621,9 @@
                     <p class="hero-subtitle">Monday, December 10, 2024 • <span>{{ visitors_today }} patrons currently in the library</span></p>
                 </div>
                 <div class="hero-actions">
-                    <a href="{% url 'admin_management' %}" class="btn btn-outline">Manage Books</a>
-                    <a href="{% url 'admin_manage_patron' %}" class="btn btn-filled">Manage Patrons</a>
+                    {% if 'books' in allowed_modules %}<a href="{% url 'admin_management' %}" class="btn btn-outline">Manage Books</a>{% endif %}
+                    {% if 'patrons' in allowed_modules %}<a href="{% url 'admin_manage_patron' %}" class="btn btn-filled">Manage Patrons</a>{% endif %}
+                    <a href="{% url 'admin_reports' %}" class="btn btn-filled">Reports</a>
                 </div>
             </section>
 
@@ -677,7 +678,7 @@
                 <section class="panel">
                     <div class="panel-header">
                         <h3 class="panel-title">📋 Recent Transactions</h3>
-                        <a href="{% url 'admin_transaction' %}" class="btn-view-all">View all &rarr;</a>
+                        {% if 'transactions' in allowed_modules %}<a href="{% url 'admin_transaction' %}" class="btn-view-all">View all &rarr;</a>{% endif %}
                     </div>
 
                     <div class="transaction-list">
@@ -719,29 +720,55 @@
                             <h3 class="panel-title">⚡ Quick Actions</h3>
                         </div>
                         <div class="quick-actions-grid">
+                            {# Administration first: these are the role's own work and are #}
+                            {# always present. Desk shortcuts follow only where granted. #}
+                            <a href="{% url 'user_management' %}" class="action-card">
+                                <span class="action-icon">🧑‍💼</span>
+                                <span class="action-label">Users</span>
+                            </a>
+                            <a href="{% url 'admin_reports' %}" class="action-card">
+                                <span class="action-icon">📈</span>
+                                <span class="action-label">Reports</span>
+                            </a>
+                            <a href="{% url 'inventory_management' %}" class="action-card">
+                                <span class="action-icon">📦</span>
+                                <span class="action-label">Inventory</span>
+                            </a>
+                            <a href="{% url 'admin_borrowing_rules' %}" class="action-card">
+                                <span class="action-icon">⚙️</span>
+                                <span class="action-label">Rules</span>
+                            </a>
+                            {% if 'books' in allowed_modules %}
                             <a href="{% url 'admin_management' %}" class="action-card">
                                 <span class="action-icon">📚</span>
                                 <span class="action-label">Books</span>
                             </a>
+                            {% endif %}
+                            {% if 'patrons' in allowed_modules %}
                             <a href="{% url 'admin_manage_patron' %}" class="action-card">
                                 <span class="action-icon">👥</span>
                                 <span class="action-label">Patrons</span>
                             </a>
+                            {% endif %}
+                            {% if 'transactions' in allowed_modules %}
                             <a href="{% url 'admin_transaction' %}" class="action-card">
                                 <span class="action-icon">📋</span>
                                 <span class="action-label">Transactions</span>
                             </a>
+                            {% endif %}
+                            {% if 'logs' in allowed_modules %}
                             <a href="{% url 'admin_log_management' %}" class="action-card">
                                 <span class="action-icon">🚪</span>
                                 <span class="action-label">Entry Logs</span>
                             </a>
+                            {% endif %}
                         </div>
                     </section>
 
                     <section class="panel">
                         <div class="panel-header">
                             <h3 class="panel-title">🚪 Today's Entry Log</h3>
-                            <a href="{% url 'admin_log_management' %}" class="btn-view-all">View &rarr;</a>
+                            {% if 'logs' in allowed_modules %}<a href="{% url 'admin_log_management' %}" class="btn-view-all">View &rarr;</a>{% endif %}
                         </div>
                         <div class="log-stats-list">
                             <div class="log-stat-row">
