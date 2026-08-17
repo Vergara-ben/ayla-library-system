@@ -1,0 +1,115 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>AYLA beacon probe</title>
+<style>
+  body { font: 14px/1.5 system-ui, sans-serif; margin: 24px; max-width: 900px; }
+  h1 { font-size: 18px; }
+  button { font: inherit; padding: 8px 16px; border-radius: 8px; border: 1px solid #888;
+           background: #0e7490; color: #fff; cursor: pointer; }
+  #status { margin: 12px 0; font-weight: 600; }
+  table { border-collapse: collapse; width: 100%; margin-top: 16px; }
+  th, td { border: 1px solid #ddd; padding: 6px 8px; text-align: left; vertical-align: top;
+           font-family: ui-monospace, monospace; font-size: 12px; }
+  th { background: #f1f5f9; }
+  .hint { color: #555; font-size: 13px; }
+  code { background: #f1f5f9; padding: 1px 4px; border-radius: 3px; }
+</style>
+
+<h1>AYLA beacon probe</h1>
+<p class="hint">
+  Serve this over <code>localhost</code> (not <code>file://</code>) in Chrome with
+  <code>chrome://flags/#enable-experimental-web-platform-features</code> enabled, then click Scan.
+  It lists every BLE advertisement it sees and — importantly — <strong>which identifier each
+  beacon actually broadcasts</strong>: a service UUID, a device name, or iBeacon manufacturer data.
+  That determines how the app must match beacons to map positions.
+</p>
+
+<button id="go">Scan for 20 seconds</button>
+<div id="status">Idle.</div>
+<table id="out">
+  <thead>
+    <tr><th>Name</th><th>RSSI</th><th>txPower</th><th>Service UUIDs</th>
+        <th>Manufacturer data (company → bytes)</th><th>Service data</th><th>Seen</th></tr>
+  </thead>
+  <tbody></tbody>
+</table>
+
+<script>
+const seen = new Map();          // key -> row data
+const tbody = document.querySelector('#out tbody');
+const statusEl = document.getElementById('status');
+
+function hex(dataView) {
+  const out = [];
+  for (let i = 0; i < dataView.byteLength; i++) {
+    out.push(dataView.getUint8(i).toString(16).padStart(2, '0'));
+  }
+  return out.join(' ');
+}
+
+function describe(map) {
+  if (!map || !map.size) return '—';
+  const parts = [];
+  map.forEach((value, key) => {
+    const label = typeof key === 'number' ? '0x' + key.toString(16).padStart(4, '0') : key;
+    parts.push(label + ' → ' + hex(value));
+  });
+  return parts.join('\n');
+}
+
+function render() {
+  tbody.innerHTML = '';
+  [...seen.values()]
+    .sort((a, b) => b.rssi - a.rssi)
+    .forEach((r) => {
+      const tr = document.createElement('tr');
+      [r.name, r.rssi, r.txPower, r.uuids, r.mfg, r.svc, r.count].forEach((v) => {
+        const td = document.createElement('td');
+        td.textContent = (v === undefined || v === null || v === '') ? '—' : String(v);
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    });
+}
+
+document.getElementById('go').addEventListener('click', async () => {
+  if (!navigator.bluetooth) {
+    statusEl.textContent = 'navigator.bluetooth is missing — not a Web Bluetooth browser.';
+    return;
+  }
+  if (!navigator.bluetooth.requestLEScan) {
+    statusEl.textContent = 'requestLEScan is unavailable — enable ' +
+      'chrome://flags/#enable-experimental-web-platform-features and relaunch Chrome.';
+    return;
+  }
+
+  try {
+    statusEl.textContent = 'Requesting scan permission…';
+    const scan = await navigator.bluetooth.requestLEScan({ acceptAllAdvertisements: true });
+
+    navigator.bluetooth.addEventListener('advertisementreceived', (e) => {
+      // Key on the stable device id so repeat advertisements collapse into one row.
+      const key = (e.device && (e.device.id || e.device.name)) || Math.random();
+      const prev = seen.get(key);
+      seen.set(key, {
+        name: (e.device && e.device.name) || '(no name)',
+        rssi: e.rssi,
+        txPower: e.txPower,
+        uuids: (e.uuids || []).join('\n') || '—',
+        mfg: describe(e.manufacturerData),
+        svc: describe(e.serviceData),
+        count: (prev ? prev.count : 0) + 1,
+      });
+      render();
+    });
+
+    statusEl.textContent = 'Scanning… walk the beacons closer/further to watch RSSI move.';
+    setTimeout(() => {
+      scan.stop();
+      statusEl.textContent = 'Stopped. ' + seen.size + ' distinct device(s) seen.';
+    }, 20000);
+  } catch (err) {
+    statusEl.textContent = 'Scan failed: ' + err;
+  }
+});
+</script>
