@@ -163,6 +163,36 @@
                 </div>
             </div>
 
+            {# Sits above the table and ignores its filters: a request waiting on #}
+            {# staff should never be one search term away from invisible. #}
+            <div class="rounded-xl border border-amber-800/40 overflow-hidden shadow-2xl" style="background-color: var(--bg-card);">
+                <div class="p-5 border-b border-amber-900/30 flex items-center gap-2">
+                    <i class="fa-solid fa-hourglass-half text-amber-500 text-xs"></i>
+                    <h4 class="text-sm font-bold text-slate-200 tracking-wide">Extension Requests</h4>
+                    {% if pending_extensions %}<span class="bg-amber-500/15 text-amber-400 text-[10px] font-bold px-2 py-0.5 rounded-full">{{ pending_extensions|length }} pending</span>{% endif %}
+                </div>
+                <div class="divide-y divide-slate-800/40">
+                    {% for ext in pending_extensions %}
+                    <div class="p-4 flex flex-col sm:flex-row sm:items-center gap-3 justify-between" id="ext-row-{{ ext.extension_id }}">
+                        <div class="text-xs">
+                            <div class="font-semibold text-slate-200">{{ ext.transaction.book.title }}</div>
+                            <div class="text-slate-500 mt-0.5">{{ ext.transaction.patron.fullname|default:"—" }} &middot;
+                                due <span class="{% if ext.transaction.overdue_flag %}text-rose-400{% else %}text-slate-400{% endif %}">{{ ext.previous_due_date|date:"M j, Y" }}</span>
+                                &rarr; requesting <span class="text-amber-400 font-semibold">{{ ext.requested_due_date|date:"M j, Y" }}</span>
+                            </div>
+                            {% if ext.reason %}<div class="text-slate-500 italic mt-0.5">"{{ ext.reason }}"</div>{% endif %}
+                        </div>
+                        <div class="flex items-center gap-1.5 flex-shrink-0">
+                            <button type="button" onclick="respondExtension({{ ext.extension_id }}, 'approve')" class="rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2.5 py-1.5 text-[10px] font-semibold hover:bg-emerald-500/20 hover:text-emerald-100">Accept</button>
+                            <button type="button" onclick="respondExtension({{ ext.extension_id }}, 'decline')" class="rounded-lg bg-rose-500/10 text-rose-400 border border-rose-500/20 px-2.5 py-1.5 text-[10px] font-semibold hover:bg-rose-500/20 hover:text-rose-100">Decline</button>
+                        </div>
+                    </div>
+                    {% empty %}
+                    <div class="p-4 text-xs text-slate-500">No pending extension requests.</div>
+                    {% endfor %}
+                </div>
+            </div>
+
             <div class="rounded-xl border border-slate-800/80 overflow-hidden shadow-2xl flex flex-col" style="background-color: var(--bg-card);">
                 
                 <div class="p-5 border-b border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -300,6 +330,7 @@
                                             <div class="inline-flex justify-center gap-1.5">
                                                 <button type="button" onclick="openTxAction({{ tx.transaction_id }}, 'return')" class="rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-1 text-[10px] font-semibold hover:bg-emerald-500/20 hover:text-emerald-100">Mark Returned</button>
                                                 <button type="button" onclick="openTxAction({{ tx.transaction_id }}, 'lost')" class="rounded-lg bg-rose-500/10 text-rose-400 border border-rose-500/20 px-2 py-1 text-[10px] font-semibold hover:bg-rose-500/20 hover:text-rose-100">Mark Lost</button>
+                                                <button type="button" onclick="openDueDateModal({{ tx.transaction_id }}, '{{ tx.due_date|date:"Y-m-d" }}')" class="rounded-lg bg-slate-700/30 text-slate-300 border border-slate-600/40 px-2 py-1 text-[10px] font-semibold hover:bg-slate-700/50" title="Set a new due date directly — for a patron asking in person">Adjust Due</button>
                                             </div>
                                         {% else %}
                                             <span class="text-slate-500">—</span>
@@ -524,6 +555,29 @@
         </div>
     </div>
 
+    {# The desk case: a patron asks in person rather than through their account, #}
+    {# so staff set the date directly rather than reviewing a request. #}
+    <div id="dueDateModal" class="fixed inset-0 z-[70] hidden items-center justify-center p-4" style="background: var(--scrim);">
+        <div class="w-full max-w-sm rounded-2xl border shadow-2xl" style="background-color: var(--bg-modal); border-color: var(--border-modal);">
+            <div class="flex items-center justify-between px-6 py-4 border-b" style="border-color: var(--border-modal);">
+                <h3 class="text-sm font-bold text-slate-200 tracking-wide">Adjust Due Date</h3>
+                <button type="button" onclick="closeDueDateModal()" class="text-slate-500 hover:text-slate-300"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="px-6 py-5 space-y-4">
+                <div>
+                    <label class="text-[10px] uppercase tracking-wide text-slate-500 font-bold">New due date</label>
+                    <input type="date" id="dueDateInput" class="mt-1.5 w-full bg-slate-950/80 border border-slate-800 rounded-lg px-3 py-2 text-xs font-mono text-slate-300 focus:outline-none focus:border-violet-800">
+                </div>
+                <p class="text-[11px] text-slate-500 leading-relaxed">Applies immediately — no approval step, since staff is the one setting it. Recorded the same way an approved extension request is.</p>
+                <div id="dueDateError" class="hidden rounded-lg border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-rose-200 text-[11px]"></div>
+                <div class="flex items-center justify-end gap-2 pt-1">
+                    <button type="button" onclick="closeDueDateModal()" class="text-xs font-semibold px-4 py-2 rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800/50">Cancel</button>
+                    <button type="button" id="dueDateConfirm" onclick="confirmDueDateAdjust()" class="text-xs font-bold px-4 py-2 rounded-lg border bg-violet-700/40 text-violet-200 border-violet-700/60 hover:bg-violet-700/60">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script>
         // ── Mark Returned / Mark Lost ─────────────────────────────────────
         // Both charge the patron, so the modal shows the figure the server
@@ -623,6 +677,99 @@
         document.getElementById('txActionModal').addEventListener('click', function (e) {
             if (e.target === this) closeTxAction();
         });
+
+        // ── Adjust Due Date (staff-initiated, no approval step) ────────────
+        let dueDateTxId = null, dueDateBusy = false;
+
+        function openDueDateModal(txId, currentDue) {
+            dueDateTxId = txId;
+            const input = document.getElementById('dueDateInput');
+            input.value = currentDue || '';
+            document.getElementById('dueDateError').classList.add('hidden');
+            const m = document.getElementById('dueDateModal');
+            m.classList.remove('hidden'); m.classList.add('flex');
+        }
+
+        function closeDueDateModal() {
+            const m = document.getElementById('dueDateModal');
+            m.classList.add('hidden'); m.classList.remove('flex');
+            dueDateTxId = null;
+        }
+
+        async function confirmDueDateAdjust() {
+            if (dueDateBusy || dueDateTxId === null) return;
+            const newDate = document.getElementById('dueDateInput').value;
+            const errBox = document.getElementById('dueDateError');
+            errBox.classList.add('hidden');
+            if (!newDate) {
+                errBox.textContent = 'Pick a date first.';
+                errBox.classList.remove('hidden');
+                return;
+            }
+            dueDateBusy = true;
+            const btn = document.getElementById('dueDateConfirm');
+            const label = btn.textContent;
+            btn.textContent = 'Saving…';
+            try {
+                const fd = new FormData();
+                fd.append('transaction_id', dueDateTxId);
+                fd.append('new_due_date', newDate);
+                const res = await fetch('{% url 'adjust_due_date' %}', {
+                    method: 'POST', body: fd,
+                    headers: { 'X-CSRFToken': getCookie('csrftoken'), 'X-Requested-With': 'XMLHttpRequest' },
+                });
+                const data = await res.json();
+                if (!data.success) {
+                    errBox.textContent = data.error || 'Could not save the new due date.';
+                    errBox.classList.remove('hidden');
+                    return;
+                }
+                closeDueDateModal();
+                window.location.reload();
+            } catch (err) {
+                errBox.textContent = 'Network error — please try again.';
+                errBox.classList.remove('hidden');
+            } finally {
+                dueDateBusy = false;
+                btn.textContent = label;
+            }
+        }
+
+        document.getElementById('dueDateModal').addEventListener('click', function (e) {
+            if (e.target === this) closeDueDateModal();
+        });
+
+        // ── Extension request review (Accept / Decline) ────────────────────
+        async function respondExtension(extensionId, action) {
+            let staffNote = '';
+            if (action === 'decline') {
+                staffNote = prompt('Reason for declining (optional, shown to the patron):', '') || '';
+                if (staffNote === null) return;
+            }
+            const row = document.getElementById('ext-row-' + extensionId);
+            const buttons = row ? row.querySelectorAll('button') : [];
+            buttons.forEach((b) => { b.disabled = true; });
+            try {
+                const fd = new FormData();
+                fd.append('extension_id', extensionId);
+                fd.append('action', action);
+                if (staffNote) fd.append('staff_note', staffNote);
+                const res = await fetch('{% url 'respond_to_extension' %}', {
+                    method: 'POST', body: fd,
+                    headers: { 'X-CSRFToken': getCookie('csrftoken'), 'X-Requested-With': 'XMLHttpRequest' },
+                });
+                const data = await res.json();
+                if (!data.success) {
+                    alert(data.error || 'Could not complete that action.');
+                    buttons.forEach((b) => { b.disabled = false; });
+                    return;
+                }
+                window.location.reload();
+            } catch (err) {
+                alert('Network error — please try again.');
+                buttons.forEach((b) => { b.disabled = false; });
+            }
+        }
 
         function toggleSidebar() {
             const sidebar = document.querySelector('aside');

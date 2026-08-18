@@ -176,6 +176,11 @@
           <span class="due-date red">₱{{ tx.fine_amount }}</span>
         </div>
         {% endif %}
+        {% if tx.pending_extension %}
+        <div class="ext-status" style="font-size:11px;color:var(--muted);margin-top:4px;">⏳ Extension requested — awaiting the library</div>
+        {% else %}
+        <button type="button" class="ext-request-btn" data-tx-id="{{ tx.transaction_id }}" onclick="requestExtension(this)" style="margin-top:6px;font-size:11px;font-weight:600;color:var(--accent);background:none;border:none;padding:0;cursor:pointer;text-decoration:underline;">Request Extension</button>
+        {% endif %}
       </div>
       {% if tx.overdue_flag %}
       <div class="loan-badge" style="background:var(--tint-danger);color:var(--danger)">OVERDUE</div>
@@ -288,6 +293,34 @@ function postForm(url, data){
     headers:{'X-CSRFToken':CSRF,'Content-Type':'application/x-www-form-urlencoded'},
     body
   }).then(r=>r.json());
+}
+
+function requestExtension(btn){
+  const txId = btn.dataset.txId;
+  btn.disabled = true;
+  btn.textContent = 'Sending…';
+  postForm('{% url 'patron_request_extension' %}', { transaction_id: txId })
+    .then(res => {
+      if (res.success) {
+        // Swapped in place rather than reloading the page, so the rest of
+        // the loan list -- and wherever the patron was scrolled to -- stays put.
+        const status = document.createElement('div');
+        status.className = 'ext-status';
+        status.style.cssText = 'font-size:11px;color:var(--muted);margin-top:4px;';
+        status.textContent = '⏳ Extension requested — awaiting the library';
+        btn.replaceWith(status);
+        toast('Extension requested. Due ' + res.requested_due_date + ' if approved.');
+      } else {
+        toast(res.error || 'Could not send the request.', false);
+        btn.disabled = false;
+        btn.textContent = 'Request Extension';
+      }
+    })
+    .catch(() => {
+      toast('Could not send the request.', false);
+      btn.disabled = false;
+      btn.textContent = 'Request Extension';
+    });
 }
 
 let editing = false;

@@ -555,6 +555,53 @@ class Transaction(models.Model):
         return f"{self.transaction_type} - {self.book}"
 
 
+class DueDateExtension(models.Model):
+    """One ask to push a loan's due date out, and how it was settled.
+
+    Covers two different business events with one record and one history,
+    rather than two disconnected mechanisms: a patron asking through their
+    account for staff to approve or decline, and staff changing a due date
+    directly when a patron asks in person. The second case is stored as an
+    already-approved, staff-initiated row — staff are their own approver at
+    the desk — so both leave the same kind of trail on the loan.
+    """
+
+    STATUS_CHOICES = [
+        ('Pending', 'Pending'),
+        ('Approved', 'Approved'),
+        ('Declined', 'Declined'),
+    ]
+
+    extension_id = models.AutoField(primary_key=True)
+    transaction = models.ForeignKey(
+        Transaction,
+        on_delete=models.CASCADE,
+        related_name='extension_requests',
+    )
+    requested_by_patron = models.BooleanField(default=True)
+    previous_due_date = models.DateField()
+    requested_due_date = models.DateField()
+    reason = models.CharField(max_length=255, blank=True, null=True)
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='Pending')
+    requested_at = models.DateTimeField(default=timezone.now)
+    resolved_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        db_column='resolved_by',
+    )
+    resolved_at = models.DateTimeField(blank=True, null=True)
+    staff_note = models.CharField(max_length=255, blank=True, null=True)
+
+    class Meta:
+        db_table = 'Due_Date_Extensions'
+        ordering = ['-requested_at']
+
+    def __str__(self):
+        return f'Extension for transaction #{self.transaction_id} ({self.status})'
+
+
 # ─── 15. PATRON LOGS ──────────────────────────────────────────
 class PatronLog(models.Model):
     """One visit session: entry_time is set on entry, exit_time on exit."""

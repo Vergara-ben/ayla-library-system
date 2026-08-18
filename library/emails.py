@@ -132,6 +132,37 @@ def return_receipt_email(patron, books, had_overdue=False):
     return send_email(f"[{lib}] Return Receipt", "\n".join(lines), patron.email)
 
 
+def extension_approved_email(patron, book, new_due_date):
+    """Notify a patron their due-date extension was approved, and the new date."""
+    lib = _library_name()
+    title = book.title if hasattr(book, 'title') else str(book)
+    due = new_due_date.strftime('%B %d, %Y') if new_due_date else 'N/A'
+    body = (
+        f"Dear {patron.fullname},\n\n"
+        f"Your request to extend the due date for the following item has been approved:\n\n"
+        f"  - {title}\n\n"
+        f"New due date: {due}\n\n"
+        f"Thank you,\n{lib}"
+    )
+    return send_email(f"[{lib}] Extension Approved", body, patron.email)
+
+
+def extension_declined_email(patron, book, note=None):
+    """Notify a patron their due-date extension request was declined."""
+    lib = _library_name()
+    title = book.title if hasattr(book, 'title') else str(book)
+    body = (
+        f"Dear {patron.fullname},\n\n"
+        f"Your request to extend the due date for the following item was not approved:\n\n"
+        f"  - {title}\n\n"
+        + (f"Note from the library: {note}\n\n" if note else "")
+        + f"The original due date still applies. Please return the item as scheduled, "
+        f"or contact the library if you have questions.\n\n"
+        f"Thank you,\n{lib}"
+    )
+    return send_email(f"[{lib}] Extension Not Approved", body, patron.email)
+
+
 def lost_book_email(patron, book, fine_amount):
     """Notify a patron that a borrowed book was marked lost and the fee owed."""
     lib = _library_name()

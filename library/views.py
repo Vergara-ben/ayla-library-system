@@ -60,13 +60,15 @@ from .emails import (
     bulk_connection,
     return_receipt_email,
     lost_book_email,
+    extension_approved_email,
+    extension_declined_email,
     otp_email,
     password_reset_otp_email,
     registration_approved_email,
     registration_rejected_email,
 )
 from .reports import REPORT_TYPES, parse_date_range, build_report, render_report_pdf, render_report_excel
-from .models import Book, Patron, PatronLog, Transaction, User, ShelfLevel, Donation, Announcement, FloorPlan, Shelf, Room, Door, Waypoint, BLEBeacon, WaypointConnection, SystemLog, BorrowingRule, PasswordResetOTP, InventoryRecord, StockMovement, StockAudit
+from .models import Book, Patron, PatronLog, Transaction, User, ShelfLevel, Donation, Announcement, FloorPlan, Shelf, Room, Door, Waypoint, BLEBeacon, WaypointConnection, SystemLog, BorrowingRule, PasswordResetOTP, InventoryRecord, StockMovement, StockAudit, DueDateExtension
 
 # Patron views
 def patron_login(request):
@@ -409,10 +411,20 @@ def patron_account(request):
     overdue_transactions = transactions.filter(overdue_flag=True)
 
     # Convenience splits for the template (derived from `transactions`)
-    active_loans = transactions.filter(
+    active_loans = list(transactions.filter(
         transaction_type='Borrow', return_date__isnull=True
-    )
+    ))
     history = transactions.filter(return_date__isnull=False)
+
+    # A loan can have at most one open request at a time (enforced in
+    # patron_request_extension), so this is a lookup, not a list.
+    pending_by_tx = {
+        e.transaction_id: e
+        for e in DueDateExtension.objects.filter(
+            transaction__in=active_loans, status='Pending')
+    }
+    for tx in active_loans:
+        tx.pending_extension = pending_by_tx.get(tx.transaction_id)
 
     context = {
         'patron': patron,
@@ -423,6 +435,45 @@ def patron_account(request):
         'history': history,
     }
     return render(request, 'patron/patronaccount.html', context)
+
+
+@patron_login_required
+def patron_request_extension(request):
+    """Patron asks to push a loan's due date out; staff decide from here."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
+    patron = get_object_or_404(Patron, patron_id=request.session.get('patron_id'))
+
+    tx = Transaction.objects.filter(
+        transaction_id=request.POST.get('transaction_id'),
+        patron=patron, transaction_type='Borrow', return_date__isnull=True,
+    ).first()
+    if tx is None:
+        return JsonResponse({'success': False, 'error': 'Loan not found.'})
+    if not tx.due_date:
+        return JsonResponse({'success': False, 'error': 'This loan has no due date to extend.'})
+    if DueDateExtension.objects.filter(transaction=tx, status='Pending').exists():
+        return JsonResponse({'success': False, 'error': 'You already have a pending request for this book.'})
+
+    reason = (request.POST.get('reason') or '').strip()[:255]
+    rule = BorrowingRule.current()
+    today = timezone.localdate()
+    # A fresh full loan period from today, not from the old due date: an
+    # overdue book extended from its own (past) due date could still land in
+    # the past or barely in the future, which answers "extended" with a date
+    # that does not actually buy the patron more time.
+    requested_due = today + timedelta(days=rule.loan_period_days)
+
+    extension = DueDateExtension.objects.create(
+        transaction=tx, requested_by_patron=True,
+        previous_due_date=tx.due_date, requested_due_date=requested_due,
+        reason=reason or None,
+    )
+    return JsonResponse({
+        'success': True,
+        'extension_id': extension.extension_id,
+        'requested_due_date': requested_due.strftime('%b %d, %Y'),
+    })
 
 
 @patron_login_required
@@ -1529,6 +1580,107 @@ def admin_transaction_action(request, transaction_id):
     return portal_redirect(request, 'admin_transaction')
 
 
+@granted_module_required('transactions')
+def respond_to_extension(request):
+    """Staff approves or declines a patron's pending due-date extension request."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
+
+    extension = DueDateExtension.objects.select_related(
+        'transaction', 'transaction__book', 'transaction__patron'
+    ).filter(extension_id=request.POST.get('extension_id'), status='Pending').first()
+    if extension is None:
+        return JsonResponse({'success': False, 'error': 'Request not found, or it was already resolved.'})
+
+    action = request.POST.get('action')
+    admin = User.objects.filter(admin_id=request.session.get('admin_id')).first()
+    tx = extension.transaction
+
+    if action == 'approve':
+        # tx.return_date could have been set between the request and this
+        # click -- the book already came back, so there is nothing left to
+        # extend. Caught here rather than earlier, since it is only possible
+        # in the gap between listing pending requests and acting on one.
+        if tx.return_date is not None:
+            return JsonResponse({'success': False, 'error': 'This book has already been returned.'})
+        tx.due_date = extension.requested_due_date
+        tx.overdue_flag = bool(tx.due_date and timezone.localdate() > tx.due_date)
+        tx.save(update_fields=['due_date', 'overdue_flag'])
+        extension.status = 'Approved'
+        extension.resolved_by = admin
+        extension.resolved_at = timezone.now()
+        extension.save(update_fields=['status', 'resolved_by', 'resolved_at'])
+        log_admin_action(request, 'Approve', 'DueDateExtension', extension.extension_id,
+                         f'Extended "{tx.book.title}" to {tx.due_date}'
+                         + (f' for {tx.patron.fullname}' if tx.patron else ''))
+        if tx.patron and tx.patron.email and tx.book:
+            extension_approved_email(tx.patron, tx.book, tx.due_date)
+    elif action == 'decline':
+        note = (request.POST.get('staff_note') or '').strip()[:255]
+        extension.status = 'Declined'
+        extension.resolved_by = admin
+        extension.resolved_at = timezone.now()
+        extension.staff_note = note or None
+        extension.save(update_fields=['status', 'resolved_by', 'resolved_at', 'staff_note'])
+        log_admin_action(request, 'Decline', 'DueDateExtension', extension.extension_id,
+                         f'Declined extension for "{tx.book.title}"' + (f' — {note}' if note else ''))
+        if tx.patron and tx.patron.email and tx.book:
+            extension_declined_email(tx.patron, tx.book, note)
+    else:
+        return JsonResponse({'success': False, 'error': 'Unknown action.'})
+
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        return JsonResponse({'success': True, 'action': action, 'extension_id': extension.extension_id})
+    return portal_redirect(request, 'admin_transaction')
+
+
+@granted_module_required('transactions')
+def adjust_due_date(request):
+    """Staff sets a due date directly -- the desk case: a patron asks in person
+    rather than through their account, so there is no request to review, only
+    a change to make and log."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
+
+    tx = Transaction.objects.select_related('book', 'patron').filter(
+        transaction_id=request.POST.get('transaction_id'),
+        transaction_type='Borrow', return_date__isnull=True,
+    ).first()
+    if tx is None:
+        return JsonResponse({'success': False, 'error': 'Active loan not found.'})
+
+    raw = (request.POST.get('new_due_date') or '').strip()
+    try:
+        new_due = datetime.strptime(raw, '%Y-%m-%d').date()
+    except ValueError:
+        return JsonResponse({'success': False, 'error': 'Enter a valid date.'})
+
+    admin = User.objects.filter(admin_id=request.session.get('admin_id')).first()
+    old_due = tx.due_date
+
+    # Logged as an already-approved, staff-initiated extension so it shows up
+    # in the same history as patron requests -- one record of every due-date
+    # change on this loan, however it happened.
+    DueDateExtension.objects.create(
+        transaction=tx, requested_by_patron=False,
+        previous_due_date=old_due or new_due, requested_due_date=new_due,
+        status='Approved', resolved_by=admin, resolved_at=timezone.now(),
+    )
+    tx.due_date = new_due
+    tx.overdue_flag = bool(new_due and timezone.localdate() > new_due)
+    tx.save(update_fields=['due_date', 'overdue_flag'])
+
+    log_admin_action(request, 'Update', 'Transaction', tx.transaction_id,
+                     f'Due date for "{tx.book.title}" changed from {old_due or "—"} to {new_due}'
+                     + (f' for {tx.patron.fullname}' if tx.patron else ''))
+    return JsonResponse({
+        'success': True,
+        'transaction_id': tx.transaction_id,
+        'due_date': new_due.strftime('%b %d, %Y'),
+        'overdue_flag': tx.overdue_flag,
+    })
+
+
 def _book_detail_page(request, template):
     books = Book.objects.select_related('shelf_level', 'shelf_level__shelf').order_by('title')
     total_books = books.count()
@@ -1603,6 +1755,14 @@ def _transaction_page(request, template):
     transactions = paginator.get_page(request.GET.get('page', 1))
     pending_transactions_count = currently_out
 
+    # Shown above the table regardless of the current filter/search/page --
+    # a request waiting on staff is not something a search term should be
+    # able to hide.
+    pending_extensions = (DueDateExtension.objects
+                          .filter(status='Pending')
+                          .select_related('transaction', 'transaction__book', 'transaction__patron')
+                          .order_by('requested_at'))
+
     params = {}
     for key, value in (('q', q), ('status', status), ('date_from', date_from), ('date_to', date_to)):
         if value:
@@ -1616,6 +1776,7 @@ def _transaction_page(request, template):
         'overdue_count': overdue_count,
         'transaction_count': transaction_count,
         'pending_transactions_count': pending_transactions_count,
+        'pending_extensions': pending_extensions,
         'paginator': paginator,
         'q': q,
         'status': status,
