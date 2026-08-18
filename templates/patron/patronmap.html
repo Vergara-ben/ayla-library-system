@@ -71,6 +71,14 @@
     border-radius:6px;padding:1px 6px;white-space:nowrap;transform:translateX(-50%);
   }
   .map-label.subtle span{font-weight:500;color:var(--muted);font-size:9px;}
+  .map-label.target span{
+    color:var(--on-accent);background:var(--accent2);border-color:var(--accent2);
+    font-size:11px;font-weight:800;padding:2px 8px;
+  }
+  .map-label.target.subtle span{
+    color:var(--accent2);background:var(--nav-bg);border-color:var(--accent2);
+    font-weight:700;
+  }
 
   /* LEGEND */
   .map-legend{
@@ -313,7 +321,7 @@ async function initMap() {
     (room.doors || []).forEach(function (d) { addDoorToLayer(d, baseLayer); });
   });
 
-  map.fitBounds(bounds);
+  map.fitBounds(bounds, { padding: [24, 24] });
   setTimeout(() => map.invalidateSize(), 200);
 
   // 100svh fixes the info panel being pushed off-screen, but the body still
@@ -336,20 +344,33 @@ async function initMap() {
       fillOpacity: isTarget ? 0.8 : 0.4,
     }).bindTooltip((isTarget ? '🎯 ' : '') + s.name, { direction: 'top', sticky: true }).addTo(shelfLayer);
 
+    // Labels are drawn for the target shelf only. A category on every shelf
+    // meant a wall of overlapping text at any zoom that fits the room on
+    // screen, and none of it answers the question the patron actually has,
+    // which is which shelf is theirs. Every shelf still names itself on tap
+    // through its tooltip, so nothing is lost -- it is just no longer all
+    // shouted at once.
+    if (!isTarget) return;
+
     // Section label = the shelf level's category text (Fiction, Economics …).
     const categories = (s.levels || []).map((lv) => lv.category).filter(Boolean);
-    if (categories.length) {
-      L.marker(toLatLng(s.x, s.y - ((s.depth || SHELF_D) / 2 + 10)), {
-        interactive: false,
-        icon: L.divIcon({ className: 'map-label', html: '<span>' + categories[0] + '</span>', iconSize: [90, 16] }),
-      }).addTo(sectionLayer);
-    }
+    const heading = categories.length ? (s.name + ' · ' + categories[0]) : s.name;
+    L.marker(toLatLng(s.x, s.y - ((s.depth || SHELF_D) / 2 + 12)), {
+      interactive: false,
+      icon: L.divIcon({
+        className: 'map-label target',
+        html: '<span>' + heading + '</span>',
+        iconSize: [Math.max(90, heading.length * 7), 18],
+        iconAnchor: [0, 9],
+      }),
+    }).addTo(sectionLayer);
 
-    // Shelf level indicators = how many levels this shelf carries.
+    // Shelf level indicators = how many levels this shelf carries. Worth
+    // keeping on the target: on arrival it says how much shelf to scan.
     if ((s.levels || []).length) {
       L.marker(toLatLng(s.x, s.y + ((s.depth || SHELF_D) / 2 + 9)), {
         interactive: false,
-        icon: L.divIcon({ className: 'map-label subtle', html: '<span>' + s.levels.length + (s.levels.length === 1 ? ' level' : ' levels') + '</span>', iconSize: [70, 14] }),
+        icon: L.divIcon({ className: 'map-label subtle target', html: '<span>' + s.levels.length + (s.levels.length === 1 ? ' level' : ' levels') + '</span>', iconSize: [70, 14], iconAnchor: [0, 7] }),
       }).addTo(levelLayer);
     }
   });
@@ -365,8 +386,8 @@ async function initMap() {
   L.control.layers(null, {
     'Floor plan': baseLayer,
     'Shelves': shelfLayer,
-    'Section labels': sectionLayer,
-    'Shelf levels': levelLayer,
+    'Target label': sectionLayer,
+    'Target levels': levelLayer,
     'Route': routeLayer,
     'Your position': positionLayer,
   }, { collapsed: true, position: 'topleft' }).addTo(map);
