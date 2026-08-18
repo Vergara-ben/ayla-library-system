@@ -618,6 +618,27 @@ async function enableBLE() {
     alert(BLE_HELP[reason].message);
     return;
   }
+
+  // getAvailability() answers without needing the OS permission first, so it
+  // catches the single most common Android failure -- Chrome not holding the
+  // "Nearby devices" (or, pre-Android 12, Location) runtime permission --
+  // before requestLEScan() has to fail and say so less clearly.
+  if (navigator.bluetooth.getAvailability) {
+    try {
+      const available = await navigator.bluetooth.getAvailability();
+      if (!available) {
+        setStatus('amber', 'Bluetooth not available to this browser');
+        alert('This phone reports no Bluetooth adapter available to Chrome, which almost '
+            + 'always means a permission rather than the hardware.\n\n'
+            + 'Open Settings → Apps → Chrome → Permissions → "Nearby devices" (Android 12+) '
+            + 'or "Location" (older Android) and allow it, then make sure Location is switched '
+            + 'on for the phone as a whole — Android requires it for Bluetooth scanning even '
+            + 'though this page uses no GPS. Close Chrome fully and press Enable Navigation again.');
+        return;
+      }
+    } catch (err) { /* not supported here; requestLEScan below still tries */ }
+  }
+
   // Continuous scanning is the good path: one permission, every beacon, no
   // further interaction. It exists on Android Chrome and almost nowhere else,
   // so failing to get it is normal rather than exceptional.
@@ -634,10 +655,23 @@ async function enableBLE() {
       // Resolved as a timeout: Chrome accepted the call and never started.
       // Windows does this silently, so fall through rather than hang.
     } catch (err) {
-      if (/cancel|denied|permission/i.test(String(err))) {
+      const message = String(err);
+      if (/cancel|denied|permission/i.test(message)) {
         setStatus('amber', 'Bluetooth permission refused');
         alert('Bluetooth was not allowed, so your position cannot be shown. '
             + 'Press Enable Navigation and allow the permission to try again.');
+        return;
+      }
+      if (/notfounderror|adapter/i.test(message)) {
+        // The same failure getAvailability() checks for above, reached
+        // instead through the scan call itself on a browser that lacks
+        // getAvailability() -- Android without it, not the "no Android"
+        // case the generic message below would otherwise suggest.
+        setStatus('amber', 'Bluetooth not available to this browser');
+        alert('Chrome could not reach a Bluetooth adapter to scan with. On Android this is '
+            + 'almost always the "Nearby devices" (or Location, on older Android) permission '
+            + 'not being granted to Chrome -- check Settings → Apps → Chrome → Permissions, '
+            + 'and that Location is on for the phone as a whole.');
         return;
       }
     }
@@ -648,7 +682,8 @@ async function enableBLE() {
   setStatus('amber', 'Live position not available here');
   alert('Bluetooth scanning did not start, so your position cannot be shown. '
       + 'The floor plan and shelf locations still work.'
-      + '\n\nLive positioning needs Chrome on an Android phone.');
+      + '\n\nLive positioning needs Chrome on an Android phone with Bluetooth scanning '
+      + 'permission granted.');
 }
 
 // A promise that gives up rather than waiting for ever. requestLEScan on
