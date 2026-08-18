@@ -3390,9 +3390,16 @@ def staff_shelf(request):
     return _shelf_page(request, 'library_staff/shelfmanager.html')
 
 
-@granted_module_required('shelf')
+@admin_login_required
+# Deliberately admin_login_required rather than one module: this is a
+# read-only book search shared by the shelf-placement picker and the
+# Transactions page's book search, and it discloses nothing a staff member
+# couldn't already see on Manage Books. Gating it to 'shelf' alone (as it
+# briefly was) broke book search for any account holding 'transactions'
+# without also holding 'shelf' -- the page returned a login redirect where
+# the search box expected JSON, so results silently failed to appear.
 def get_books_for_placement(request):
-    """Searchable list of books for the shelf-level placement picker."""
+    """Searchable list of books, for the shelf-placement picker and Transactions."""
     q = (request.GET.get('q') or '').strip()
     books = Book.objects.select_related('shelf_level').order_by('title')
     if q:
