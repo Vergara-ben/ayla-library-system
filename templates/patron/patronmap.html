@@ -188,7 +188,9 @@ const map = L.map('map', {
 
 let imgW = 0, imgH = 0;
 let mapData = null;
-let patronPos = null;            // {x, y} in floor-plan pixels (top-left origin)
+let patronPos = null;            // {x, y} in floor-plan pixels (top-left origin) -- the latest smoothed estimate
+let displayedPos = null;         // {x, y} of wherever the marker is actually drawn right now
+let lastRoutePoints = null;      // the most recent full route the server returned
 let routeLine = null, patronMarker = null;
 let routeArrows = [];   // chevron markers drawn along the route, cleared and redrawn with it
 // The six independently toggleable layers the manuscript specifies.
@@ -393,18 +395,61 @@ function applyPositionThreshold(pos) {
 
 // Position comes from live BLE trilateration only — there is no manual or
 // simulated placement, so a marker on this map always means a real measurement.
+//
+// A new fix arrives at most once a second (trilaterate() runs on
+// TRILATERATE_INTERVAL_MS), which is a real limit -- BLE gives discrete
+// samples, not a continuous stream. What can be continuous is how the marker
+// gets from one fix to the next: instead of snapping, it is animated there
+// over ANIM_MS, so motion reads as fluid even though the underlying
+// measurement is not. This is the same technique live GPS trackers use
+// between fixes -- interpolating the display, not the measurement.
+let animFrom = null, animTo = null, animStartTime = null, animRAF = null;
+const ANIM_MS = 900;   // just under the fix interval, so one animation finishes before the next begins
+
 function setPatronPosition(pos) {
   pos = applyPositionThreshold(pos);     // continuous estimates → stable marker
   patronPos = pos;
-  const ll = toLatLng(pos.x, pos.y);
+  animateTo(pos);
+  setStatus('green', 'BLE: Active');
+  if (targetData.shelf_id) computeRoute();
+}
+
+function animateTo(target) {
+  animFrom = displayedPos || target;   // first-ever fix: nothing to animate from, so it appears immediately
+  animTo = target;
+  animStartTime = null;                // stamped on the first frame with that frame's own clock
+  if (animRAF) cancelAnimationFrame(animRAF);
+  animRAF = requestAnimationFrame(stepPositionAnimation);
+}
+
+function stepPositionAnimation(now) {
+  if (animStartTime === null) animStartTime = now;
+  const t = Math.min(1, (now - animStartTime) / ANIM_MS);
+  const eased = t * t * (3 - 2 * t);   // smoothstep: eases in and out, rather than stopping abruptly at each fix
+  displayedPos = {
+    x: animFrom.x + (animTo.x - animFrom.x) * eased,
+    y: animFrom.y + (animTo.y - animFrom.y) * eased,
+  };
+  renderDisplayedPosition();
+  animRAF = (t < 1) ? requestAnimationFrame(stepPositionAnimation) : null;
+}
+
+// Runs on every animation frame, so it only ever does cheap work: moving the
+// marker and re-pointing the route line's first vertex. Rebuilding the arrow
+// markers is comparatively expensive (DOM churn) and stays on computeRoute()'s
+// slower, once-a-fix cadence instead of every frame.
+function renderDisplayedPosition() {
+  const ll = toLatLng(displayedPos.x, displayedPos.y);
   if (!patronMarker) {
     patronMarker = L.circleMarker(ll, { radius: 8, color: AylaTheme.color('--surface'), weight: 3, fillColor: AylaTheme.color('--blue'), fillOpacity: 1 })
       .bindTooltip('You are here', { direction: 'top' }).addTo(positionLayer);
   } else {
     patronMarker.setLatLng(ll);
   }
-  setStatus('green', 'BLE: Active');
-  if (targetData.shelf_id) computeRoute();
+  if (routeLine && lastRoutePoints && lastRoutePoints.length > 1) {
+    const glued = [{ x: displayedPos.x, y: displayedPos.y }].concat(lastRoutePoints.slice(1));
+    routeLine.setLatLngs(glued.map((p) => toLatLng(p.x, p.y)));
+  }
 }
 
 async function computeRoute() {
@@ -413,10 +458,17 @@ async function computeRoute() {
   let r;
   try { r = await fetchJSON(url); } catch (e) { return; }
   if (!r.success) { document.getElementById('shelfPath').textContent = r.error || 'No route found'; return; }
-  const latlngs = r.route.map((p) => toLatLng(p.x, p.y));
+  lastRoutePoints = r.route;
+  // Drawn from wherever the marker is actually shown right now, not from
+  // patronPos -- the marker may still be mid-animation toward it -- so the
+  // line never visibly detaches from the marker for even one frame.
+  const drawPoints = displayedPos
+    ? [{ x: displayedPos.x, y: displayedPos.y }].concat(r.route.slice(1))
+    : r.route;
+  const latlngs = drawPoints.map((p) => toLatLng(p.x, p.y));
   if (routeLine) routeLayer.removeLayer(routeLine);
   routeLine = L.polyline(latlngs, { color: AylaTheme.color('--blue'), weight: 4, opacity: 0.9 }).addTo(routeLayer);
-  drawRouteArrows(r.route);
+  drawRouteArrows(drawPoints);
   document.getElementById('navBtn').textContent = '🧭 Navigating…';
   const segs = Math.max(r.route.length - 1, 0);
   const ppm = mapData && mapData.pixels_per_meter;
