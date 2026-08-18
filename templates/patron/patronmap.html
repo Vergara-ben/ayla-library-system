@@ -251,8 +251,8 @@ function shelfCorners(cx, cy, rotationDeg, width, depth) {
     toLatLng(cx + p[0] * cos - p[1] * sin, cy + p[0] * sin + p[1] * cos));
 }
 let bleInterval = null;
-const rssiBuffers = {};          // beacon_uuid -> [rssi, ...] (recent-readings window)
-const rssiLastSeen = {};         // beacon_uuid -> Date.now() of its last matched advertisement
+const rssiBuffers = {};          // beacon_id -> [rssi, ...] (recent-readings window)
+const rssiLastSeen = {};         // beacon_id -> Date.now() of its last matched advertisement
 const advertisedTxPower = {};    // beacon_id -> 1 m reference read off the packet
 const matchedBeacons = new Set();// beacon_ids actually seen, for the status line
 
@@ -584,11 +584,11 @@ function calibrationFor(b) {
   return { txPower: (tx == null ? null : tx), n: b.path_loss_n };
 }
 
-function pushRssi(uuid, rssi, win) {
-  const buf = rssiBuffers[uuid] || (rssiBuffers[uuid] = []);
+function pushRssi(beaconId, rssi, win) {
+  const buf = rssiBuffers[beaconId] || (rssiBuffers[beaconId] = []);
   buf.push(rssi);
   if (buf.length > (win || 5)) buf.shift();   // recent-readings window
-  rssiLastSeen[uuid] = Date.now();
+  rssiLastSeen[beaconId] = Date.now();
 }
 
 // The median resists a single multipath-reflected packet reading far off from
@@ -698,18 +698,25 @@ function onAdvertisement(e) {
     // If this beacon had gone stale, its buffer holds readings from wherever
     // the patron was before -- likely a different spot. Starting fresh means
     // the first reading back does not get averaged against old geography.
-    const uuid = hit.beacon.beacon_uuid;
-    const lastSeen = rssiLastSeen[uuid];
+    //
+    // Keyed by beacon_id, not beacon_uuid: several beacons commonly share one
+    // UUID and are told apart only by major/minor (this deployment's three
+    // do exactly that). Keying by UUID collapsed all of them into one shared
+    // buffer -- every beacon got the same distance regardless of which one
+    // actually sent a given packet, which pinned the computed position to a
+    // fixed point (the beacons' circumcentre) no matter where the phone was.
+    const bid = hit.beacon.beacon_id;
+    const lastSeen = rssiLastSeen[bid];
     if (lastSeen && (Date.now() - lastSeen) > BEACON_STALE_MS) {
-      rssiBuffers[uuid] = [];
+      rssiBuffers[bid] = [];
     }
     // Remember whatever calibration arrived with the packet so it can stand in
     // when the Administrator has not measured this beacon yet.
-    if (hit.advertisedTxPower != null && advertisedTxPower[hit.beacon.beacon_id] == null) {
-      advertisedTxPower[hit.beacon.beacon_id] = hit.advertisedTxPower;
+    if (hit.advertisedTxPower != null && advertisedTxPower[bid] == null) {
+      advertisedTxPower[bid] = hit.advertisedTxPower;
     }
-    matchedBeacons.add(hit.beacon.beacon_id);
-    pushRssi(hit.beacon.beacon_uuid, e.rssi);
+    matchedBeacons.add(bid);
+    pushRssi(bid, e.rssi);
   } catch (_) { /* ignore malformed advertisements */ }
 }
 
@@ -726,8 +733,8 @@ function trilaterate() {
   const now = Date.now();
   const pts = [];
   mapData.beacons.forEach((b) => {
-    const buf = rssiBuffers[b.beacon_uuid];
-    const seen = rssiLastSeen[b.beacon_uuid];
+    const buf = rssiBuffers[b.beacon_id];
+    const seen = rssiLastSeen[b.beacon_id];
     // A beacon not heard recently no longer describes where the patron is.
     // Without this check, walking out of one beacon's range left its last,
     // increasingly wrong reading anchoring the fix indefinitely -- exactly

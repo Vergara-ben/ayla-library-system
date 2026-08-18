@@ -152,7 +152,7 @@ let mapData = null, lmap = null, imgH = 0;
 let meMarker = null, meCircle = null;
 const beaconMarkers = {};
 
-const rssiBuffers = {};          // beacon uuid -> recent RSSI
+const rssiBuffers = {};          // beacon_id -> recent RSSI
 const advertisedTxPower = {};    // beacon id -> tx power the packet carried
 const matchedBeacons = new Set();
 const heardDevices = new Map();  // device key -> what it last sent
@@ -179,8 +179,8 @@ function calibrationFor(b) {
   return { txPower: (tx == null ? null : tx), n: b.path_loss_n };
 }
 
-function pushRssi(uuid, rssi, win) {
-  const buf = rssiBuffers[uuid] || (rssiBuffers[uuid] = []);
+function pushRssi(beaconId, rssi, win) {
+  const buf = rssiBuffers[beaconId] || (rssiBuffers[beaconId] = []);
   buf.push(rssi);
   if (buf.length > (win || 5)) buf.shift();
 }
@@ -292,7 +292,11 @@ function onAdvertisement(e) {
         advertisedTxPower[hit.beacon.beacon_id] = hit.advertisedTxPower;
       }
       matchedBeacons.add(hit.beacon.beacon_id);
-      pushRssi(hit.beacon.beacon_uuid, e.rssi);
+      // beacon_id, not beacon_uuid: several beacons here share one UUID and
+      // are told apart only by minor. Keying by UUID would collapse them
+      // into one shared buffer, giving every beacon the same distance
+      // regardless of which one actually sent a given packet.
+      pushRssi(hit.beacon.beacon_id, e.rssi);
     }
   } catch (_) { /* malformed advertisement */ }
 }
@@ -305,7 +309,7 @@ function trilaterate() {
 
   const pts = [];
   mapData.beacons.forEach((b) => {
-    const buf = rssiBuffers[b.beacon_uuid];
+    const buf = rssiBuffers[b.beacon_id];
     if (buf && buf.length) {
       const avg = buf.reduce((a, c) => a + c, 0) / buf.length;
       const cal = calibrationFor(b);
