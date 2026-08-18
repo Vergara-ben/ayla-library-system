@@ -4780,11 +4780,13 @@ def get_navigation_route(request):
     coords = {w.waypoint_id: (w.map_x, w.map_y) for w in waypoints}
     wp_ids = set(coords)
     adjacency = {wid: [] for wid in coords}
+    edges = []   # (from_id, to_id) pairs, kept alongside adjacency for edge-snapping below
     for c in WaypointConnection.objects.filter(
         waypoint_from_id__in=wp_ids, waypoint_to_id__in=wp_ids
     ):
         adjacency[c.waypoint_from_id].append((c.waypoint_to_id, c.distance))
         adjacency[c.waypoint_to_id].append((c.waypoint_from_id, c.distance))
+        edges.append((c.waypoint_from_id, c.waypoint_to_id))
 
     def nearest_waypoint(x, y):
         best_id, best_d = None, None
@@ -4794,7 +4796,57 @@ def get_navigation_route(request):
                 best_d, best_id = d, wid
         return best_id
 
+    # The corridor the librarian actually drew is a better start than whichever
+    # end of it happens to be nearest: a patron standing mid-corridor snapped to
+    # one endpoint used to route them there first, and as they kept walking the
+    # snap would flip to the other endpoint and the drawn route would visibly
+    # jump between two different paths for what was smooth, continuous motion.
+    # Projecting onto the nearest edge fixes both — the route starts from
+    # wherever they are actually standing along it.
+    START_SENTINEL = '__start__'
+    EDGE_SNAP_EPSILON = 1e-6   # a projection this close to an endpoint IS that endpoint
+
+    def nearest_point_on_edges(x, y):
+        best = None   # (distance, a, b, proj_x, proj_y, t)
+        for a, b in edges:
+            ax, ay = coords[a]
+            bx, by = coords[b]
+            dx, dy = bx - ax, by - ay
+            seg_len2 = dx * dx + dy * dy
+            if seg_len2 <= EDGE_SNAP_EPSILON:
+                t = 0.0   # a and b coincide -- treat the edge as a point
+            else:
+                t = ((x - ax) * dx + (y - ay) * dy) / seg_len2
+                t = max(0.0, min(1.0, t))
+            px, py = ax + t * dx, ay + t * dy
+            d = math.hypot(x - px, y - py)
+            if best is None or d < best[0]:
+                best = (d, a, b, px, py, t)
+        return best
+
     start_wp = nearest_waypoint(start_x, start_y)
+    edge_hit = nearest_point_on_edges(start_x, start_y) if edges else None
+    if edge_hit is not None:
+        _dist, a, b, px, py, t = edge_hit
+        if t > EDGE_SNAP_EPSILON and t < 1 - EDGE_SNAP_EPSILON:
+            # Genuinely mid-edge: splice a start node into the graph at the
+            # projected point. Split distances come from the live coordinates
+            # rather than prorating WaypointConnection.distance, which is set
+            # once when the connection is drawn and never recalculated if a
+            # waypoint is moved afterward -- it can quietly drift from the
+            # true geometry, while re-deriving from coords cannot.
+            coords[START_SENTINEL] = (px, py)
+            ax, ay = coords[a]
+            bx, by = coords[b]
+            adjacency[START_SENTINEL] = [
+                (a, math.hypot(px - ax, py - ay)),
+                (b, math.hypot(px - bx, py - by)),
+            ]
+            start_wp = START_SENTINEL
+        elif t <= EDGE_SNAP_EPSILON:
+            start_wp = a
+        else:
+            start_wp = b
 
     target_shelf = None
     if target_waypoint_id:
@@ -4825,14 +4877,16 @@ def get_navigation_route(request):
         return JsonResponse({'success': False, 'error': 'No path found between your position and the target'})
 
     route = [
-        {'waypoint_id': wid, 'x': coords[wid][0], 'y': coords[wid][1]}
+        {'waypoint_id': (None if wid == START_SENTINEL else wid),
+         'x': coords[wid][0], 'y': coords[wid][1]}
         for wid in path
     ]
     response = {
         'success': True,
         'route': route,
         'distance': total,
-        'start_waypoint_id': start_wp,
+        'start_waypoint_id': None if start_wp == START_SENTINEL else start_wp,
+        'start_snapped_to_edge': start_wp == START_SENTINEL,
         'goal_waypoint_id': goal_wp,
     }
     if target_shelf is not None:

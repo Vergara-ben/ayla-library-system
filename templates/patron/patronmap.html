@@ -190,6 +190,7 @@ let imgW = 0, imgH = 0;
 let mapData = null;
 let patronPos = null;            // {x, y} in floor-plan pixels (top-left origin)
 let routeLine = null, patronMarker = null;
+let routeArrows = [];   // chevron markers drawn along the route, cleared and redrawn with it
 // The six independently toggleable layers the manuscript specifies.
 const baseLayer = L.layerGroup();       // 1. floor plan (room polygons)
 const shelfLayer = L.layerGroup();      // 2. shelf markers
@@ -240,14 +241,29 @@ function shelfCorners(cx, cy, rotationDeg, width, depth) {
     toLatLng(cx + p[0] * cos - p[1] * sin, cy + p[0] * sin + p[1] * cos));
 }
 let bleInterval = null;
-const rssiBuffers = {};          // beacon_uuid -> [rssi, ...] (moving-average window)
+const rssiBuffers = {};          // beacon_uuid -> [rssi, ...] (recent-readings window)
+const rssiLastSeen = {};         // beacon_uuid -> Date.now() of its last matched advertisement
 const advertisedTxPower = {};    // beacon_id -> 1 m reference read off the packet
 const matchedBeacons = new Set();// beacon_ids actually seen, for the status line
 
 // Position Threshold filtering state (stabilises the continuous position marker).
 let lastSmoothPos = null;        // smoothing baseline
-const POS_JUMP_MAX = 80;         // px: cap physically implausible jumps between cycles
-const POS_SMOOTHING = 0.4;       // exponential moving-average factor
+// This used to be a flat 80 canvas units regardless of the floor plan's scale
+// or how often trilaterate() runs. On a 157 px/m plan that is 0.51 m per
+// cycle -- under a third of a normal walking pace -- so the marker could
+// never keep up with someone actually walking, however accurate each raw fix
+// was. It is now derived from the plan's real scale and a walking-speed
+// ceiling, computed in posJumpMaxPx() once mapData is loaded.
+const MAX_WALK_SPEED_MPS = 2.2;  // brisk walk; an implied jump faster than this is noise, not motion
+const TRILATERATE_INTERVAL_MS = 1000;
+const POS_SMOOTHING = 0.5;       // exponential moving-average factor
+const BEACON_STALE_MS = 6000;    // a beacon unheard this long stops influencing the fix
+
+function posJumpMaxPx() {
+  const ppm = mapData && mapData.pixels_per_meter;
+  if (!ppm) return Infinity;     // no scale yet -- a cap in undefined units means nothing
+  return MAX_WALK_SPEED_MPS * (TRILATERATE_INTERVAL_MS / 1000) * ppm;
+}
 
 
 const NAV_DATA_URL = "{% url 'get_patron_map_data' %}";
@@ -368,7 +384,8 @@ function applyPositionThreshold(pos) {
   if (!lastSmoothPos) { lastSmoothPos = pos; return pos; }
   let dx = pos.x - lastSmoothPos.x, dy = pos.y - lastSmoothPos.y;
   const dist = Math.hypot(dx, dy);
-  if (dist > POS_JUMP_MAX) { const k = POS_JUMP_MAX / dist; dx *= k; dy *= k; }
+  const cap = posJumpMaxPx();
+  if (dist > cap) { const k = cap / dist; dx *= k; dy *= k; }
   const smoothed = { x: lastSmoothPos.x + POS_SMOOTHING * dx, y: lastSmoothPos.y + POS_SMOOTHING * dy };
   lastSmoothPos = smoothed;
   return smoothed;
@@ -399,11 +416,72 @@ async function computeRoute() {
   const latlngs = r.route.map((p) => toLatLng(p.x, p.y));
   if (routeLine) routeLayer.removeLayer(routeLine);
   routeLine = L.polyline(latlngs, { color: AylaTheme.color('--blue'), weight: 4, opacity: 0.9 }).addTo(routeLayer);
+  drawRouteArrows(r.route);
   document.getElementById('navBtn').textContent = '🧭 Navigating…';
   const segs = Math.max(r.route.length - 1, 0);
   const ppm = mapData && mapData.pixels_per_meter;
   const dist = ppm ? (Math.round((r.distance / ppm) * 10) / 10) + ' m' : Math.round(r.distance) + ' canvas units';
   document.getElementById('shelfPath').textContent = 'Distance ≈ ' + dist + ' · ' + segs + ' segment(s)';
+}
+
+// A flat polyline reads the same whichever way you look at it, which is the
+// "confusing" part -- nothing on it says which end is the shelf. Chevrons
+// spaced along the line, all pointing the same way, turn it into a direction
+// rather than just a route.
+const ARROW_SPACING_M = 1.1;   // roughly one chevron per stride
+
+function chevronIcon(bearingDeg, big) {
+  const color = AylaTheme.color('--blue');
+  const size = big ? 20 : 14;
+  return L.divIcon({
+    className: 'route-arrow',
+    html: '<svg width="' + size + '" height="' + size + '" viewBox="0 0 14 14" '
+        + 'style="display:block;transform:rotate(' + bearingDeg + 'deg)">'
+        + '<path d="M3 2 L10 7 L3 12" fill="none" stroke="' + color + '" '
+        + 'stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    iconSize: [size, size], iconAnchor: [size / 2, size / 2],
+  });
+}
+
+function drawRouteArrows(route) {
+  routeArrows.forEach((m) => routeLayer.removeLayer(m));
+  routeArrows = [];
+  if (!route || route.length < 2) return;
+
+  // Bearing is computed directly from the raw canvas (x, y) deltas, not from
+  // the flipped lat/lng: toLatLng()'s y-flip and Leaflet's own north-up
+  // projection cancel out, so atan2(dy, dx) here already matches the angle a
+  // CSS rotate() needs to point the same way on screen.
+  const ppm = (mapData && mapData.pixels_per_meter) || 1;
+  const spacing = Math.max(ARROW_SPACING_M * ppm, 24);   // never so dense it smears together
+
+  for (let i = 0; i < route.length - 1; i++) {
+    const a = route[i], b = route[i + 1];
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const length = Math.hypot(dx, dy);
+    if (length < 1e-6) continue;
+    const bearing = Math.atan2(dy, dx) * 180 / Math.PI;
+    const isLastSegment = i === route.length - 2;
+
+    const count = Math.max(1, Math.floor(length / spacing));
+    for (let k = 1; k <= count; k++) {
+      const t = k / (count + 1);
+      const px = a.x + dx * t, py = a.y + dy * t;
+      const marker = L.marker(toLatLng(px, py), {
+        icon: chevronIcon(bearing, false), interactive: false, keyboard: false,
+      }).addTo(routeLayer);
+      routeArrows.push(marker);
+    }
+
+    // One larger chevron right at the door of the last segment, so which end
+    // is the shelf is obvious without following the whole line to find out.
+    if (isLastSegment) {
+      const endMarker = L.marker(toLatLng(b.x - dx * 0.08, b.y - dy * 0.08), {
+        icon: chevronIcon(bearing, true), interactive: false, keyboard: false,
+      }).addTo(routeLayer);
+      routeArrows.push(endMarker);
+    }
+  }
 }
 
 // ---- Bluetooth Low Energy positioning (best-effort, with manual fallback) ----
@@ -436,7 +514,17 @@ function calibrationFor(b) {
 function pushRssi(uuid, rssi, win) {
   const buf = rssiBuffers[uuid] || (rssiBuffers[uuid] = []);
   buf.push(rssi);
-  if (buf.length > (win || 5)) buf.shift();   // Moving Average window
+  if (buf.length > (win || 5)) buf.shift();   // recent-readings window
+  rssiLastSeen[uuid] = Date.now();
+}
+
+// The median resists a single multipath-reflected packet reading far off from
+// the rest, which a mean does not -- and a stray reading 10-15 dB off is
+// common indoors, especially near metal shelving.
+function median(values) {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
 const APPLE_COMPANY_ID = 0x004C;      // iBeacon manufacturer data
@@ -534,6 +622,14 @@ function onAdvertisement(e) {
     if (e.rssi == null || !mapData) return;
     const hit = matchBeacon(e);
     if (!hit) return;
+    // If this beacon had gone stale, its buffer holds readings from wherever
+    // the patron was before -- likely a different spot. Starting fresh means
+    // the first reading back does not get averaged against old geography.
+    const uuid = hit.beacon.beacon_uuid;
+    const lastSeen = rssiLastSeen[uuid];
+    if (lastSeen && (Date.now() - lastSeen) > BEACON_STALE_MS) {
+      rssiBuffers[uuid] = [];
+    }
     // Remember whatever calibration arrived with the packet so it can stand in
     // when the Administrator has not measured this beacon yet.
     if (hit.advertisedTxPower != null && advertisedTxPower[hit.beacon.beacon_id] == null) {
@@ -554,15 +650,20 @@ function trilaterate() {
     setStatus('amber', 'Map scale not set — ask an administrator');
     return;
   }
+  const now = Date.now();
   const pts = [];
   mapData.beacons.forEach((b) => {
     const buf = rssiBuffers[b.beacon_uuid];
-    if (buf && buf.length) {
-      const avg = buf.reduce((a, c) => a + c, 0) / buf.length;
-      const cal = calibrationFor(b);
-      // metres → canvas units, so every term below is in the same unit
-      pts.push({ x: b.x, y: b.y, d: rssiToDistance(avg, cal.txPower, cal.n) * scale });
-    }
+    const seen = rssiLastSeen[b.beacon_uuid];
+    // A beacon not heard recently no longer describes where the patron is.
+    // Without this check, walking out of one beacon's range left its last,
+    // increasingly wrong reading anchoring the fix indefinitely -- exactly
+    // the kind of drag that shows up as "inaccurate while walking".
+    if (!buf || !buf.length || !seen || (now - seen) > BEACON_STALE_MS) return;
+    const rssi = median(buf);
+    const cal = calibrationFor(b);
+    // metres → canvas units, so every term below is in the same unit
+    pts.push({ x: b.x, y: b.y, d: rssiToDistance(rssi, cal.txPower, cal.n) * scale });
   });
   if (pts.length < 3) {
     // Say why nothing is happening — silence here is what makes a beacon
@@ -717,7 +818,7 @@ function withTimeout(promise, ms) {
 
 function startTrilateration() {
   if (bleInterval) clearInterval(bleInterval);
-  bleInterval = setInterval(trilaterate, 1500);
+  bleInterval = setInterval(trilaterate, TRILATERATE_INTERVAL_MS);
 }
 
 initMap();
