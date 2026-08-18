@@ -12,7 +12,16 @@
 <link rel="stylesheet" href="{% static 'css/theme.css' %}">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
-  body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);height:100vh;display:flex;flex-direction:column;overflow:hidden;}
+  /* 100vh on Android Chrome is measured with the address bar hidden, which is
+     taller than the screen actually visible when it's shown -- so with
+     overflow:hidden the bottom flex child (the info panel, with the Enable
+     Navigation button) sits below the real fold with nothing able to scroll
+     it back. 100svh is the guaranteed-visible height with the address bar
+     showing, which is the safer floor for a fixed app-shell layout than
+     100dvh, which resizes live as the bar shows and hides. The 100vh line
+     stays first as the fallback for browsers that do not understand svh --
+     an unsupported value is dropped, leaving the previous one in effect. */
+  body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);height:100vh;height:100svh;display:flex;flex-direction:column;overflow:hidden;}
 
   .navbar{flex-shrink:0;background:var(--nav-bg);backdrop-filter:blur(20px);border-bottom:1px solid var(--border);padding:14px 20px;display:flex;align-items:center;gap:12px;z-index:200;}
   .back-btn{width:36px;height:36px;border-radius:10px;border:1px solid var(--border);background:var(--surface2);display:flex;align-items:center;justify-content:center;cursor:pointer;text-decoration:none;color:var(--text);font-size:16px;}
@@ -288,6 +297,16 @@ async function initMap() {
 
   map.fitBounds(bounds);
   setTimeout(() => map.invalidateSize(), 200);
+
+  // 100svh fixes the info panel being pushed off-screen, but the body still
+  // resizes as Android's address bar shows and hides while scrolling or
+  // rotating -- without this, the Leaflet canvas keeps the stale size from
+  // whichever moment it first measured its container.
+  let resizeTimer = null;
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => map.invalidateSize(), 150);
+  });
 
   // ---- Layers 2-4: shelf footprints, section labels, shelf level indicators
   data.shelves.forEach((s) => {
