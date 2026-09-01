@@ -1,4 +1,4 @@
-from django.urls import path
+from django.urls import path, re_path
 from . import views
 from . import desk
 from . import chat
@@ -19,9 +19,13 @@ urlpatterns = [
     path('patron/update-profile/', views.patron_update_profile, name='patron_update_profile'),
     path('patron/request-extension/', views.patron_request_extension, name='patron_request_extension'),
     path('patron/change-password/', views.patron_change_password, name='patron_change_password'),
+    path('patron/deactivate-account/', views.patron_deactivate_account, name='patron_deactivate_account'),
+    path('patron/reactivate/', views.patron_reactivate_request, name='patron_reactivate_request'),
     path('patron/library-card/', views.my_library_card, name='my_library_card'),
     path('admin-portal/login/', views.admin_login, name='admin_login'),
     path('admin-portal/forgot-password/', views.admin_forgot_password, name='admin_forgot_password'),
+    # One endpoint for both portals: it acts on whoever is signed in.
+    path('portal/change-password/', views.portal_change_password, name='portal_change_password'),
     path('admin-portal/logout/', views.admin_logout, name='admin_logout'),
     path('admin-portal/dashboard/', views.admin_dashboard, name='admin_dashboard'),
     path('admin-portal/signin/', views.admin_signin, name='admin_signin'),
@@ -73,6 +77,7 @@ urlpatterns = [
     path('admin-portal/users/<int:user_id>/reset-password/', views.reset_staff_password, name='reset_staff_password'),
     path('admin-portal/users/<int:user_id>/toggle-status/', views.toggle_staff_status, name='toggle_staff_status'),
     path('admin-portal/dashboard/', views.admin_dashboard, name='admin_dashboard_admin'),
+    path('admin-portal/patron-search/', views.patron_search_json, name='patron_search_json'),
     path('admin-portal/management/', views.admin_management, name='admin_management'),
     path('admin-portal/add-book/', views.admin_add_book, name='admin_add_book'),
     path('admin-portal/add-patron/', views.admin_add_patron, name='admin_add_patron'),
@@ -82,6 +87,7 @@ urlpatterns = [
     path('admin-portal/delete-patron/<int:patron_id>/', views.admin_delete_patron, name='admin_delete_patron'),
     path('admin-portal/approve-patron/<int:patron_id>/', views.approve_patron, name='approve_patron'),
     path('admin-portal/reject-patron/<int:patron_id>/', views.reject_patron, name='reject_patron'),
+    path('admin-portal/reactivation/<int:request_id>/respond/', views.respond_to_reactivation, name='respond_to_reactivation'),
     path('admin-portal/promote-visitor/<int:patron_id>/', views.promote_visitor, name='promote_visitor'),
     path('admin-portal/book-detail/', views.admin_book_detail, name='admin_book_detail'),
     path('admin-portal/edit-book/<int:book_id>/', views.admin_edit_book, name='admin_edit_book'),
@@ -92,8 +98,12 @@ urlpatterns = [
     path('admin-portal/respond-to-extension/', views.respond_to_extension, name='respond_to_extension'),
     path('admin-portal/adjust-due-date/', views.adjust_due_date, name='adjust_due_date'),
     path('admin-portal/indoor-map/', views.admin_indoor_map, name='admin_indoor_map'),
+    path('admin-portal/floor-plan/print/', views.floorplan_print, name='floorplan_print'),
+    path('admin-portal/reshelving/', views.reshelving_queue, name='reshelving_queue'),
+    path('admin-portal/activity-logs/', views.activity_logs, name='activity_logs'),
     path('admin-portal/log-management/', views.admin_log_management, name='admin_log_management'),
     path('admin-portal/book-details/<int:book_id>/', views.admin_book_details_ajax, name='admin_book_details_ajax'),
+    path('admin-portal/book-qr/<int:book_id>/', views.book_qr_png, name='book_qr_png'),
     path('admin-portal/search-book-by-qr/', views.search_book_by_qr, name='search_book_by_qr'),
     path('admin-portal/search-patron-by-qr/', views.search_patron_by_qr, name='search_patron_by_qr'),
     path('admin-portal/download-book-template/', views.download_book_template, name='download_book_template'),
@@ -115,13 +125,18 @@ urlpatterns = [
     path('admin-portal/delete-donation/', views.delete_donation, name='delete_donation'),
     # Announcement Management
     path('admin-portal/announcement-management/', views.announcement_management, name='announcement_management'),
+    # Not under /media/: these are identity documents and need a login check.
+    re_path(r'^patron-id/(?P<path>.+)$', views.serve_patron_credential, name='patron_credential'),
     path('admin-portal/toggle-announcement/', views.toggle_announcement, name='toggle_announcement'),
     path('admin-portal/delete-announcement/', views.delete_announcement, name='delete_announcement'),
     # Floor Plan Management
     path('admin-portal/floorplan-management/', views.floorplan_management, name='floorplan_management'),
     path('admin-portal/position-test/', views.position_test, name='position_test'),
+    path('admin-portal/calibrate-beacon/', views.calibrate_beacon, name='calibrate_beacon'),
     path('admin-portal/set-active-floorplan/', views.set_active_floorplan, name='set_active_floorplan'),
     path('admin-portal/set-floorplan-scale/', views.set_floorplan_scale, name='set_floorplan_scale'),
+    path('admin-portal/set-floorplan-north/', views.set_floorplan_north, name='set_floorplan_north'),
+    path('admin-portal/set-floorplan-floor/', views.set_floorplan_floor_number, name='set_floorplan_floor_number'),
     path('admin-portal/toggle-renovation/', views.toggle_renovation, name='toggle_renovation'),
     path('admin-portal/delete-floorplan/', views.delete_floorplan, name='delete_floorplan'),
     path('admin-portal/add-room/', views.add_room, name='add_room'),

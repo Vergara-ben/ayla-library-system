@@ -18,10 +18,14 @@ from django.contrib import admin
 from django.urls import path, include, re_path
 from django.conf import settings
 from django.conf.urls.static import static
+from django.views.generic import RedirectView
 from django.views.static import serve as serve_media
 
 urlpatterns = [
     path('admin/', admin.site.urls),
+    # Somebody typing the bare domain got a 404. The public face of a library
+    # system is the catalogue, so that is where the front door leads.
+    path('', RedirectView.as_view(url='/patron/dashboard/', permanent=False)),
     path('', include('library.urls')),
 ]
 
@@ -29,8 +33,15 @@ urlpatterns = [
 # The app relies on user-uploaded images at runtime, so this must work
 # regardless of DEBUG — django.conf.urls.static.static() is a no-op when
 # DEBUG is False, which silently 404s every /media/ URL.
+#
+# Everything except credentials/. Those are photographs of government IDs and
+# are served instead by library.views.serve_patron_credential, behind a login
+# and a module check. This pattern refuses them outright rather than relying on
+# the credential route being the one people happen to use: the whole point is
+# that no unauthenticated path to those files exists.
 urlpatterns += [
-    re_path(r'^media/(?P<path>.*)$', serve_media, {'document_root': settings.MEDIA_ROOT}),
+    re_path(r'^media/(?!credentials/)(?P<path>.*)$', serve_media,
+            {'document_root': settings.MEDIA_ROOT}),
 ]
 
 # Static files: only needed via runserver in development.

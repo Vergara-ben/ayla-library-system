@@ -9,7 +9,7 @@
     <script src="{% static 'js/theme.js' %}"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="{% static 'js/tailwind-theme.js' %}"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha384-iw3OoTErCYJJB9mCa8LNS2hbsQ7M3C0EpIsO/H5+EGAkPGc6rk+V8i04oW/K5xq0" crossorigin="anonymous" referrerpolicy="no-referrer">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@400;700&display=swap" rel="stylesheet">
@@ -137,11 +137,8 @@
                 </button>
                 <h2 class="logo-text text-lg tracking-wider text-slate-200 uppercase">Manage Patrons</h2>
             </div>
-            <div class="flex items-center gap-4">
-                <span class="bg-cyan-950 text-cyan-400 text-xs px-2.5 py-1 rounded font-bold border border-cyan-800 tracking-wider">ADMIN</span>
-                <div class="w-8 h-8 rounded-full bg-cyan-900 border border-cyan-700 flex items-center justify-center text-xs font-bold text-cyan-200">
-                    AD
-                </div>
+            <div class="flex items-center gap-3">
+                {% include 'admin/_headeractions.html' with accent='cyan' %}
             </div>
         </header>
 
@@ -211,7 +208,7 @@
                                             data-contact="{{ p.contact_number|default:'' }}"
                                             data-address="{{ p.address|default:'' }}"
                                             data-applied="{{ p.registration_date|date:'M j, Y' }}"
-                                            data-doc="{{ p.credential_document|default:'' }}"
+                                            data-doc="{{ p.credential_filename|default:'' }}"
                                             data-channel="{{ p.registration_channel }}"
                                             data-approve-url="{% url 'approve_patron' p.patron_id %}"
                                             data-reject-url="{% url 'reject_patron' p.patron_id %}"
@@ -223,6 +220,39 @@
                             {% endfor %}
                         </tbody>
                     </table>
+                </div>
+            </div>
+            {% endif %}
+
+            {% if pending_reactivations %}
+            <div class="rounded-xl border border-violet-800/60 overflow-hidden shadow-2xl" style="background-color: var(--bg-card);">
+                <div class="p-5 border-b border-slate-800 flex items-center gap-2">
+                    <i class="fa-solid fa-rotate-left text-violet-400 text-xs"></i>
+                    <h4 class="text-sm font-bold text-slate-200 tracking-wide">Reactivation Requests</h4>
+                    <span class="bg-violet-500/10 text-violet-400 border border-violet-500/30 px-2 py-0.5 rounded text-[10px] font-bold">{{ pending_reactivations|length }}</span>
+                </div>
+                <div class="divide-y divide-slate-800/40">
+                    {% for r in pending_reactivations %}
+                    <div class="p-4 flex flex-col sm:flex-row sm:items-center gap-3 justify-between">
+                        <div class="text-xs">
+                            <div class="font-semibold text-slate-200">{{ r.patron.fullname }}</div>
+                            <div class="text-slate-500 mt-0.5">{{ r.patron.email }} &middot; requested {{ r.requested_at|date:"M j, Y" }}</div>
+                        </div>
+                        <div class="flex items-center gap-1.5 flex-shrink-0">
+                            <form method="post" action="{% url 'respond_to_reactivation' r.request_id %}" class="inline-block" onsubmit="return confirm('Reactivate {{ r.patron.fullname|escapejs }}?');">
+                                {% csrf_token %}
+                                <input type="hidden" name="action" value="approve">
+                                <button type="submit" class="rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2.5 py-1.5 text-[10px] font-semibold hover:bg-emerald-500/20 hover:text-emerald-100">Approve</button>
+                            </form>
+                            <form method="post" action="{% url 'respond_to_reactivation' r.request_id %}" class="inline-block" onsubmit="return fillRejectNote(this)">
+                                {% csrf_token %}
+                                <input type="hidden" name="action" value="reject">
+                                <input type="hidden" name="staff_note" value="">
+                                <button type="submit" class="rounded-lg bg-rose-500/10 text-rose-400 border border-rose-500/20 px-2.5 py-1.5 text-[10px] font-semibold hover:bg-rose-500/20 hover:text-rose-100">Reject</button>
+                            </form>
+                        </div>
+                    </div>
+                    {% endfor %}
                 </div>
             </div>
             {% endif %}
@@ -281,7 +311,7 @@
                 <div class="px-5 py-3.5 bg-slate-900/20 border-b border-slate-800/60 flex flex-col lg:flex-row lg:items-center gap-3">
                     <div class="relative flex-1">
                         <i class="fa-solid fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-xs"></i>
-                        <input type="text" id="patronSearch" value="{{ search_query }}" onkeydown="if(event.key==='Enter')applyPatronSearch()" placeholder="Search by name, student ID, email..." class="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-4 py-2 text-xs text-slate-300 focus:outline-none focus:border-cyan-800 placeholder-slate-600 transition-colors">
+                        <input type="text" id="patronSearch" value="{{ search_query }}" onkeydown="if(event.key==='Enter')applyPatronSearch()" placeholder="Search by name, ID, email or mobile..." class="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-4 py-2 text-xs text-slate-300 focus:outline-none focus:border-cyan-800 placeholder-slate-600 transition-colors">
                     </div>
                     <div class="flex items-center gap-2 self-end lg:self-auto">
                         <div class="relative">
@@ -359,7 +389,7 @@
                                             </span>
                                             <span class="block text-[10px] text-slate-600">{{ patron.identity_verified_at|date:"M d, Y" }}</span>
                                             {% if patron.identity_verified_by %}<span class="block text-[10px] text-slate-600">by {{ patron.identity_verified_by.fullname }}</span>{% endif %}
-                                            {% if patron.credential_document %}<a href="/media/{{ patron.credential_document }}" target="_blank" class="text-cyan-400 hover:text-cyan-300 text-[10px] font-bold underline">View ID</a>{% endif %}
+                                            {% if patron.credential_document %}<a href="/patron-id/{{ patron.credential_filename }}" target="_blank" class="text-cyan-400 hover:text-cyan-300 text-[10px] font-bold underline">View ID</a>{% endif %}
                                         {% else %}
                                             <span class="text-slate-600">Not verified</span>
                                         {% endif %}
@@ -708,6 +738,13 @@
         // rather than one click on a row.
         let rvPatron = null;
 
+        function fillRejectNote(form) {
+            if (!confirm('Reject this reactivation request?')) return false;
+            const note = prompt('Reason for rejecting (optional, shown to the patron):', '') || '';
+            form.querySelector('[name=staff_note]').value = note;
+            return true;
+        }
+
         function openReview(btn) {
             rvPatron = {
                 id: btn.dataset.patronId,
@@ -741,7 +778,7 @@
             if (!rvPatron.doc) {
                 (atDesk ? deskNote : none).classList.remove('hidden');
             } else {
-                const url = '/media/' + rvPatron.doc;
+                const url = '/patron-id/' + rvPatron.doc;
                 full.href = url;
                 full.classList.remove('hidden');
                 if (rvPatron.doc.toLowerCase().endsWith('.pdf')) {

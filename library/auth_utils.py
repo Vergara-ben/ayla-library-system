@@ -10,6 +10,101 @@ def check_password(plain_password, hashed_password):
     return django_check_password(plain_password, hashed_password)
 
 
+# ─── Login throttling ─────────────────────────────────────────────────────
+# Password guessing was unlimited on all four sign-in doors. These helpers are
+# deliberately tiny and synchronous: a capstone deployment has no Redis and no
+# background worker, and a counter in the database that everyone actually calls
+# beats a perfect design nobody wires up.
+
+def _throttle_row(scope, identifier):
+    from .models import LoginAttempt
+    key = (identifier or '').strip().lower()[:255]
+    if not key:
+        return None
+    row, _created = LoginAttempt.objects.get_or_create(scope=scope, identifier=key)
+    return row
+
+
+def login_locked_message(scope, identifier):
+    """The refusal to show, or None when this identity may still try.
+
+    Returns the message rather than a boolean so the caller cannot forget to
+    explain itself: a locked-out librarian needs to know it is a lockout and not
+    a wrong password, or they will keep typing.
+    """
+    from django.utils import timezone
+    from .models import LoginAttempt
+
+    row = _throttle_row(scope, identifier)
+    if row is None or not row.locked_until:
+        return None
+    if row.locked_until <= timezone.now():
+        # Expired: clear it here so the next failure starts a fresh run.
+        row.failures = 0
+        row.locked_until = None
+        row.first_failure_at = None
+        row.save(update_fields=['failures', 'locked_until', 'first_failure_at'])
+        return None
+    minutes = max(1, int((row.locked_until - timezone.now()).total_seconds() // 60) + 1)
+    return (f'Too many failed sign-in attempts. Try again in about {minutes} minute'
+            f'{"s" if minutes != 1 else ""}.')
+
+
+def record_login_failure(scope, identifier):
+    """Count one miss, and lock the identity once the run is long enough."""
+    from datetime import timedelta
+    from django.utils import timezone
+    from .models import LoginAttempt
+
+    row = _throttle_row(scope, identifier)
+    if row is None:
+        return None
+    now = timezone.now()
+
+    # A run that went quiet for longer than the window is over, not continuing.
+    if row.last_failure_at and (now - row.last_failure_at) > timedelta(minutes=LoginAttempt.WINDOW_MINUTES):
+        row.failures = 0
+        row.first_failure_at = None
+
+    row.failures += 1
+    row.last_failure_at = now
+    if row.first_failure_at is None:
+        row.first_failure_at = now
+    if row.failures >= LoginAttempt.MAX_FAILURES:
+        row.locked_until = now + timedelta(minutes=LoginAttempt.LOCKOUT_MINUTES)
+    row.save(update_fields=['failures', 'first_failure_at', 'last_failure_at', 'locked_until'])
+    return LoginAttempt.MAX_FAILURES - row.failures
+
+
+def clear_login_failures(scope, identifier):
+    """A correct password ends the run."""
+    from .models import LoginAttempt
+    key = (identifier or '').strip().lower()[:255]
+    if key:
+        LoginAttempt.objects.filter(scope=scope, identifier=key).delete()
+
+
+# A hash of a value nobody can supply. Verifying a password against it costs the
+# same as verifying a real one, which is the point: without this, a missing user
+# returns instantly while a real one runs PBKDF2, and the difference is a
+# perfectly good answer to "does this address have an account?".
+_DUMMY_HASH = None
+
+
+def waste_password_time():
+    """Spend the same time on a missing account as on a real one."""
+    global _DUMMY_HASH
+    if _DUMMY_HASH is None:
+        _DUMMY_HASH = make_password('no-such-account-placeholder')
+    django_check_password('no-such-account-placeholder-attempt', _DUMMY_HASH)
+
+
+# One sentence for every way a sign-in can fail. Naming the reason -- no such
+# user, wrong password, suspended -- tells an attacker which addresses are real
+# without them ever needing a correct password.
+LOGIN_FAILED_TEXT = 'Invalid email or password.'
+
+
 def patron_login_required(view_func):
     def _wrapped_view(request, *args, **kwargs):
         if 'patron_id' not in request.session:
@@ -92,6 +187,15 @@ def granted_module_required(module_key):
 
     For pages both portals share, where holding the module is the question and
     the role only decides which dashboard a refusal returns to.
+
+    Only correct where the *page* is gated the same way. Guarding an endpoint
+    with this while the page that calls it is admin_only_required locks an
+    Administrator out of a screen they can still open: the request 302s to the
+    dashboard, the fetch that expected JSON parses an HTML page instead, and the
+    button appears to do nothing at all. Shelf Manager and Floor Plan Management
+    were exactly that for any Administrator holding no modules -- both are
+    admin_only_required pages -- so their endpoints use admin_or_module_required
+    instead. Check the calling page before reaching for this one.
     """
     def decorator(view_func):
         def _wrapped_view(request, *args, **kwargs):
@@ -188,3 +292,65 @@ def module_required(module_key):
             return view_func(request, *args, **kwargs)
         return _wrapped_view
     return decorator
+
+# ─── Password policy ──────────────────────────────────────────────────────
+# One number, in one place. It had drifted: self-service changes and resets
+# demanded 8 characters, an Administrator resetting a *staff* password demanded
+# 6, and patron registration checked nothing at all -- so the account types with
+# the most access had the weakest rule, and a one-character password could be
+# set at sign-up.
+MIN_PASSWORD_LENGTH = 8
+
+PASSWORD_RULE_TEXT = (
+    f'Password must be at least {MIN_PASSWORD_LENGTH} characters and include '
+    'both a letter and a number.'
+)
+
+
+def password_length_error(password, user=None, current_hash=None):
+    """The message to show for an unacceptable password, or None if it passes.
+
+    Kept under its original name because every password path in the app already
+    funnels through it -- registration, self-service change, admin reset, the
+    OTP reset -- so strengthening it here strengthens all of them at once.
+
+    Four checks, in the order a person meets them:
+
+    Length, as before.
+
+    Letter *and* number. The rule was length alone, so "aaaaaaaa" passed.
+
+    Django's own validators, which were configured in settings from the day the
+    project was generated and then never called -- nothing in the codebase ever
+    invoked validate_password. That is 20,000 known-common passwords, a
+    similar-to-your-own-email check, and a not-entirely-numeric check, all free.
+
+    Reuse. "Change your password" that accepts the same password back is not a
+    change, and it is the one people reach for when forced to rotate.
+    """
+    password = password or ''
+
+    if len(password) < MIN_PASSWORD_LENGTH:
+        return PASSWORD_RULE_TEXT
+
+    has_letter = any(c.isalpha() for c in password)
+    has_digit = any(c.isdigit() for c in password)
+    if not (has_letter and has_digit):
+        return PASSWORD_RULE_TEXT
+
+    try:
+        from django.contrib.auth.password_validation import validate_password
+        from django.core.exceptions import ValidationError
+        try:
+            validate_password(password, user=user)
+        except ValidationError as exc:
+            # One message, not the whole list: a wall of red is how people end
+            # up picking the first thing that clears it.
+            return exc.messages[0]
+    except ImportError:            # pragma: no cover - Django is always present
+        pass
+
+    if current_hash and django_check_password(password, current_hash):
+        return 'That is your current password. Please choose a different one.'
+
+    return None
