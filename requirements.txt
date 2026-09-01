@@ -4,3 +4,7 @@ python-dotenv>=1.0.0
 openpyxl>=3.1.2
 qrcode>=7.4.2
 reportlab>=4.0.0
+whitenoise>=6.6.0
+# Only needed when EMAIL_PROVIDER is an HTTP API (brevo/sendgrid/mailgun/resend)
+# rather than smtp -- e.g. on a host that blocks outbound SMTP ports.
+django-anymail>=10.0

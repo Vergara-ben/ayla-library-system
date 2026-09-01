@@ -14,10 +14,16 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv()
-
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Loaded from the project directory explicitly, not from wherever the process
+# happens to have been started. A bare load_dotenv() searches upward from the
+# current working directory, which is the project root under `manage.py` but
+# very often is not under a WSGI server -- so the file was found in development
+# and silently missed in production, leaving the app with no SECRET_KEY and no
+# database settings and no obvious reason why.
+load_dotenv(BASE_DIR / '.env')
 
 
 # Quick-start development settings - unsuitable for production
@@ -72,11 +78,19 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    # Serves collected static files from the app itself. PythonAnywhere serves
+    # /static/ from its own nginx config, so this is redundant there and harmless
+    # -- but on any other host, without it, every stylesheet 404s silently once
+    # DEBUG is off, and the site comes up unstyled with no error to explain why.
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
+    # After the session middleware, so request.session is available.
+    'library.middleware.IdleSessionTimeoutMiddleware',
+    'library.middleware.ContentSecurityPolicyMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     # Suspends the portal in a browser that has been handed to the public.
     'library.middleware.DeskModeMiddleware',
@@ -95,6 +109,7 @@ TEMPLATES = [
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
                 'library.context_processors.staff_modules',
+                'library.context_processors.patron_session',
             ],
         },
     },
@@ -106,14 +121,39 @@ WSGI_APPLICATION = 'ayla_library_system.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
 
+# A missing DATABASE_NAME used to surface as an opaque psycopg connection error
+# somewhere deep in a request. Named here instead, at startup, where whoever is
+# deploying can act on it.
+if not os.environ.get('DATABASE_NAME'):
+    raise RuntimeError(
+        'DATABASE_NAME is not set. Copy .env.example to .env and fill in the '
+        'database settings before starting the application.'
+    )
+
+# The engine is configurable because the deployment host decides it, not the
+# code. Nothing here is Postgres-specific -- JSONField is the cross-database one,
+# and the row locking that protects against double-borrowing works on MySQL too
+# (it does NOT work on SQLite, so never point this at SQLite in production).
+DATABASE_ENGINE = os.environ.get('DATABASE_ENGINE', 'postgresql')
+if DATABASE_ENGINE not in ('postgresql', 'mysql'):
+    raise RuntimeError(
+        f"DATABASE_ENGINE must be 'postgresql' or 'mysql', not {DATABASE_ENGINE!r}. "
+        "SQLite cannot lock rows and would silently disable the protection "
+        "against the same copy being lent to two patrons at once."
+    )
+
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.postgresql',
+        'ENGINE': f'django.db.backends.{DATABASE_ENGINE}',
         'NAME': os.environ.get('DATABASE_NAME'),
         'USER': os.environ.get('DATABASE_USER'),
         'PASSWORD': os.environ.get('DATABASE_PASSWORD'),
         'HOST': os.environ.get('DATABASE_HOST'),
         'PORT': os.environ.get('DATABASE_PORT'),
+        # Reuse connections between requests instead of opening a new one each
+        # time; on a hosted Postgres the handshake is a large share of a short
+        # request's total time.
+        'CONN_MAX_AGE': int(os.environ.get('DB_CONN_MAX_AGE', '60')),
     }
 }
 
@@ -157,6 +197,10 @@ STATIC_URL = '/static/'
 # Media files
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
+# media/ is gitignored, so a fresh clone has no such directory and the first
+# upload would fail on a missing path. Created at startup instead.
+(MEDIA_ROOT / 'credentials').mkdir(parents=True, exist_ok=True)
+(MEDIA_ROOT / 'qrcodes').mkdir(parents=True, exist_ok=True)
 
 SESSION_ENGINE = 'django.contrib.sessions.backends.db'
 SESSION_COOKIE_AGE = 3600
@@ -169,6 +213,17 @@ STATICFILES_DIRS = [
 ]
 
 STATIC_ROOT = BASE_DIR / 'staticfiles'
+
+# Hashed filenames plus long-lived caching, and a manifest so a template that
+# asks for a file that was never collected fails loudly at deploy time instead
+# of 404-ing quietly in a user's browser.
+STORAGES = {
+    'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
+    'staticfiles': {
+        'BACKEND': 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+        if not DEBUG else 'django.contrib.staticfiles.storage.StaticFilesStorage'
+    },
+}
 
 
 # Email / SMTP configuration (env-driven)
@@ -185,15 +240,79 @@ DEFAULT_FROM_EMAIL = os.environ.get(
 )
 EMAIL_TIMEOUT = 20
 
-# Use real SMTP only when credentials are present; otherwise print emails to the
-# console so the app runs in dev/demo without crashing on send.
-if EMAIL_HOST_USER and EMAIL_HOST_PASSWORD:
-    EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-else:
+# How mail actually leaves the building.
+#
+# SMTP is the obvious answer and the default, but it is not always available: a
+# free PythonAnywhere account cannot open arbitrary outbound ports, so port 587
+# is simply unreachable and every send fails. That would take the OTP the whole
+# registration flow depends on with it.
+#
+# The way around it is to stop speaking SMTP and speak HTTPS instead. The
+# transactional providers all offer an HTTP API, which such a host does allow, so
+# the choice of transport is made here rather than in the code -- every call site
+# goes through django.core.mail and never learns which one is in use.
+#
+#   EMAIL_PROVIDER=smtp      (default) classic SMTP, needs EMAIL_HOST_USER/PASSWORD
+#   EMAIL_PROVIDER=brevo     HTTPS API, needs EMAIL_API_KEY
+#   EMAIL_PROVIDER=sendgrid  ditto
+#   EMAIL_PROVIDER=mailgun   ditto, plus MAILGUN_SENDER_DOMAIN
+#   EMAIL_PROVIDER=resend    ditto
+#   EMAIL_PROVIDER=console   print to the log; never sends anything
+EMAIL_PROVIDER = os.environ.get('EMAIL_PROVIDER', 'smtp').strip().lower()
+EMAIL_API_KEY = os.environ.get('EMAIL_API_KEY', '')
+
+_ANYMAIL_BACKENDS = {
+    'brevo': ('anymail.backends.brevo.EmailBackend', 'BREVO_API_KEY'),
+    'sendgrid': ('anymail.backends.sendgrid.EmailBackend', 'SENDGRID_API_KEY'),
+    'mailgun': ('anymail.backends.mailgun.EmailBackend', 'MAILGUN_API_KEY'),
+    'resend': ('anymail.backends.resend.EmailBackend', 'RESEND_API_KEY'),
+}
+
+ANYMAIL = {}
+
+if EMAIL_PROVIDER in _ANYMAIL_BACKENDS:
+    backend_path, key_name = _ANYMAIL_BACKENDS[EMAIL_PROVIDER]
+    if not EMAIL_API_KEY:
+        raise RuntimeError(
+            f"EMAIL_PROVIDER is '{EMAIL_PROVIDER}' but EMAIL_API_KEY is empty. "
+            'Set the API key from your provider, or use EMAIL_PROVIDER=smtp.'
+        )
+    try:
+        import anymail  # noqa: F401
+    except ImportError:
+        raise RuntimeError(
+            f"EMAIL_PROVIDER is '{EMAIL_PROVIDER}', which needs django-anymail. "
+            'Run: pip install django-anymail'
+        )
+    EMAIL_BACKEND = backend_path
+    ANYMAIL = {key_name: EMAIL_API_KEY}
+    if EMAIL_PROVIDER == 'mailgun':
+        ANYMAIL['MAILGUN_SENDER_DOMAIN'] = os.environ.get('MAILGUN_SENDER_DOMAIN', '')
+
+elif EMAIL_PROVIDER == 'console':
     EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
 
-# Email sends are best-effort and never raise into a request, so failures are
-# only visible here. On PythonAnywhere this lands in the web app's error log.
+elif EMAIL_HOST_USER and EMAIL_HOST_PASSWORD:
+    EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+
+else:
+    # Nothing configured. Printing beats crashing: the app has to run in
+    # development and in a demo without a mail account existing at all.
+    EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+
+# Email sends are best-effort and never raise into a request, so a failure is
+# invisible unless it is written down somewhere a person will look. Console
+# alone was not that place: on a hosted deployment it goes to a log nobody opens
+# until something is already wrong, and a broken SMTP password would mean overdue
+# notices silently stop going out.
+#
+# So: console for development, and a rotating file that survives a restart and
+# can be read after the fact. django.request is captured too, because that is
+# where a 500 in a view actually lands -- without it the new 500 page would be
+# the only trace that anything happened.
+LOG_DIR = BASE_DIR / 'logs'
+LOG_DIR.mkdir(exist_ok=True)
+
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
@@ -202,9 +321,20 @@ LOGGING = {
     },
     'handlers': {
         'console': {'class': 'logging.StreamHandler', 'formatter': 'simple'},
+        'file': {
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': LOG_DIR / 'ayla.log',
+            # Five files of 2 MB: enough to look back over a bad week, bounded
+            # so a hosted account's disk quota is never the thing that fails.
+            'maxBytes': 2 * 1024 * 1024,
+            'backupCount': 5,
+            'formatter': 'simple',
+            'encoding': 'utf-8',
+        },
     },
     'loggers': {
-        'library': {'handlers': ['console'], 'level': 'INFO', 'propagate': False},
+        'library': {'handlers': ['console', 'file'], 'level': 'INFO', 'propagate': False},
+        'django.request': {'handlers': ['console', 'file'], 'level': 'ERROR', 'propagate': False},
     },
 }
 
@@ -212,6 +342,45 @@ LOGGING = {
 # ── Security hardening ──────────────────────────────────────────
 # Safe in every environment (no effect on local HTTP dev):
 SECURE_CONTENT_TYPE_NOSNIFF = True
+
+# ─── Content-Security-Policy ──────────────────────────────────────────────
+# Set here rather than in a package, because it has to be honest about what
+# this app actually is.
+#
+# 'unsafe-inline' is present for scripts, and it has to be: the templates carry
+# large inline <script> blocks and hundreds of onclick= handlers. That means
+# this policy does NOT stop an injected inline script -- it is defence in depth,
+# not an XSS cure. What it does stop is most of what an injected script would
+# want to do next:
+#
+#   script-src allowlist  no pulling a payload in from an arbitrary domain
+#   connect-src 'self'    no exfiltrating a session or patron data outwards
+#   form-action 'self'    no re-pointing a form at an attacker's endpoint
+#   frame-ancestors       no clickjacking the portal inside someone's iframe
+#   base-uri 'self'       no rewriting every relative URL on the page
+#   object-src 'none'     no Flash/applet-era embedding
+#
+# Removing 'unsafe-inline' is a real improvement but a large refactor: every
+# inline handler would have to move into a file. Worth doing, not worth doing
+# badly the week of a defence.
+CSP_DIRECTIVES = [
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com "
+    "https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://unpkg.com",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com "
+    "https://cdnjs.cloudflare.com https://unpkg.com",
+    "font-src 'self' data: https://fonts.gstatic.com https://cdnjs.cloudflare.com",
+    "img-src 'self' data: blob:",
+    "connect-src 'self'",
+    "media-src 'self' blob:",
+    "worker-src 'self' blob:",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+]
+CONTENT_SECURITY_POLICY = '; '.join(CSP_DIRECTIVES)
+
 SECURE_REFERRER_POLICY = 'same-origin'
 SESSION_COOKIE_HTTPONLY = True
 X_FRAME_OPTIONS = 'DENY'

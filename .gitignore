@@ -32,3 +32,12 @@ Thumbs.db
 seeded_transactions.json
 seeded_logs.json
 seeded_catalogue.json
+
+# Application log files
+logs/
+
+# Database and media backups -- these contain patron data, including
+# photographs of government IDs. Never commit them.
+backups/
+
+# Local editor/agent tooling config

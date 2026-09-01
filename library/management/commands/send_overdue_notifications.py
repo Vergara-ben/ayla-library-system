@@ -70,6 +70,15 @@ class Command(BaseCommand):
                 except Exception:
                     pass
 
+        if not dry_run and (flagged or sent or failed):
+            # A dry run changes nothing, so it leaves no trail; a real run marks
+            # books overdue and emails patrons without any person behind it,
+            # which is exactly what the System role is for.
+            from library.audit import log_system_action
+            log_system_action('Notify', 'Transaction', None,
+                              f'Overdue sweep: {flagged} item(s) flagged, '
+                              f'{sent} patron(s) notified, {failed} failed')
+
         self.stdout.write(self.style.SUCCESS(
             f"Overdue items: {flagged} | patrons notified: {sent} | "
             f"failed: {failed} | dry-run: {dry_run}"))
