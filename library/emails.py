@@ -28,7 +28,11 @@ def _library_name():
 
 
 def bulk_connection():
-    """A single reusable SMTP connection for multi-recipient sends.
+    """A single reusable mail connection for multi-recipient sends.
+
+    Whatever EMAIL_BACKEND is configured -- SMTP, or one of the HTTP API
+    providers -- get_connection returns the right one, so nothing here or in the
+    callers has to know which transport is in use.
 
     Returned unopened; use it as a context manager, or pass it to the *_email
     helpers and close it when done. Returns None if the connection cannot even
@@ -261,6 +265,47 @@ def announcement_email(patron, announcement, connection=None):
     )
     return send_email(f"[{lib}] {announcement.title}", body, patron.email,
                       connection=connection)
+
+
+def account_action_otp_email(email, fullname, code, action_label):
+    """Email a one-time code for a self-service account action (deactivate/reactivate)."""
+    lib = _library_name()
+    body = (
+        f"Dear {fullname},\n\n"
+        f"We received a request to {action_label} your {lib} account.\n\n"
+        f"Your verification code is:\n\n"
+        f"    {code}\n\n"
+        f"This code expires in 10 minutes. If you did not make this request,\n"
+        f"you can safely ignore this email — no changes will be made.\n\n"
+        f"Thank you,\n{lib}"
+    )
+    return send_email(f"[{lib}] Verification Code", body, email)
+
+
+def reactivation_approved_email(patron):
+    """Notify a patron their account reactivation request was approved."""
+    lib = _library_name()
+    body = (
+        f"Dear {patron.fullname},\n\n"
+        f"Your request to reactivate your {lib} account has been approved. "
+        f"You can log in again right away.\n\n"
+        f"Welcome back,\n{lib}"
+    )
+    return send_email(f"[{lib}] Account Reactivated", body, patron.email)
+
+
+def reactivation_declined_email(patron, note=None):
+    """Notify a patron their account reactivation request was not approved."""
+    lib = _library_name()
+    body = (
+        f"Dear {patron.fullname},\n\n"
+        f"Your request to reactivate your {lib} account was not approved.\n\n"
+        + (f"Note from the library: {note}\n\n" if note else "")
+        + f"Your account remains inactive. Please contact the library if you have "
+        f"questions, or you may submit a new request.\n\n"
+        f"Thank you,\n{lib}"
+    )
+    return send_email(f"[{lib}] Reactivation Request Update", body, patron.email)
 
 
 def password_reset_otp_email(email, fullname, code, role_label='account'):

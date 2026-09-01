@@ -3,7 +3,8 @@ from django.contrib import messages
 from django.db.models import Count, Max, Q
 from django.db import transaction
 from django.utils import timezone
-from django.http import HttpResponse, JsonResponse
+from django.core.exceptions import SuspiciousFileOperation
+from django.http import HttpResponse, JsonResponse, Http404
 from django.conf import settings
 from django.core.paginator import Paginator
 from datetime import datetime, timedelta
@@ -18,9 +19,16 @@ import qrcode
 import os
 import math
 import heapq
+import secrets
+import re
 
 from .auth_utils import (
+    LOGIN_FAILED_TEXT,
     check_password,
+    clear_login_failures,
+    login_locked_message,
+    record_login_failure,
+    waste_password_time,
     hash_password,
     patron_login_required,
     admin_login_required,
@@ -30,10 +38,13 @@ from .auth_utils import (
     staff_only_required,
     module_required,
     admin_or_module_required,
+    MIN_PASSWORD_LENGTH,
+    PASSWORD_RULE_TEXT,
+    password_length_error,
 )
 from .modules import STAFF_MODULES, clean_module_keys
 from .names import compose_name, parse_name
-from .desk import PURPOSE_CHOICES, close_stale_visits, desk_is_armed
+from .desk import PURPOSE_CHOICES, close_stale_visits, desk_is_armed, desk_viewer_id
 
 # Map admin page-URL names to their Library Staff equivalents so that shared
 # action endpoints can return whichever portal the current user belongs to.
@@ -52,7 +63,7 @@ def portal_redirect(request, name, *args, **kwargs):
     if request.session.get('admin_role') == 'Staff':
         name = STAFF_PORTAL_MAP.get(name, name)
     return redirect(name, *args, **kwargs)
-from .audit import log_admin_action
+from .audit import log_admin_action, log_patron_action, log_system_action
 from .eligibility import check_patron_eligibility
 from .emails import (
     announcement_email,
@@ -63,48 +74,103 @@ from .emails import (
     extension_approved_email,
     extension_declined_email,
     otp_email,
+    account_action_otp_email,
+    reactivation_approved_email,
+    reactivation_declined_email,
     password_reset_otp_email,
     registration_approved_email,
     registration_rejected_email,
 )
-from .reports import REPORT_TYPES, parse_date_range, build_report, render_report_pdf, render_report_excel
-from .models import Book, Patron, PatronLog, Transaction, User, ShelfLevel, Donation, Announcement, FloorPlan, Shelf, Room, Door, Waypoint, BLEBeacon, WaypointConnection, SystemLog, BorrowingRule, PasswordResetOTP, InventoryRecord, StockMovement, StockAudit, DueDateExtension
+from .reports import (REPORT_TYPES, SNAPSHOT_REPORTS, parse_date_range, build_report,
+                      render_report_pdf, render_report_excel)
+from .models import Book, Patron, PatronLog, Transaction, User, ShelfLevel, Donation, Announcement, FloorPlan, Shelf, Room, Door, Waypoint, BLEBeacon, WaypointConnection, SystemLog, BorrowingRule, PasswordResetOTP, InventoryRecord, StockMovement, StockAudit, DueDateExtension, ReactivationRequest
 
 # Patron views
 def patron_login(request):
-    if request.method == 'POST':
-        email = request.POST.get('email')
-        password = request.POST.get('password')
+    """Patron sign-in.
 
-        try:
-            patron = Patron.objects.get(email=email)
-        except Patron.DoesNotExist:
-            return render(request, 'patron/patronlogin.html', {'error': 'Invalid email or password'})
+    The order here matters and is not the obvious one. Status used to be checked
+    before the password, so anyone could type an address with any password and
+    learn from the reply whether it belonged to a pending applicant, a
+    deactivated member, or nobody at all.
+
+    Those messages are worth keeping -- an applicant genuinely needs to be told
+    their registration is still waiting, and a deactivated member needs the way
+    back. So the password is verified first and the status is only explained to
+    someone who has just proved the account is theirs. A guesser sees one
+    sentence, always the same one.
+    """
+    if request.method == 'POST':
+        email = (request.POST.get('email') or '').strip()
+        password = request.POST.get('password') or ''
+
+        locked = login_locked_message('patron', email)
+        if locked:
+            return render(request, 'patron/patronlogin.html', {'error': locked})
+
+        patron = Patron.objects.filter(email__iexact=email).first()
+        if patron is None:
+            waste_password_time()      # a missing account costs what a real one costs
+            password_ok = False
+        else:
+            password_ok = check_password(password, patron.password_hash)
+
+        if not password_ok:
+            remaining = record_login_failure('patron', email)
+            if patron is not None:
+                # Logged against the account whose password was missed, which is
+                # what makes a run of them legible as an attack on that account.
+                log_patron_action(request, 'Login failed', 'Patron', patron.patron_id,
+                                  'Incorrect password', patron=patron)
+            else:
+                log_system_action('Login failed', 'Patron', None,
+                                  f'Failed patron sign-in for "{email[:120]}"')
+            error = LOGIN_FAILED_TEXT
+            if remaining is not None and 0 < remaining <= 2:
+                error += f' {remaining} attempt(s) left before this account is locked.'
+            return render(request, 'patron/patronlogin.html', {'error': error})
+
+        # Password correct: from here the account is demonstrably theirs, so the
+        # real reason they cannot get in is safe -- and necessary -- to give.
+        clear_login_failures('patron', email)
 
         if patron.account_status == 'Pending':
             return render(request, 'patron/patronlogin.html',
                           {'error': 'Your registration is awaiting administrator approval. You will receive an email once it is approved.'})
 
+        if patron.account_status == 'Inactive':
+            return render(request, 'patron/patronlogin.html',
+                          {'error': 'Your account has been deactivated.', 'show_reactivate': True})
+
         if patron.account_status != 'Active':
             return render(request, 'patron/patronlogin.html', {'error': 'Your account is suspended or inactive'})
 
-        if not check_password(password, patron.password_hash):
-            return render(request, 'patron/patronlogin.html', {'error': 'Invalid email or password'})
-
+        # Session fixation: the id the browser arrived holding must not be the
+        # one it leaves authenticated with. flush() rather than cycle_key() so
+        # nothing seeded into the pre-login session survives the sign-in either.
+        request.session.flush()
         request.session['patron_id'] = patron.patron_id
         request.session['patron_fullname'] = patron.fullname
+        log_patron_action(request, 'Login', 'Patron', patron.patron_id,
+                          'Signed in to the patron portal', patron=patron)
         return redirect('/patron/dashboard/')
 
     return render(request, 'patron/patronlogin.html')
 
 
 def patron_logout(request):
+    # Recorded before flush(): afterwards there is no session to say who left.
+    log_patron_action(request, 'Logout', 'Patron', request.session.get('patron_id'),
+                      'Signed out of the patron portal')
     request.session.flush()
     return redirect('/patron/login/')
 
 
-@patron_login_required
 def patron_dashboard(request):
+    # Home is the borrowing summary, which a guest does not have. Search is
+    # what they came for, so that is where Home takes them.
+    if 'patron_id' not in request.session:
+        return redirect('/patron/catalog/')
     patron_id = request.session.get('patron_id')
     patron = get_object_or_404(Patron, patron_id=patron_id)
 
@@ -170,9 +236,129 @@ def _name_from_post(request):
 
 
 def _new_otp():
-    """6-digit numeric one-time password."""
-    import random
-    return f'{random.randint(0, 999999):06d}'
+    """6-digit numeric one-time password.
+
+    Drawn from `secrets`, not `random`: the latter is a Mersenne Twister whose
+    future output is derivable from enough observed values, and these codes
+    stand between an attacker and someone's account.
+    """
+    return f'{secrets.randbelow(1000000):06d}'
+
+
+def _otp_matches(supplied, stored):
+    """Constant-time comparison of a supplied code against the stored one.
+
+    Both sides are encoded to bytes first: compare_digest rejects non-ASCII
+    str outright, and a patron typing an accented character into the code box
+    should get "incorrect code", not a 500.
+    """
+    if not stored or not supplied:
+        return False
+    return secrets.compare_digest(supplied.encode('utf-8'), stored.encode('utf-8'))
+
+
+# How long to wait between sending one code and the next, for the same
+# account. Without it "send code" mails someone's inbox as fast as it can be
+# clicked -- by anyone who knows the address, on the flows that need no login.
+OTP_RESEND_COOLDOWN = timedelta(seconds=60)
+
+
+def _otp_cooldown_left(last_sent_at):
+    """Whole seconds still to wait before another code may go out (0 = clear)."""
+    if not last_sent_at:
+        return 0
+    remaining = OTP_RESEND_COOLDOWN - (timezone.now() - last_sent_at)
+    return max(0, math.ceil(remaining.total_seconds()))
+
+
+def _reset_cooldown_left(account_type, email):
+    """Same, for the PasswordResetOTP-backed flows, off the last row's created_at."""
+    last = (PasswordResetOTP.objects
+            .filter(account_type=account_type, email__iexact=email)
+            .order_by('-created_at').first())
+    return _otp_cooldown_left(last.created_at if last else None)
+
+
+# ─── Self-service account-action OTPs ─────────────────────────────────────
+# Deactivation, reactivation and password changes all confirm by emailed code.
+# They share Patron.otp_code, so every code carries the purpose it was issued
+# for and is checked against it -- see Patron.otp_purpose.
+
+def _issue_account_otp(patron, purpose, action_label):
+    """Mint a purpose-scoped code on the patron and email it. True if sent.
+
+    Callers are expected to have cleared _otp_cooldown_left() first; how a
+    refusal is worded differs by flow, so it is not decided here.
+    """
+    patron.otp_code = _new_otp()
+    patron.otp_purpose = purpose
+    patron.otp_expires_at = timezone.now() + timedelta(minutes=10)
+    patron.otp_attempts = 0
+    patron.otp_last_sent_at = timezone.now()
+    patron.save(update_fields=['otp_code', 'otp_purpose', 'otp_expires_at',
+                               'otp_attempts', 'otp_last_sent_at'])
+    return account_action_otp_email(patron.email, patron.fullname,
+                                    patron.otp_code, action_label)
+
+
+def _count_failed_otp(patron):
+    """Record one wrong guess and return the message to show for it.
+
+    The code is burnt once the ceiling is reached rather than merely refused,
+    so the limit actually costs the guesser their code instead of letting them
+    keep hammering the same one.
+    """
+    patron.otp_attempts += 1
+    remaining = Patron.MAX_OTP_ATTEMPTS - patron.otp_attempts
+    if remaining <= 0:
+        patron.otp_code = None
+        patron.otp_purpose = ''
+        patron.otp_expires_at = None
+        patron.save(update_fields=['otp_code', 'otp_purpose', 'otp_expires_at', 'otp_attempts'])
+        return 'Too many incorrect codes. Request a new one to try again.'
+    patron.save(update_fields=['otp_attempts'])
+    return f'Incorrect code. {remaining} attempt(s) left.'
+
+
+def _check_account_otp(patron, purpose, code):
+    """Return an error message for a bad code, or None if it is good.
+
+    A code issued without a purpose (registration's) has otp_purpose '', which
+    matches no caller here -- so those can never be spent on an account action.
+    """
+    if not patron.otp_code or not patron.otp_expires_at or timezone.now() > patron.otp_expires_at:
+        # Covers never-requested, already-spent and timed-out alike: from the
+        # patron's side the fix is the same, and saying which it was would tell
+        # anyone holding the session more than they need to know.
+        return 'That code is no longer valid. Request a new one.'
+    if patron.otp_purpose != purpose:
+        return 'That code was issued for a different request. Request a new one.'
+    if not _otp_matches(code, patron.otp_code):
+        return _count_failed_otp(patron)
+    return None
+
+
+def _clear_account_otp(patron, extra_fields=()):
+    """Spend the code so it cannot be replayed, saving any fields alongside."""
+    patron.otp_code = None
+    patron.otp_purpose = ''
+    patron.otp_expires_at = None
+    patron.otp_attempts = 0
+    patron.save(update_fields=['otp_code', 'otp_purpose', 'otp_expires_at',
+                               'otp_attempts', *extra_fields])
+
+
+# What each accepted format actually starts with. Checked because the
+# extension is chosen by whoever uploads the file and means nothing on its own:
+# naming something .png does not make it a PNG. Low risk while these files are
+# only ever served as a download, but the check costs three lines and stops the
+# store filling with things that are not what they claim.
+_CREDENTIAL_MAGIC = {
+    '.jpg': (b'\xff\xd8\xff',),
+    '.jpeg': (b'\xff\xd8\xff',),
+    '.png': (b'\x89PNG\r\n\x1a\n',),
+    '.pdf': (b'%PDF-',),
+}
 
 
 def _save_credential_document(uploaded, patron_email):
@@ -182,10 +368,16 @@ def _save_credential_document(uploaded, patron_email):
     if not uploaded:
         return None
     ext = os.path.splitext(uploaded.name)[1].lower()
-    if ext not in ('.jpg', '.jpeg', '.png', '.pdf'):
+    if ext not in _CREDENTIAL_MAGIC:
         raise ValueError('Credential must be a JPG, PNG, or PDF file.')
     if uploaded.size > 5 * 1024 * 1024:
         raise ValueError('Credential file must be 5 MB or smaller.')
+
+    head = uploaded.read(8)
+    uploaded.seek(0)      # the writer below re-reads from the start
+    if not any(head.startswith(sig) for sig in _CREDENTIAL_MAGIC[ext]):
+        raise ValueError('That file does not look like a real JPG, PNG, or PDF. '
+                         'Please upload a photo or scan of your ID.')
     cred_dir = os.path.join(settings.MEDIA_ROOT, 'credentials')
     os.makedirs(cred_dir, exist_ok=True)
     filename = f'credential_{uuid4().hex}{ext}'
@@ -220,14 +412,15 @@ def patron_register(request):
             return render(request, 'patron/patronregister.html',
                           {'stage': 'otp', 'otp_email': email,
                            'error': 'That code has expired. Click "Resend code" to get a new one.'})
-        if code != patron.otp_code:
+        if not _otp_matches(code, patron.otp_code):
             return render(request, 'patron/patronregister.html',
                           {'stage': 'otp', 'otp_email': email,
-                           'error': 'Incorrect code. Please try again.'})
+                           'error': _count_failed_otp(patron)})
         patron.otp_verified = True
         patron.otp_code = None
         patron.otp_expires_at = None
-        patron.save(update_fields=['otp_verified', 'otp_code', 'otp_expires_at'])
+        patron.otp_attempts = 0
+        patron.save(update_fields=['otp_verified', 'otp_code', 'otp_expires_at', 'otp_attempts'])
         return render(request, 'patron/patronregister.html', {'stage': 'pending'})
 
     # ── Resend OTP ───────────────────────────────────────────
@@ -239,9 +432,18 @@ def patron_register(request):
         if patron is None:
             return render(request, 'patron/patronregister.html',
                           {'stage': 'form', 'error': 'No pending registration found for that email. Please register again.'})
+        # This flow already tells the visitor whether a pending registration
+        # exists, so a real countdown reveals nothing further.
+        wait = _otp_cooldown_left(patron.otp_last_sent_at)
+        if wait:
+            return render(request, 'patron/patronregister.html',
+                          {'stage': 'otp', 'otp_email': email,
+                           'error': f'A code was just sent. Please wait {wait} second(s) before requesting another.'})
         patron.otp_code = _new_otp()
         patron.otp_expires_at = timezone.now() + timedelta(minutes=10)
-        patron.save(update_fields=['otp_code', 'otp_expires_at'])
+        patron.otp_attempts = 0
+        patron.otp_last_sent_at = timezone.now()
+        patron.save(update_fields=['otp_code', 'otp_expires_at', 'otp_attempts', 'otp_last_sent_at'])
         if not otp_email(patron.email, patron.fullname, patron.otp_code):
             return render(request, 'patron/patronregister.html',
                           {'stage': 'otp', 'otp_email': email,
@@ -268,6 +470,11 @@ def patron_register(request):
         return _form_error(name_error)
     if not all([fullname, email, password, confirm_password, patron_type, contact_number, address]):
         return _form_error('All fields are required')
+    # Registration checked no length at all before this, so a one-character
+    # password was accepted at sign-up.
+    length_error = password_length_error(password)
+    if length_error:
+        return _form_error(length_error)
     if password != confirm_password:
         return _form_error('Passwords do not match')
 
@@ -306,6 +513,7 @@ def patron_register(request):
         credential_document=credential_path,
         otp_code=_new_otp(),
         otp_expires_at=timezone.now() + timedelta(minutes=10),
+        otp_last_sent_at=timezone.now(),
         otp_verified=False,
     )
     if not otp_email(patron.email, patron.fullname, patron.otp_code):
@@ -320,7 +528,12 @@ def patron_register(request):
 
 
 
-@patron_login_required
+# ─── Open to visitors who have not registered ─────────────────────────────
+# Looking a book up and being walked to its shelf is the library's public
+# service; an account is only needed to take a book home. That is already the
+# rule at the desk -- desk.py logs a walk-in as a Visitor and tells them to see
+# a librarian with an ID before borrowing -- so the online catalogue follows it
+# rather than inventing a stricter one. Nothing below reads the patron session.
 def patron_catalog(request):
     search_query = request.GET.get('search', '').strip()
 
@@ -329,11 +542,14 @@ def patron_catalog(request):
     ).order_by('title')
 
     if search_query:
-        books = books.filter(
-            Q(title__icontains=search_query) |
-            Q(author__icontains=search_query) |
-            Q(genre__icontains=search_query)
-        )
+        books = books.filter(_book_search_q(search_query))
+
+    if search_query:
+        # Only real searches, never plain browsing -- a log entry per page view
+        # would bury everything else and answer no question worth asking.
+        log_patron_action(request, 'Search', 'Book', None,
+                          f'Searched the catalogue for "{search_query[:80]}" '
+                          f'({books.count()} result(s))')
 
     context = {
         'books': books,
@@ -342,7 +558,6 @@ def patron_catalog(request):
     return render(request, 'patron/patroncatalog.html', context)
 
 
-@patron_login_required
 def patron_book_details(request, book_id):
     book = get_object_or_404(
         Book.objects.select_related(
@@ -370,7 +585,6 @@ def patron_book_details(request, book_id):
     return render(request, 'patron/patronbook-details.html', context)
 
 
-@patron_login_required
 def patron_map(request):
     target = {}
     book_id = request.GET.get('book_id')
@@ -383,10 +597,17 @@ def patron_map(request):
             if shelf:
                 target['shelf_id'] = shelf.shelf_id
                 target['shelf_name'] = shelf.name
+            # The navigation route is recomputed roughly once a second while the
+            # map is open, so logging that would produce thousands of rows saying
+            # the same thing. This records the patron asking to be taken to a
+            # book, which is the event with any meaning in it.
+            log_patron_action(request, 'Navigate', 'Book', book.book_id,
+                              f'Opened the map to "{book.title[:60]}"'
+                              + (f' at {target["shelf_name"]}' if target.get('shelf_name')
+                                 else ' (shelf not placed on the map)'))
     return render(request, 'patron/patronmap.html', {'target': target})
 
 
-@patron_login_required
 def patron_announcements(request):
     announcements = Announcement.objects.filter(
         is_active=True
@@ -396,6 +617,101 @@ def patron_announcements(request):
         'announcements': announcements,
     }
     return render(request, 'patron/patronannouncements.html', context)
+
+
+def _patron_search_q(term):
+    """One definition of "search for a patron", used by every patron search box.
+
+    Four boxes had grown their own version and all four looked for the name and
+    the email only -- while the Manage Patrons box promised "name, student ID,
+    email" in its own placeholder. Most patrons have neither an email nor a
+    contact number recorded, so in practice only the name worked and searching
+    by the ID printed on a library card silently found nothing.
+
+    The ID is matched exactly rather than as a substring: typing 18 should not
+    return patrons 18, 180 and 1802 when the librarian is reading one number off
+    a card.
+    """
+    term = (term or '').strip()
+    if not term:
+        return Q()
+    q = (Q(fullname__icontains=term)
+         | Q(email__icontains=term)
+         | Q(contact_number__icontains=term))
+    if term.isdigit():
+        q |= Q(patron_id=int(term))
+    return q
+
+
+def _book_search_q(term):
+    """One definition of "search for a book", used by every book search box.
+
+    ISBNs are read off a back cover, where they are printed with hyphens, and
+    stored here without them. Matching only the raw string means a correctly
+    typed ISBN finds nothing, so the punctuation is stripped from the query and
+    both forms are tried.
+    """
+    term = (term or '').strip()
+    if not term:
+        return Q()
+    q = (Q(title__icontains=term)
+         | Q(author__icontains=term)
+         | Q(ISBN__icontains=term)
+         | Q(genre__icontains=term))
+    bare = re.sub(r'[^0-9A-Za-z]', '', term)
+    if bare and bare != term:
+        q |= Q(ISBN__icontains=bare)
+    return q
+
+
+def _floor_for_request(request, target_shelf=None):
+    """Which floor's map to draw.
+
+    Three questions in priority order, because they answer each other's gaps:
+    an explicit ?floor= wins (the patron used the switcher); otherwise the
+    floor the target book sits on (they asked to be taken to a book, so show
+    the floor it is on); otherwise the lowest floor in service, which is where
+    someone walking in from the street starts.
+    """
+    live = FloorPlan.objects.filter(is_active=True).order_by('floor_number', 'floor_plan_id')
+
+    raw = (request.GET.get('floor') or '').strip()
+    if raw.isdigit():
+        chosen = live.filter(floor_plan_id=int(raw)).first()
+        if chosen:
+            return chosen, live
+
+    if target_shelf is not None and target_shelf.room_id:
+        on = live.filter(room__shelf=target_shelf).first()
+        if on:
+            return on, live
+
+    return live.first(), live
+
+
+def _floor_short_label(plan):
+    """The one or two characters that fit on a lift button: 2, G, B1."""
+    n = plan.floor_number if plan.floor_number is not None else 1
+    if n < 0:
+        return f'B{abs(n)}'
+    if n == 0:
+        return 'G'
+    return str(n)
+
+
+def _floor_payload(plans, current):
+    """The floor switcher's options."""
+    return [
+        {
+            'floor_plan_id': p.floor_plan_id,
+            'floor_number': p.floor_number,
+            'name': p.name,
+            'label': p.floor_label,
+            'short': _floor_short_label(p),
+            'is_current': (current is not None and p.floor_plan_id == current.floor_plan_id),
+        }
+        for p in plans
+    ]
 
 
 @patron_login_required
@@ -506,55 +822,194 @@ def patron_update_profile(request):
     patron.save(update_fields=['fullname', 'first_name', 'middle_name', 'last_name',
                                'email', 'contact_number', 'address'])
     request.session['patron_fullname'] = patron.fullname
+    log_patron_action(request, 'Update', 'Patron', patron.patron_id,
+                      'Updated their own profile details', patron=patron)
     return JsonResponse({'success': True, 'message': 'Profile updated.'})
 
 
 @patron_login_required
 def patron_change_password(request):
-    """Change the login password (requires the current password)."""
+    """Change the login password: current password, then an emailed OTP.
+
+    Both passwords are revalidated at the verify step rather than trusted from
+    the request that sent the code, so the change that lands is checked against
+    the account as it stands when it is actually applied.
+    """
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
     patron = get_object_or_404(Patron, patron_id=request.session.get('patron_id'))
+    action = (request.POST.get('action') or 'request').strip()
 
     current = request.POST.get('current_password') or ''
     new = request.POST.get('new_password') or ''
-    if len(new) < 8:
-        return JsonResponse({'success': False, 'error': 'New password must be at least 8 characters.'})
     if not check_password(current, patron.password_hash):
         return JsonResponse({'success': False, 'error': 'Current password is incorrect.'})
+    # Checked after the current password, so a stranger poking at this endpoint
+    # never learns anything about the password already set.
+    policy_error = password_length_error(new, current_hash=patron.password_hash)
+    if policy_error:
+        return JsonResponse({'success': False, 'error': policy_error})
 
-    patron.password_hash = hash_password(new)
-    patron.save(update_fields=['password_hash'])
-    return JsonResponse({'success': True, 'message': 'Password changed.'})
+    if action in ('request', 'resend'):
+        if not patron.email:
+            return JsonResponse({'success': False, 'error': 'Your account has no email address on file to send a code to.'})
+        wait = _otp_cooldown_left(patron.otp_last_sent_at)
+        if wait:
+            return JsonResponse({'success': False,
+                                 'error': f'A code was just sent. Please wait {wait} second(s) before requesting another.'})
+        if not _issue_account_otp(patron, 'password', 'change the password on'):
+            return JsonResponse({'success': False, 'error': 'Could not send the verification code. Please try again.'})
+        return JsonResponse({'success': True, 'stage': 'otp'})
+
+    if action == 'verify':
+        error = _check_account_otp(patron, 'password', (request.POST.get('code') or '').strip())
+        if error:
+            return JsonResponse({'success': False, 'error': error})
+
+        patron.password_hash = hash_password(new)
+        _clear_account_otp(patron, extra_fields=['password_hash'])
+        log_patron_action(request, 'Password change', 'Patron', patron.patron_id,
+                          'Changed their own password, verified by OTP', patron=patron)
+        return JsonResponse({'success': True, 'stage': 'done', 'message': 'Password changed.'})
+
+    return JsonResponse({'success': False, 'error': 'Invalid action.'})
+
+
+@patron_login_required
+def patron_deactivate_account(request):
+    """Self-service account deactivation (Figure 20): OTP-verified, immediate.
+
+    A patron with any unreturned book is refused -- the library's own
+    definition of the diagram's "account status check... not ready for
+    deactivation" step.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
+    patron = get_object_or_404(Patron, patron_id=request.session.get('patron_id'))
+    action = (request.POST.get('action') or 'request').strip()
+
+    active_loans = Transaction.objects.filter(
+        patron=patron, transaction_type='Borrow', return_date__isnull=True,
+    ).select_related('book')
+    if active_loans.exists():
+        titles = ', '.join(tx.book.title if tx.book else 'Unknown title' for tx in active_loans)
+        return JsonResponse({
+            'success': False,
+            'error': f'You still have unreturned book(s): {titles}. Return them before deactivating your account.',
+        })
+
+    if action in ('request', 'resend'):
+        # Signed in, so the account plainly exists -- a real countdown here
+        # gives nothing away and beats a silent no-op.
+        wait = _otp_cooldown_left(patron.otp_last_sent_at)
+        if wait:
+            return JsonResponse({'success': False,
+                                 'error': f'A code was just sent. Please wait {wait} second(s) before requesting another.'})
+        if not _issue_account_otp(patron, 'deactivate', 'deactivate'):
+            return JsonResponse({'success': False, 'error': 'Could not send the verification code. Please try again.'})
+        return JsonResponse({'success': True, 'stage': 'otp'})
+
+    if action == 'verify':
+        error = _check_account_otp(patron, 'deactivate', (request.POST.get('code') or '').strip())
+        if error:
+            return JsonResponse({'success': False, 'error': error})
+
+        patron.account_status = 'Inactive'
+        _clear_account_otp(patron, extra_fields=['account_status'])
+        log_patron_action(request, 'Deactivate', 'Patron', patron.patron_id,
+                          'Deactivated their own account, verified by OTP', patron=patron)
+        request.session.flush()
+        return JsonResponse({'success': True, 'stage': 'done'})
+
+    return JsonResponse({'success': False, 'error': 'Invalid action.'})
 
 
 # Admin views
+def _portal_login(request, template, scope, expected_role, home, wrong_portal_text):
+    """One sign-in implementation for the Administrator and Library Staff doors.
+
+    Three things it does that the two hand-written copies did not.
+
+    Throttling: the run of failures is counted per email address, and five
+    misses inside half an hour close the door for fifteen minutes. A miss
+    against an address with no account is counted too -- if those were free, the
+    throttle would answer "does this address exist?" all by itself.
+
+    Session rotation: cycle_key() before anything is written into the session.
+    Without it the ID the browser arrived with is the ID it keeps, so anyone able
+    to plant a cookie on a shared desk machine -- and desk mode means these
+    machines are shared by design -- holds a valid staff session the moment a
+    librarian signs in on it.
+
+    One error message: the old code answered "suspended or inactive" for a real
+    account and "invalid email or password" for an unknown one, and it checked
+    status *before* the password. Any address could therefore be tested for
+    existence without knowing its password at all.
+    """
+    if request.method != 'POST':
+        return render(request, template)
+
+    email = (request.POST.get('email') or '').strip()
+    password = request.POST.get('password') or ''
+
+    locked = login_locked_message(scope, email)
+    if locked:
+        return render(request, template, {'error': locked})
+
+    user = User.objects.filter(email__iexact=email).first()
+
+    # The password is verified before anything else is looked at, and a missing
+    # account still pays for a hash, so the two cases cost the same and look the
+    # same from outside.
+    if user is None:
+        waste_password_time()
+        password_ok = False
+    else:
+        password_ok = check_password(password, user.password_hash)
+
+    if user is None or not password_ok or user.account_status != 'Active' or user.role != expected_role:
+        remaining = record_login_failure(scope, email)
+
+        # Failed staff and Administrator sign-ins were not recorded anywhere,
+        # while patron ones were -- so the accounts worth attacking had the
+        # weaker trail. They are recorded now, without the password and without
+        # saying which part was wrong.
+        log_system_action(
+            'Login failed', 'Auth',
+            getattr(user, 'admin_id', None),
+            f'Failed {scope} sign-in for "{email[:120]}"',
+        )
+
+        # A wrong portal is worth naming: it is only reachable with a correct
+        # password, so it discloses nothing an attacker does not already hold,
+        # and staff do land on the wrong page.
+        if user is not None and password_ok and user.account_status == 'Active' and user.role != expected_role:
+            return render(request, template, {'error': wrong_portal_text})
+
+        error = LOGIN_FAILED_TEXT
+        if remaining is not None and 0 < remaining <= 2:
+            error += f' {remaining} attempt(s) left before this account is locked.'
+        return render(request, template, {'error': error})
+
+    clear_login_failures(scope, email)
+    # flush(), not cycle_key(). Both give the browser a new session id, which is
+    # what defeats fixation -- but cycle_key keeps the *data* that was in the old
+    # session, so anything an attacker managed to seed there (a desk-mode flag, a
+    # stale patron_id) would ride across the login. flush() starts empty.
+    request.session.flush()
+    request.session['admin_id'] = user.admin_id
+    request.session['admin_fullname'] = user.fullname
+    request.session['admin_role'] = user.role
+    log_admin_action(request, 'Login', 'Auth', user.admin_id,
+                     f'{user.fullname} ({user.role}) logged in')
+    return redirect(home)
+
+
 def admin_login(request):
-    if request.method == 'POST':
-        email = request.POST.get('email')
-        password = request.POST.get('password')
-
-        try:
-            admin = User.objects.get(email=email)
-        except User.DoesNotExist:
-            return render(request, 'admin/signin.html', {'error': 'Invalid email or password'})
-
-        if admin.account_status != 'Active':
-            return render(request, 'admin/signin.html', {'error': 'Your account is suspended or inactive'})
-
-        if not check_password(password, admin.password_hash):
-            return render(request, 'admin/signin.html', {'error': 'Invalid email or password'})
-
-        if admin.role != 'Admin':
-            return render(request, 'admin/signin.html', {'error': 'This is the administrator portal. Please use the Library Staff login.'})
-
-        request.session['admin_id'] = admin.admin_id
-        request.session['admin_fullname'] = admin.fullname
-        request.session['admin_role'] = admin.role
-        log_admin_action(request, 'Login', 'Auth', admin.admin_id, f'{admin.fullname} (Admin) logged in')
-        return redirect('/admin-portal/dashboard/')
-
-    return render(request, 'admin/signin.html')
+    return _portal_login(
+        request, 'admin/signin.html', 'admin', 'Admin', '/admin-portal/dashboard/',
+        'This is the administrator portal. Please use the Library Staff login.',
+    )
 
 
 def admin_logout(request):
@@ -564,31 +1019,10 @@ def admin_logout(request):
 
 # Library Staff portal authentication
 def staff_login(request):
-    if request.method == 'POST':
-        email = request.POST.get('email')
-        password = request.POST.get('password')
-
-        try:
-            user = User.objects.get(email=email)
-        except User.DoesNotExist:
-            return render(request, 'library_staff/signin.html', {'error': 'Invalid email or password'})
-
-        if user.account_status != 'Active':
-            return render(request, 'library_staff/signin.html', {'error': 'Your account is suspended or inactive'})
-
-        if not check_password(password, user.password_hash):
-            return render(request, 'library_staff/signin.html', {'error': 'Invalid email or password'})
-
-        if user.role != 'Staff':
-            return render(request, 'library_staff/signin.html', {'error': 'This portal is for library staff. Please use the administrator login.'})
-
-        request.session['admin_id'] = user.admin_id
-        request.session['admin_fullname'] = user.fullname
-        request.session['admin_role'] = user.role
-        log_admin_action(request, 'Login', 'Auth', user.admin_id, f'{user.fullname} (Staff) logged in')
-        return redirect('/library-staff/dashboard/')
-
-    return render(request, 'library_staff/signin.html')
+    return _portal_login(
+        request, 'library_staff/signin.html', 'staff', 'Staff', '/library-staff/dashboard/',
+        'This portal is for library staff. Please use the administrator login.',
+    )
 
 
 def staff_logout(request):
@@ -655,6 +1089,34 @@ def _issue_reset_code(account_type, email, fullname, role_label):
     return password_reset_otp_email(email, fullname, reset.code, role_label)
 
 
+def _redeem_reset_code(account_type, email, code):
+    """Check a reset code, counting the attempt against its limit.
+
+    Returns (reset, error, exhausted). `reset` is the row to mark used once the
+    caller has actually applied the change; `exhausted` says the code is burnt
+    and the patron/staff has to request a new one rather than retype this one.
+
+    Shared by the forgot-password flow and the signed-in change-password flow,
+    so both get the same expiry and the same MAX_ATTEMPTS ceiling instead of one
+    of them quietly allowing unlimited guesses.
+    """
+    reset = (PasswordResetOTP.objects
+             .filter(account_type=account_type, email__iexact=email, used_at__isnull=True)
+             .order_by('-created_at').first())
+    if reset is None or not reset.is_usable:
+        return None, 'That code is no longer valid. Request a new one.', True
+
+    if not _otp_matches(code, reset.code):
+        reset.attempts += 1
+        reset.save(update_fields=['attempts'])
+        remaining = PasswordResetOTP.MAX_ATTEMPTS - reset.attempts
+        if remaining <= 0:
+            return None, 'Too many incorrect codes. Request a new one to try again.', True
+        return None, f'Incorrect code. {remaining} attempt(s) left.', False
+
+    return reset, None, False
+
+
 def _password_reset_view(request, portal):
     cfg = PASSWORD_RESET_PORTALS[portal]
     template = cfg['template']
@@ -678,7 +1140,11 @@ def _password_reset_view(request, portal):
             return _render('request', error='Enter the email address on your account.')
 
         account = _find_reset_account(account_type, email)
-        if account is not None:
+        # Applied silently, like the account lookup itself: a visible "wait 40
+        # seconds" would fire only for addresses that exist, which is exactly
+        # what answering every address identically is meant to hide.
+        cooling = _reset_cooldown_left(account_type, email)
+        if account is not None and not cooling:
             fullname = getattr(account, 'fullname', '') or 'there'
             if not _issue_reset_code(account_type, email, fullname, cfg['role_label']):
                 return _render('request', email=email,
@@ -687,6 +1153,9 @@ def _password_reset_view(request, portal):
         # No account: fall through and show the same screen anyway.
         note = ('A new code has been sent if the account exists.'
                 if action == 'resend' else _RESET_SENT_NOTE)
+        # Said to everyone, so it explains the wait without confirming anything.
+        note += (f' If you already asked for one, you can request another after '
+                 f'{int(OTP_RESEND_COOLDOWN.total_seconds())} seconds.')
         return _render('otp', email=email, info=note)
 
     # ── Submit the code and the new password ─────────────────
@@ -699,25 +1168,12 @@ def _password_reset_view(request, portal):
             return _render('otp', email=email, error='Enter the 6-digit code from your email.')
         if new_password != confirm_password:
             return _render('otp', email=email, error='The two passwords do not match.')
-        if len(new_password) < 8:
-            return _render('otp', email=email, error='New password must be at least 8 characters.')
+        if len(new_password) < MIN_PASSWORD_LENGTH:
+            return _render('otp', email=email, error=PASSWORD_RULE_TEXT)
 
-        reset = (PasswordResetOTP.objects
-                 .filter(account_type=account_type, email__iexact=email, used_at__isnull=True)
-                 .order_by('-created_at').first())
-        if reset is None or not reset.is_usable:
-            return _render('otp', email=email,
-                           error='That code is no longer valid. Request a new one.')
-
-        if code != reset.code:
-            reset.attempts += 1
-            reset.save(update_fields=['attempts'])
-            remaining = PasswordResetOTP.MAX_ATTEMPTS - reset.attempts
-            if remaining <= 0:
-                return _render('request',
-                               error='Too many incorrect codes. Request a new one to try again.')
-            return _render('otp', email=email,
-                           error=f'Incorrect code. {remaining} attempt(s) left.')
+        reset, error, exhausted = _redeem_reset_code(account_type, email, code)
+        if error:
+            return _render('request' if exhausted else 'otp', email=email, error=error)
 
         account = _find_reset_account(account_type, email)
         if account is None:
@@ -731,12 +1187,18 @@ def _password_reset_view(request, portal):
         reset.used_at = timezone.now()
         reset.save(update_fields=['used_at'])
 
+        # A password reset happens with nobody signed in, so there is no session
+        # to name the actor. Attributing it to the account being reset is the
+        # only truthful option -- and the account is exactly what an auditor
+        # would search for.
         if account_type == 'Patron':
-            log_admin_action(request, 'Update', 'Patron', account.patron_id,
-                             f'Self-service password reset via OTP for {account.email}')
+            log_patron_action(request, 'Password reset', 'Patron', account.patron_id,
+                              f'Reset their password by emailed code ({account.email})',
+                              patron=account)
         else:
-            log_admin_action(request, 'Update', 'User', account.admin_id,
-                             f'Self-service password reset via OTP for {account.email}')
+            log_system_action('Password reset', 'User', account.admin_id,
+                              f'{cfg["role_label"]} {account.fullname} reset their password '
+                              f'by emailed code ({account.email})')
 
         return _render('done')
 
@@ -747,12 +1209,129 @@ def patron_forgot_password(request):
     return _password_reset_view(request, 'patron')
 
 
+def patron_reactivate_request(request):
+    """Self-service reactivation (Figure 19): OTP, then forwarded to an Admin.
+
+    Unlike deactivation, a verified OTP here does not reactivate the account
+    by itself -- it only creates a Pending ReactivationRequest for an Admin
+    to approve or reject, matching the diagram's admin-review step. An
+    Inactive patron cannot log in, so this view is reached from the login
+    page rather than the (authenticated) Account page.
+    """
+    def _render(stage, **extra):
+        context = {'stage': stage}
+        context.update(extra)
+        return render(request, 'patron/patronreactivate.html', context)
+
+    # Deliberately identical whether or not the email matches an eligible
+    # account, so the form cannot be used to discover account status --
+    # mirrors the same rule in _password_reset_view above.
+    note = 'If that account is eligible for reactivation, a verification code has been sent.'
+
+    if request.method != 'POST':
+        return _render('request')
+
+    action = (request.POST.get('action') or '').strip()
+    email = (request.POST.get('email') or '').strip()
+
+    if action in ('request', 'resend'):
+        if not email:
+            return _render('request', error='Enter the email address on your account.')
+        # Only Inactive accounts are eligible -- Suspended is a separate,
+        # Admin-only status this self-service flow does not touch.
+        patron = Patron.objects.filter(email__iexact=email, account_status='Inactive').first()
+        # The cooldown is applied silently: surfacing "wait 40 seconds" only
+        # for real accounts would undo the whole point of answering every
+        # address identically. The reply below is the same either way.
+        if patron is not None and not _otp_cooldown_left(patron.otp_last_sent_at):
+            _issue_account_otp(patron, 'reactivate', 'reactivate')
+        return _render('otp', email=email, info=note)
+
+    if action == 'verify':
+        code = (request.POST.get('code') or '').strip()
+        if not code:
+            return _render('otp', email=email, error='Enter the 6-digit code from your email.')
+        patron = Patron.objects.filter(email__iexact=email, account_status='Inactive').first()
+        if patron is None:
+            return _render('otp', email=email, error='That code is no longer valid. Request a new one.')
+        error = _check_account_otp(patron, 'reactivate', code)
+        if error:
+            return _render('otp', email=email, error=error)
+
+        _clear_account_otp(patron)
+        ReactivationRequest.objects.get_or_create(patron=patron, status='Pending')
+        return _render('done')
+
+    return _render('request')
+
+
 def staff_forgot_password(request):
     return _password_reset_view(request, 'staff')
 
 
 def admin_forgot_password(request):
     return _password_reset_view(request, 'admin')
+
+
+@admin_login_required
+def portal_change_password(request):
+    """Signed-in Library Staff / Administrator changes their own password.
+
+    Confirmed by an emailed code, the same as the patron flow. The code rides
+    on PasswordResetOTP rather than new columns on User: that model already
+    scopes codes by account_type, expires them, and caps guesses at
+    MAX_ATTEMPTS, all of which this needs. A code minted here and one minted by
+    "forgot password" grant the same thing -- set a new password on this
+    account, having proved control of its inbox -- so there is nothing to
+    separate them for, and this path additionally demands the session and the
+    current password on top.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
+    user = get_object_or_404(User, admin_id=request.session.get('admin_id'))
+    action = (request.POST.get('action') or 'request').strip()
+
+    current = request.POST.get('current_password') or ''
+    new = request.POST.get('new_password') or ''
+    if not check_password(current, user.password_hash):
+        return JsonResponse({'success': False, 'error': 'Current password is incorrect.'})
+    # Checked after the current password, so a stranger poking at this endpoint
+    # never learns anything about the password already set.
+    policy_error = password_length_error(new, current_hash=user.password_hash)
+    if policy_error:
+        return JsonResponse({'success': False, 'error': policy_error})
+
+    account_type = 'Admin' if user.role == 'Admin' else 'Staff'
+    role_label = 'administrator account' if user.role == 'Admin' else 'library staff account'
+
+    if action in ('request', 'resend'):
+        if not user.email:
+            return JsonResponse({'success': False, 'error': 'Your account has no email address on file to send a code to.'})
+        wait = _reset_cooldown_left(account_type, user.email)
+        if wait:
+            return JsonResponse({'success': False,
+                                 'error': f'A code was just sent. Please wait {wait} second(s) before requesting another.'})
+        if not _issue_reset_code(account_type, user.email, user.fullname, role_label):
+            return JsonResponse({'success': False, 'error': 'Could not send the verification code. Please try again.'})
+        return JsonResponse({'success': True, 'stage': 'otp'})
+
+    if action == 'verify':
+        code = (request.POST.get('code') or '').strip()
+        if not code:
+            return JsonResponse({'success': False, 'error': 'Enter the 6-digit code from your email.'})
+        reset, error, _exhausted = _redeem_reset_code(account_type, user.email, code)
+        if error:
+            return JsonResponse({'success': False, 'error': error})
+
+        user.password_hash = hash_password(new)
+        user.save(update_fields=['password_hash'])
+        reset.used_at = timezone.now()
+        reset.save(update_fields=['used_at'])
+        log_admin_action(request, 'Update', 'User', user.admin_id,
+                         f'Self-service password change via OTP for {user.email}')
+        return JsonResponse({'success': True, 'stage': 'done', 'message': 'Password changed.'})
+
+    return JsonResponse({'success': False, 'error': 'Invalid action.'})
 
 
 @admin_only_required
@@ -781,8 +1360,6 @@ def admin_dashboard(request):
     # PatronLog visit count for today (one session row per visit)
     visitors_today = PatronLog.objects.filter(entry_time__date=today).count()
 
-    # Pending transactions count for badge
-    pending_transactions_count = Transaction.objects.filter(transaction_type='Borrow', return_date__isnull=True).count()
 
     context = {
         'admin': admin,
@@ -801,7 +1378,6 @@ def admin_dashboard(request):
         # Transactions and logs
         'recent_transactions': recent_transactions,
         'visitors_today': visitors_today,
-        'pending_transactions_count': pending_transactions_count,
     }
     return render(request, 'admin/dashboard.html', context)
 
@@ -820,7 +1396,6 @@ def staff_dashboard(request):
 
     recent_transactions = Transaction.objects.select_related('patron', 'book').order_by('-transaction_date')[:5]
     visitors_today = PatronLog.objects.filter(entry_time__date=today).count()
-    pending_transactions_count = Transaction.objects.filter(transaction_type='Borrow', return_date__isnull=True).count()
 
     context = {
         'admin': admin,
@@ -830,7 +1405,6 @@ def staff_dashboard(request):
         'books_being_read': books_being_read,
         'recent_transactions': recent_transactions,
         'visitors_today': visitors_today,
-        'pending_transactions_count': pending_transactions_count,
     }
     return render(request, 'library_staff/dashboard.html', context)
 
@@ -844,17 +1418,22 @@ def _books_page(request, template):
     q = (request.GET.get('q') or '').strip()
     status = (request.GET.get('status') or '').strip()
     genre = (request.GET.get('genre') or '').strip()
+    material = (request.GET.get('material') or '').strip()
 
     books_queryset = Book.objects.select_related('shelf_level', 'shelf_level__shelf')
     if q:
-        books_queryset = books_queryset.filter(
-            Q(title__icontains=q) | Q(author__icontains=q) | Q(ISBN__icontains=q)
-        )
+        books_queryset = books_queryset.filter(_book_search_q(q))
     valid_status = [choice[0] for choice in Book.STATUS_CHOICES]
     if status in valid_status:
         books_queryset = books_queryset.filter(status=status)
     if genre:
         books_queryset = books_queryset.filter(genre=genre)
+    # What kind of material it is, as opposed to what it is about -- a separate
+    # question from genre, and the one a librarian filters on to find the
+    # magazines or the bound journals.
+    valid_material = [choice[0] for choice in Book.MATERIAL_TYPE_CHOICES]
+    if material in valid_material:
+        books_queryset = books_queryset.filter(material_type=material)
     books_queryset = books_queryset.order_by('title')
 
     # Global stats (independent of the filters above).
@@ -871,10 +1450,9 @@ def _books_page(request, template):
     paginator = Paginator(books_queryset, 15)  # 15 books per page
     books = paginator.get_page(request.GET.get('page', 1))
 
-    pending_transactions_count = Transaction.objects.filter(transaction_type='Borrow', return_date__isnull=True).count()
 
     params = {}
-    for key, value in (('q', q), ('status', status), ('genre', genre)):
+    for key, value in (('q', q), ('status', status), ('genre', genre), ('material', material)):
         if value:
             params[key] = value
 
@@ -886,12 +1464,13 @@ def _books_page(request, template):
         'borrowed_count': borrowed_count,
         'shelf_levels': shelf_levels,
         'genres': genres,
+        'material_choices': Book.MATERIAL_TYPE_CHOICES,
+        'material': material,
         'status_choices': valid_status,
         'q': q,
         'status': status,
         'genre': genre,
         'querystring': urlencode(params),
-        'pending_transactions_count': pending_transactions_count,
         'paginator': paginator,
     }
     return render(request, template, context)
@@ -916,6 +1495,12 @@ def admin_add_book(request):
         author = request.POST.get('author', '').strip()
         isbn = request.POST.get('ISBN', '').strip()
         genre = request.POST.get('genre', '').strip()
+        # Unknown or missing falls back to Book rather than being rejected: the
+        # type is a convenience for filtering, not something worth blocking a
+        # catalogue entry over.
+        material_type = request.POST.get('material_type', 'Book').strip()
+        if material_type not in {c[0] for c in Book.MATERIAL_TYPE_CHOICES}:
+            material_type = 'Book'
         status = request.POST.get('status', 'Available').strip()
         shelf_level_id = request.POST.get('shelf_level', '').strip()
         publication_year = request.POST.get('publication_year', '').strip()
@@ -939,6 +1524,7 @@ def admin_add_book(request):
                 author=author,
                 ISBN=isbn,
                 genre=genre,
+                material_type=material_type,
                 status=status or 'Available',
                 shelf_level=shelf_level,
                 publication_year=int(publication_year) if publication_year else None,
@@ -1182,6 +1768,82 @@ def reject_patron(request, patron_id):
     return _patron_page_redirect(request)
 
 
+@admin_or_module_required('patrons')
+def respond_to_reactivation(request, request_id):
+    """Admin approves or rejects a patron's OTP-verified reactivation request.
+
+    The approval step Figure 19 puts between OTP verification and the
+    account actually going live again.
+    """
+    if request.method != 'POST':
+        return _patron_page_redirect(request)
+    reactivation = ReactivationRequest.objects.select_related('patron').filter(
+        request_id=request_id, status='Pending').first()
+    if reactivation is None:
+        messages.error(request, 'Reactivation request not found, or it was already resolved.')
+        return _patron_page_redirect(request)
+
+    action = request.POST.get('action')
+    admin = User.objects.filter(admin_id=request.session.get('admin_id')).first()
+    patron = reactivation.patron
+
+    if action == 'approve':
+        patron.account_status = 'Active'
+        patron.save(update_fields=['account_status'])
+        reactivation.status = 'Approved'
+        reactivation.resolved_by = admin
+        reactivation.resolved_at = timezone.now()
+        reactivation.save(update_fields=['status', 'resolved_by', 'resolved_at'])
+        log_admin_action(request, 'Approve', 'ReactivationRequest', reactivation.request_id,
+                         f'Reactivated "{patron.fullname}"')
+        if patron.email:
+            reactivation_approved_email(patron)
+        messages.success(request, f'{patron.fullname} is now Active.')
+    elif action == 'reject':
+        note = (request.POST.get('staff_note') or '').strip()[:255]
+        reactivation.status = 'Rejected'
+        reactivation.resolved_by = admin
+        reactivation.resolved_at = timezone.now()
+        reactivation.staff_note = note or None
+        reactivation.save(update_fields=['status', 'resolved_by', 'resolved_at', 'staff_note'])
+        log_admin_action(request, 'Reject', 'ReactivationRequest', reactivation.request_id,
+                         f'Rejected reactivation for "{patron.fullname}"' + (f' — {note}' if note else ''))
+        if patron.email:
+            reactivation_declined_email(patron, note)
+        messages.success(request, f'Reactivation request for {patron.fullname} rejected.')
+    else:
+        messages.error(request, 'Unknown action.')
+    return _patron_page_redirect(request)
+
+
+@admin_login_required
+# Deliberately admin_login_required rather than the 'patrons' module, for the
+# same reason get_books_for_placement is: the Transactions page has to look a
+# patron up to process a loan, and an account can hold 'transactions' without
+# holding 'patrons'. Gated the other way, the search box received a login
+# redirect where it expected JSON, so results silently never appeared -- which
+# reads as a broken search rather than a permission being missing. It discloses
+# only the name and email of active patrons, which whoever is standing at the
+# desk processing their loan is already looking at.
+def patron_search_json(request):
+    """Name/email lookup for the Transactions page's patron picker."""
+    q = (request.GET.get('search') or '').strip()
+    if not q:
+        return JsonResponse({'patrons': []})
+    patrons = Patron.objects.filter(
+        _patron_search_q(q)
+    ).filter(account_status='Active')[:10]
+    return JsonResponse({'patrons': [
+        {
+            'patron_id': p.patron_id,
+            'fullname': p.fullname,
+            'email': p.email,
+            'patron_type': p.patron_type,
+        }
+        for p in patrons
+    ]})
+
+
 @admin_module_required('patrons')
 def admin_manage_patron(request):
     return _patrons_page(request, 'admin/managepatron.html')
@@ -1207,7 +1869,7 @@ def _patrons_page(request, template):
     # Handle AJAX search requests
     if request.headers.get('X-Requested-With') == 'XMLHttpRequest' and search_query:
         patrons = Patron.objects.filter(
-            Q(fullname__icontains=search_query) | Q(email__icontains=search_query)
+            _patron_search_q(search_query)
         ).filter(account_status='Active')[:10]
         
         patron_list = []
@@ -1252,18 +1914,18 @@ def _patrons_page(request, template):
     # Registrations awaiting review — online sign-ups and desk hand-offs alike.
     pending_patrons = Patron.objects.filter(account_status='Pending').order_by('-registration_date')
 
+    # Self-service reactivation requests awaiting Admin approval (Figure 19).
+    pending_reactivations = ReactivationRequest.objects.select_related('patron').filter(
+        status='Pending').order_by('-requested_at')
+
     # Apply the search filter to the table list.
     if search_query:
-        patrons_queryset = patrons_queryset.filter(
-            Q(fullname__icontains=search_query) | Q(email__icontains=search_query)
-        )
+        patrons_queryset = patrons_queryset.filter(_patron_search_q(search_query))
 
     page_number = request.GET.get('page', 1)
     paginator = Paginator(patrons_queryset, 15)  # 15 patrons per page
     patrons = paginator.get_page(page_number)
 
-    # Pending transactions count for badge
-    pending_transactions_count = Transaction.objects.filter(transaction_type='Borrow', return_date__isnull=True).count()
 
     from urllib.parse import urlencode
     context = {
@@ -1273,9 +1935,9 @@ def _patrons_page(request, template):
         'patrons_with_borrows': patrons_with_borrows,
         'patrons_overdue': patrons_overdue,
         'pending_patrons': pending_patrons,
+        'pending_reactivations': pending_reactivations,
         'visitor_count': visitor_count,
         'show_visitors': show_visitors,
-        'pending_transactions_count': pending_transactions_count,
         'paginator': paginator,
         'search_query': search_query,
         'querystring': urlencode({'search': search_query}) if search_query else '',
@@ -1537,10 +2199,14 @@ def admin_transaction_action(request, transaction_id):
             tx.fine_amount = BorrowingRule.current().compute_fine(tx.due_date, tx.return_date)
             tx.save()
             if tx.book and tx.transaction_type == 'Borrow':
-                tx.book.status = 'Available'
+                # Back at the desk, not back on the shelf. Sending the next
+                # patron to its shelf now would waste their walk, so it waits in
+                # the reshelving queue until someone physically puts it back.
+                tx.book.status = 'For Reshelving'
                 tx.book.save()
             log_admin_action(request, 'Process', 'Transaction', tx.transaction_id,
-                             f'Returned "{tx.book.title if tx.book else ""}"')
+                             f'Returned "{tx.book.title if tx.book else ""}"',
+                             patron=tx.patron)
             # Email the patron a return receipt.
             if tx.patron and tx.book:
                 return_receipt_email(tx.patron, [tx.book], had_overdue=tx.overdue_flag)
@@ -1562,7 +2228,8 @@ def admin_transaction_action(request, transaction_id):
                 + (f' by {tx.patron.fullname}' if tx.patron else ''))
             log_admin_action(request, 'Process', 'Transaction', tx.transaction_id,
                              f'Marked "{tx.book.title if tx.book else ""}" lost (fine {tx.fine_amount})'
-                             + (' — inventory copy flagged' if flagged else ''))
+                             + (' — inventory copy flagged' if flagged else ''),
+                             patron=tx.patron)
             if tx.patron and tx.book:
                 lost_book_email(tx.patron, tx.book, tx.fine_amount)
 
@@ -1753,7 +2420,6 @@ def _transaction_page(request, template):
 
     paginator = Paginator(transactions_queryset, 20)
     transactions = paginator.get_page(request.GET.get('page', 1))
-    pending_transactions_count = currently_out
 
     # Shown above the table regardless of the current filter/search/page --
     # a request waiting on staff is not something a search term should be
@@ -1775,7 +2441,6 @@ def _transaction_page(request, template):
         'currently_out': currently_out,
         'overdue_count': overdue_count,
         'transaction_count': transaction_count,
-        'pending_transactions_count': pending_transactions_count,
         'pending_extensions': pending_extensions,
         'paginator': paginator,
         'q': q,
@@ -1798,27 +2463,39 @@ def staff_transaction(request):
 
 
 def _indoor_map_page(request, template, is_admin_view=False):
-    # Fetch all floor plans for dropdown selector
-    floorplans = FloorPlan.objects.all().order_by('-uploaded_at')
-    
+    # Every floor, lowest first. The switcher on the map is a lift panel, and a
+    # lift panel whose buttons are not in storey order is unreadable -- the old
+    # "-uploaded_at" order listed them by whenever someone happened to draw them.
+    floorplans = FloorPlan.objects.all().order_by('floor_number', 'floor_plan_id')
+
+    # Which shelf, if any, the visitor came here looking for. Read before the
+    # floor is chosen, because it is one of the things that chooses it.
+    shelf_param = (request.GET.get('shelf') or '').strip()
+
     # Determine which floor plan to display
     floorplan = None
     no_floorplans = False
-    
+
     if floorplans.exists():
-        # Check if a specific floor plan was requested via URL parameter
+        # An explicit choice wins: a floor button was pressed.
         requested_floorplan_id = request.GET.get('floorplan')
         if requested_floorplan_id:
             try:
                 floorplan = FloorPlan.objects.filter(floor_plan_id=int(requested_floorplan_id)).first()
             except (ValueError, TypeError):
                 pass
-        
-        # If no specific floor plan requested or not found, try to get active floor plan
+
+        # Otherwise, arriving from "Locate on Map" for a shelf upstairs: open the
+        # floor that shelf is on. Opening the ground floor with nothing
+        # highlighted is the one answer that is never what was asked for.
+        if not floorplan and shelf_param.isdigit():
+            floorplan = floorplans.filter(room__shelf__shelf_id=int(shelf_param)).first()
+
+        # Otherwise the lowest floor in service, where someone walking in starts.
         if not floorplan:
-            floorplan = FloorPlan.objects.filter(is_active=True).first()
-        
-        # Fallback to most recent if still no floor plan
+            floorplan = floorplans.filter(is_active=True).first()
+
+        # Fallback to any plan at all, so a library holding only drafts still draws.
         if not floorplan:
             floorplan = floorplans.first()
     else:
@@ -1905,31 +2582,44 @@ def _indoor_map_page(request, template, is_admin_view=False):
             'renovation_message': floorplan.renovation_message
         }
     
-    # Serialize all floor plans for dropdown
+    # Serialize all floor plans for the floor switcher
     floorplans_list = []
     for fp in floorplans:
         floorplans_list.append({
             'id': fp.floor_plan_id,
             'name': fp.name,
+            'floor_number': fp.floor_number,
+            'label': fp.floor_label,
+            'short': _floor_short_label(fp),
             'is_active': fp.is_active,
             'uploaded_at': fp.uploaded_at.isoformat() if fp.uploaded_at else None
         })
     
-    # Pending transactions count for badge
-    pending_transactions_count = Transaction.objects.filter(transaction_type='Borrow', return_date__isnull=True).count()
 
     # A specific shelf to land on, e.g. arriving from "Locate on Map" on a
     # book's detail modal. `book` is a display label only (not looked up).
     target_shelf = None
-    shelf_param = request.GET.get('shelf')
-    if shelf_param:
-        shelf = Shelf.objects.filter(shelf_id=shelf_param, room__floor_plan=floorplan).select_related('room').first()
-        if shelf:
+    target_elsewhere = None
+    if shelf_param.isdigit():
+        shelf = (Shelf.objects.filter(shelf_id=int(shelf_param))
+                 .select_related('room__floor_plan').first())
+        on_plan = shelf.room.floor_plan if (shelf and shelf.room_id) else None
+        if on_plan and floorplan and on_plan.floor_plan_id == floorplan.floor_plan_id:
             target_shelf = {
                 'id': shelf.shelf_id,
                 'name': shelf.name,
                 'room_name': shelf.room.name if shelf.room else None,
                 'book': request.GET.get('book') or '',
+            }
+        elif on_plan:
+            # The shelf exists, just not on the floor being drawn. Saying which
+            # floor it is on, with a way to get there, beats an empty panel that
+            # reads as a bug.
+            target_elsewhere = {
+                'id': shelf.shelf_id,
+                'name': shelf.name,
+                'floor_plan_id': on_plan.floor_plan_id,
+                'label': on_plan.floor_label,
             }
 
     context = {
@@ -1941,8 +2631,9 @@ def _indoor_map_page(request, template, is_admin_view=False):
         'beacons': json.dumps(beacons_data),
         'show_beacons': is_admin_view,
         'no_floorplans': no_floorplans,
-        'pending_transactions_count': pending_transactions_count,
         'target_shelf': json.dumps(target_shelf) if target_shelf else 'null',
+        'target_elsewhere': json.dumps(target_elsewhere) if target_elsewhere else 'null',
+        'current_floor_id': floorplan.floor_plan_id if floorplan else None,
     }
 
     return render(request, template, context)
@@ -1980,7 +2671,19 @@ def _logs_page(request, template):
     except ValueError:
         sel_date = today
 
+    # Needed before the queryset below, not only for the template further down.
+    desk_mode = desk_is_armed(request)
+
     logs_qs = PatronLog.objects.select_related('patron').filter(entry_time__date=sel_date)
+    if desk_mode:
+        # Desk mode puts this table in front of whoever is standing at the PC.
+        # Showing them every other patron's name, school and visit times is the
+        # data-privacy problem the professor raised, so the table is narrowed to
+        # the person who just identified themselves -- and shows nothing at all
+        # until someone does. The counts above stay aggregate, which names
+        # nobody.
+        viewer_id = desk_viewer_id(request)
+        logs_qs = logs_qs.filter(patron_id=viewer_id) if viewer_id else logs_qs.none()
     if q:
         if q.isdigit():
             logs_qs = logs_qs.filter(Q(patron__patron_id=int(q)) | Q(patron__fullname__icontains=q))
@@ -1999,7 +2702,6 @@ def _logs_page(request, template):
     # In desk mode the person reading this table is whoever just walked in, so
     # the contact details of everyone who visited today are masked. The log is
     # theirs to add to, not to mine.
-    desk_mode = desk_is_armed(request)
     for entry in logs:
         entry.display_email = (_mask_email(entry.patron.email) if desk_mode
                                else entry.patron.email)
@@ -2045,6 +2747,205 @@ def _logs_page(request, template):
     return render(request, template, context)
 
 
+@admin_or_module_required('books')
+def reshelving_queue(request):
+    """Books returned to the desk but not yet put back on their shelf.
+
+    GET lists them; POST with a book_id marks one shelved and returns it to
+    Available. Deliberately a separate step from processing the return: the
+    person at the desk taking books back is rarely the person walking them to
+    the aisles, and the catalogue should not claim a book is at its shelf until
+    someone has actually taken it there.
+    """
+    if request.method == 'POST':
+        book = Book.objects.filter(book_id=request.POST.get('book_id')).first()
+        if book is None:
+            return JsonResponse({'success': False, 'error': 'Book not found'})
+        if book.status != 'For Reshelving':
+            return JsonResponse({'success': False,
+                                 'error': f'"{book.title}" is not waiting to be reshelved.'})
+        book.status = 'Available'
+        book.save(update_fields=['status'])
+        log_admin_action(request, 'Update', 'Book', book.book_id,
+                         f'Shelved "{book.title[:60]}" - back on the shelf and borrowable')
+        remaining = Book.objects.filter(status='For Reshelving').count()
+        return JsonResponse({'success': True, 'remaining': remaining, 'title': book.title})
+
+    waiting = (Book.objects
+               .filter(status='For Reshelving')
+               .select_related('shelf_level', 'shelf_level__shelf')
+               .order_by('shelf_level__shelf__name', 'title'))
+    return render(request, 'admin/reshelving.html', {
+        'active': 'reshelving',
+        'books': waiting,
+        'total_waiting': waiting.count(),
+    })
+
+
+@admin_or_module_required('indoor_map')
+def floorplan_print(request):
+    """A printable wayfinding map of one floor.
+
+    Rooms and shelves with their names and sections, drawn as plain SVG rather
+    than Leaflet: a tiled, scripted map does not survive a print dialog, and
+    this has to come out of a printer and go on a wall. Waypoints and beacons
+    are left off deliberately -- this is for a patron looking for the Fiction
+    aisle, not for whoever installs the hardware.
+    """
+    floor_plan, live_plans = _floor_for_request(request)
+    if floor_plan is None:
+        messages.error(request, 'No floor plan is in service.')
+        return portal_redirect(request, 'admin_indoor_map')
+
+    width, height = _floorplan_canvas_size(floor_plan)
+    rooms = [
+        {
+            'name': r.name,
+            'points': ' '.join(f'{x},{y}' for x, y in (r.geometry or [])),
+            'label_x': r.map_x,
+            'label_y': r.map_y,
+            'has_shape': bool(r.geometry and len(r.geometry) >= 3),
+        }
+        for r in Room.objects.filter(floor_plan=floor_plan, is_active=True)
+    ]
+
+    shelves = []
+    for sh in (Shelf.objects
+               .filter(room__floor_plan=floor_plan, is_active=True,
+                       map_x__isnull=False, map_y__isnull=False)
+               .prefetch_related('shelflevel_set')):
+        w = sh.width or 46
+        d = sh.depth or 14
+        cats = [lv.category for lv in sh.shelflevel_set.all() if lv.is_active and lv.category]
+        shelves.append({
+            'name': sh.name,
+            # Rotated rectangles are drawn with a transform rather than four
+            # computed corners, so the label can ride along with the shape.
+            'x': sh.map_x - w / 2,
+            'y': sh.map_y - d / 2,
+            'w': w,
+            'h': d,
+            'cx': sh.map_x,
+            'cy': sh.map_y,
+            'rotation': sh.rotation or 0,
+            'sections': ', '.join(sorted(set(cats))),
+        })
+
+    return render(request, 'admin/floorplanprint.html', {
+        'plan': floor_plan,
+        'floors': _floor_payload(live_plans, floor_plan),
+        'canvas_width': width,
+        'canvas_height': height,
+        'rooms': rooms,
+        'shelves': shelves,
+        'printed_on': timezone.localdate(),
+    })
+
+
+@admin_only_required
+def activity_logs(request):
+    """The Activity Logs viewer (ERD, Figure 87).
+
+    Every write into SystemLog already existed -- 58 call sites across the
+    admin, staff and now patron portals -- with nothing anywhere that read it
+    back. This is that missing half.
+
+    Deliberately read-only: an audit trail with an edit button answers nothing,
+    because any entry could then have been changed by the person it accuses.
+    Rows are never deleted from here either; retention is a database decision,
+    not a button.
+    """
+    from urllib.parse import urlencode
+    from datetime import datetime
+
+    logs = SystemLog.objects.select_related('admin', 'patron')
+
+    q = (request.GET.get('q') or '').strip()
+    role = (request.GET.get('role') or '').strip()
+    action = (request.GET.get('action') or '').strip()
+    entity = (request.GET.get('entity') or '').strip()
+    date_from = (request.GET.get('from') or '').strip()
+    date_to = (request.GET.get('to') or '').strip()
+
+    if q:
+        # Searches the actor, the affected patron and the detail line together,
+        # because "what happened to this patron" and "what did this person do"
+        # are the same question asked from two ends.
+        logs = logs.filter(
+            Q(admin_name__icontains=q)
+            | Q(detail__icontains=q)
+            | Q(entity_type__icontains=q)
+            | Q(entity_id__iexact=q)
+            | Q(patron__fullname__icontains=q)
+        )
+    if role in dict(SystemLog.ACTOR_ROLE_CHOICES):
+        logs = logs.filter(actor_role=role)
+    if action:
+        logs = logs.filter(action__iexact=action)
+    if entity:
+        logs = logs.filter(entity_type__iexact=entity)
+
+    def _parse(value):
+        try:
+            return datetime.strptime(value, '%Y-%m-%d').date()
+        except ValueError:
+            return None
+
+    d_from, d_to = _parse(date_from), _parse(date_to)
+    if d_from:
+        logs = logs.filter(timestamp__date__gte=d_from)
+    if d_to:
+        logs = logs.filter(timestamp__date__lte=d_to)
+
+    logs = logs.order_by('-timestamp')
+
+    # Filter menus are built from what is actually in the table rather than a
+    # hardcoded list, so a new action verb appears without anyone remembering
+    # to add it here.
+    all_actions = list(
+        SystemLog.objects.order_by('action').values_list('action', flat=True).distinct()
+    )
+    all_entities = list(
+        SystemLog.objects.order_by('entity_type').values_list('entity_type', flat=True).distinct()
+    )
+
+    total = SystemLog.objects.count()
+    # Built as a list of triples rather than a dict: a Django template cannot
+    # look a dict up by a loop variable, so a dict here would need a custom
+    # filter to display at all.
+    counts = dict(
+        SystemLog.objects.values_list('actor_role')
+        .annotate(n=Count('actor_role')).values_list('actor_role', 'n')
+    )
+    role_stats = [
+        (key, label, counts.get(key, 0))
+        for key, label in SystemLog.ACTOR_ROLE_CHOICES
+    ]
+
+    paginator = Paginator(logs, 25)
+    page_obj = paginator.get_page(request.GET.get('page'))
+
+    querystring = urlencode({k: v for k, v in {
+        'q': q, 'role': role, 'action': action,
+        'entity': entity, 'from': date_from, 'to': date_to,
+    }.items() if v})
+
+    return render(request, 'admin/activitylogs.html', {
+        'active': 'activity',
+        'page_obj': page_obj,
+        'total_logs': total,
+        'filtered_count': paginator.count,
+        'role_stats': role_stats,
+        'role_choices': SystemLog.ACTOR_ROLE_CHOICES,
+        'all_actions': all_actions,
+        'all_entities': all_entities,
+        'q': q, 'role': role, 'action': action,
+        'entity': entity, 'date_from': date_from, 'date_to': date_to,
+        'querystring': querystring,
+        'is_filtered': bool(q or role or action or entity or date_from or date_to),
+    })
+
+
 @admin_module_required('logs')
 def admin_log_management(request):
     return _logs_page(request, 'admin/logmanagement.html')
@@ -2082,6 +2983,57 @@ def admin_book_details_ajax(request, book_id):
         'copies': Book.objects.filter(title=book.title, author=book.author).count(),
     }
     return JsonResponse(book_data)
+
+
+@admin_login_required
+def book_qr_png(request, book_id):
+    """Serve a book's QR as a PNG, inline for display or as a download.
+
+    The modal used to point an <img> at api.qrserver.com. Three problems with
+    that, and the third is why this exists at all:
+
+    1. It needs the internet. `_qr_data_uri` already exists in this file and
+       its docstring says why -- a library front desk mid-brownout still has to
+       print a card. Book QRs are no different.
+    2. It sends every book's QR payload to a third party to render.
+    3. A cross-origin image cannot be downloaded. `<a download>` is ignored
+       across origins and a canvas that has drawn one is tainted, so no button
+       pointed at that URL could ever have produced a file.
+
+    ?download=1 sets the attachment disposition; without it the same URL is
+    the inline <img> source, so the picture on screen and the file saved are
+    byte-identical rather than two separate renderings.
+    """
+    book = Book.objects.filter(book_id=book_id).first()
+    if book is None:
+        raise Http404('Book not found')
+    if not book.qr_code:
+        raise Http404('This book has no QR code')
+
+    qr = qrcode.QRCode(
+        version=None,
+        error_correction=qrcode.constants.ERROR_CORRECT_M,
+        box_size=10,
+        border=2,
+    )
+    qr.add_data(book.qr_code)
+    qr.make(fit=True)
+    buffer = BytesIO()
+    qr.make_image(fill_color='black', back_color='white').save(buffer, format='PNG')
+
+    response = HttpResponse(buffer.getvalue(), content_type='image/png')
+    if request.GET.get('download'):
+        # Whoever opens the file later needs to know which book it belongs to,
+        # so the title goes in the filename -- reduced to characters that are
+        # safe on every filesystem, since titles carry colons and slashes.
+        safe = re.sub(r'[^A-Za-z0-9]+', '-', book.title or 'book').strip('-')[:60] or 'book'
+        filename = f'QR-{safe}-BOOK-{book.book_id}.png'
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        log_admin_action(request, 'Download', 'Book', book.book_id,
+                         f'Downloaded the QR code for "{book.title[:60]}"')
+    else:
+        response['Content-Disposition'] = 'inline'
+    return response
 
 
 # Deliberately admin_login_required rather than one module: shared by Manage Books and Transactions,
@@ -2171,6 +3123,40 @@ def download_book_template(request):
     return response
 
 
+# An uploaded workbook is attacker-controllable input even when the attacker is
+# a staff member with a mistyped file. openpyxl will happily allocate for a sheet
+# claiming a million rows, and a spreadsheet that expands enormously when parsed
+# is the oldest denial-of-service in the format. Both are capped before parsing.
+MAX_IMPORT_BYTES = 5 * 1024 * 1024
+MAX_IMPORT_ROWS = 5000
+
+
+def check_import_upload(uploaded):
+    """Return an error string for a workbook we should not parse, or None."""
+    if uploaded is None:
+        return 'No file was uploaded.'
+    name = (getattr(uploaded, 'name', '') or '').lower()
+    if not name.endswith(('.xlsx', '.xlsm')):
+        return 'Please upload an .xlsx spreadsheet.'
+    if uploaded.size > MAX_IMPORT_BYTES:
+        return f'That file is too large. The limit is {MAX_IMPORT_BYTES // (1024 * 1024)} MB.'
+    # ZIP-based formats all start with PK; a renamed .csv or .exe does not.
+    head = uploaded.read(2)
+    uploaded.seek(0)
+    if head != b'PK':
+        return 'That file is not a valid Excel workbook.'
+    return None
+
+
+def check_import_size(worksheet):
+    """Return an error string for a sheet with more rows than we will accept."""
+    rows = worksheet.max_row or 0
+    if rows > MAX_IMPORT_ROWS:
+        return (f'That sheet has {rows:,} rows. Please import at most '
+                f'{MAX_IMPORT_ROWS:,} at a time.')
+    return None
+
+
 def _resolve_storage_area(name):
     """Find the shelf level a sheet's "Storage Area" refers to, creating it once.
 
@@ -2221,8 +3207,11 @@ def import_books(request):
         return JsonResponse({'success': False, 'error': 'No file uploaded'})
 
     excel_file = request.FILES['excel_file']
-    if not excel_file.name.endswith('.xlsx'):
-        return JsonResponse({'success': False, 'error': 'Only .xlsx files are allowed'})
+    # Name, size and magic bytes, not just the extension: openpyxl allocates for
+    # whatever a workbook claims to hold, and a renamed file is not a workbook.
+    upload_error = check_import_upload(excel_file)
+    if upload_error:
+        return JsonResponse({'success': False, 'error': upload_error})
 
     # header text (normalised) -> field. Several spellings map to one field.
     HEADER_ALIASES = {
@@ -2252,6 +3241,9 @@ def import_books(request):
     try:
         wb = openpyxl.load_workbook(excel_file, data_only=True)
         ws = wb.active
+        size_error = check_import_size(ws)
+        if size_error:
+            return JsonResponse({'success': False, 'error': size_error})
 
         header_row = next(ws.iter_rows(min_row=1, max_row=1, values_only=True), None)
         if not header_row:
@@ -2385,13 +3377,18 @@ def import_patrons(request):
         return JsonResponse({'success': False, 'error': 'No file uploaded'})
     
     excel_file = request.FILES['excel_file']
-    
-    if not excel_file.name.endswith('.xlsx'):
-        return JsonResponse({'success': False, 'error': 'Only .xlsx files are allowed'})
+
+    # Name, size and magic bytes, not just the extension.
+    upload_error = check_import_upload(excel_file)
+    if upload_error:
+        return JsonResponse({'success': False, 'error': upload_error})
     
     try:
         wb = openpyxl.load_workbook(excel_file)
         ws = wb.active
+        size_error = check_import_size(ws)
+        if size_error:
+            return JsonResponse({'success': False, 'error': size_error})
         
         imported_count = 0
         skipped_count = 0
@@ -2470,13 +3467,18 @@ def import_donations(request):
         return JsonResponse({'success': False, 'error': 'No file uploaded'})
     
     excel_file = request.FILES['excel_file']
-    
-    if not excel_file.name.endswith('.xlsx'):
-        return JsonResponse({'success': False, 'error': 'Only .xlsx files are allowed'})
+
+    # Name, size and magic bytes, not just the extension.
+    upload_error = check_import_upload(excel_file)
+    if upload_error:
+        return JsonResponse({'success': False, 'error': upload_error})
     
     try:
         wb = openpyxl.load_workbook(excel_file)
         ws = wb.active
+        size_error = check_import_size(ws)
+        if size_error:
+            return JsonResponse({'success': False, 'error': size_error})
         
         imported_count = 0
         skipped_count = 0
@@ -2488,6 +3490,10 @@ def import_donations(request):
             author = row[3].value
             isbn = row[4].value
             genre = row[5].value
+            # Spreadsheets predating this column simply produce None.
+            material_type = (str(row[7].value).strip() if len(row) > 7 and row[7].value else 'Book')
+            if material_type not in {c[0] for c in Book.MATERIAL_TYPE_CHOICES}:
+                material_type = 'Book'
             publication_year = row[6].value
             
             if not donor_name or not title or not author:
@@ -2498,6 +3504,7 @@ def import_donations(request):
                 author=author,
                 ISBN=isbn,
                 genre=genre,
+                material_type=material_type,
                 publication_year=int(publication_year) if publication_year else None,
                 status='Available'
             )
@@ -2562,13 +3569,18 @@ def import_announcements(request):
         return JsonResponse({'success': False, 'error': 'No file uploaded'})
     
     excel_file = request.FILES['excel_file']
-    
-    if not excel_file.name.endswith('.xlsx'):
-        return JsonResponse({'success': False, 'error': 'Only .xlsx files are allowed'})
+
+    # Name, size and magic bytes, not just the extension.
+    upload_error = check_import_upload(excel_file)
+    if upload_error:
+        return JsonResponse({'success': False, 'error': upload_error})
     
     try:
         wb = openpyxl.load_workbook(excel_file)
         ws = wb.active
+        size_error = check_import_size(ws)
+        if size_error:
+            return JsonResponse({'success': False, 'error': size_error})
         
         imported_count = 0
         
@@ -2624,6 +3636,141 @@ def get_book_by_id(request):
     return JsonResponse(book_data)
 
 
+class _BasketAborted(Exception):
+    """Raised inside the transaction to roll the whole basket back.
+
+    Processing used to validate and write one book at a time in the same loop,
+    so a basket of five where the third was already on loan left the first two
+    committed as borrowed -- while the staff member saw an error and reasonably
+    assumed nothing had happened.
+    """
+
+    def __init__(self, errors):
+        super().__init__('; '.join(errors))
+        self.errors = list(errors)
+
+
+def _apply_basket(request, transaction_type, book_ids, patron, admin, rule):
+    """Do the whole basket inside one locked transaction, or do none of it.
+
+    Split out of process_transaction so the atomic block is a function boundary
+    rather than an extra level of indentation wrapped around a hundred lines --
+    and so the emails and the audit line, which must not fire for a basket that
+    rolled back, are plainly outside it.
+
+    Returns (processed_titles, borrowed_books, borrow_due_date, returned_books,
+    returned_overdue). Raises _BasketAborted if anything in the basket fails.
+    """
+    errors = []
+    processed_books = []
+    borrowed_books = []
+    borrow_due_date = None
+    returned_books = []
+    returned_overdue = False
+    today = timezone.localdate()
+
+    with transaction.atomic():
+        if transaction_type == 'Borrow':
+            eligible, violations = check_patron_eligibility(patron)
+            if not eligible:
+                raise _BasketAborted(violations)
+
+            # Counted inside the transaction so two baskets processed at the same
+            # moment cannot each see the patron under the limit and together push
+            # them over it.
+            active_borrows = Transaction.objects.filter(
+                patron=patron, transaction_type='Borrow', return_date__isnull=True
+            ).count()
+            if active_borrows + len(book_ids) > rule.max_books_per_patron:
+                raise _BasketAborted([
+                    f'Borrowing limit is {rule.max_books_per_patron} book(s). '
+                    f'This patron already has {active_borrows} active borrow(s).'
+                ])
+
+        # Ids are resolved and sorted before any lock is taken: two staff
+        # processing {A, B} and {B, A} at the same time would otherwise each hold
+        # the row the other is waiting for, and deadlock.
+        wanted = []
+        for raw in book_ids:
+            try:
+                wanted.append(int(raw))
+            except (TypeError, ValueError):
+                errors.append(f'Invalid book_id: {raw}')
+        wanted = sorted(set(wanted))
+
+        for book_id_int in wanted:
+            # select_for_update holds this row until the transaction ends, which
+            # is what turns the status check below from a guess into a decision.
+            # Without it two terminals could both read "Available" for the same
+            # copy and both write "Borrowed" -- two open loans, one physical book.
+            book = Book.objects.select_for_update().filter(book_id=book_id_int).first()
+            if book is None:
+                errors.append(f'Book not found: {book_id_int}')
+                continue
+
+            if transaction_type == 'Borrow':
+                if book.status != 'Available':
+                    errors.append(f'Book "{book.title}" is not Available (current status: {book.status})')
+                    continue
+            elif transaction_type == 'Return':
+                if book.status not in ['Borrowed', 'Overdue']:
+                    errors.append(f'Book "{book.title}" is not Borrowed or Overdue (current status: {book.status})')
+                    continue
+            elif transaction_type == 'In-Library Reading':
+                if book.status != 'Available':
+                    errors.append(f'Book "{book.title}" is not Available (current status: {book.status})')
+                    continue
+
+            if transaction_type == 'Borrow':
+                due_date = today + timedelta(days=rule.loan_period_days)
+                book.status = 'Borrowed'
+                book.save()
+                Transaction.objects.create(
+                    patron=patron,
+                    book=book,
+                    processed_by=admin,
+                    transaction_type='Borrow',
+                    due_date=due_date,
+                )
+                borrowed_books.append(book)
+                borrow_due_date = due_date
+            elif transaction_type == 'Return':
+                book.status = 'Available'
+                book.save()
+                tx = Transaction.objects.select_for_update().filter(
+                    book=book,
+                    transaction_type='Borrow',
+                    return_date__isnull=True,
+                ).first()
+                if tx:
+                    tx.return_date = today
+                    tx.overdue_flag = bool(tx.due_date and today > tx.due_date)
+                    tx.fine_amount = rule.compute_fine(tx.due_date, today)
+                    tx.save()
+                    if tx.overdue_flag:
+                        returned_overdue = True
+                returned_books.append(book)
+            elif transaction_type == 'In-Library Reading':
+                book.status = 'Being Read'
+                book.save()
+                Transaction.objects.create(
+                    patron=None,
+                    book=book,
+                    processed_by=admin,
+                    transaction_type='In-Library Reading',
+                    due_date=None,
+                )
+
+            processed_books.append(book.title)
+
+        # Raised rather than returned: the exception is what unwinds the atomic
+        # block, and unwinding it is what undoes the books already written above.
+        if errors:
+            raise _BasketAborted(errors)
+
+    return processed_books, borrowed_books, borrow_due_date, returned_books, returned_overdue
+
+
 @granted_module_required('transactions')
 def process_transaction(request):
     if request.method != 'POST':
@@ -2675,120 +3822,26 @@ def process_transaction(request):
 
     # 3-point patron eligibility check before borrowing (overdue items,
     # account suspension, outstanding lost-book penalty).
-    if transaction_type == 'Borrow':
-        eligible, violations = check_patron_eligibility(patron)
-        if not eligible:
-            return JsonResponse({
-                'success': False,
-                'error': f'{patron.fullname} is not eligible to borrow',
-                'errors': violations,
-            })
 
-        # Enforce the configured borrowing limit.
-        active_borrows = Transaction.objects.filter(
-            patron=patron, transaction_type='Borrow', return_date__isnull=True
-        ).count()
-        if active_borrows + len(book_ids) > rule.max_books_per_patron:
-            return JsonResponse({
-                'success': False,
-                'error': f'{patron.fullname} is not eligible to borrow',
-                'errors': [
-                    f'Borrowing limit is {rule.max_books_per_patron} book(s). '
-                    f'This patron already has {active_borrows} active borrow(s).'
-                ],
-            })
-
-    # Validate books and process transaction
-    errors = []
-    processed_books = []
-    borrowed_books = []
-    borrow_due_date = None
-    returned_books = []
-    returned_overdue = False
-    today = timezone.localdate()
-    
-    for book_id_str in book_ids:
-        try:
-            book_id_int = int(book_id_str)
-        except ValueError:
-            errors.append(f'Invalid book_id: {book_id_str}')
-            continue
-        
-        book = Book.objects.filter(book_id=book_id_int).first()
-        if book is None:
-            errors.append(f'Book not found: {book_id_str}')
-            continue
-        
-        # Validate book status based on transaction type
-        if transaction_type == 'Borrow':
-            if book.status != 'Available':
-                errors.append(f'Book "{book.title}" is not Available (current status: {book.status})')
-                continue
-        elif transaction_type == 'Return':
-            if book.status not in ['Borrowed', 'Overdue']:
-                errors.append(f'Book "{book.title}" is not Borrowed or Overdue (current status: {book.status})')
-                continue
-        elif transaction_type == 'In-Library Reading':
-            if book.status != 'Available':
-                errors.append(f'Book "{book.title}" is not Available (current status: {book.status})')
-                continue
-        
-        # Process transaction
-        if transaction_type == 'Borrow':
-            due_date = today + timedelta(days=rule.loan_period_days)
-            book.status = 'Borrowed'
-            book.save()
-            Transaction.objects.create(
-                patron=patron,
-                book=book,
-                processed_by=admin,
-                transaction_type='Borrow',
-                due_date=due_date
-            )
-            borrowed_books.append(book)
-            borrow_due_date = due_date
-        elif transaction_type == 'Return':
-            book.status = 'Available'
-            book.save()
-            # Find the active borrow transaction for this book
-            tx = Transaction.objects.filter(
-                book=book,
-                transaction_type='Borrow',
-                return_date__isnull=True
-            ).first()
-            if tx:
-                tx.return_date = today
-                tx.overdue_flag = bool(tx.due_date and today > tx.due_date)
-                tx.fine_amount = rule.compute_fine(tx.due_date, today)
-                tx.save()
-                if tx.overdue_flag:
-                    returned_overdue = True
-            returned_books.append(book)
-        elif transaction_type == 'In-Library Reading':
-            book.status = 'Being Read'
-            book.save()
-            Transaction.objects.create(
-                patron=None,
-                book=book,
-                processed_by=admin,
-                transaction_type='In-Library Reading',
-                due_date=None
-            )
-        
-        processed_books.append(book.title)
-
-    if errors:
+    try:
+        (processed_books, borrowed_books, borrow_due_date,
+         returned_books, returned_overdue) = _apply_basket(
+            request, transaction_type, book_ids, patron, admin, rule)
+    except _BasketAborted as aborted:
+        # Nothing was written: the transaction rolled back on the way out, so
+        # there is no partial basket to report.
         return JsonResponse({
             'success': False,
             'error': 'Transaction validation failed',
-            'errors': errors,
-            'processed': processed_books
+            'errors': aborted.errors,
+            'processed': [],
         })
 
     patron_label = f' for {patron.fullname}' if patron else ''
     log_admin_action(
         request, 'Process', 'Transaction', None,
-        f'{transaction_type}: {len(processed_books)} book(s){patron_label}{verification}'
+        f'{transaction_type}: {len(processed_books)} book(s){patron_label}{verification}',
+        patron=patron,
     )
 
     # Email the patron a borrowing confirmation with the due date.
@@ -2875,8 +3928,6 @@ def _donations_page(request, template):
     stage_counts = {row['status']: row['n'] for row in
                     donations_queryset.order_by().values('status').annotate(n=Count('status'))}
 
-    # Pending transactions count for badge
-    pending_transactions_count = Transaction.objects.filter(transaction_type='Borrow', return_date__isnull=True).count()
 
     return render(request, template, {
         'donations': donations,
@@ -2888,7 +3939,6 @@ def _donations_page(request, template):
         'received_count': stage_counts.get('Received', 0),
         'processing_count': stage_counts.get('Processing', 0),
         'shelved_count': stage_counts.get('Shelved', 0),
-        'pending_transactions_count': pending_transactions_count,
     })
 
 
@@ -2968,6 +4018,26 @@ def delete_donation(request):
 
 
 # Announcement Management Views
+def _announcement_stats(queryset):
+    """The four figures above the table.
+
+    Counted here rather than in the template. The template was reaching for
+    `|dictsort:"is_active"|slice:":1"`, which does not count anything -- it sorts
+    the page and hands back a one-item *list*, so all three cards rendered as
+    `[<Announcement: Announcement object (1)>]` instead of a number. Two of them
+    were the same expression as well, so Active and Inactive could never have
+    disagreed even had it worked.
+    """
+    active = queryset.filter(is_active=True).count()
+    total = queryset.count()
+    return {
+        'total_count': total,
+        'active_count': active,
+        'inactive_count': total - active,
+        'today_count': queryset.filter(created_at__date=timezone.localdate()).count(),
+    }
+
+
 @admin_only_required
 def announcement_management(request):
     announcements_queryset = Announcement.objects.select_related('posted_by').order_by('-created_at')
@@ -2978,7 +4048,9 @@ def announcement_management(request):
         
         if not all([title, message]):
             error = 'Title and message are required.'
-            return render(request, 'admin/announcementadmin.html', {'announcements': announcements_queryset, 'error': error})
+            context = {'announcements': announcements_queryset, 'error': error}
+            context.update(_announcement_stats(announcements_queryset))
+            return render(request, 'admin/announcementadmin.html', context)
         
         admin_id = request.session.get('admin_id')
         admin = User.objects.filter(admin_id=admin_id).first()
@@ -3034,10 +4106,13 @@ def announcement_management(request):
     paginator = Paginator(announcements_queryset, 10)  # 10 announcements per page
     announcements = paginator.get_page(page_number)
     
-    # Pending transactions count for badge
-    pending_transactions_count = Transaction.objects.filter(transaction_type='Borrow', return_date__isnull=True).count()
     
-    return render(request, 'admin/announcementadmin.html', {'announcements': announcements, 'paginator': paginator, 'pending_transactions_count': pending_transactions_count})
+    context = {
+        'announcements': announcements,
+        'paginator': paginator,
+    }
+    context.update(_announcement_stats(announcements_queryset))
+    return render(request, 'admin/announcementadmin.html', context)
 
 
 @admin_only_required
@@ -3143,15 +4218,12 @@ def set_active_floorplan(request):
         floorplan_id = request.POST.get('floorplan_id')
         floorplan = FloorPlan.objects.filter(floor_plan_id=floorplan_id).first()
         if floorplan:
-            if floorplan.is_active:
-                # Toggle off: deactivate this floor plan.
-                floorplan.is_active = False
-                floorplan.save()
-            else:
-                # Activate this one (only one active at a time).
-                FloorPlan.objects.all().update(is_active=False)
-                floorplan.is_active = True
-                floorplan.save()
+            # A plain toggle. This used to deactivate every other plan, on the
+            # assumption that exactly one floor existed -- which meant putting an
+            # upper floor into service took the ground floor's books out of the
+            # catalogue. Floors are independent now.
+            floorplan.is_active = not floorplan.is_active
+            floorplan.save(update_fields=['is_active'])
 
     return redirect('floorplan_management')
 
@@ -3192,6 +4264,68 @@ def set_floorplan_scale(request):
     log_admin_action(request, 'Update', 'FloorPlan', plan.floor_plan_id,
                      f'Map scale set to {scale:g} canvas units per metre')
     return JsonResponse({'success': True, 'pixels_per_meter': scale})
+
+
+@admin_only_required
+def set_floorplan_floor_number(request):
+    """Which storey a plan represents.
+
+    Backfilled by creation order when multi-floor support landed, which is a
+    guess -- the order plans were drawn in is not the order they are stacked in.
+    This is how an Administrator corrects it. The number orders the patron's
+    floor switcher and names each entry ("2nd floor"), so it is the one thing
+    that has to match the building.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
+
+    plan = FloorPlan.objects.filter(floor_plan_id=request.POST.get('floorplan_id')).first()
+    if plan is None:
+        return JsonResponse({'success': False, 'error': 'Floor plan not found'})
+
+    try:
+        number = int((request.POST.get('floor_number') or '').strip())
+    except (TypeError, ValueError):
+        return JsonResponse({'success': False, 'error': 'Floor number must be a whole number.'})
+    if not (-5 <= number <= 100):
+        return JsonResponse({'success': False,
+                             'error': 'Floor number should be between -5 (basements) and 100.'})
+
+    before = plan.floor_number
+    plan.floor_number = number
+    plan.save(update_fields=['floor_number'])
+    log_admin_action(request, 'Update', 'FloorPlan', plan.floor_plan_id,
+                     f'{plan.name}: floor number {before} -> {number}')
+    return JsonResponse({'success': True, 'floor_number': number, 'label': plan.floor_label})
+
+
+@admin_only_required
+def set_floorplan_north(request):
+    """Record how far the plan's "up" is from magnetic north.
+
+    Dead reckoning turns a compass bearing into a direction on this map, so an
+    unmeasured offset does not degrade the result gracefully -- it sends the
+    marker off at a fixed angle to wherever the patron actually walked. Zero is
+    only correct if the plan happens to have been drawn with north at the top.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
+
+    plan = FloorPlan.objects.filter(floor_plan_id=request.POST.get('floorplan_id')).first()
+    if plan is None:
+        return JsonResponse({'success': False, 'error': 'Floor plan not found'})
+
+    try:
+        offset = float((request.POST.get('north_offset_deg') or '').strip())
+    except (TypeError, ValueError):
+        return JsonResponse({'success': False, 'error': 'Offset must be a number of degrees'})
+
+    offset = offset % 360        # a bearing, so 370 and -350 both mean 10
+    plan.north_offset_deg = offset
+    plan.save(update_fields=['north_offset_deg'])
+    log_admin_action(request, 'Update', 'FloorPlan', plan.floor_plan_id,
+                     f'Map north offset set to {offset:.1f} degrees')
+    return JsonResponse({'success': True, 'north_offset_deg': offset})
 
 
 @admin_only_required
@@ -3244,13 +4378,18 @@ def import_transactions(request):
         return JsonResponse({'success': False, 'error': 'No file uploaded'})
     
     excel_file = request.FILES['excel_file']
-    
-    if not excel_file.name.endswith('.xlsx'):
-        return JsonResponse({'success': False, 'error': 'Only .xlsx files are allowed'})
+
+    # Name, size and magic bytes, not just the extension.
+    upload_error = check_import_upload(excel_file)
+    if upload_error:
+        return JsonResponse({'success': False, 'error': upload_error})
     
     try:
         wb = openpyxl.load_workbook(excel_file)
         ws = wb.active
+        size_error = check_import_size(ws)
+        if size_error:
+            return JsonResponse({'success': False, 'error': size_error})
         
         imported_count = 0
         skipped_count = 0
@@ -3347,13 +4486,18 @@ def import_logs(request):
         return JsonResponse({'success': False, 'error': 'No file uploaded'})
     
     excel_file = request.FILES['excel_file']
-    
-    if not excel_file.name.endswith('.xlsx'):
-        return JsonResponse({'success': False, 'error': 'Only .xlsx files are allowed'})
+
+    # Name, size and magic bytes, not just the extension.
+    upload_error = check_import_upload(excel_file)
+    if upload_error:
+        return JsonResponse({'success': False, 'error': upload_error})
     
     try:
         wb = openpyxl.load_workbook(excel_file)
         ws = wb.active
+        size_error = check_import_size(ws)
+        if size_error:
+            return JsonResponse({'success': False, 'error': size_error})
         
         imported_count = 0
         skipped_count = 0
@@ -3404,25 +4548,35 @@ def import_logs(request):
 # ─── REPORTS VIEWS ───────────────────────────────────────────────
 @admin_only_required
 def admin_reports(request):
-    """Reports hub: on-screen preview of the selected report + date range."""
+    """Reports hub: builds the selected report only when Generate is pressed.
+
+    Opening the page used to run a report immediately, which meant every visit
+    paid for a query nobody had asked for and the screen filled with a default
+    nobody chose. The report is now built only when the form is submitted, so
+    landing here is free and what you see is always something you asked for.
+    """
     report_type = request.GET.get('type', 'transactions')
     if report_type not in dict(REPORT_TYPES):
         report_type = 'transactions'
     start, end = parse_date_range(request.GET.get('start'), request.GET.get('end'))
-    report = build_report(report_type, start, end)
 
-    pending_transactions_count = Transaction.objects.filter(
-        transaction_type='Borrow', return_date__isnull=True
-    ).count()
+    # The form carries generate=1; a bare visit to the page does not.
+    generated = bool(request.GET.get('generate'))
+    report = build_report(report_type, start, end) if generated else None
+
 
     context = {
         'report': report,
+        'generated': generated,
         'report_types': REPORT_TYPES,
         'selected_type': report_type,
         'start_date': start.strftime('%Y-%m-%d'),
         'end_date': end.strftime('%Y-%m-%d'),
-        'is_snapshot': report_type in {'books', 'patrons'},
-        'pending_transactions_count': pending_transactions_count,
+        # Was a hardcoded {'books', 'patrons'}, which left the date range showing
+        # on Stock Levels -- a point-in-time count that ignores it. reports.py
+        # already names the set; there is no reason for a second, staler copy.
+        'is_snapshot': report_type in SNAPSHOT_REPORTS,
+        'snapshot_types_json': json.dumps(sorted(SNAPSHOT_REPORTS)),
     }
     return render(request, 'admin/reports.html', context)
 
@@ -3501,25 +4655,17 @@ def admin_borrowing_rules(request):
         except (ValueError, InvalidOperation):
             error = 'Please enter valid numeric values.'
 
-    pending_transactions_count = Transaction.objects.filter(
-        transaction_type='Borrow', return_date__isnull=True
-    ).count()
     return render(request, 'admin/borrowingrules.html', {
         'rule': rule,
         'saved': saved,
         'error': error,
-        'pending_transactions_count': pending_transactions_count,
     })
 
 
 # ─── SHELF MANAGEMENT VIEWS ──────────────────────────────────────
 def _shelf_page(request, template):
     """IDE-style hierarchical manager for shelves, sections, levels and books."""
-    pending_transactions_count = Transaction.objects.filter(
-        transaction_type='Borrow', return_date__isnull=True
-    ).count()
     return render(request, template, {
-        'pending_transactions_count': pending_transactions_count,
     })
 
 
@@ -3564,9 +4710,7 @@ def get_books_for_placement(request):
     q = (request.GET.get('q') or '').strip()
     books = Book.objects.select_related('shelf_level').order_by('title')
     if q:
-        books = books.filter(
-            Q(title__icontains=q) | Q(author__icontains=q) | Q(ISBN__icontains=q)
-        )
+        books = books.filter(_book_search_q(q))
     data = []
     for b in books[:300]:
         if b.shelf_level:
@@ -3584,7 +4728,34 @@ def get_books_for_placement(request):
     return JsonResponse({'success': True, 'books': data})
 
 
-@granted_module_required('shelf')
+def _shelf_capacity():
+    """Every shelf level with how many books already sit on it.
+
+    Shown beside the receiving form so whoever is unpacking a box can see where
+    it can go without leaving the page and losing what they have typed. Emptiest
+    first, because that is the question being asked -- where is there room.
+
+    There is no capacity field on ShelfLevel, so "room" is relative rather than
+    absolute: the counts rank the levels, they do not claim a level is full.
+    """
+    levels = (ShelfLevel.objects
+              .select_related('shelf', 'shelf__room')
+              .annotate(book_count=Count('book'))
+              .order_by('book_count', 'shelf__name', 'level_number'))
+    return [
+        {
+            'shelf_level_id': lv.shelf_level_id,
+            'shelf': lv.shelf.name if lv.shelf else 'Unplaced',
+            'room': lv.shelf.room.name if (lv.shelf and lv.shelf.room) else '',
+            'level_number': lv.level_number,
+            'category': lv.category or '',
+            'book_count': lv.book_count,
+        }
+        for lv in levels
+    ]
+
+
+@admin_or_module_required('shelf')
 def assign_books_to_level(request):
     """Place the selected books onto a shelf level."""
     if request.method != 'POST':
@@ -3605,19 +4776,30 @@ def assign_books_to_level(request):
     return JsonResponse({'success': True, 'updated': updated})
 
 
-@granted_module_required('shelf')
+@admin_or_module_required('shelf')
 def get_shelf_tree(request):
     """Returns full nested hierarchy FloorPlan > Room > Shelf > ShelfLevel > Books"""
-    floor_plans = FloorPlan.objects.filter(is_active=True).prefetch_related(
+    # Ordered by storey. More than one floor can be in service now, so the tree
+    # has several roots where it used to have one -- ground floor first is the
+    # only order that reads correctly.
+    floor_plans = FloorPlan.objects.filter(is_active=True).order_by(
+        'floor_number', 'floor_plan_id'
+    ).prefetch_related(
         'room_set__shelf_set__shelflevel_set__book_set'
     )
-    
+
     tree_data = []
     for fp in floor_plans:
+        # Named, not numbered. "Floor Plan 16" gave no clue which storey it was
+        # or why it might be empty; "2nd floor - 2nd floor" does.
+        label = fp.floor_label
+        if fp.name and fp.name.strip().lower() != label.lower():
+            label = f'{label} — {fp.name}'
         fp_node = {
             'type': 'floorplan',
             'id': fp.floor_plan_id,
-            'name': f'Floor Plan {fp.floor_plan_id}',
+            'name': label,
+            'floor_number': fp.floor_number,
             'is_active': fp.is_active,
             'children': []
         }
@@ -3681,7 +4863,7 @@ def get_shelf_tree(request):
     return JsonResponse({'tree': tree_data})
 
 
-@granted_module_required('shelf')
+@admin_or_module_required('shelf')
 def get_shelf_levels_flat(request):
     """Returns flattened list of all ShelfLevels with breadcrumb path"""
     shelf_levels = ShelfLevel.objects.select_related(
@@ -3719,7 +4901,7 @@ def get_shelf_levels_flat(request):
     return JsonResponse({'shelf_levels': flat_data})
 
 
-@granted_module_required('shelf')
+@admin_or_module_required('shelf')
 def add_room(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
@@ -3756,7 +4938,12 @@ def add_room(request):
         return JsonResponse({'success': False, 'error': 'Floor plan not found'})
 
 
-@admin_only_required
+# Gated like the rest of the Shelf Manager family rather than Administrator-only.
+# add_room, add/edit/delete_shelf and the shelf-level operations all use
+# admin_or_module_required('shelf'); these two were left behind when the module
+# system came in, which let a Library Staff member create a room and then fail
+# to rename or remove it -- with both buttons sitting right there in their UI.
+@admin_or_module_required('shelf')
 def edit_room(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
@@ -3796,7 +4983,8 @@ def edit_room(request):
         return JsonResponse({'success': False, 'error': 'Room not found'})
 
 
-@admin_only_required
+# Module-gated to match add_room and the shelf/level operations -- see edit_room.
+@admin_or_module_required('shelf')
 def delete_room(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
@@ -3811,7 +4999,7 @@ def delete_room(request):
     return redirect('floorplan_management')
 
 
-@granted_module_required('shelf')
+@admin_or_module_required('shelf')
 def add_shelf(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
@@ -3860,7 +5048,7 @@ def add_shelf(request):
         return JsonResponse({'success': False, 'error': 'Room not found'})
 
 
-@granted_module_required('shelf')
+@admin_or_module_required('shelf')
 def edit_shelf(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
@@ -4164,7 +5352,7 @@ def unplace_shelf(request):
     return JsonResponse({'success': True})
 
 
-@granted_module_required('shelf')
+@admin_or_module_required('shelf')
 def delete_shelf(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
@@ -4179,7 +5367,7 @@ def delete_shelf(request):
     return redirect('floorplan_management')
 
 
-@granted_module_required('shelf')
+@admin_or_module_required('shelf')
 def add_shelf_level(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
@@ -4203,7 +5391,7 @@ def add_shelf_level(request):
         return JsonResponse({'success': False, 'error': 'Shelf not found'})
 
 
-@granted_module_required('shelf')
+@admin_or_module_required('shelf')
 def edit_shelf_level(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
@@ -4227,7 +5415,7 @@ def edit_shelf_level(request):
         return JsonResponse({'success': False, 'error': 'Shelf level not found'})
 
 
-@granted_module_required('shelf')
+@admin_or_module_required('shelf')
 def delete_shelf_level(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
@@ -4242,7 +5430,7 @@ def delete_shelf_level(request):
     return redirect('floorplan_management')
 
 
-@granted_module_required('shelf')
+@admin_or_module_required('shelf')
 def toggle_active(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
@@ -4453,6 +5641,7 @@ def get_map_data(request):
         'canvas_width': width,
         'canvas_height': height,
         'pixels_per_meter': floor_plan.pixels_per_meter,
+        'north_offset_deg': floor_plan.north_offset_deg or 0,
         'beacons': beacons,
         'waypoints': waypoints,
         'connections': connections,
@@ -4473,6 +5662,7 @@ def _beacon_payload(b):
         'instance_id': (b.instance_id or '').lower() or None,
         'tx_power': b.tx_power,
         'path_loss_n': b.path_loss_n,
+        'height': b.height,
         'map_x': b.map_x,
         'map_y': b.map_y,
         'label': b.label or '',
@@ -4528,8 +5718,14 @@ def add_beacon(request):
     try:
         major, minor, tx_power = _int_or_none('major'), _int_or_none('minor'), _int_or_none('tx_power')
         path_loss_n = _float_or_none('path_loss_n')
+        height = _float_or_none('height')
     except ValueError as bad:
         return JsonResponse({'success': False, 'error': f'{bad} must be a number'})
+
+    if height is not None and not (0 <= height <= 10):
+        return JsonResponse({'success': False,
+                             'error': 'Mounting height is measured in metres above the floor, '
+                                      'so it should be between 0 and 10.'})
 
     beacon = BLEBeacon.objects.create(
         floor_plan=floor_plan,
@@ -4541,6 +5737,7 @@ def add_beacon(request):
         instance_id=(request.POST.get('instance_id') or '').strip().lower() or None,
         tx_power=tx_power,
         path_loss_n=path_loss_n,
+        height=height,
         map_x=map_x,
         map_y=map_y,
         label=label or None,
@@ -4639,6 +5836,11 @@ def update_beacon(request):
         return JsonResponse({'success': False,
                              'error': 'Tx power is an RSSI reading at 1 m, so it is negative '
                                       '— usually between -55 and -70.'})
+    height = _float('height')
+    if height is not None and not (0 <= height <= 10):
+        return JsonResponse({'success': False,
+                             'error': 'Mounting height is measured in metres above the floor, '
+                                      'so it should be between 0 and 10.'})
 
     before = beacon.advertisement_type
     beacon.beacon_uuid = uuid_value
@@ -4650,12 +5852,53 @@ def update_beacon(request):
     beacon.instance_id = (request.POST.get('instance_id') or '').strip() or None
     beacon.tx_power = tx_power
     beacon.path_loss_n = path_loss
+    beacon.height = height
     beacon.save()
 
     detail = f'{beacon.label or beacon.beacon_uuid[:8]} — {adv_type}'
     if before != adv_type:
         detail += f' (was {before})'
     log_admin_action(request, 'Update', 'BLEBeacon', beacon.beacon_id, detail)
+    return JsonResponse({'success': True, 'beacon': _beacon_payload(beacon)})
+
+
+@admin_only_required
+def calibrate_beacon(request):
+    """Write back only tx_power and path_loss_n, fitted from measurements.
+
+    Deliberately not update_beacon: that endpoint rewrites the whole identity
+    (UUID, major/minor, namespace) from its POST, so calling it with just two
+    calibration numbers would blank the very fields that decide whether the
+    beacon is ever matched again. Calibration is measured far more often than
+    identity is corrected, so it gets its own narrow endpoint.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
+
+    beacon = BLEBeacon.objects.filter(beacon_id=request.POST.get('beacon_id')).first()
+    if beacon is None:
+        return JsonResponse({'success': False, 'error': 'Beacon not found'})
+
+    try:
+        tx_power = int(float(request.POST.get('tx_power')))
+        path_loss_n = float(request.POST.get('path_loss_n'))
+    except (TypeError, ValueError):
+        return JsonResponse({'success': False, 'error': 'tx_power and path_loss_n must be numbers'})
+
+    if not (-120 <= tx_power <= 0):
+        return JsonResponse({'success': False,
+                             'error': 'Tx power is an RSSI reading at 1 m, so it is negative.'})
+    if not (1.0 <= path_loss_n <= 6.0):
+        return JsonResponse({'success': False,
+                             'error': 'Path-loss n is normally between 1.5 and 4.'})
+
+    before = (beacon.tx_power, beacon.path_loss_n)
+    beacon.tx_power = tx_power
+    beacon.path_loss_n = path_loss_n
+    beacon.save(update_fields=['tx_power', 'path_loss_n'])
+    log_admin_action(request, 'Calibrate', 'BLEBeacon', beacon.beacon_id,
+                     f'{beacon.label or beacon.beacon_uuid[:8]}: '
+                     f'tx {before[0]} -> {tx_power}, n {before[1]} -> {path_loss_n}')
     return JsonResponse({'success': True, 'beacon': _beacon_payload(beacon)})
 
 
@@ -4845,13 +6088,24 @@ def _astar(start_id, goal_id, coords, adjacency):
     return None, None
 
 
-@patron_login_required
 def get_patron_map_data(request):
-    """Read-only map payload for the patron navigation map: active floor plan,
-    shelves, waypoints, beacons and connections."""
-    floor_plan = FloorPlan.objects.filter(is_active=True).first()
+    """Read-only map payload for the patron navigation map: one floor's rooms,
+    shelves, waypoints, beacons and connections, plus the list of floors.
+
+    Which floor is decided by ?floor=<id> when the patron used the switcher,
+    and otherwise by the lowest floor in service. The floors list is what the
+    switcher is built from, so a library with one floor simply gets a list of
+    one and the control hides itself.
+    """
+    # ?shelf= lets the map open on the floor the target book is on, without the
+    # client having to know which floor that is -- it only knows the shelf.
+    raw_shelf = (request.GET.get('shelf') or '').strip()
+    target_shelf = (Shelf.objects.filter(shelf_id=raw_shelf).first()
+                    if raw_shelf.isdigit() else None)
+    floor_plan, live_plans = _floor_for_request(request, target_shelf=target_shelf)
     if floor_plan is None:
-        return JsonResponse({'success': False, 'has_active': False, 'error': 'No active floor plan'})
+        return JsonResponse({'success': False, 'has_active': False,
+                             'error': 'No floor plan is in service'})
 
     width, height = _floorplan_canvas_size(floor_plan)
 
@@ -4913,6 +6167,18 @@ def get_patron_map_data(request):
         # Null until an Administrator measures it; the client refuses to
         # trilaterate without it rather than mixing metres with canvas units.
         'pixels_per_meter': floor_plan.pixels_per_meter,
+        'north_offset_deg': floor_plan.north_offset_deg or 0,
+        'floor_number': floor_plan.floor_number,
+        'floor_label': floor_plan.floor_label,
+        # What the floor switcher is built from. One floor gives a list
+        # of one, and the control hides itself.
+        'floors': _floor_payload(live_plans, floor_plan),
+        # Which floor the requested shelf is on, so the map can say "it is on
+        # the 2nd floor" when the patron is looking at a different one.
+        'target_floor_id': (
+            live_plans.filter(room__shelf=target_shelf).values_list('floor_plan_id', flat=True).first()
+            if target_shelf is not None else None
+        ),
         'renovation_notice': floor_plan.renovation_notice or '',
         'rooms': rooms,
         'shelves': shelves,
@@ -4922,13 +6188,23 @@ def get_patron_map_data(request):
     })
 
 
-@patron_login_required
 def get_navigation_route(request):
     """Compute the A* route from the patron's current position to a target shelf
-    (or waypoint) over the active floor plan's waypoint graph."""
-    floor_plan = FloorPlan.objects.filter(is_active=True).first()
+    (or waypoint), over one floor's waypoint graph.
+
+    The floor is the one the target sits on, not a global "active" plan: asking
+    to be taken to a book decides which floor is being walked. Routes do not
+    cross floors -- Waypoint has no notion of a stair or a lift, and the
+    positioning that would have to follow you up one is single-floor anyway.
+    A cross-floor request is answered with the floor to go to rather than a
+    path that pretends the two are connected.
+    """
+    target_shelf_id = request.GET.get('target_shelf_id')
+    resolving_shelf = (Shelf.objects.filter(shelf_id=target_shelf_id).first()
+                       if target_shelf_id else None)
+    floor_plan, _live = _floor_for_request(request, target_shelf=resolving_shelf)
     if floor_plan is None:
-        return JsonResponse({'success': False, 'error': 'No active floor plan'})
+        return JsonResponse({'success': False, 'error': 'No floor plan is in service'})
 
     try:
         start_x = float(request.GET.get('start_x'))
@@ -4936,7 +6212,6 @@ def get_navigation_route(request):
     except (TypeError, ValueError):
         return JsonResponse({'success': False, 'error': 'start_x and start_y are required'})
 
-    target_shelf_id = request.GET.get('target_shelf_id')
     target_waypoint_id = request.GET.get('target_waypoint_id')
     if not target_shelf_id and not target_waypoint_id:
         return JsonResponse({'success': False, 'error': 'A target_shelf_id or target_waypoint_id is required'})
@@ -5025,7 +6300,8 @@ def get_navigation_route(request):
         if goal_wp not in coords:
             return JsonResponse({'success': False, 'error': 'Target waypoint not found on this floor plan'})
     else:
-        target_shelf = Shelf.objects.filter(shelf_id=target_shelf_id).first()
+        # Already looked up above to decide which floor this route belongs to.
+        target_shelf = resolving_shelf
         if target_shelf is None:
             return JsonResponse({'success': False, 'error': 'Target shelf not found'})
         linked = Waypoint.objects.filter(floor_plan=floor_plan, linked_shelf=target_shelf).first()
@@ -5441,8 +6717,8 @@ def reset_staff_password(request, user_id):
     if request.method != 'POST':
         return redirect('user_management')
     password = request.POST.get('password') or ''
-    if len(password) < 6:
-        messages.error(request, 'Password must be at least 6 characters.')
+    if len(password) < MIN_PASSWORD_LENGTH:
+        messages.error(request, PASSWORD_RULE_TEXT)
         return redirect('user_management')
     user.password_hash = hash_password(password)
     user.save(update_fields=['password_hash'])
@@ -5525,6 +6801,7 @@ def inventory_management(request):
     if q:
         records = records.filter(
             Q(book__title__icontains=q) | Q(title_hint__icontains=q)
+            | Q(book__author__icontains=q) | Q(book__ISBN__icontains=q)
             | Q(qr_label__icontains=q) | Q(supplier__icontains=q)
             | Q(po_number__icontains=q) | Q(donor_name__icontains=q)
         )
@@ -5580,8 +6857,6 @@ def inventory_management(request):
         'today': timezone.localdate().isoformat(),
         'books': Book.objects.order_by('title'),
         'shelves': shelf_list,
-        'pending_transactions_count': Transaction.objects.filter(
-            transaction_type='Borrow', return_date__isnull=True).count(),
     }
     context.update(_inventory_stats())
     return render(request, 'admin/inventoryadmin.html', context)
@@ -5644,6 +6919,9 @@ def _resolve_intake_book(item, source):
     author = (item.get('author') or '').strip()
     isbn = (item.get('isbn') or '').strip()
     genre = (item.get('genre') or '').strip()
+    material_type = (item.get('material_type') or 'Book').strip()
+    if material_type not in {c[0] for c in Book.MATERIAL_TYPE_CHOICES}:
+        material_type = 'Book'
     year = None
     raw_year = str(item.get('publication_year') or '').strip()
     if raw_year:
@@ -5667,6 +6945,7 @@ def _resolve_intake_book(item, source):
         author=author or 'Unknown',
         ISBN=isbn or None,
         genre=genre or None,
+        material_type=material_type,
         publication_year=year,
         # A donated title is not lendable until accessioning reaches Shelved,
         # which is where the Donations page flips it to Available.
@@ -5824,12 +7103,11 @@ def staff_inventory_receive(request):
             .order_by('-inventory_id')[:25])
     return render(request, 'library_staff/inventoryreceive.html', {
         'recent': mine,
+        'shelf_levels_available': _shelf_capacity(),
         'books': Book.objects.order_by('title'),
         'condition_choices': InventoryRecord.CONDITION_CHOICES,
         'stage_choices': InventoryRecord.STAGE_CHOICES,
         'today': timezone.localdate().isoformat(),
-        'pending_transactions_count': Transaction.objects.filter(
-            transaction_type='Borrow', return_date__isnull=True).count(),
     })
 
 
@@ -6279,6 +7557,38 @@ def _library_card_context(patron):
         'active_borrows': active_borrows,
         'issued_on': timezone.localdate(),
     }
+
+
+@granted_module_required('patrons')
+def serve_patron_credential(request, path):
+    """A patron's uploaded ID, served only to staff who hold the patrons module.
+
+    These are photographs of government identity documents. They used to sit
+    under /media/, which is served by django.views.static.serve with no
+    authentication at all -- an anonymous request for the file returned it in
+    full. The random filename was the only thing standing in the way, and an
+    unguessable URL is not access control: it leaks through browser history on a
+    shared desk machine, through a referrer header, through any backup.
+
+    Gated on the patrons module rather than on being any logged-in user, because
+    reviewing an applicant's ID is exactly what that module is for.
+    """
+    from django.utils._os import safe_join
+    from django.views.static import serve as static_serve
+
+    base = os.path.join(settings.MEDIA_ROOT, 'credentials')
+    name = os.path.basename(path or '')
+    if not name:
+        raise Http404('No such document.')
+    try:
+        # safe_join raises rather than escaping the directory, which is what
+        # stops ../../ from walking out of the credentials folder.
+        safe_join(base, name)
+    except (ValueError, SuspiciousFileOperation):
+        raise Http404('No such document.')
+
+    log_admin_action(request, 'View', 'Patron credential', detail=f'Opened ID document {name}')
+    return static_serve(request, name, document_root=base)
 
 
 @granted_module_required('patrons')

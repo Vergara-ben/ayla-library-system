@@ -22,7 +22,14 @@ from django.http import JsonResponse
 from django.shortcuts import redirect
 from django.utils import timezone
 
-from .auth_utils import check_password, hash_password
+from .auth_utils import (
+    check_password,
+    clear_login_failures,
+    hash_password,
+    login_locked_message,
+    record_login_failure,
+)
+from .audit import log_system_action
 from .models import Patron, PatronLog, User
 from .names import name_matches, parse_name, tokenise
 
@@ -34,7 +41,15 @@ DESK_SESSION_KEY = 'desk_mode'
 # How long an open visit has to have been running before typing the same name
 # again is read as a return rather than a double-tap. Short enough that lunch
 # counts as leaving, long enough that a stutter at the keyboard does not.
-RETURN_THRESHOLD = timedelta(minutes=5)
+RETURN_THRESHOLD = timedelta(minutes=15)
+
+# How long after signing in the desk screen keeps showing that patron their own
+# row. Long enough to read the confirmation and press Sign out on the way past,
+# short enough that the next person at the screen does not inherit it. Signing
+# out at the end of a long visit is done with the card, which needs no table.
+DESK_VIEWER_WINDOW = timedelta(minutes=3)
+DESK_VIEWER_KEY = 'desk_viewer'
+DESK_VIEWER_AT = 'desk_viewer_at'
 
 PURPOSE_CHOICES = [
     'Study',
@@ -159,9 +174,26 @@ def unlock_desk_mode(request):
         request.session.flush()
         return JsonResponse({'success': False, 'redirect': '/admin-portal/login/',
                              'error': 'This session has expired. Please sign in again.'})
-    if not password or not check_password(password, user.password_hash):
-        return JsonResponse({'success': False, 'error': 'That password is not correct.'})
 
+    # The most exposed password prompt in the system: desk mode exists to be
+    # handed to a member of the public, and this is a staff member's real
+    # account password with the machine sitting unattended on a counter. It
+    # accepted unlimited guesses. Throttled per account, like the sign-in pages.
+    scope, identity = 'desk', str(user.admin_id)
+    locked = login_locked_message(scope, identity)
+    if locked:
+        return JsonResponse({'success': False, 'error': locked})
+
+    if not password or not check_password(password, user.password_hash):
+        remaining = record_login_failure(scope, identity)
+        log_system_action('Unlock failed', 'Auth', user.admin_id,
+                          f'Failed desk-mode unlock for {user.fullname}')
+        error = 'That password is not correct.'
+        if remaining is not None and 0 < remaining <= 2:
+            error += f' {remaining} attempt(s) left before this is locked.'
+        return JsonResponse({'success': False, 'error': error})
+
+    clear_login_failures(scope, identity)
     request.session.pop(DESK_SESSION_KEY, None)
     request.session.modified = True
     destination = ('/library-staff/dashboard/'
@@ -203,6 +235,12 @@ def close_stale_visits():
         log.auto_closed = True
         log.save(update_fields=['exit_time', 'auto_closed'])
         closed += 1
+    if closed:
+        # Attributed to the system, not to whichever administrator happened to
+        # load the page that triggered the sweep -- they did not close anyone's
+        # visit, and an audit trail that says they did is worse than none.
+        log_system_action('Auto-close', 'PatronLog', None,
+                          f'Closed {closed} visit(s) left open on a previous day')
     return closed
 
 
@@ -282,8 +320,11 @@ def _toggle_visit(patron, purpose='', school=''):
                   .first())
 
     if open_visit is not None:
-        # A second scan seconds after the first is a stutter, not a departure.
-        if timezone.now() - open_visit.entry_time < timedelta(seconds=30):
+        # A second scan soon after the first is a re-scan, not a departure --
+        # someone checking the beep registered, or the reader firing twice. Only
+        # a visit that has been running a while can plausibly be ending, which
+        # is the same line RETURN_THRESHOLD draws for a typed name.
+        if timezone.now() - open_visit.entry_time < RETURN_THRESHOLD:
             return {
                 'success': True, 'action': 'already_in',
                 'name': patron.fullname,
@@ -308,6 +349,53 @@ def _toggle_visit(patron, purpose='', school=''):
     return {'success': True, 'action': 'entry', 'name': patron.fullname,
             'message': ('Welcome, ' + patron.fullname.split(' ')[0] + ' — signed in at '
                         + timezone.localtime(log.entry_time).strftime('%I:%M %p') + '.')}
+
+
+def remember_desk_viewer(request, patron):
+    """Note who just signed in, so the desk can show them their own row.
+
+    Desk mode puts the visit table in front of whoever is standing there, which
+    means one patron reading every other patron's name, school and visit times.
+    The table is now filtered to the person who just identified themselves, and
+    this is how the page knows who that is.
+    """
+    try:
+        request.session[DESK_VIEWER_KEY] = patron.patron_id
+        request.session[DESK_VIEWER_AT] = timezone.now().isoformat()
+    except Exception:
+        pass
+
+
+def forget_desk_viewer(request):
+    for key in (DESK_VIEWER_KEY, DESK_VIEWER_AT):
+        try:
+            request.session.pop(key, None)
+        except Exception:
+            pass
+
+
+def desk_viewer_id(request):
+    """The patron the desk screen is currently showing, if any.
+
+    Expires on its own: a patron who signs in and walks off must not leave
+    their visit on screen for the next person.
+    """
+    patron_id = request.session.get(DESK_VIEWER_KEY)
+    if not patron_id:
+        return None
+    stamp = request.session.get(DESK_VIEWER_AT)
+    if not stamp:
+        return None
+    try:
+        seen = datetime.fromisoformat(stamp)
+    except (TypeError, ValueError):
+        return None
+    if timezone.is_naive(seen):
+        seen = timezone.make_aware(seen)
+    if timezone.now() - seen > DESK_VIEWER_WINDOW:
+        forget_desk_viewer(request)
+        return None
+    return patron_id
 
 
 def _require_armed_or_staff(request):
@@ -352,6 +440,7 @@ def desk_sign(request):
     if patron is not None:
         result = _sign_in(patron, purpose, school)
         result['is_visitor'] = patron.account_status == 'Visitor'
+        remember_desk_viewer(request, patron)
         return JsonResponse(result)
 
     # Nobody by that name: a first-time visitor, logged without an account.
@@ -377,6 +466,7 @@ def desk_sign(request):
     result = _sign_in(visitor, purpose, school)
     result['is_visitor'] = True
     result['created_visitor'] = True
+    remember_desk_viewer(request, visitor)
     result['message'] = ('Welcome, ' + name.split(' ')[0]
                          + ' — signed in as a visitor. See the librarian with a valid ID '
                            'if you would like to become a member.')
@@ -405,6 +495,7 @@ def desk_sign_out(request):
 
     log.exit_time = timezone.now()
     log.save(update_fields=['exit_time'])
+    forget_desk_viewer(request)   # they have left; their row leaves the screen with them
     minutes = int((log.exit_time - log.entry_time).total_seconds() // 60)
     stay = (f'{minutes // 60}h {minutes % 60}m' if minutes >= 60 else f'{minutes}m')
     return JsonResponse({'success': True, 'action': 'exit', 'name': log.patron.fullname,
@@ -432,6 +523,10 @@ def desk_scan(request):
 
     result = _toggle_visit(patron, (request.POST.get('purpose') or '').strip())
     result['is_visitor'] = patron.account_status == 'Visitor'
+    if result.get('action') == 'exit':
+        forget_desk_viewer(request)      # gone: nothing of theirs stays on screen
+    else:
+        remember_desk_viewer(request, patron)
     return JsonResponse(result)
 
 
