@@ -35,6 +35,28 @@ class FloorPlan(models.Model):
     # metres — without this scale the two cannot be mixed, so trilateration
     # refuses to run until an Administrator measures and sets it.
     pixels_per_meter = models.FloatField(blank=True, null=True)
+    # How far the plan's "up" sits from magnetic north, in degrees clockwise.
+    # The compass reports bearings from north; the floor plan is drawn in
+    # whatever orientation the Administrator happened to draw it. Without this
+    # the two cannot be reconciled, and dead reckoning walks the marker off in
+    # a consistently wrong direction -- which looks far worse than not moving
+    # it at all. Measured once per plan from the Position Test page.
+    north_offset_deg = models.FloatField(default=0)
+    # Which storey this is. Used for ordering and for labelling the patron's
+    # floor switcher; the ground floor is 1.
+    floor_number = models.IntegerField(default=1)
+    # Whether this floor is in service.
+    #
+    # This used to mean "the one floor the whole system is looking at", and
+    # activating a second plan deactivated the first. That quietly broke the
+    # catalogue: ActiveLocationManager treats a book as locatable only if its
+    # floor plan is active, so switching to a newly drawn upper floor made
+    # every book on the ground floor vanish from search.
+    #
+    # It now means what it says -- any number of floors may be in service at
+    # once, and a book is locatable if the floor it sits on is. Which map to
+    # *draw* is a separate question, answered by the floor being viewed or by
+    # the floor the target book is on.
     is_active = models.BooleanField(default=True)
     renovation_notice = models.CharField(max_length=255, blank=True, null=True)
     renovation_message = models.TextField(blank=True, null=True)
@@ -42,6 +64,25 @@ class FloorPlan(models.Model):
 
     class Meta:
         db_table = 'Floor_Plans'
+        ordering = ['floor_number', 'floor_plan_id']
+
+    @property
+    def floor_label(self):
+        """How this storey is named to a patron.
+
+        Ordinals only make sense above ground: -1 came out as "-1th floor",
+        because Python's -1 % 10 is 9. Below ground and at ground level get
+        their own wording instead of a suffix that does not apply.
+        """
+        n = self.floor_number
+        if n is None:
+            n = 1
+        if n < 0:
+            return f"Basement {abs(n)}"
+        if n == 0:
+            return "Ground floor"
+        suffix = 'th' if 11 <= (n % 100) <= 13 else {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')
+        return f"{n}{suffix} floor"
 
     def __str__(self):
         return self.name or f"Floor Plan {self.floor_plan_id}"
@@ -86,6 +127,20 @@ class BLEBeacon(models.Model):
     path_loss_n = models.FloatField(blank=True, null=True)
     map_x = models.FloatField()
     map_y = models.FloatField()
+    # Mounting height above the floor, in METRES -- deliberately not canvas
+    # units. It is a physical measurement of the building that has nothing to do
+    # with how the plan happens to be drawn, so it must survive the plan being
+    # rescaled or redrawn.
+    #
+    # RSSI ranging yields the straight-line distance through the air, but
+    # trilateration solves in the floor plane. A beacon mounted 2.4 m up reads
+    # as 1.2 m away from someone standing directly beneath it, and that error
+    # is largest exactly where the patron is closest to a beacon. Recording the
+    # height is what lets the vertical leg be taken back out.
+    #
+    # Null means "not measured", and applies no correction -- the same
+    # behaviour as before this field existed.
+    height = models.FloatField(blank=True, null=True)
     label = models.CharField(max_length=255, blank=True, null=True)
 
     class Meta:
@@ -254,9 +309,28 @@ class Book(models.Model):
         ('Available', 'Available'),
         ('Borrowed', 'Borrowed'),
         ('Being Read', 'Being Read'),
+        # Returned to the desk but not yet put back. The copy is in the
+        # building and not with a patron, but it is not at its shelf either --
+        # so sending someone to that shelf would waste their trip. Cleared by
+        # staff from the reshelving queue once it is physically back.
+        ('For Reshelving', 'For reshelving'),
         ('Overdue', 'Overdue'),
         ('Lost', 'Lost'),
         ('Donated', 'Donated'),
+    ]
+
+    # What kind of material this is, as distinct from what it is about.
+    # `genre` already holds the subject (Fiction, Mathematics, Adventure), which
+    # is a different question from whether the thing in your hand is a book, a
+    # magazine or a bound journal -- and they are shelved and lent differently.
+    MATERIAL_TYPE_CHOICES = [
+        ('Book', 'Book'),
+        ('Magazine', 'Magazine'),
+        ('Journal', 'Journal'),
+        ('Comic', 'Comic / Graphic novel'),
+        ('Newspaper', 'Newspaper'),
+        ('Reference', 'Reference'),
+        ('Thesis', 'Thesis / Research paper'),
     ]
 
     book_id = models.AutoField(primary_key=True)
@@ -272,6 +346,8 @@ class Book(models.Model):
     publication_year = models.IntegerField(blank=True, null=True)
     ISBN = models.CharField(max_length=255, blank=True, null=True)
     genre = models.CharField(max_length=255, blank=True, null=True)
+    material_type = models.CharField(
+        max_length=20, choices=MATERIAL_TYPE_CHOICES, default='Book')
     status = models.CharField(
         max_length=50,
         choices=STATUS_CHOICES,
@@ -285,6 +361,12 @@ class Book(models.Model):
 
     class Meta:
         db_table = 'Books'
+        indexes = [
+            # Catalogue and inventory pages group and filter on status; the
+            # reshelving queue lives entirely on it.
+            models.Index(fields=['status']),
+            models.Index(fields=['title']),
+        ]
 
     def __str__(self):
         return self.title
@@ -359,6 +441,22 @@ class User(models.Model):
         return self.fullname
 
     @property
+    def initials(self):
+        """One or two letters for the header's profile button.
+
+        First and last word of the name, so "Ben Vergara" gives BV and a
+        single-word name gives one letter rather than a doubled one. Computed
+        here rather than in the template because Django's template language
+        cannot index a split list, and the workaround for it was unreadable.
+        """
+        words = (self.fullname or '').split()
+        if not words:
+            return '?'
+        if len(words) == 1:
+            return words[0][:1].upper()
+        return (words[0][:1] + words[-1][:1]).upper()
+
+    @property
     def module_keys(self):
         """The operational modules this account may open.
 
@@ -407,6 +505,10 @@ class Announcement(models.Model):
 
 # ─── 13. PATRON ───────────────────────────────────────────────
 class Patron(models.Model):
+
+    # Wrong OTP guesses allowed before the code is burnt. Matches
+    # PasswordResetOTP.MAX_ATTEMPTS so both halves of the system agree.
+    MAX_OTP_ATTEMPTS = 5
 
     PATRON_TYPE_CHOICES = [
         ('Student', 'Student'),
@@ -472,6 +574,14 @@ class Patron(models.Model):
     # identity evidence there is and a reviewer must open it before approving.
     # On-site registrations have none by design - see below.
     credential_document = models.CharField(max_length=255, blank=True, null=True)
+
+    @property
+    def credential_filename(self):
+        """Just the file name -- the credential route serves from a fixed folder."""
+        if not self.credential_document:
+            return ''
+        return self.credential_document.replace('\\', '/').rsplit('/', 1)[-1]
+
     # Who validated this patron's identity, and when. On-site that is the desk
     # staff who looked at the physical ID; online it is whoever reviewed the
     # uploaded one before approving. Deliberately the *only* thing kept about
@@ -486,9 +596,23 @@ class Patron(models.Model):
         related_name='verified_patrons',
     )
     identity_verified_at = models.DateTimeField(blank=True, null=True)
-    # Email OTP for the online registration flow.
+    # Email OTP, shared by online registration and the self-service account
+    # actions (deactivate, reactivate, change password). Only one code is ever
+    # outstanding, so `otp_purpose` records which action it was issued for --
+    # without it a code emailed to confirm a password change would also be
+    # spendable on the deactivate endpoint, since both check the same field.
     otp_code = models.CharField(max_length=6, blank=True, null=True)
+    otp_purpose = models.CharField(max_length=20, blank=True, default='')
     otp_expires_at = models.DateTimeField(blank=True, null=True)
+    # Wrong guesses against the current code. Without a ceiling a 6-digit code
+    # is only a million cheap guesses from being walked through inside its own
+    # 10-minute window, so the count is kept here and the code is burnt when it
+    # runs out. Reset every time a fresh code is issued.
+    otp_attempts = models.PositiveIntegerField(default=0)
+    # When the last code was emailed, so a cooldown can refuse to send another
+    # straight away -- otherwise "send code" is a button that mails someone
+    # else's inbox as fast as it can be clicked.
+    otp_last_sent_at = models.DateTimeField(blank=True, null=True)
     otp_verified = models.BooleanField(default=False)
 
     def save(self, *args, **kwargs):
@@ -550,6 +674,15 @@ class Transaction(models.Model):
 
     class Meta:
         db_table = 'Transactions'
+        indexes = [
+            # Every report filters a date range on this.
+            models.Index(fields=['transaction_date']),
+            # "What is currently out" -- the pending count on ten pages, the
+            # unreturned report, and the borrowing-limit check on every loan.
+            models.Index(fields=['transaction_type', 'return_date']),
+            # One patron's history, on their account page and the desk lookup.
+            models.Index(fields=['patron', '-transaction_date']),
+        ]
 
     def __str__(self):
         return f"{self.transaction_type} - {self.book}"
@@ -602,6 +735,50 @@ class DueDateExtension(models.Model):
         return f'Extension for transaction #{self.transaction_id} ({self.status})'
 
 
+class ReactivationRequest(models.Model):
+    """One patron's ask to reactivate a self-deactivated account.
+
+    Deactivation (Figure 20) processes immediately once its own OTP is
+    verified, so it needs no record of its own beyond the status change
+    itself. Reactivation (Figure 19) is different: OTP verification only
+    forwards the request to an Admin, who approves or rejects it, so that
+    step needs somewhere to live in the meantime — this is that record,
+    mirroring how DueDateExtension holds a request separately from the
+    Transaction it applies to rather than as flags on it.
+    """
+
+    STATUS_CHOICES = [
+        ('Pending', 'Pending'),
+        ('Approved', 'Approved'),
+        ('Rejected', 'Rejected'),
+    ]
+
+    request_id = models.AutoField(primary_key=True)
+    patron = models.ForeignKey(
+        Patron,
+        on_delete=models.CASCADE,
+        related_name='reactivation_requests',
+    )
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='Pending')
+    requested_at = models.DateTimeField(default=timezone.now)
+    resolved_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        db_column='resolved_by',
+    )
+    resolved_at = models.DateTimeField(blank=True, null=True)
+    staff_note = models.CharField(max_length=255, blank=True, null=True)
+
+    class Meta:
+        db_table = 'Reactivation_Requests'
+        ordering = ['-requested_at']
+
+    def __str__(self):
+        return f'Reactivation request for {self.patron} ({self.status})'
+
+
 # ─── 15. PATRON LOGS ──────────────────────────────────────────
 class PatronLog(models.Model):
     """One visit session: entry_time is set on entry, exit_time on exit."""
@@ -624,6 +801,13 @@ class PatronLog(models.Model):
 
     class Meta:
         db_table = 'Patron_Logs'
+        indexes = [
+            # Visit reports and the peak-hour analytics scan this by date.
+            models.Index(fields=['entry_time']),
+            # "Who is still inside" -- the occupancy count and the stale-visit
+            # sweep, both of which run on ordinary page loads.
+            models.Index(fields=['exit_time']),
+        ]
 
     def __str__(self):
         return f"{self.patron} — entry {self.entry_time}"
@@ -829,12 +1013,25 @@ class BorrowingRule(models.Model):
 
 # ─── 16. SYSTEM LOGS (ADMIN AUDIT TRAIL) ──────────────────────
 class SystemLog(models.Model):
-    """Audit trail of administrative actions performed in the system.
+    """Activity log: who did what, in every portal.
 
-    Powers the manuscript's System Log Report. ``admin`` is kept with
-    SET_NULL and ``admin_name`` stores a snapshot so the trail survives
-    even if the admin account is later deleted.
+    This is the manuscript's Activity Logs entity (ERD, Figure 87), which
+    relates it to Patrons *and* Staff. It began as an admin-only audit trail,
+    so the actor was a single FK to User; patrons live in their own table and
+    were therefore invisible to it. Both actor references are now kept, with
+    ``actor_role`` saying which one applies.
+
+    Both FKs are SET_NULL and ``actor_name`` holds a snapshot of the name, so
+    a deleted account leaves its history readable rather than a row of blanks
+    -- an audit trail that disappears with the account it indicts is not one.
     """
+
+    ACTOR_ROLE_CHOICES = [
+        ('Admin', 'Administrator'),
+        ('Staff', 'Library Staff'),
+        ('Patron', 'Patron'),
+        ('System', 'System'),          # scheduled jobs: overdue sweeps, auto-closed visits
+    ]
 
     log_id = models.AutoField(primary_key=True)
     admin = models.ForeignKey(
@@ -844,8 +1041,20 @@ class SystemLog(models.Model):
         null=True,
         db_column='admin_id'
     )
+    patron = models.ForeignKey(
+        'Patron',
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        db_column='patron_id',
+        related_name='activity_logs'
+    )
+    actor_role = models.CharField(max_length=20, choices=ACTOR_ROLE_CHOICES, default='Admin')
+    # Kept under its original column name so the 58 existing call sites and
+    # every row already recorded stay valid; it is the actor's name whichever
+    # table the actor came from.
     admin_name = models.CharField(max_length=255, blank=True, null=True)
-    action = models.CharField(max_length=50)          # Create, Update, Delete, Login, Process
+    action = models.CharField(max_length=50)          # Create, Update, Delete, Login, Search, ...
     entity_type = models.CharField(max_length=100)    # Book, Patron, Transaction, Donation, ...
     entity_id = models.CharField(max_length=100, blank=True, null=True)
     detail = models.CharField(max_length=500, blank=True, null=True)
@@ -854,9 +1063,19 @@ class SystemLog(models.Model):
     class Meta:
         db_table = 'System_Logs'
         ordering = ['-timestamp']
+        indexes = [
+            # The viewer's default is "newest first, filtered by role", and the
+            # table only grows.
+            models.Index(fields=['-timestamp'], name='syslog_ts_desc_idx'),
+            models.Index(fields=['actor_role', '-timestamp'], name='syslog_role_ts_idx'),
+        ]
+
+    @property
+    def actor_name(self):
+        return self.admin_name or 'Unknown'
 
     def __str__(self):
-        return f"{self.action} {self.entity_type} by {self.admin_name}"
+        return f"{self.action} {self.entity_type} by {self.actor_name} ({self.actor_role})"
 
 # ─── 16. PASSWORD RESET OTP ───────────────────────────────────
 class PasswordResetOTP(models.Model):
@@ -1083,3 +1302,41 @@ class StockMovement(models.Model):
 
     def __str__(self):
         return f"{self.action} — {self.inventory_record_id}"
+
+# ─── 14. LOGIN THROTTLE ───────────────────────────────────────
+class LoginAttempt(models.Model):
+    """One row per identity being guessed at, holding the run of failures.
+
+    Every sign-in door in the system -- Administrator, Library Staff, patron, and
+    the desk-mode unlock -- accepted unlimited password guesses. The desk unlock
+    was the worst of them: desk mode exists to be handed to a member of the
+    public, and the way back out is a staff member's real account password.
+
+    Keyed on scope + identifier rather than on a foreign key, so an address that
+    belongs to no account is throttled exactly like one that does. If misses
+    against unknown users were free, the throttle would itself answer the
+    question of which addresses exist.
+    """
+    MAX_FAILURES = 5
+    LOCKOUT_MINUTES = 15
+    # Failures older than this are not part of the current run. Without it a
+    # staff member who fumbled three times last March would start today two
+    # strikes down.
+    WINDOW_MINUTES = 30
+
+    attempt_id = models.AutoField(primary_key=True)
+    scope = models.CharField(max_length=20)          # admin | staff | patron | desk
+    identifier = models.CharField(max_length=255)    # email, or account id for desk
+    failures = models.PositiveIntegerField(default=0)
+    first_failure_at = models.DateTimeField(null=True, blank=True)
+    last_failure_at = models.DateTimeField(null=True, blank=True)
+    locked_until = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'Login_Attempts'
+        unique_together = ('scope', 'identifier')
+        indexes = [models.Index(fields=['scope', 'identifier'])]
+
+    def __str__(self):
+        return f'{self.scope}:{self.identifier} ({self.failures})'
+
