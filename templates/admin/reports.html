@@ -9,12 +9,36 @@
     <script src="{% static 'js/theme.js' %}"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="{% static 'js/tailwind-theme.js' %}"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha384-iw3OoTErCYJJB9mCa8LNS2hbsQ7M3C0EpIsO/H5+EGAkPGc6rk+V8i04oW/K5xq0" crossorigin="anonymous" referrerpolicy="no-referrer">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@400;700&display=swap" rel="stylesheet">
 
     <link rel="stylesheet" href="{% static 'css/theme.css' %}">
+    <style>
+        /* The date fields collapse sideways instead of disappearing abruptly,
+           so it reads as the form adapting rather than the page redrawing. */
+        #date-fields {
+            max-width: 30rem;
+            opacity: 1;
+            transition: max-width .3s cubic-bezier(.4, 0, .2, 1), opacity .2s ease, margin .3s ease;
+        }
+        #date-fields.is-collapsed {
+            max-width: 0;
+            opacity: 0;
+            margin-left: -1rem;   /* swallows the flex gap it would otherwise still occupy */
+            pointer-events: none;
+        }
+        #report-output { animation: report-in .35s cubic-bezier(.4, 0, .2, 1) both; }
+        @keyframes report-in {
+            from { opacity: 0; transform: translateY(8px); }
+            to   { opacity: 1; transform: none; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            #date-fields { transition: none; }
+            #report-output { animation: none; }
+        }
+    </style>
     <style>
         body {
             font-family: 'Inter', sans-serif;
@@ -60,11 +84,8 @@
                 </button>
                 <h2 class="logo-text text-lg tracking-wider text-slate-200 uppercase">Reports</h2>
             </div>
-            <div class="flex items-center gap-4">
-                <span class="bg-cyan-950 text-cyan-400 text-xs px-2.5 py-1 rounded font-bold border border-cyan-800 tracking-wider">ADMIN</span>
-                <div class="w-8 h-8 rounded-full bg-cyan-900 border border-cyan-700 flex items-center justify-center text-xs font-bold text-cyan-200">
-                    AD
-                </div>
+            <div class="flex items-center gap-3">
+                {% include 'admin/_headeractions.html' with accent='cyan' %}
             </div>
         </header>
 
@@ -81,30 +102,39 @@
                             {% endfor %}
                         </select>
                     </div>
-                    <div class="space-y-1.5">
-                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Start Date</label>
-                        <input type="date" name="start" value="{{ start_date }}" {% if is_snapshot %}disabled{% endif %} class="rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium disabled:opacity-40" style="background-color: var(--bg-input);">
-                    </div>
-                    <div class="space-y-1.5">
-                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">End Date</label>
-                        <input type="date" name="end" value="{{ end_date }}" {% if is_snapshot %}disabled{% endif %} class="rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium disabled:opacity-40" style="background-color: var(--bg-input);">
+                    {# Collapses away entirely for snapshot reports rather than sitting #}
+                    {# there greyed out, because a disabled date box still reads as    #}
+                    {# something you ought to be able to fill in.                      #}
+                    <div id="date-fields" class="flex items-end gap-4 overflow-hidden{% if is_snapshot %} is-collapsed{% endif %}">
+                        <div class="space-y-1.5">
+                            <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Start Date</label>
+                            <input type="date" name="start" value="{{ start_date }}" {% if is_snapshot %}disabled{% endif %} class="rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                        </div>
+                        <div class="space-y-1.5">
+                            <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">End Date</label>
+                            <input type="date" name="end" value="{{ end_date }}" {% if is_snapshot %}disabled{% endif %} class="rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                        </div>
                     </div>
                     <div class="flex items-center gap-2">
+                        {# Tells the view this was an explicit request, so a bare visit #}
+                        {# to the page builds nothing. #}
+                        <input type="hidden" name="generate" value="1">
                         <button type="submit" class="bg-cyan-700/30 text-cyan-400 border border-cyan-800/80 hover:bg-cyan-700/50 text-xs font-bold px-4 py-2.5 rounded-lg flex items-center gap-2 transition-colors">
                             <i class="fa-solid fa-arrows-rotate text-[11px]"></i> Generate
                         </button>
-                        <button type="submit" formaction="{% url 'admin_report_excel' %}" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-emerald-500/90 text-xs font-bold px-4 py-2.5 rounded-lg flex items-center gap-2 transition-colors">
+                        <button type="submit" formaction="{% url 'admin_report_excel' %}" {% if not generated %}disabled title="Generate the report first"{% endif %} class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-emerald-500/90 text-xs font-bold px-4 py-2.5 rounded-lg flex items-center gap-2 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-slate-900">
                             <i class="fa-solid fa-file-excel text-[11px]"></i> Export Excel
                         </button>
-                        <button type="submit" formaction="{% url 'admin_report_pdf' %}" class="bg-cyan-700 hover:bg-cyan-600 text-white text-xs font-bold px-4 py-2.5 rounded-lg flex items-center gap-2 transition-colors shadow-md">
+                        <button type="submit" formaction="{% url 'admin_report_pdf' %}" {% if not generated %}disabled title="Generate the report first"{% endif %} class="bg-cyan-700 hover:bg-cyan-600 text-white text-xs font-bold px-4 py-2.5 rounded-lg flex items-center gap-2 transition-colors shadow-md disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-cyan-700">
                             <i class="fa-solid fa-file-pdf text-[11px]"></i> Download PDF
                         </button>
                     </div>
                 </div>
-                {% if is_snapshot %}
-                <p class="text-[11px] text-slate-500 mt-3"><i class="fa-solid fa-circle-info mr-1"></i> This report is a real-time snapshot; the date range does not apply.</p>
-                {% endif %}
+                <p id="snapshot-note" class="text-[11px] text-slate-500 mt-3{% if not is_snapshot %} hidden{% endif %}"><i class="fa-solid fa-circle-info mr-1"></i> This report is a real-time snapshot; the date range does not apply.</p>
             </form>
+
+            {% if report %}
+            <div id="report-output" class="space-y-6">
 
             <!-- Report header + summary -->
             <div>
@@ -121,6 +151,134 @@
                 </div>
                 {% endfor %}
             </div>
+
+            {% if report.chart %}
+            {# The chart is the answer; the table underneath is the working. Drawn #}
+            {# as inline SVG from coordinates the server computed, which the PDF   #}
+            {# exporter redraws from the same numbers -- so the printed chart      #}
+            {# cannot drift away from this one.                                     #}
+            <div class="rounded-xl border border-slate-800/80 overflow-hidden shadow-2xl" style="background-color: var(--bg-card);">
+                <div class="p-5 border-b border-slate-800 flex items-center gap-2 flex-wrap">
+                    <i class="fa-solid fa-chart-simple text-cyan-600 text-xs"></i>
+                    <h4 class="text-sm font-bold text-slate-200 tracking-wide">{{ report.chart.title }}</h4>
+                    {% if report.chart.peak_mark %}
+                    <span class="text-[10px] font-bold text-cyan-400 border border-cyan-800/60 rounded-full px-2 py-0.5">
+                        {{ report.chart.peak_mark.label }} &middot; {{ report.chart.peak_mark.value }}
+                    </span>
+                    {% endif %}
+                    <span class="text-[10px] text-slate-500 ml-auto">{{ report.chart.note }}</span>
+                </div>
+
+                <div class="p-5">
+                    {% if report.chart.has_data %}
+                    <svg viewBox="0 0 {{ report.chart.width }} {{ report.chart.height }}"
+                         width="100%" height="auto" preserveAspectRatio="xMidYMid meet"
+                         style="display:block; max-height:290px; overflow:visible;"
+                         role="img"
+                         aria-label="{{ report.chart.title }}. {{ report.chart.axis_note }}. Exact figures are listed in the tables below.">
+
+                        {% for g in report.chart.gridlines %}
+                        <line x1="{{ report.chart.plot_left }}" y1="{{ g.y }}"
+                              x2="{{ report.chart.plot_right }}" y2="{{ g.y }}"
+                              stroke="currentColor" stroke-width="1"
+                              class="text-slate-500" opacity="0.18"></line>
+                        <text x="{{ report.chart.axis_label_x }}" y="{{ g.label_y }}"
+                              text-anchor="end" font-size="9" fill="currentColor"
+                              class="text-slate-500" opacity="0.85">{{ g.label }}</text>
+                        {% endfor %}
+
+                        {% if report.chart.kind == 'line' %}
+                        <path d="{{ report.chart.area }}" fill="var(--accent, #0e7490)" opacity="0.12"></path>
+                        <polyline points="{{ report.chart.line }}" fill="none"
+                                  stroke="var(--accent, #0e7490)" stroke-width="2.5"
+                                  stroke-linejoin="round" stroke-linecap="round"></polyline>
+                        {% for p in report.chart.points %}
+                        {% if p.is_peak %}
+                        <line x1="{{ p.x }}" y1="{{ p.y }}" x2="{{ p.x }}" y2="{{ report.chart.baseline_y }}"
+                              stroke="var(--accent, #0e7490)" stroke-width="1"
+                              stroke-dasharray="3 3" opacity="0.55"></line>
+                        <circle cx="{{ p.x }}" cy="{{ p.y }}" r="7" fill="var(--accent, #0e7490)" opacity="0.22"></circle>
+                        <circle cx="{{ p.x }}" cy="{{ p.y }}" r="4.5" fill="var(--accent, #0e7490)"
+                                stroke="var(--bg-card, #fff)" stroke-width="2"></circle>
+                        <text x="{{ p.x }}" y="{{ p.value_y }}" text-anchor="middle"
+                              font-size="11" font-weight="700"
+                              fill="var(--accent, #0e7490)">{{ p.value }}</text>
+                        {% else %}
+                        <circle cx="{{ p.x }}" cy="{{ p.y }}" r="3"
+                                fill="var(--accent, #0e7490)" opacity="0.75"></circle>
+                        {% endif %}
+                        <title>{{ p.label }} — {{ p.value }} ({{ p.share }}%)</title>
+                        {% endfor %}
+
+                        {% else %}
+                        {% for b in report.chart.bars %}
+                        <rect x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h }}" rx="2"
+                              fill="var(--accent, #0e7490)"
+                              opacity="{% if b.is_peak %}1{% else %}0.45{% endif %}">
+                            <title>{{ b.label }} — {{ b.value }} ({{ b.share }}%)</title>
+                        </rect>
+                        {% if b.value %}
+                        <text x="{{ b.cx }}" y="{{ b.value_y }}" text-anchor="middle"
+                              font-size="10" font-weight="700"
+                              fill="var(--accent, #0e7490)"
+                              opacity="{% if b.is_peak %}1{% else %}0.75{% endif %}">{{ b.value }}</text>
+                        {% endif %}
+                        {% endfor %}
+                        {% endif %}
+
+                        <line x1="{{ report.chart.plot_left }}" y1="{{ report.chart.baseline_y }}"
+                              x2="{{ report.chart.plot_right }}" y2="{{ report.chart.baseline_y }}"
+                              stroke="currentColor" stroke-width="1" class="text-slate-500" opacity="0.35"></line>
+                        {% for m in report.chart.marks %}
+                        {% if m.show_label %}
+                        <text x="{% if report.chart.kind == 'line' %}{{ m.x }}{% else %}{{ m.cx }}{% endif %}"
+                              y="{{ report.chart.tick_label_y }}" text-anchor="middle"
+                              font-size="9.5" fill="currentColor"
+                              class="{% if m.is_peak %}text-cyan-500{% else %}text-slate-500{% endif %}"
+                              {% if m.is_peak %}font-weight="700"{% endif %}>{{ m.axis_label }}</text>
+                        {% endif %}
+                        {% endfor %}
+                    </svg>
+                    <p class="text-[10px] text-slate-500 text-center mt-3">
+                        {{ report.chart.axis_note }} &middot; exact figures in the tables below
+                    </p>
+                    {% else %}
+                    <p class="py-8 text-center text-slate-500 text-xs">{{ report.chart.note }}</p>
+                    {% endif %}
+                </div>
+            </div>
+            {% endif %}
+
+            {% if report.breakdown %}
+            {# Totals that do not fit a row-per-record table: fine totals per   #}
+            {# day/week/month, visits per hour. Rendered beside the detail      #}
+            {# rather than instead of it, because the adviser asked for both    #}
+            {# the totals and the records behind them.                          #}
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {% for label, pairs in report.breakdown.items %}
+                <div class="rounded-xl border border-slate-800/80 overflow-hidden" style="background-color: var(--bg-card);">
+                    <div class="px-5 py-3 border-b border-slate-800 flex items-center justify-between">
+                        <h4 class="text-xs font-bold text-slate-200 tracking-wide uppercase">{{ label }}</h4>
+                        <span class="text-[10px] text-slate-500">{{ pairs|length }}</span>
+                    </div>
+                    <div class="max-h-56 overflow-y-auto">
+                        <table class="w-full text-left border-collapse">
+                            <tbody class="divide-y divide-slate-800/40 text-xs">
+                                {% for name, value in pairs %}
+                                <tr>
+                                    <td class="py-2 px-5 text-slate-400">{{ name }}</td>
+                                    <td class="py-2 px-5 text-right font-semibold text-cyan-400">{{ value }}</td>
+                                </tr>
+                                {% empty %}
+                                <tr><td class="py-6 px-5 text-center text-slate-500">Nothing in this period.</td></tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
 
             <!-- Data table -->
             <div class="rounded-xl border border-slate-800/80 overflow-hidden shadow-2xl flex flex-col" style="background-color: var(--bg-card);">
@@ -157,6 +315,18 @@
                 </div>
             </div>
 
+            </div>
+            {% else %}
+            <div class="rounded-xl border border-dashed border-slate-800 py-20 px-6 text-center" style="background-color: var(--bg-card);">
+                <i class="fa-solid fa-chart-line text-3xl text-slate-700 mb-4"></i>
+                <p class="text-sm font-semibold text-slate-300">No report generated yet</p>
+                <p class="text-xs text-slate-500 mt-2 max-w-md mx-auto">
+                    Choose a report type above, set a date range if it needs one, then press
+                    <span class="text-slate-300 font-medium">Generate</span>. Nothing is queried until you do.
+                </p>
+            </div>
+            {% endif %}
+
         </main>
     </div>
 
@@ -164,6 +334,31 @@
         function toggleSidebar() {
             document.querySelector('aside').classList.toggle('open');
         }
+
+        // Which reports ignore a date range. Served from reports.py rather than
+        // repeated here, so the list cannot drift from the one the server uses.
+        const SNAPSHOT_TYPES = {{ snapshot_types_json|safe }};
+
+        (function () {
+            const typeSelect = document.querySelector('select[name="type"]');
+            const dateFields = document.getElementById('date-fields');
+            const note = document.getElementById('snapshot-note');
+            if (!typeSelect || !dateFields) return;
+
+            function syncDateFields() {
+                const isSnapshot = SNAPSHOT_TYPES.indexOf(typeSelect.value) !== -1;
+                dateFields.classList.toggle('is-collapsed', isSnapshot);
+                if (note) note.classList.toggle('hidden', !isSnapshot);
+                // Disabled inputs are not submitted, which is what keeps a stale
+                // range out of the query string for a report that ignores it.
+                dateFields.querySelectorAll('input').forEach(function (i) {
+                    i.disabled = isSnapshot;
+                });
+            }
+
+            typeSelect.addEventListener('change', syncDateFields);
+            syncDateFields();
+        })();
     </script>
 
     <script src="{% static 'js/admin-enhance.js' %}" defer></script>

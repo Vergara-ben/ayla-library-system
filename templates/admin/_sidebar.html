@@ -76,6 +76,10 @@ entries above it are always shown -- they are gated by role, not module.
                     <i class="fa-solid fa-boxes-stacked w-5 text-sm"></i>
                     <span class="text-sm {% if active != 'inventory' %}font-medium{% endif %}">Inventory</span>
                 </a>
+                <a href="{% url 'activity_logs' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg {% if active == 'activity' %}bg-slate-800/50 text-cyan-400 font-medium border border-slate-700/50{% else %}text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors{% endif %}">
+                    <i class="fa-solid fa-user-shield w-5 text-sm"></i>
+                    <span class="text-sm {% if active != 'activity' %}font-medium{% endif %}">Activity Logs</span>
+                </a>
             </div>
         </div>
 
@@ -90,6 +94,15 @@ entries above it are always shown -- they are gated by role, not module.
                         <span class="text-sm {% if active != 'transactions' %}font-medium{% endif %}">Transactions</span>
                     </div>
                     {% if pending_transactions_count %}<span class="bg-rose-500/20 text-rose-400 text-xs px-2 py-0.5 rounded-full font-semibold">{{ pending_transactions_count }}</span>{% endif %}
+                </a>
+                {% endif %}
+                {% if 'books' in allowed_modules %}
+                <a href="{% url 'reshelving_queue' %}" class="flex items-center justify-between px-3 py-2 rounded-lg {% if active == 'reshelving' %}bg-slate-800/50 text-cyan-400 font-medium border border-slate-700/50{% else %}text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors{% endif %}">
+                    <div class="flex items-center gap-3">
+                        <i class="fa-solid fa-arrow-rotate-left w-5 text-sm"></i>
+                        <span class="text-sm {% if active != 'reshelving' %}font-medium{% endif %}">Reshelving</span>
+                    </div>
+                    {% if reshelving_count %}<span class="bg-amber-500/20 text-amber-400 text-xs px-2 py-0.5 rounded-full font-semibold">{{ reshelving_count }}</span>{% endif %}
                 </a>
                 {% endif %}
                 {% if 'logs' in allowed_modules %}
@@ -141,3 +154,5 @@ entries above it are always shown -- they are gated by role, not module.
         </div>
     </nav>
 </aside>
+
+{% include 'admin/_changepassword_modal.html' with accent='cyan' %}

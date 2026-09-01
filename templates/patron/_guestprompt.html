@@ -1,0 +1,69 @@
+{% comment %}
+The Account tab for someone who has not registered.
+
+The tab deliberately stays where it is rather than disappearing: a visitor who
+cannot see it has no way of learning that an account exists or what it would
+give them. Tapping it explains, and offers the two doors out — sign in, or
+register — instead of dropping them on a login form with no context.
+
+Included by the patron pages that are open to visitors and carry the bottom
+nav. Pages without the nav (map, book details) do not need it.
+{% endcomment %}
+
+<div id="guestPrompt" class="guest-prompt" onclick="if(event.target===this)closeGuestPrompt()">
+  <div class="guest-card">
+    <div class="guest-icon">👤</div>
+    <h3 class="guest-title">An account is needed for this</h3>
+    <p class="guest-body">
+      Searching the catalogue and finding a book on the map are open to everyone.
+      Your borrowing history, due dates and library card need an account.
+    </p>
+    <a href="{% url 'patron_login' %}" class="guest-btn guest-btn-primary">Sign in</a>
+    <a href="{% url 'patron_register' %}" class="guest-btn">Register</a>
+    <button type="button" onclick="closeGuestPrompt()" class="guest-btn guest-btn-quiet">Not now</button>
+  </div>
+</div>
+
+<style>
+  .guest-prompt{
+    position:fixed; inset:0; z-index:200; display:none;
+    align-items:flex-end; justify-content:center;
+    background:rgba(0,0,0,.55); padding:16px;
+  }
+  .guest-prompt.show{ display:flex; }
+  .guest-card{
+    width:100%; max-width:420px; background:var(--surface2);
+    border:1px solid var(--border); border-radius:18px; padding:24px 20px 20px;
+    text-align:center; font-family:'DM Sans',sans-serif;
+    animation:guest-up .22s cubic-bezier(.4,0,.2,1) both;
+  }
+  @keyframes guest-up{ from{ transform:translateY(16px); opacity:0; } to{ transform:none; opacity:1; } }
+  .guest-icon{ font-size:32px; line-height:1; margin-bottom:10px; }
+  .guest-title{ margin:0 0 8px; font-size:16px; font-weight:700; color:var(--text); }
+  .guest-body{ margin:0 0 18px; font-size:13px; line-height:1.6; color:var(--text2,var(--text)); opacity:.85; }
+  .guest-btn{
+    display:block; width:100%; margin-top:8px; padding:12px;
+    border-radius:12px; border:1px solid var(--border); background:transparent;
+    color:var(--text); font-family:'DM Sans',sans-serif; font-size:14px; font-weight:600;
+    text-decoration:none; cursor:pointer; transition:background .15s ease, border-color .15s ease;
+  }
+  .guest-btn:hover{ border-color:var(--accent,var(--border)); }
+  .guest-btn-primary{ background:var(--accent,#2563eb); border-color:transparent; color:#fff; }
+  .guest-btn-quiet{ border-color:transparent; opacity:.7; font-weight:500; }
+  /* The nav bar sits above everything else on these pages; the sheet has to clear it. */
+  @media (min-width:640px){ .guest-prompt{ align-items:center; } }
+  @media (prefers-reduced-motion:reduce){ .guest-card{ animation:none; } }
+</style>
+
+<script>
+  function showGuestPrompt(e){
+    if (e) e.preventDefault();
+    document.getElementById('guestPrompt').classList.add('show');
+  }
+  function closeGuestPrompt(){
+    document.getElementById('guestPrompt').classList.remove('show');
+  }
+  document.addEventListener('keydown', function(e){
+    if (e.key === 'Escape') closeGuestPrompt();
+  });
+</script>

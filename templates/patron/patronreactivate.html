@@ -1,0 +1,191 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en" data-module="patron" data-theme-floating>
+<head>
+<meta charset="UTF-8">
+<meta name="theme-color" content="#ffffff">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AYLA Library — Reactivate Account</title>
+<script src="{% static 'js/theme.js' %}"></script>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Syne:wght@600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{% static 'css/theme.css' %}">
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+
+body{
+  font-family:'Plus Jakarta Sans',sans-serif;
+  min-height:100vh;
+  background:var(--bg-dark);
+  color:var(--text-main);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:24px;
+}
+
+.card{
+  width:100%;
+  max-width:420px;
+  background:var(--bg-card);
+  border:1px solid var(--border);
+  border-radius:20px;
+  padding:34px 30px;
+}
+
+.logo{ margin-bottom:24px; }
+.logo img{ height:42px; }
+
+.eyebrow{
+  font-size:11px;
+  font-weight:700;
+  letter-spacing:.14em;
+  text-transform:uppercase;
+  color:var(--muted);
+  margin-bottom:10px;
+}
+
+h1{
+  font-family:'Syne',sans-serif;
+  font-size:24px;
+  font-weight:700;
+  margin-bottom:8px;
+}
+
+.sub{ font-size:13px; color:var(--muted); line-height:1.6; margin-bottom:26px; }
+
+.form-group{ margin-bottom:18px; }
+.form-group label{
+  display:block;
+  font-size:12px;
+  font-weight:600;
+  color:var(--muted);
+  margin-bottom:7px;
+}
+
+.input input{
+  width:100%;
+  background:var(--bg);
+  border:1px solid var(--border);
+  border-radius:12px;
+  padding:13px 15px;
+  font-family:inherit;
+  font-size:14px;
+  color:var(--text-main);
+  outline:none;
+  transition:border-color .2s;
+}
+
+.input input:focus{ border-color:var(--accent-strong); }
+.code input{ letter-spacing:.5em; text-align:center; font-size:18px; font-weight:700; }
+
+.btn{
+  width:100%;
+  padding:14px;
+  border:none;
+  border-radius:12px;
+  background:var(--accent-strong);
+  color:#fff;
+  font-family:inherit;
+  font-size:14px;
+  font-weight:600;
+  cursor:pointer;
+  transition:opacity .2s;
+}
+
+.btn:hover{ opacity:.9; }
+
+.link-btn{
+  background:none;
+  border:none;
+  padding:0;
+  font-family:inherit;
+  font-size:13px;
+  font-weight:600;
+  color:var(--accent-strong);
+  cursor:pointer;
+  text-decoration:none;
+}
+
+.link-btn:hover{ text-decoration:underline; }
+
+.alert{ border-radius:12px; padding:12px 14px; font-size:13px; line-height:1.5; margin-bottom:18px; }
+.alert-error{ background:var(--tint-danger); border:1px solid var(--danger); color:var(--danger); }
+.alert-info{ background:var(--tint-accent); border:1px solid var(--accent-strong); color:var(--text-main); }
+
+.row{ margin-top:22px; display:flex; justify-content:space-between; align-items:center; gap:12px; }
+.hint{ font-size:11px; color:var(--muted); margin-top:7px; }
+</style>
+</head>
+<body>
+
+<div class="card">
+  <div class="logo">
+    <img src="{% static 'images/ayla-logo.png' %}" data-logo-light="{% static 'images/ayla-logo.png' %}" data-logo-dark="{% static 'images/ayla-logo-dark.png' %}" alt="AYLA" class="ayla-logo">
+  </div>
+
+  <div class="eyebrow">Patron Account</div>
+
+  {% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
+  {% if info %}<div class="alert alert-info">{{ info }}</div>{% endif %}
+
+  {% if stage == 'done' %}
+    <h1>Request submitted</h1>
+    <p class="sub">Your reactivation request has been sent to the library for review. You'll receive an email once it's approved.</p>
+    <a href="{% url 'patron_login' %}"><button type="button" class="btn">Back to sign in</button></a>
+
+  {% elif stage == 'otp' %}
+    <h1>Enter your code</h1>
+    <p class="sub">If <strong>{{ email }}</strong> belongs to an account eligible for reactivation, we've sent it a 6-digit code. Enter it below to submit your reactivation request for review.</p>
+
+    <form method="POST" action="{% url 'patron_reactivate_request' %}">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="verify">
+      <input type="hidden" name="email" value="{{ email }}">
+
+      <div class="form-group code">
+        <label for="code">Verification code</label>
+        <div class="input">
+          <input type="text" id="code" name="code" inputmode="numeric" maxlength="6" pattern="[0-9]{6}" placeholder="000000" autocomplete="one-time-code" required>
+        </div>
+      </div>
+
+      <button type="submit" class="btn">Submit for review</button>
+    </form>
+
+    <div class="row">
+      <form method="POST" action="{% url 'patron_reactivate_request' %}">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="resend">
+        <input type="hidden" name="email" value="{{ email }}">
+        <button type="submit" class="link-btn">Resend code</button>
+      </form>
+      <a class="link-btn" href="{% url 'patron_login' %}">Back to sign in</a>
+    </div>
+
+  {% else %}
+    <h1>Reactivate your account</h1>
+    <p class="sub">Enter the email address on your deactivated account and we'll send you a verification code. Once verified, the library will review your request.</p>
+
+    <form method="POST" action="{% url 'patron_reactivate_request' %}">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="request">
+
+      <div class="form-group">
+        <label for="email">Email address</label>
+        <div class="input">
+          <input type="email" id="email" name="email" value="{{ email|default:'' }}" placeholder="name@domain.com" required autofocus>
+        </div>
+        <p class="hint">The code expires 10 minutes after it is sent.</p>
+      </div>
+
+      <button type="submit" class="btn">Send verification code</button>
+    </form>
+
+    <div class="row">
+      <a class="link-btn" href="{% url 'patron_login' %}">Back to sign in</a>
+    </div>
+  {% endif %}
+</div>
+
+</body>
+</html>

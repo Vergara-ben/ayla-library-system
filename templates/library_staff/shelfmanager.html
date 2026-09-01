@@ -9,7 +9,7 @@
     <script src="{% static 'js/theme.js' %}"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="{% static 'js/tailwind-theme.js' %}"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha384-iw3OoTErCYJJB9mCa8LNS2hbsQ7M3C0EpIsO/H5+EGAkPGc6rk+V8i04oW/K5xq0" crossorigin="anonymous" referrerpolicy="no-referrer">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@400;700&display=swap" rel="stylesheet">
@@ -70,9 +70,8 @@
                 <button class="mobile-menu-btn" onclick="document.querySelector('aside').classList.toggle('open')"><i class="fa-solid fa-bars"></i></button>
                 <h2 class="logo-text text-lg tracking-wider text-slate-200 uppercase">Shelf Manager</h2>
             </div>
-            <div class="flex items-center gap-4">
-                <span class="bg-violet-950 text-violet-400 text-xs px-2.5 py-1 rounded font-bold border border-violet-800 tracking-wider">{% if request.session.admin_role == 'Staff' %}STAFF{% else %}ADMIN{% endif %}</span>
-                <div class="w-8 h-8 rounded-full bg-violet-900 border border-violet-700 flex items-center justify-center text-xs font-bold text-violet-200">AD</div>
+            <div class="flex items-center gap-3">
+                {% include 'admin/_headeractions.html' with accent='violet' %}
             </div>
         </header>
 

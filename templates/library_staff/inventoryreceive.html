@@ -9,7 +9,7 @@
     <script src="{% static 'js/theme.js' %}"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="{% static 'js/tailwind-theme.js' %}"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha384-iw3OoTErCYJJB9mCa8LNS2hbsQ7M3C0EpIsO/H5+EGAkPGc6rk+V8i04oW/K5xq0" crossorigin="anonymous" referrerpolicy="no-referrer">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@400;700&display=swap" rel="stylesheet">
@@ -55,9 +55,8 @@
                 <button class="mobile-menu-btn" onclick="toggleSidebar()"><i class="fa-solid fa-bars"></i></button>
                 <h2 class="logo-text text-lg tracking-wider text-slate-200 uppercase">Stock Receiving</h2>
             </div>
-            <div class="flex items-center gap-4">
-                <span class="bg-violet-950 text-violet-400 text-xs px-2.5 py-1 rounded font-bold border border-violet-800 tracking-wider">STAFF</span>
-                <div class="w-8 h-8 rounded-full bg-violet-900 border border-violet-700 flex items-center justify-center text-xs font-bold text-violet-200">ST</div>
+            <div class="flex items-center gap-3">
+                {% include 'admin/_headeractions.html' with accent='violet' %}
             </div>
         </header>
 
@@ -209,6 +208,40 @@
                             <i class="fa-solid fa-check mr-1"></i> Receive into inventory
                         </button>
                     </form>
+                </div>
+
+                <!-- Where there is room -->
+                {# Beside the form, not on another page: the person unpacking a #}
+                {# box needs to know where it can go without navigating away    #}
+                {# and losing what they have typed. #}
+                <div class="rounded-xl border border-slate-800/80 overflow-hidden mb-6" style="background-color: var(--bg-card);">
+                    <div class="px-5 py-3 border-b border-slate-800/60 flex items-center justify-between gap-2">
+                        <h4 class="text-sm font-bold text-slate-200 tracking-wide">Available shelves</h4>
+                        <input type="text" id="shelfFilter" oninput="filterShelves(this.value)" placeholder="Filter by shelf or category"
+                               class="text-[11px] rounded px-2 py-1 text-slate-300 border border-slate-700/60 focus:outline-none focus:border-violet-700"
+                               style="background-color: var(--bg-input); max-width: 190px;">
+                    </div>
+                    <p class="px-5 pt-3 text-[10px] text-slate-500">Emptiest first. Counts rank the levels &mdash; they do not mean a level is full.</p>
+                    <div class="max-h-72 overflow-y-auto mt-2" id="shelfList">
+                        {% for lv in shelf_levels_available %}
+                        <div class="shelf-avail px-5 py-2.5 flex items-center justify-between gap-3 border-t border-slate-800/40"
+                             data-search="{{ lv.shelf|lower }} {{ lv.category|lower }} {{ lv.room|lower }}">
+                            <div class="min-w-0">
+                                <p class="text-xs font-bold text-slate-200 truncate">{{ lv.shelf }} &middot; Level {{ lv.level_number }}</p>
+                                <p class="text-[10px] text-slate-500 truncate">
+                                    {% if lv.category %}{{ lv.category }}{% else %}<span class="text-slate-600">No category</span>{% endif %}
+                                    {% if lv.room %} &middot; {{ lv.room }}{% endif %}
+                                </p>
+                            </div>
+                            <span class="text-[10px] font-bold px-2 py-0.5 rounded-full flex-shrink-0
+                                         {% if lv.book_count == 0 %}bg-emerald-500/10 text-emerald-400 border border-emerald-500/20{% else %}bg-slate-800/60 text-slate-400 border border-slate-700/40{% endif %}">
+                                {{ lv.book_count }} book{{ lv.book_count|pluralize }}
+                            </span>
+                        </div>
+                        {% empty %}
+                        <p class="px-5 py-8 text-center text-xs text-slate-500">No shelf levels have been set up yet.</p>
+                        {% endfor %}
+                    </div>
                 </div>
 
                 <!-- What this account has received -->
@@ -396,5 +429,13 @@
         }
     </script>
     <script src="{% static 'js/admin-enhance.js' %}" defer></script>
+<script>
+    function filterShelves(term) {
+        const t = (term || '').trim().toLowerCase();
+        document.querySelectorAll('#shelfList .shelf-avail').forEach(function (row) {
+            row.style.display = (!t || row.dataset.search.indexOf(t) > -1) ? '' : 'none';
+        });
+    }
+</script>
 </body>
 </html>

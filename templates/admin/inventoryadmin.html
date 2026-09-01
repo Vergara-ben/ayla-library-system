@@ -9,12 +9,12 @@
     <script src="{% static 'js/theme.js' %}"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="{% static 'js/tailwind-theme.js' %}"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha384-iw3OoTErCYJJB9mCa8LNS2hbsQ7M3C0EpIsO/H5+EGAkPGc6rk+V8i04oW/K5xq0" crossorigin="anonymous" referrerpolicy="no-referrer">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@400;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{% static 'css/theme.css' %}">
-    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js" integrity="sha384-hStSInNIZ8ljtOVrmrgf7zdHMapaLBWoSnPTtF0nzsybp4+LuhDz6sHuEVpWIX8o" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <style>
         body { font-family: 'Inter', sans-serif; background-color: var(--bg-main); color: var(--text-primary); }
         .logo-text { font-family: 'Rowdies', sans-serif; }
@@ -64,9 +64,8 @@
                 </button>
                 <h2 class="logo-text text-lg tracking-wider text-slate-200 uppercase">Inventory Management</h2>
             </div>
-            <div class="flex items-center gap-4">
-                <span class="bg-cyan-950 text-cyan-400 text-xs px-2.5 py-1 rounded font-bold border border-cyan-800 tracking-wider">ADMIN</span>
-                <div class="w-8 h-8 rounded-full bg-cyan-900 border border-cyan-700 flex items-center justify-center text-xs font-bold text-cyan-200">AD</div>
+            <div class="flex items-center gap-3">
+                {% include 'admin/_headeractions.html' with accent='cyan' %}
             </div>
         </header>
 
@@ -161,9 +160,12 @@
                                 </select>
                             </div>
                             <div>
-                                <label class="field-label" for="auditManual">Add a copy label</label>
+                                {# This box is also where a handheld scanner lands: it types the #}
+                                {# label and presses Enter, which is what the box already expects. #}
+                                {# It said "type or paste", so nobody knew that. #}
+                                <label class="field-label" for="auditManual">Add a copy label &mdash; scanner or typed</label>
                                 <div class="flex gap-2">
-                                    <input type="text" id="auditManual" class="field-input" placeholder="Type or paste a QR label, then Enter">
+                                    <input type="text" id="auditManual" class="field-input" placeholder="Scan with a handheld here, or type a label, then Enter">
                                     <button type="button" onclick="addScannedLabel(document.getElementById('auditManual').value); document.getElementById('auditManual').value='';" class="px-3 rounded-lg border border-slate-700 text-slate-300 text-xs font-semibold hover:bg-slate-800/50">Add</button>
                                 </div>
                             </div>
@@ -173,8 +175,8 @@
                                 </button>
                                 <button type="button" onclick="clearScanned()" class="px-3 py-2 rounded-lg border border-slate-700 text-slate-400 text-xs font-semibold hover:bg-slate-800/50">Clear</button>
                             </div>
-                            <div id="auditCamWrap" class="hidden relative aspect-video bg-slate-900 rounded-lg overflow-hidden">
-                                <video id="auditVideo" class="w-full h-full object-cover" autoplay playsinline></video>
+                            <div id="auditCamWrap" class="hidden relative aspect-video w-full max-w-[260px] mx-auto bg-slate-900 rounded-lg overflow-hidden">
+                                <video id="auditVideo" class="w-full h-full object-contain" autoplay playsinline></video>
                                 <canvas id="auditCanvas" class="hidden"></canvas>
                             </div>
                             <p id="auditScanStatus" class="text-[11px] text-slate-500"></p>
@@ -372,7 +374,7 @@
                 <form method="get" class="px-5 py-3.5 bg-slate-900/20 border-b border-slate-800/60 flex flex-col lg:flex-row lg:items-center gap-3">
                     <div class="relative flex-1">
                         <i class="fa-solid fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-xs"></i>
-                        <input type="text" name="q" value="{{ q }}" placeholder="Search by title, label, or source reference..." class="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-4 py-2 text-xs text-slate-300 focus:outline-none focus:border-cyan-800 placeholder-slate-600">
+                        <input type="text" name="q" value="{{ q }}" placeholder="Search by title, author, ISBN, label or source..." class="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-4 py-2 text-xs text-slate-300 focus:outline-none focus:border-cyan-800 placeholder-slate-600">
                     </div>
                     <select name="condition" onchange="this.form.submit()" class="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-400 focus:outline-none min-w-[130px]">
                         <option value="">All conditions</option>

@@ -1,0 +1,135 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ plan.name }} — Library Map</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        /* Deliberately its own stylesheet rather than the portal's: this page
+           exists to come out of a printer, so it is black on white with no
+           theme, no sidebar and no chrome. */
+        * { box-sizing: border-box; }
+        body {
+            font-family: 'Inter', sans-serif;
+            margin: 0; padding: 24px;
+            background: #fff; color: #111;
+        }
+        .sheet { max-width: 1000px; margin: 0 auto; }
+        .head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+        .title { font-size: 22px; font-weight: 700; margin: 0; }
+        .sub { font-size: 13px; color: #555; margin: 4px 0 0; }
+        .logo { height: 46px; }
+        .toolbar { margin-bottom: 16px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+        .btn {
+            font: inherit; font-size: 13px; font-weight: 600;
+            padding: 8px 14px; border-radius: 8px; cursor: pointer;
+            border: 1px solid #c7ccd4; background: #fff; color: #111; text-decoration: none;
+        }
+        .btn-primary { background: #0e7490; border-color: #0e7490; color: #fff; }
+        .map-wrap { border: 1px solid #d5d9df; border-radius: 8px; padding: 12px; }
+        svg { width: 100%; height: auto; display: block; }
+        .room-shape { fill: #f4f6f9; stroke: #7b8795; stroke-width: 2; }
+        .shelf-shape { fill: #dbe3ec; stroke: #46546a; stroke-width: 1.5; }
+        .room-label { font-size: 15px; font-weight: 700; fill: #33404f; }
+        .shelf-label { font-size: 9px; font-weight: 700; fill: #1d2733; }
+        .shelf-cat { font-size: 7.5px; fill: #4d5a6b; }
+        .legend { margin-top: 14px; display: flex; gap: 18px; flex-wrap: wrap; font-size: 12px; color: #444; }
+        .swatch { display: inline-block; width: 14px; height: 10px; border-radius: 2px; vertical-align: middle; margin-right: 6px; }
+        .sections { margin-top: 20px; }
+        .sections h2 { font-size: 14px; margin: 0 0 8px; }
+        .sections table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        .sections th, .sections td { text-align: left; padding: 5px 8px; border-bottom: 1px solid #e3e7ec; }
+        .sections th { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: #666; }
+        .foot { margin-top: 18px; font-size: 11px; color: #777; }
+
+        @media print {
+            /* The controls are for the screen; the paper gets the map. */
+            .toolbar, .no-print { display: none !important; }
+            body { padding: 0; }
+            .map-wrap { border: none; padding: 0; }
+            @page { margin: 12mm; }
+        }
+    </style>
+</head>
+<body>
+<div class="sheet">
+
+    <div class="toolbar no-print">
+        <button type="button" class="btn btn-primary" onclick="window.print()">Print this map</button>
+        <a class="btn" href="{% url 'admin_indoor_map' %}">Back to Indoor Map</a>
+        {% if floors|length > 1 %}
+        <select class="btn" onchange="location.search = '?floor=' + this.value">
+            {% for f in floors %}
+            <option value="{{ f.floor_plan_id }}" {% if f.is_current %}selected{% endif %}>{{ f.label }}{% if f.name %} — {{ f.name }}{% endif %}</option>
+            {% endfor %}
+        </select>
+        {% endif %}
+    </div>
+
+    <div class="head">
+        <div>
+            <h1 class="title">Ayla Public Library</h1>
+            <p class="sub">{{ plan.floor_label }}{% if plan.name %} · {{ plan.name }}{% endif %} · shelf and section map</p>
+        </div>
+        <img class="logo" src="{% static 'images/ayla-logo.png' %}" alt="AYLA">
+    </div>
+
+    <div class="map-wrap">
+        <svg viewBox="0 0 {{ canvas_width|floatformat:0 }} {{ canvas_height|floatformat:0 }}"
+             role="img" aria-label="Map of {{ plan.floor_label }} showing rooms and shelves">
+            {% for room in rooms %}
+                {% if room.has_shape %}
+                <polygon class="room-shape" points="{{ room.points }}"></polygon>
+                {% endif %}
+            {% endfor %}
+
+            {% for sh in shelves %}
+            <g transform="rotate({{ sh.rotation|floatformat:2 }} {{ sh.cx|floatformat:2 }} {{ sh.cy|floatformat:2 }})">
+                <rect class="shelf-shape" x="{{ sh.x|floatformat:2 }}" y="{{ sh.y|floatformat:2 }}"
+                      width="{{ sh.w|floatformat:2 }}" height="{{ sh.h|floatformat:2 }}" rx="2"></rect>
+            </g>
+            {% endfor %}
+
+            {# Labels drawn upright, outside the rotation, so a rotated shelf   #}
+            {# does not print its name sideways. #}
+            {% for sh in shelves %}
+            <text class="shelf-label" x="{{ sh.cx|floatformat:2 }}" y="{{ sh.cy|floatformat:2 }}" text-anchor="middle">{{ sh.name }}</text>
+            {% if sh.sections %}
+            <text class="shelf-cat" x="{{ sh.cx|floatformat:2 }}" y="{{ sh.cy|add:9|floatformat:2 }}" text-anchor="middle">{{ sh.sections }}</text>
+            {% endif %}
+            {% endfor %}
+
+            {% for room in rooms %}
+            <text class="room-label" x="{{ room.label_x|floatformat:2 }}" y="{{ room.label_y|floatformat:2 }}" text-anchor="middle">{{ room.name }}</text>
+            {% endfor %}
+        </svg>
+    </div>
+
+    <div class="legend">
+        <span><span class="swatch" style="background:#f4f6f9;border:1px solid #7b8795"></span>Room</span>
+        <span><span class="swatch" style="background:#dbe3ec;border:1px solid #46546a"></span>Shelf</span>
+    </div>
+
+    {% if shelves %}
+    <div class="sections">
+        <h2>Shelves on this floor</h2>
+        <table>
+            <thead><tr><th>Shelf</th><th>Sections held</th></tr></thead>
+            <tbody>
+                {% for sh in shelves %}
+                <tr>
+                    <td>{{ sh.name }}</td>
+                    <td>{% if sh.sections %}{{ sh.sections }}{% else %}&mdash;{% endif %}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    <p class="foot">Printed {{ printed_on|date:"j F Y" }}. Shelf positions change as the collection is reorganised &mdash; reprint after any shelf is moved.</p>
+</div>
+</body>
+</html>

@@ -139,7 +139,9 @@
 </head>
 <body>
 <nav class="navbar">
-  <a href="{% url 'patron_dashboard' %}" class="back-btn">←</a>
+  {# A guest has no Home to go back to -- Home redirects here -- so the arrow #}
+  {# would be a loop. Shown only when there is somewhere to return to. #}
+  {% if patron_signed_in %}<a href="{% url 'patron_dashboard' %}" class="back-btn">←</a>{% endif %}
   <div class="nav-title">Book Catalog</div>
   <button type="button" class="theme-toggle" data-theme-toggle></button>
 </nav>
@@ -211,7 +213,12 @@
   <a href="{% url 'patron_dashboard' %}" class="nav-item"><div class="nav-icon">🏠</div><div class="nav-label">Home</div></a>
   <a href="{% url 'patron_catalog' %}" class="nav-item active"><div class="nav-icon">🔍</div><div class="nav-label">Search</div></a>
   <a href="{% url 'patron_map' %}" class="nav-item"><div class="nav-icon">🗺️</div><div class="nav-label">Map</div></a>
+  {% if patron_signed_in %}
   <a href="{% url 'patron_account' %}" class="nav-item"><div class="nav-icon">👤</div><div class="nav-label">Account</div></a>
+  {% else %}
+  {# Tab stays put for a visitor; tapping explains what an account is for. #}
+  <a href="{% url 'patron_login' %}" class="nav-item" onclick="showGuestPrompt(event)"><div class="nav-icon">👤</div><div class="nav-label">Account</div></a>
+  {% endif %}
 </nav>
 
 <script>
@@ -271,5 +278,6 @@ function applySort(key,label){
   cards.forEach(c=>list.appendChild(c));
 }
 </script>
+{% if not patron_signed_in %}{% include 'patron/_guestprompt.html' %}{% endif %}
 </body>
 </html>

@@ -9,7 +9,8 @@
     <script src="{% static 'js/theme.js' %}"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="{% static 'js/tailwind-theme.js' %}"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js" integrity="sha384-hStSInNIZ8ljtOVrmrgf7zdHMapaLBWoSnPTtF0nzsybp4+LuhDz6sHuEVpWIX8o" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha384-iw3OoTErCYJJB9mCa8LNS2hbsQ7M3C0EpIsO/H5+EGAkPGc6rk+V8i04oW/K5xq0" crossorigin="anonymous" referrerpolicy="no-referrer">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@400;700&display=swap" rel="stylesheet">
@@ -117,16 +118,24 @@
         
         <header class="h-16 flex-shrink-0 flex items-center justify-between px-8" style="background-color: var(--bg-main);">
             <div class="flex items-center">
+                {% if desk_mode %}
+                {# The sidebar carries the logo everywhere else, and desk mode hides #}
+                {# the sidebar -- leaving the one screen a patron actually stands in #}
+                {# front of as the only unbranded page in the system. The hamburger  #}
+                {# goes with it: there is no sidebar left for it to open.            #}
+                <img src="{% static 'images/ayla-logo.png' %}"
+                     data-logo-light="{% static 'images/ayla-logo.png' %}"
+                     data-logo-dark="{% static 'images/ayla-logo-dark.png' %}"
+                     alt="AYLA Public Library" class="ayla-logo h-10 mr-3">
+                {% else %}
                 <button class="mobile-menu-btn" onclick="toggleSidebar()">
                     <i class="fa-solid fa-bars"></i>
                 </button>
+                {% endif %}
                 <h2 class="logo-text text-lg tracking-wider text-slate-200 uppercase">Log Management</h2>
             </div>
-            <div class="flex items-center gap-4">
-                {% if desk_mode %}<span class="bg-amber-500/15 text-amber-400 text-xs px-2.5 py-1 rounded font-bold border border-amber-600/40 tracking-wider">DESK MODE</span>{% else %}                <span class="bg-violet-950 text-violet-400 text-xs px-2.5 py-1 rounded font-bold border border-violet-800 tracking-wider">{% if request.session.admin_role == 'Staff' %}STAFF{% else %}ADMIN{% endif %}</span>{% endif %}
-                <div class="w-8 h-8 rounded-full bg-violet-900 border border-violet-700 flex items-center justify-center text-xs font-bold text-violet-200">
-                    AD
-                </div>
+            <div class="flex items-center gap-3">
+                {% include 'admin/_headeractions.html' with accent='violet' %}
             </div>
         </header>
 
@@ -139,7 +148,7 @@
                     <i class="fa-solid fa-book-open-reader text-amber-400 text-2xl"></i>
                     <div class="flex-1">
                         <p class="text-sm font-bold text-slate-100">Welcome to Ayla Public Library</p>
-                        <p class="text-[11px] text-slate-300 mt-0.5">Signing in? Use the first row of the table below, or press <strong>Scan Card</strong>. Leaving? Find your name in the table and press <strong>Sign out</strong> &mdash; no need to type it again.</p>
+                        <p class="text-[11px] text-slate-300 mt-0.5">Signing in? Use the first row of the table below, or press <strong>Scan Card</strong>. Leaving? Press <strong>Scan Card</strong> again, or use <strong>Sign out</strong> on your own row. <span class="text-slate-400">Only your own visit is shown here &mdash; other patrons' details are private.</span></p>
                     </div>
                     <button type="button" onclick="deskOpenUnlock()" class="text-[11px] font-bold px-3 py-2 rounded-lg border border-slate-600 text-slate-300 hover:bg-slate-800/50">
                         <i class="fa-solid fa-lock text-[10px]"></i> Librarian
@@ -176,15 +185,37 @@
 
             {# The scanner is a keyboard. It only listens once Scan Card is pressed, so #}
                 {# a stray barcode cannot sign someone in while staff are typing. #}
-                <div id="deskScanBar" class="hidden rounded-xl border border-violet-800/60 bg-violet-500/[0.06] px-5 py-4 flex items-center gap-4">
-                    <i class="fa-solid fa-qrcode text-violet-400 text-2xl"></i>
-                    <div class="flex-1">
-                        <p class="text-sm font-bold text-slate-100">Hold your library card up to the scanner</p>
-                        <p class="text-[11px] text-slate-400 mt-0.5">The card's QR code signs you in or out straight away.</p>
+                <div id="deskScanBar" class="hidden rounded-xl border border-violet-800/60 bg-violet-500/[0.06] px-5 py-4">
+                    <div class="flex items-center gap-4">
+                        <i class="fa-solid fa-qrcode text-violet-400 text-2xl"></i>
+                        <div class="flex-1">
+                            <p class="text-sm font-bold text-slate-100">Hold your library card up to the scanner</p>
+                            <p class="text-[11px] text-slate-400 mt-0.5">The card's QR code signs you in or out straight away.</p>
+                        </div>
+                        <input type="text" id="deskScanField" autocomplete="off"
+                               class="w-px h-px opacity-0 border-0 p-0 absolute" aria-label="Scanner input">
+                        {# A desk with no handheld scanner still has a webcam, and it #}
+                        {# reads the same QR. Both stay live while the bar is open, so #}
+                        {# neither has to be chosen up front. #}
+                        <button type="button" id="deskCamBtn" onclick="deskToggleCamera()" class="text-violet-400 hover:bg-violet-700/30 text-[11px] font-semibold px-3 py-1.5 rounded-lg border border-violet-800/80 flex items-center gap-1.5">
+                            <i class="fa-solid fa-camera text-[10px]"></i> Use camera
+                        </button>
+                        <button type="button" onclick="deskCloseScan()" class="text-slate-400 hover:text-slate-200 text-[11px] font-semibold px-3 py-1.5 rounded-lg border border-slate-700">Cancel</button>
                     </div>
-                    <input type="text" id="deskScanField" autocomplete="off"
-                           class="w-px h-px opacity-0 border-0 p-0 absolute" aria-label="Scanner input">
-                    <button type="button" onclick="deskCloseScan()" class="text-slate-400 hover:text-slate-200 text-[11px] font-semibold px-3 py-1.5 rounded-lg border border-slate-700">Cancel</button>
+
+                    {# Deliberately small: jsQR reads the whole camera frame regardless #}
+                    {# of how large the preview is, so a big viewfinder buys nothing and #}
+                    {# pushes the log table off the screen. #}
+                    <div id="deskCamWrap" class="hidden mt-4">
+                        <div class="relative aspect-video w-full max-w-[260px] mx-auto bg-slate-900 rounded-lg overflow-hidden">
+                            <video id="deskCamVideo" class="w-full h-full object-contain" autoplay playsinline muted></video>
+                            <canvas id="deskCamCanvas" class="hidden"></canvas>
+                            <div id="deskCamLoading" class="absolute inset-0 flex items-center justify-center text-slate-400 text-xs px-3 text-center">
+                                <i class="fa-solid fa-spinner fa-spin mr-2"></i> Starting camera&hellip;
+                            </div>
+                        </div>
+                        <p id="deskCamStatus" class="text-center text-[11px] text-slate-400 mt-2">Hold the card's QR code up to the camera.</p>
+                    </div>
                 </div>
 
                             <div class="rounded-xl border border-slate-800/80 overflow-hidden shadow-2xl flex flex-col" style="background-color: var(--bg-card);">
@@ -689,31 +720,132 @@
         }
 
         // ── Scanning a card ─────────────────────────────────────────────
+        // Two ways in, both ending at the same endpoint: the desk's handheld
+        // scanner, which types the code and presses Enter, and the webcam, for a
+        // desk that has none attached. Both stay live while the bar is open.
         function deskOpenScan() {
             document.getElementById('deskScanBar').classList.remove('hidden');
+            deskScanBusy = false;
             const f = document.getElementById('deskScanField');
             f.value = '';
             f.focus();
         }
         function deskCloseScan() {
+            deskStopCamera();
             document.getElementById('deskScanBar').classList.add('hidden');
         }
-        const deskScanField = document.getElementById('deskScanField');
-        if (deskScanField) {
-            deskScanField.addEventListener('keydown', async function (e) {
-                if (e.key === 'Escape') { deskCloseScan(); return; }
-                if (e.key !== 'Enter') return;
-                e.preventDefault();
-                const code = deskScanField.value.trim();
-                deskScanField.value = '';
-                if (!code) return;
+
+        let deskScanBusy = false;
+        async function deskSubmitCode(code) {
+            // The camera reads the same card ten times a second; without this the
+            // first frame signs the patron in and the second signs them straight
+            // back out.
+            if (!code || deskScanBusy) return;
+            deskScanBusy = true;
+            try {
                 const r = await deskPost(DESK_URLS.scan, {
                     code: code,
                     purpose: document.getElementById('deskPurpose').value,
                 });
                 deskCloseScan();
                 deskShowMessage(r.success ? r.message : r.error, r.success ? 'ok' : 'error');
+                // On success the page reloads, so the lock stays on. A rejected
+                // card has to be presentable again.
                 if (r.success) setTimeout(function () { window.location.reload(); }, 1600);
+                else deskScanBusy = false;
+            } catch (err) {
+                deskScanBusy = false;
+                deskShowMessage('Could not reach the server. Try again.', 'error');
+            }
+        }
+
+        // ── The webcam as a scanner ──────────────────────────────────────
+        let deskCamStream = null, deskCamTimer = null;
+
+        function deskToggleCamera() {
+            if (deskCamStream || deskCamTimer) { deskStopCamera(); return; }
+            deskStartCamera();
+        }
+
+        async function deskStartCamera() {
+            const wrap = document.getElementById('deskCamWrap');
+            const video = document.getElementById('deskCamVideo');
+            const loading = document.getElementById('deskCamLoading');
+            const status = document.getElementById('deskCamStatus');
+            const btn = document.getElementById('deskCamBtn');
+
+            wrap.classList.remove('hidden');
+            loading.classList.remove('hidden');
+            loading.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i> Starting camera&hellip;';
+            status.textContent = "Hold the card's QR code up to the camera.";
+
+            try {
+                deskCamStream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'environment' },
+                });
+                video.srcObject = deskCamStream;
+                video.onloadedmetadata = function () {
+                    loading.classList.add('hidden');
+                    deskScanLoop();
+                };
+                btn.innerHTML = '<i class="fa-solid fa-camera-rotate text-[10px]"></i> Stop camera';
+            } catch (err) {
+                // No camera, permission refused, or the page is being served over
+                // plain http from something other than localhost -- getUserMedia
+                // is refused outright there. Say so: the handheld scanner still
+                // works, and a dead black box would look like a broken feature.
+                deskCamStream = null;
+                loading.innerHTML = '<i class="fa-solid fa-triangle-exclamation mr-2"></i> Camera unavailable';
+                status.textContent = 'Allow camera access, or use the desk scanner instead.';
+                btn.innerHTML = '<i class="fa-solid fa-camera text-[10px]"></i> Use camera';
+            }
+        }
+
+        function deskScanLoop() {
+            const video = document.getElementById('deskCamVideo');
+            const canvas = document.getElementById('deskCamCanvas');
+            const ctx = canvas.getContext('2d', { willReadFrequently: true });
+            deskCamTimer = setInterval(function () {
+                if (!video || video.readyState !== video.HAVE_ENOUGH_DATA) return;
+                // The full frame is scanned, not the preview: the box on screen is
+                // only how much of it the patron gets to see.
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                const frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                const found = jsQR(frame.data, frame.width, frame.height);
+                if (found && found.data) deskSubmitCode(found.data.trim());
+            }, 120);
+        }
+
+        function deskStopCamera() {
+            if (deskCamTimer) { clearInterval(deskCamTimer); deskCamTimer = null; }
+            if (deskCamStream) {
+                // Release the device, or the camera light stays on after the bar
+                // closes and the next page cannot open it.
+                deskCamStream.getTracks().forEach(function (t) { t.stop(); });
+                deskCamStream = null;
+            }
+            const video = document.getElementById('deskCamVideo');
+            if (video) video.srcObject = null;
+            const wrap = document.getElementById('deskCamWrap');
+            if (wrap) wrap.classList.add('hidden');
+            const btn = document.getElementById('deskCamBtn');
+            if (btn) btn.innerHTML = '<i class="fa-solid fa-camera text-[10px]"></i> Use camera';
+        }
+
+        // A page left mid-scan should not keep the camera.
+        window.addEventListener('pagehide', deskStopCamera);
+
+        const deskScanField = document.getElementById('deskScanField');
+        if (deskScanField) {
+            deskScanField.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape') { deskCloseScan(); return; }
+                if (e.key !== 'Enter') return;
+                e.preventDefault();
+                const code = deskScanField.value.trim();
+                deskScanField.value = '';
+                deskSubmitCode(code);
             });
             // While the scan bar is open the field must keep the keystrokes.
             deskScanField.addEventListener('blur', function () {
@@ -826,14 +958,18 @@
         let lgBusy = false;
 
         function openNewLogModal() {
+            const el = document.getElementById('newLogModal');
+            if (!el) return;                 // desk mode: no staff modal to open
             lgReset();
-            document.getElementById('newLogModal').classList.remove('hidden');
+            el.classList.remove('hidden');
             document.body.style.overflow = 'hidden';
             setTimeout(function () { document.getElementById('lgName').focus(); }, 50);
         }
         function closeNewLogModal() {
             clearTimeout(lgConfirmTimer);
-            document.getElementById('newLogModal').classList.add('hidden');
+            const el = document.getElementById('newLogModal');
+            if (!el) return;                 // desk mode: never rendered
+            el.classList.add('hidden');
             document.body.style.overflow = 'auto';
         }
 
@@ -982,9 +1118,17 @@
             });
         }
 
-        document.getElementById('newLogModal').addEventListener('click', function (e) {
-            if (e.target === this) closeNewLogModal();
-        });
+        // Both visit-log modals are staff-only and are not rendered in desk mode,
+        // where the browser is handed to a patron. The listeners have to check
+        // for that: wiring a click handler onto a null threw on every desk-mode
+        // load, and the Escape handler below calls the close functions
+        // unconditionally, so those are guarded at source too.
+        const newLogModalEl = document.getElementById('newLogModal');
+        if (newLogModalEl) {
+            newLogModalEl.addEventListener('click', function (e) {
+                if (e.target === this) closeNewLogModal();
+            });
+        }
 
         // ── Edit visit log ─────────────────────────────────────────
         let editLogBusy = false;
@@ -999,7 +1143,9 @@
             document.body.style.overflow = 'hidden';
         }
         function closeEditLog() {
-            document.getElementById('editLogModal').classList.add('hidden');
+            const el = document.getElementById('editLogModal');
+            if (!el) return;                 // desk mode: never rendered
+            el.classList.add('hidden');
             document.body.style.overflow = 'auto';
         }
         function editLogErr(msg) {
@@ -1027,9 +1173,12 @@
                 editLogBusy = false;
             }
         }
-        document.getElementById('editLogModal').addEventListener('click', function (e) {
-            if (e.target === this) closeEditLog();
-        });
+        const editLogModalEl = document.getElementById('editLogModal');
+        if (editLogModalEl) {
+            editLogModalEl.addEventListener('click', function (e) {
+                if (e.target === this) closeEditLog();
+            });
+        }
 
         document.addEventListener('keydown', function (e) {
             if (e.key === 'Escape') { closeNewLogModal(); closeEditLog(); }

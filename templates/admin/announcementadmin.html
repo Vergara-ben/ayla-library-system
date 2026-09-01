@@ -9,7 +9,7 @@
     <script src="{% static 'js/theme.js' %}"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="{% static 'js/tailwind-theme.js' %}"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha384-iw3OoTErCYJJB9mCa8LNS2hbsQ7M3C0EpIsO/H5+EGAkPGc6rk+V8i04oW/K5xq0" crossorigin="anonymous" referrerpolicy="no-referrer">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@400;700&display=swap" rel="stylesheet">
@@ -90,11 +90,8 @@
                 </button>
                 <h2 class="logo-text text-lg tracking-wider text-slate-200 uppercase">Announcement Management</h2>
             </div>
-            <div class="flex items-center gap-4">
-                <span class="bg-cyan-950 text-cyan-400 text-xs px-2.5 py-1 rounded font-bold border border-cyan-800 tracking-wider">ADMIN</span>
-                <div class="w-8 h-8 rounded-full bg-cyan-900 border border-cyan-700 flex items-center justify-center text-xs font-bold text-cyan-200">
-                    AD
-                </div>
+            <div class="flex items-center gap-3">
+                {% include 'admin/_headeractions.html' with accent='cyan' %}
             </div>
         </header>
 
@@ -111,22 +108,22 @@
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
                     <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Total Announcements</p>
-                    <p class="text-3xl font-bold text-cyan-400 mt-2">{{ announcements|length }}</p>
+                    <p class="text-3xl font-bold text-cyan-400 mt-2">{{ total_count }}</p>
                     <p class="text-[10px] text-slate-500 mt-1">All announcements</p>
                 </div>
                 <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
                     <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Active</p>
-                    <p class="text-3xl font-bold text-emerald-400 mt-2">{{ announcements|dictsort:"is_active"|slice:":1" }}</p>
+                    <p class="text-3xl font-bold text-emerald-400 mt-2">{{ active_count }}</p>
                     <p class="text-[10px] text-slate-500 mt-1">Currently visible</p>
                 </div>
                 <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
                     <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Inactive</p>
-                    <p class="text-3xl font-bold text-slate-400 mt-2">{{ announcements|dictsort:"is_active"|slice:":1" }}</p>
+                    <p class="text-3xl font-bold text-slate-400 mt-2">{{ inactive_count }}</p>
                     <p class="text-[10px] text-slate-500 mt-1">Hidden from patrons</p>
                 </div>
                 <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
                     <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Posted Today</p>
-                    <p class="text-3xl font-bold text-amber-500 mt-2">{{ announcements|dictsort:"created_at"|slice:":1" }}</p>
+                    <p class="text-3xl font-bold text-amber-500 mt-2">{{ today_count }}</p>
                     <p class="text-[10px] text-slate-500 mt-1">New announcements</p>
                 </div>
             </div>
@@ -205,7 +202,9 @@
                 </div>
 
                 <div class="px-5 py-4 border-t border-slate-800/60 flex items-center justify-between text-xs text-slate-500 bg-slate-900/5">
-                    <span class="font-medium">Showing <span class="text-slate-400">{{ announcements|length }}</span> of <span class="text-slate-400">{{ announcements|length }}</span> announcements</span>
+                    {# Was "{{ announcements|length }} of {{ announcements|length }}" -- the same #}
+                    {# number twice, so page 1 of 30 read "Showing 10 of 10".            #}
+                    <span class="font-medium">Showing <span class="text-slate-400">{{ announcements|length }}</span> of <span class="text-slate-400">{{ total_count }}</span> announcements</span>
                     
                     <div class="flex items-center gap-1">
                         {% if announcements.has_previous %}

@@ -515,6 +515,8 @@ label{
 
           <div class="forgot">
             <a href="{% url 'patron_forgot_password' %}">Forgot password?</a>
+            &nbsp;·&nbsp;
+            <a href="{% url 'patron_reactivate_request' %}">Reactivate account?</a>
           </div>
 
           <button type="submit" class="btn">
@@ -524,6 +526,11 @@ label{
 
         {% if error %}
         <p class="error-text">{{ error }}</p>
+        {% if show_reactivate %}
+        <p class="error-text" style="margin-top:6px;">
+          <a href="{% url 'patron_reactivate_request' %}" style="color:var(--green);">Reactivate your account</a>
+        </p>
+        {% endif %}
         {% endif %}
       </div>
 

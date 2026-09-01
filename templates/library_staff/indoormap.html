@@ -12,15 +12,15 @@
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@0,600;1,400&display=swap" rel="stylesheet">
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="{% static 'js/tailwind-theme.js' %}"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha384-iw3OoTErCYJJB9mCa8LNS2hbsQ7M3C0EpIsO/H5+EGAkPGc6rk+V8i04oW/K5xq0" crossorigin="anonymous" referrerpolicy="no-referrer">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@400;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{% static 'css/theme.css' %}">
     <style>
         .logo-text { font-family: 'Rowdies', sans-serif; }
         aside.w-64 { font-family: 'Inter', sans-serif; }
     </style>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H" crossorigin="anonymous" referrerpolicy="no-referrer"/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <style>
         * {
             box-sizing: border-box;
@@ -317,26 +317,93 @@
             font-size: 16px;
         }
 
-        /* Floor plan selector */
-        .floorplan-selector {
-            margin-bottom: 20px;
+        /* Floor switcher — a lift panel, docked on the map itself.
+           A dropdown in the side panel reading "Floor Plan 16" said neither
+           which storey you were on nor which ones existed. Buttons in storey
+           order answer both without being read, which is why every indoor map
+           uses them. */
+        .floor-switch {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            padding: 6px;
+            border-radius: 12px;
+            background-color: var(--bg-card);
+            border: 1px solid var(--border-color);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, .28);
         }
 
-        .floorplan-selector select {
-            width: 100%;
-            padding: 10px 12px;
+        .floor-switch .fs-cap {
+            font-size: 9px;
+            font-weight: 700;
+            letter-spacing: .1em;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            text-align: center;
+            padding: 1px 0 3px;
+        }
+
+        .floor-switch button {
+            width: 38px;
+            height: 34px;
+            border: 1px solid transparent;
+            border-radius: 8px;
+            background: transparent;
+            color: var(--text-main);
+            font-family: inherit;
+            font-size: 13px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: background-color .15s ease, color .15s ease;
+        }
+
+        .floor-switch button:hover { background-color: var(--bg-dark); }
+
+        .floor-switch button.is-current {
+            background-color: var(--accent-violet);
+            color: #fff;
+        }
+
+        /* Not in service: still viewable, because a layout has to be checked
+           before it goes live — but the button says draft rather than pretending
+           the floor is open. */
+        .floor-switch button.is-draft {
+            opacity: .5;
+            border-style: dashed;
+            border-color: var(--border-color);
+        }
+
+        .floor-switch button.is-draft.is-current { opacity: 1; }
+
+        .current-floor {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 18px;
+            padding: 9px 12px;
+            border-radius: 8px;
             background-color: var(--bg-dark);
             border: 1px solid var(--border-color);
-            border-radius: 8px;
+            font-size: 12px;
+            font-weight: 600;
             color: var(--text-main);
-            font-size: 13px;
+        }
+
+        .floor-go-btn {
+            margin-top: 12px;
+            width: 100%;
+            padding: 9px 12px;
+            border: 1px solid var(--accent-violet);
+            border-radius: 8px;
+            background: transparent;
+            color: var(--accent-violet);
+            font-family: inherit;
+            font-size: 12px;
+            font-weight: 700;
             cursor: pointer;
         }
 
-        .floorplan-selector select:focus {
-            outline: none;
-            border-color: var(--accent-violet);
-        }
+        .floor-go-btn:hover { background-color: var(--accent-violet); color: #fff; }
 
         /* Error message styling */
         .map-error {
@@ -474,8 +541,7 @@
         <header class="top-navbar">
             <h2 class="page-title">Indoor Map & Navigation</h2>
             <div class="navbar-actions">
-                <span class="badge-admin-tag">STAFF</span>
-                <div class="user-avatar">ST</div>
+                {% include 'admin/_headeractions.html' with accent='violet' %}
             </div>
         </header>
 
@@ -500,13 +566,9 @@
                         <span>🗺️</span> Floor Plan
                     </div>
 
-                    {% if floorplans != '[]' %}
-                    <div class="floorplan-selector">
-                        <select id="floorplan-select">
-                            <option value="">Select Floor Plan</option>
-                        </select>
-                    </div>
-                    {% endif %}
+                    {# Which floor is on screen, in words. The switcher itself #}
+                    {# lives on the map, where the map is. #}
+                    <div class="current-floor"><i class="fa-solid fa-layer-group"></i> <span id="currentFloorLabel">—</span></div>
 
                     <div class="filter-controls">
                         <div class="filter-item">
@@ -549,6 +611,19 @@
                     <p class="step-text">📍 In <strong class="shelf-highlight" id="navTargetRoom">this room</strong> — highlighted on the map.</p>
                 </section>
 
+                {# Asked for a shelf that is on another storey. Saying which one, #}
+                {# with a way to get there, beats the "nothing selected" panel, #}
+                {# which reads as the request having been dropped. #}
+                <section class="panel" id="otherFloorPanel" style="display:none;">
+                    <div class="panel-meta">
+                        <span>🧭</span> Locating
+                    </div>
+                    <h3 class="panel-heading-serif" id="awayShelfName">Shelf</h3>
+                    <p class="panel-sub-label" id="awayBookName"></p>
+                    <p class="step-text"><i class="fa-solid fa-layer-group"></i> On the <strong class="shelf-highlight" id="awayFloorLabel">other floor</strong> — not the one on screen.</p>
+                    <button type="button" class="floor-go-btn" id="awayGoBtn">Show me that floor</button>
+                </section>
+
                 <section class="panel" id="noTargetPanel">
                     <div class="panel-meta">
                         <span>🧭</span> Locating
@@ -569,6 +644,7 @@
         const beaconsData = {{ beacons|safe }};
         const floorplansList = {{ floorplans|safe }};
         const targetShelf = {{ target_shelf|safe }};
+        const targetElsewhere = {{ target_elsewhere|safe }};
 
         // Global variables
         let map = null;
@@ -586,7 +662,8 @@
             }
 
             initializeMap();
-            populateFloorplanSelector();
+            addFloorSwitcher();
+            showCurrentFloor();
             setupFilterControls();
             showTargetShelf();
         });
@@ -597,6 +674,23 @@
         function showTargetShelf() {
             const panel = document.getElementById('navigatingToPanel');
             const empty = document.getElementById('noTargetPanel');
+            const away = document.getElementById('otherFloorPanel');
+            if (away) away.style.display = 'none';
+
+            // The shelf was asked for and exists, just not on this storey.
+            if (!targetShelf && targetElsewhere && away) {
+                if (panel) panel.style.display = 'none';
+                if (empty) empty.style.display = 'none';
+                away.style.display = '';
+                document.getElementById('awayShelfName').textContent = targetElsewhere.name || 'That shelf';
+                document.getElementById('awayBookName').textContent = bookParam();
+                document.getElementById('awayFloorLabel').textContent = targetElsewhere.label || 'other floor';
+                document.getElementById('awayGoBtn').onclick = function () {
+                    goToFloor(targetElsewhere.floor_plan_id);
+                };
+                return;
+            }
+
             if (!targetShelf) { if (panel) panel.style.display = 'none'; if (empty) empty.style.display = ''; return; }
             if (panel) panel.style.display = '';
             if (empty) empty.style.display = 'none';
@@ -789,28 +883,84 @@
             beaconMarkers = [];
         }
 
-        function populateFloorplanSelector() {
-            const select = document.getElementById('floorplan-select');
-            if (!select || !floorplansList || floorplansList.length === 0) return;
+        function bookParam() {
+            return new URLSearchParams(window.location.search).get('book') || '';
+        }
 
-            floorplansList.forEach(fp => {
-                const option = document.createElement('option');
-                option.value = fp.id;
-                option.textContent = `Floor Plan ${fp.id}${fp.is_active ? ' (Active)' : ''}`;
-                if (fp.id === floorplanData.id) {
-                    option.selected = true;
-                }
-                select.appendChild(option);
-            });
+        function floorEntry(id) {
+            return (floorplansList || []).filter(function (f) { return f.id === id; })[0] || null;
+        }
 
-            // Handle floor plan selection change
-            select.addEventListener('change', function() {
-                const selectedId = parseInt(this.value);
-                if (selectedId && selectedId !== floorplanData.id) {
-                    // Reload page with selected floor plan
-                    window.location.href = `/library-staff/indoor-map/?floorplan=${selectedId}`;
-                }
-            });
+        function floorText(fp) {
+            // "2nd floor — Reference Section". The plan's own name is only added
+            // when it says something the storey label does not, so a plan named
+            // "2nd floor" does not come out as "2nd floor — 2nd floor".
+            let text = fp.label || ('Floor ' + fp.floor_number);
+            if (fp.name && fp.name.trim().toLowerCase() !== String(fp.label).toLowerCase()) {
+                text += ' — ' + fp.name;
+            }
+            return text;
+        }
+
+        // -- Floor switcher ------------------------------------------------
+        // One button per storey, highest at the top, because that is where it is
+        // in the building. Hidden entirely in a single-storey library: a control
+        // with one option is furniture.
+        function addFloorSwitcher() {
+            if (!map || !floorplansList || floorplansList.length < 2) return;
+
+            const control = L.control({ position: 'topright' });
+            control.onAdd = function () {
+                const box = L.DomUtil.create('div', 'floor-switch');
+                box.setAttribute('role', 'group');
+                box.setAttribute('aria-label', 'Choose a floor');
+
+                const cap = L.DomUtil.create('div', 'fs-cap', box);
+                cap.textContent = 'Floor';
+
+                // Reversed: the list arrives lowest-first, the panel reads top-down.
+                floorplansList.slice().reverse().forEach(function (fp) {
+                    const b = L.DomUtil.create('button', '', box);
+                    b.type = 'button';
+                    b.textContent = fp.short || String(fp.floor_number);
+                    b.title = floorText(fp) + (fp.is_active ? '' : ' (draft — not in service)');
+                    b.setAttribute('aria-label', b.title);
+                    if (!fp.is_active) b.classList.add('is-draft');
+                    if (fp.id === floorplanData.id) {
+                        b.classList.add('is-current');
+                        b.setAttribute('aria-current', 'true');
+                    }
+                    b.onclick = function () { goToFloor(fp.id); };
+                });
+
+                // Without this, pressing a button also drags and zooms the map
+                // underneath it.
+                L.DomEvent.disableClickPropagation(box);
+                L.DomEvent.disableScrollPropagation(box);
+                return box;
+            };
+            control.addTo(map);
+        }
+
+        // A reload rather than a layer swap: rooms, shelves, waypoints and beacons
+        // are all rendered from server-side context for one plan, and half a floor
+        // swap is exactly how a marker ends up drawn against another floor's walls.
+        // Other parameters are kept, so ?shelf= survives the trip and the target is
+        // still highlighted once the right floor comes up.
+        function goToFloor(floorPlanId) {
+            if (!floorPlanId || floorPlanId === floorplanData.id) return;
+            const params = new URLSearchParams(window.location.search);
+            params.set('floorplan', floorPlanId);
+            window.location.search = params.toString();
+        }
+
+        function showCurrentFloor() {
+            const el = document.getElementById('currentFloorLabel');
+            if (!el || !floorplanData) return;
+            const me = floorEntry(floorplanData.id);
+            el.textContent = me
+                ? floorText(me) + (me.is_active ? '' : ' · draft, not in service')
+                : (floorplanData.name || 'Floor plan');
         }
 
         function setupFilterControls() {
@@ -871,11 +1021,15 @@
         function showError(message) {
             const mapContainer = document.getElementById('floorplan-map');
             if (mapContainer) {
+                {# No "Go to Floor Plan Management" link here, unlike the #}
+                {# Administrator's copy of this page: that module is Admin-only, so #}
+                {# offering it to Library Staff only bounces them to the dashboard. #}
+                {# Matches how the empty state below words it for this portal. #}
                 mapContainer.innerHTML = `
                     <div class="map-error">
                         <h3>Error Loading Map</h3>
                         <p>${message}</p>
-                        <a href="{% url 'floorplan_management' %}">Go to Floor Plan Management</a>
+                        <p>Ask an administrator to check the floor plan setup.</p>
                     </div>
                 `;
             }

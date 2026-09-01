@@ -258,7 +258,37 @@
       <input type="password" id="currentPassword" placeholder="Current password" style="margin-bottom:8px">
       <input type="password" id="newPassword" placeholder="New password (min. 8 characters)">
     </div>
-    <button class="save-changes" style="background:var(--accent-strong)" onclick="changePassword()">Update Password</button>
+    <div id="passwordStart">
+      <button class="save-changes" style="background:var(--accent-strong)" onclick="startPasswordChange(this)">Update Password</button>
+    </div>
+    <div id="passwordOtp" style="display:none">
+      <div class="form-group">
+        <label>Enter the 6-digit code emailed to {{ patron.email }}</label>
+        <input type="text" id="passwordCode" maxlength="6" placeholder="000000">
+      </div>
+      <button class="save-changes" style="background:var(--accent-strong)" onclick="confirmPasswordChange(this)">Confirm Password Change</button>
+      <button class="save-changes" style="background:var(--surface2);color:var(--text);margin-top:8px" onclick="cancelPasswordChange()">Cancel</button>
+    </div>
+  </div>
+
+  <!-- DEACTIVATE ACCOUNT -->
+  <div class="section" style="animation-delay:0.3s;border-color:var(--danger)">
+    <div class="section-title" style="margin-bottom:16px;color:var(--danger)">⚠️ Deactivate Account</div>
+    <p style="font-size:12px;color:var(--muted);margin-bottom:12px;line-height:1.5;">
+      Deactivating signs you out and blocks login until you reactivate. You can't
+      deactivate while you still have unreturned books.
+    </p>
+    <div id="deactivateStart">
+      <button class="save-changes" style="background:var(--danger)" onclick="startDeactivate(this)">Deactivate Account</button>
+    </div>
+    <div id="deactivateOtp" style="display:none">
+      <div class="form-group">
+        <label>Enter the 6-digit code emailed to {{ patron.email }}</label>
+        <input type="text" id="deactivateCode" maxlength="6" placeholder="000000">
+      </div>
+      <button class="save-changes" style="background:var(--danger)" onclick="confirmDeactivate(this)">Confirm Deactivation</button>
+      <button class="save-changes" style="background:var(--surface2);color:var(--text);margin-top:8px" onclick="cancelDeactivate()">Cancel</button>
+    </div>
   </div>
 
   <!-- LOGOUT -->
@@ -350,16 +380,88 @@ function saveChanges(){
   }).catch(()=>toast('⚠️ Could not save changes.', false));
 }
 
-function changePassword(){
-  postForm('{% url 'patron_change_password' %}', {
+// Both passwords are re-sent with the code: the server revalidates them at
+// the verify step rather than trusting the request that asked for the code.
+function passwordFields(){
+  return {
     current_password: document.getElementById('currentPassword').value,
     new_password: document.getElementById('newPassword').value,
-  }).then(res=>{
-    if(!res.success){ toast('⚠️ '+res.error, false); return; }
-    toast('✅ Password changed!');
-    document.getElementById('currentPassword').value='';
-    document.getElementById('newPassword').value='';
-  }).catch(()=>toast('⚠️ Could not change password.', false));
+  };
+}
+function startPasswordChange(btn){
+  btn.disabled = true;
+  btn.textContent = 'Sending code…';
+  postForm('{% url 'patron_change_password' %}', Object.assign({action:'request'}, passwordFields()))
+    .then(res=>{
+      btn.disabled = false;
+      btn.textContent = 'Update Password';
+      if(!res.success){ toast('⚠️ '+res.error, false); return; }
+      document.getElementById('passwordStart').style.display = 'none';
+      document.getElementById('passwordOtp').style.display = 'block';
+      toast('Verification code sent to your email.');
+    })
+    .catch(()=>{ btn.disabled=false; btn.textContent='Update Password'; toast('⚠️ Could not send the code.', false); });
+}
+function cancelPasswordChange(){
+  document.getElementById('passwordOtp').style.display = 'none';
+  document.getElementById('passwordStart').style.display = 'block';
+  document.getElementById('passwordCode').value = '';
+}
+function confirmPasswordChange(btn){
+  const code = document.getElementById('passwordCode').value.trim();
+  if(!code){ toast('Enter the code from your email.', false); return; }
+  btn.disabled = true;
+  btn.textContent = 'Confirming…';
+  postForm('{% url 'patron_change_password' %}', Object.assign({action:'verify', code:code}, passwordFields()))
+    .then(res=>{
+      btn.disabled = false;
+      btn.textContent = 'Confirm Password Change';
+      if(!res.success){ toast('⚠️ '+res.error, false); return; }
+      toast('✅ Password changed!');
+      cancelPasswordChange();
+      document.getElementById('currentPassword').value='';
+      document.getElementById('newPassword').value='';
+    })
+    .catch(()=>{ btn.disabled=false; btn.textContent='Confirm Password Change'; toast('⚠️ Could not change password.', false); });
+}
+
+function startDeactivate(btn){
+  if(!confirm('Deactivate your account? You will be signed out and cannot log in until you reactivate.')) return;
+  btn.disabled = true;
+  btn.textContent = 'Sending code…';
+  postForm('{% url 'patron_deactivate_account' %}', { action: 'request' })
+    .then(res=>{
+      btn.disabled = false;
+      btn.textContent = 'Deactivate Account';
+      if(!res.success){ toast('⚠️ '+res.error, false); return; }
+      document.getElementById('deactivateStart').style.display = 'none';
+      document.getElementById('deactivateOtp').style.display = 'block';
+      toast('Verification code sent to your email.');
+    })
+    .catch(()=>{ btn.disabled=false; btn.textContent='Deactivate Account'; toast('⚠️ Could not send the code.', false); });
+}
+function cancelDeactivate(){
+  document.getElementById('deactivateOtp').style.display = 'none';
+  document.getElementById('deactivateStart').style.display = 'block';
+  document.getElementById('deactivateCode').value = '';
+}
+function confirmDeactivate(btn){
+  const code = document.getElementById('deactivateCode').value.trim();
+  if(!code){ toast('Enter the code from your email.', false); return; }
+  btn.disabled = true;
+  btn.textContent = 'Confirming…';
+  postForm('{% url 'patron_deactivate_account' %}', { action: 'verify', code: code })
+    .then(res=>{
+      if(!res.success){
+        btn.disabled = false;
+        btn.textContent = 'Confirm Deactivation';
+        toast('⚠️ '+res.error, false);
+        return;
+      }
+      toast('Account deactivated. Signing you out…');
+      setTimeout(()=>{ window.location.href = '{% url 'patron_login' %}'; }, 1500);
+    })
+    .catch(()=>{ btn.disabled=false; btn.textContent='Confirm Deactivation'; toast('⚠️ Could not verify the code.', false); });
 }
 </script>
 </body>

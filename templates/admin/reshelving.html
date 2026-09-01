@@ -1,0 +1,149 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en" data-module="admin">
+<head>
+    <meta charset="UTF-8">
+    <meta name="theme-color" content="#ffffff">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ayla Admin Panel - Reshelving</title>
+    <script src="{% static 'js/theme.js' %}"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="{% static 'js/tailwind-theme.js' %}"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha384-iw3OoTErCYJJB9mCa8LNS2hbsQ7M3C0EpIsO/H5+EGAkPGc6rk+V8i04oW/K5xq0" crossorigin="anonymous" referrerpolicy="no-referrer">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'css/theme.css' %}">
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: var(--bg-main); color: var(--text-primary); }
+        .logo-text { font-family: 'Rowdies', sans-serif; }
+        .shelf-row { transition: opacity .25s ease, transform .25s ease; }
+        .shelf-row.done { opacity: 0; transform: translateX(18px); }
+        .mobile-menu-btn { display: none; align-items: center; justify-content: center; width: 40px; height: 40px; margin-right: .75rem; color: var(--text-secondary); }
+        @media (max-width: 1024px) {
+            aside { position: fixed; left: -100%; top: 0; height: 100vh; z-index: 50; transition: left .3s ease; }
+            aside.open { left: 0; }
+            .mobile-menu-btn { display: flex !important; }
+            main { padding: 1rem; }
+        }
+        @media (prefers-reduced-motion: reduce) { .shelf-row { transition: none; } }
+    </style>
+</head>
+<body class="flex h-screen overflow-hidden">
+
+    {% include 'admin/_sidebar.html' with active='reshelving' %}
+
+    <div class="flex-1 flex flex-col overflow-hidden">
+        <header class="h-16 flex-shrink-0 flex items-center justify-between px-8" style="background-color: var(--bg-main);">
+            <div class="flex items-center">
+                <button class="mobile-menu-btn" onclick="toggleSidebar()"><i class="fa-solid fa-bars"></i></button>
+                <h2 class="logo-text text-lg tracking-wider text-slate-200 uppercase">Reshelving</h2>
+            </div>
+            <div class="flex items-center gap-3">
+                {% include 'admin/_headeractions.html' with accent='cyan' %}
+            </div>
+        </header>
+
+        <main class="flex-1 overflow-y-auto p-8 space-y-6">
+
+            <div class="rounded-xl border border-slate-800/80 p-4" style="background-color: var(--bg-card);">
+                <div class="flex items-start gap-3">
+                    <i class="fa-solid fa-arrow-rotate-left text-cyan-500 mt-1"></i>
+                    <div class="text-xs text-slate-400 leading-relaxed">
+                        <span class="font-bold text-slate-200">Returned, but not back on the shelf yet.</span>
+                        These copies are in the building and not with a patron, so they are not
+                        borrowable and the map does not send anyone to their shelf. Press
+                        <span class="text-slate-200">Shelved</span> once a book is physically back
+                        &mdash; that is what makes it available again.
+                    </div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                <div class="rounded-xl border border-slate-800/80 p-5" style="background-color: var(--bg-card);">
+                    <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Waiting</p>
+                    <p id="waitingCount" class="text-3xl font-bold text-cyan-400 mt-2">{{ total_waiting }}</p>
+                </div>
+            </div>
+
+            <div class="rounded-xl border border-slate-800/80 overflow-hidden" style="background-color: var(--bg-card);">
+                <div class="p-5 border-b border-slate-800 flex items-center gap-2">
+                    <i class="fa-solid fa-boxes-packing text-cyan-600 text-xs"></i>
+                    <h4 class="text-sm font-bold text-slate-200 tracking-wide">Waiting to be shelved</h4>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="border-b border-slate-800/80 text-[10px] font-bold tracking-wider text-slate-500 uppercase">
+                                <th class="py-3 px-6">Book</th>
+                                <th class="py-3 px-6">Author</th>
+                                <th class="py-3 px-6">Goes back to</th>
+                                <th class="py-3 px-6 text-center w-32">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="queueBody" class="divide-y divide-slate-800/40 text-xs text-slate-300">
+                            {% for book in books %}
+                            <tr class="shelf-row hover:bg-slate-800/10" data-book-id="{{ book.book_id }}">
+                                <td class="py-3.5 px-6 font-semibold text-slate-200">{{ book.title }}</td>
+                                <td class="py-3.5 px-6 text-slate-400">{{ book.author }}</td>
+                                <td class="py-3.5 px-6 text-slate-400">
+                                    {% if book.shelf_level %}
+                                        {{ book.shelf_level.shelf.name }} &middot; Level {{ book.shelf_level.level_number }}
+                                        {% if book.shelf_level.category %}<span class="text-slate-500">&middot; {{ book.shelf_level.category }}</span>{% endif %}
+                                    {% else %}
+                                        <span class="text-amber-500">No shelf assigned</span>
+                                    {% endif %}
+                                </td>
+                                <td class="py-3.5 px-6 text-center">
+                                    <button type="button" onclick="markShelved(this, {{ book.book_id }})"
+                                            class="inline-flex items-center gap-1.5 rounded-lg border border-emerald-600/40 text-emerald-400 hover:bg-emerald-500/10 px-3 py-1.5 text-[11px] font-bold transition-colors">
+                                        <i class="fa-solid fa-check text-[10px]"></i> Shelved
+                                    </button>
+                                </td>
+                            </tr>
+                            {% empty %}
+                            <tr id="emptyRow">
+                                <td colspan="4" class="py-14 text-center text-slate-500">
+                                    Nothing waiting &mdash; every returned book is back on its shelf.
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        function toggleSidebar() { document.querySelector('aside').classList.toggle('open'); }
+
+        async function markShelved(btn, bookId) {
+            btn.disabled = true;
+            const res = await fetch("{% url 'reshelving_queue' %}", {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': '{{ csrf_token }}',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: new URLSearchParams({ book_id: bookId }),
+            });
+            const data = await res.json();
+            if (!data.success) { alert(data.error || 'Could not mark it shelved.'); btn.disabled = false; return; }
+
+            const row = btn.closest('tr');
+            row.classList.add('done');
+            // Removed after the fade rather than immediately, so the row does not
+            // vanish out from under the cursor mid-click.
+            setTimeout(function () {
+                row.remove();
+                document.getElementById('waitingCount').textContent = data.remaining;
+                if (data.remaining === 0 && !document.getElementById('emptyRow')) {
+                    document.getElementById('queueBody').innerHTML =
+                        '<tr id="emptyRow"><td colspan="4" class="py-14 text-center text-slate-500">'
+                        + 'Nothing waiting &mdash; every returned book is back on its shelf.</td></tr>';
+                }
+            }, 250);
+        }
+    </script>
+</body>
+</html>

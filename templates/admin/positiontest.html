@@ -9,13 +9,13 @@
     <script src="{% static 'js/theme.js' %}"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="{% static 'js/tailwind-theme.js' %}"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha384-iw3OoTErCYJJB9mCa8LNS2hbsQ7M3C0EpIsO/H5+EGAkPGc6rk+V8i04oW/K5xq0" crossorigin="anonymous" referrerpolicy="no-referrer">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@400;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{% static 'css/theme.css' %}">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" integrity="sha384-c6Rcwz4e4CITMbu/NBmnNS8yN2sC3cUElMEMfP3vqqKFp7GOYaaBBCqmaWBjmkjb" crossorigin="anonymous" referrerpolicy="no-referrer"/>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" integrity="sha384-NElt3Op+9NBMCYaef5HxeJmU4Xeard/Lku8ek6hoPTvYkQPh3zLIrJP7KiRocsxO" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <style>
         body { font-family: 'Inter', sans-serif; background-color: var(--bg-main); color: var(--text-primary); }
         .logo-text { font-family: 'Rowdies', sans-serif; }
@@ -58,8 +58,8 @@
                 <button class="mobile-menu-btn" onclick="document.querySelector('aside').classList.toggle('open')"><i class="fa-solid fa-bars"></i></button>
                 <h2 class="logo-text text-lg tracking-wider text-slate-200 uppercase">Position Test</h2>
             </div>
-            <div class="flex items-center gap-4">
-                <span class="bg-cyan-950 text-cyan-400 text-xs px-2.5 py-1 rounded font-bold border border-cyan-800 tracking-wider">{% if request.session.admin_role == 'Staff' %}STAFF{% else %}ADMIN{% endif %}</span>
+            <div class="flex items-center gap-3">
+                {% include 'admin/_headeractions.html' with accent='cyan' %}
             </div>
         </header>
 
@@ -126,6 +126,88 @@
 
             <div class="rounded-xl border border-slate-800/80 overflow-hidden" style="background-color: var(--bg-card);">
                 <div class="p-4 border-b border-slate-800 flex items-center gap-2">
+                    <i class="fa-solid fa-compass text-cyan-600 text-xs"></i>
+                    <h4 class="text-sm font-bold text-slate-200 tracking-wide">Which way is north on this plan</h4>
+                    <span id="compassNow" class="text-[10px] text-slate-500 ml-auto">compass: waiting</span>
+                </div>
+                <div class="p-4 space-y-4">
+                    <p class="text-xs text-slate-400 leading-relaxed">
+                        The patron map moves the marker as people walk, using the phone&rsquo;s compass to
+                        decide which way a step went. A compass gives bearings from magnetic north, but this
+                        floor plan is drawn in whatever orientation it was drawn in &mdash; so the two have to
+                        be reconciled once, here. <span class="text-slate-200">Until this is measured the
+                        marker will walk off at a fixed angle to wherever the patron actually went</span>,
+                        which looks far worse than not moving it at all.
+                    </p>
+                    <p class="text-xs text-slate-400 leading-relaxed">
+                        Easiest way to measure it: <span class="text-slate-200">stand at one beacon and face
+                        another</span> &mdash; they are already on the map, so their true bearing is known.
+                        Pick the two below, point the top of the phone straight at the second beacon, and
+                        press Capture.
+                    </p>
+                    <div class="flex items-center gap-3 flex-wrap">
+                        <span class="text-xs text-slate-500">Standing at</span>
+                        <select id="northFrom" class="text-xs rounded px-2 py-1.5 text-slate-200 border border-slate-700" style="background-color: var(--bg-input);"></select>
+                        <span class="text-xs text-slate-500">facing</span>
+                        <select id="northTo" class="text-xs rounded px-2 py-1.5 text-slate-200 border border-slate-700" style="background-color: var(--bg-input);"></select>
+                        <button class="btn btn-ghost" onclick="captureNorth()">
+                            <i class="fa-solid fa-crosshairs"></i> Capture
+                        </button>
+                        <button id="northSaveBtn" class="btn btn-ghost" onclick="saveNorth()" disabled>
+                            <i class="fa-solid fa-floppy-disk"></i> Save
+                        </button>
+                    </div>
+                    <div id="northReadout" class="text-xs text-slate-500">
+                        Currently saved: <span id="northSaved" class="mono text-slate-300">&mdash;</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="rounded-xl border border-slate-800/80 overflow-hidden" style="background-color: var(--bg-card);">
+                <div class="p-4 border-b border-slate-800 flex items-center gap-2">
+                    <i class="fa-solid fa-crosshairs text-cyan-600 text-xs"></i>
+                    <h4 class="text-sm font-bold text-slate-200 tracking-wide">Calibration from known positions</h4>
+                    <span id="calCount" class="text-[10px] text-slate-500 ml-auto">no samples</span>
+                </div>
+                <div class="p-4 space-y-4">
+                    <p class="text-xs text-slate-400 leading-relaxed">
+                        Every other number on this page is the radio&rsquo;s opinion. This is the only place
+                        you can tell it where you <em>actually</em> are, which is what turns a vague
+                        &ldquo;the dot is wrong&rdquo; into a measurement of <span class="text-slate-200">which
+                        beacon</span> is wrong and <span class="text-slate-200">by how much</span>.
+                        Press <span class="text-slate-200">Set my position</span>, click the spot on the map
+                        you are standing on, then <span class="text-slate-200">Record</span>. Move a couple of
+                        metres and repeat &mdash; <span class="text-slate-200">at least four spots at different
+                        distances</span>, otherwise there is nothing to fit a curve to.
+                    </p>
+                    <div class="flex items-center gap-3 flex-wrap">
+                        <button id="truthBtn" class="btn btn-ghost" onclick="armTruth()">
+                            <i class="fa-solid fa-location-dot"></i> Set my position
+                        </button>
+                        <button id="recordBtn" class="btn btn-ghost" onclick="recordSample()" disabled>
+                            <i class="fa-solid fa-circle-dot"></i> Record
+                        </button>
+                        <button class="btn btn-ghost" onclick="clearSamples()">
+                            <i class="fa-solid fa-eraser"></i> Clear
+                        </button>
+                        <span id="truthNote" class="text-xs text-slate-500">Position not set.</span>
+                    </div>
+                    <div style="overflow-x:auto">
+                        <table class="diag">
+                            <thead>
+                                <tr><th>Beacon</th><th>True</th><th>Measured</th><th>Error</th>
+                                    <th>Samples</th><th>Fitted Tx / n</th><th>Fit</th><th></th></tr>
+                            </thead>
+                            <tbody id="calBody">
+                                <tr><td colspan="8" class="text-slate-500 text-xs p-4">Set a position to begin.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div class="rounded-xl border border-slate-800/80 overflow-hidden" style="background-color: var(--bg-card);">
+                <div class="p-4 border-b border-slate-800 flex items-center gap-2">
                     <i class="fa-solid fa-list-check text-cyan-600 text-xs"></i>
                     <h4 class="text-sm font-bold text-slate-200 tracking-wide">Configured beacons</h4>
                     <a href="{% url 'floorplan_management' %}" class="text-[10px] text-slate-400 hover:text-cyan-400 ml-auto"><i class="fa-solid fa-pen-to-square"></i> Edit beacons</a>
@@ -133,7 +215,7 @@
                 <div style="overflow-x:auto">
                     <table class="diag">
                         <thead>
-                            <tr><th>Label</th><th>Type</th><th>Identity</th><th>Tx / n</th><th>Position</th><th>Heard</th></tr>
+                            <tr><th>Label</th><th>Type</th><th>Identity</th><th>Tx / n</th><th>Height</th><th>Position</th><th>Heard</th></tr>
                         </thead>
                         <tbody id="configBody">
                             <tr><td colspan="6" class="text-slate-500 text-xs p-4">Loading&hellip;</td></tr>
@@ -147,6 +229,10 @@
 
 <script>
 const MAP_DATA_URL = "{% url 'get_map_data' %}";
+
+// The only write this page makes is saving a fitted calibration, so it needs a
+// token; there was no form on the page before, hence declaring one here.
+const CSRF = '{{ csrf_token }}';
 
 let mapData = null, lmap = null, imgH = 0;
 let meMarker = null, meCircle = null;
@@ -172,6 +258,28 @@ function rssiToDistance(rssi, txPower, n) {
   const p = (txPower == null) ? DEFAULT_TX_POWER : txPower;
   const exp = (n == null || n <= 0) ? DEFAULT_PATH_LOSS_N : n;
   return Math.pow(10, (p - rssi) / (10 * exp));
+}
+
+// How high a patron holds a phone. Not an administrator setting: it is a
+// property of people rather than of the building, nobody can measure it per
+// beacon, and inviting it to be tuned would be false precision. 1.2 m is the
+// usual figure for a phone carried while walking.
+const RECEIVER_HEIGHT_M = 1.2;
+
+// rssiToDistance() measures the straight line through the air; the solver works
+// in the floor plane. A beacon fixed 2.4 m up is 1.2 m above the phone, so
+// someone standing directly beneath it ranges at 1.2 m rather than 0 -- and the
+// error is worst exactly where they are closest to it. Taking the vertical leg
+// back out is Pythagoras.
+//
+// Noise can make the measured slant shorter than the height difference, which
+// has no triangle; the honest horizontal answer there is zero, i.e. directly
+// underneath. A beacon whose height was never measured is left uncorrected.
+function horizontalDistance(slantM, beaconHeightM) {
+  if (beaconHeightM == null) return slantM;
+  const dz = beaconHeightM - RECEIVER_HEIGHT_M;
+  const flat = slantM * slantM - dz * dz;
+  return flat > 0 ? Math.sqrt(flat) : 0;
 }
 
 function calibrationFor(b) {
@@ -313,7 +421,8 @@ function trilaterate() {
     if (buf && buf.length) {
       const avg = buf.reduce((a, c) => a + c, 0) / buf.length;
       const cal = calibrationFor(b);
-      pts.push({ x: b.map_x, y: b.map_y, d: rssiToDistance(avg, cal.txPower, cal.n) * scale });
+      const slant = rssiToDistance(avg, cal.txPower, cal.n);
+      pts.push({ x: b.map_x, y: b.map_y, d: horizontalDistance(slant, b.height) * scale });
     }
   });
   if (pts.length < 3) {
@@ -378,7 +487,16 @@ async function loadMap() {
   if (bounds.length) lmap.fitBounds(L.latLngBounds(bounds).pad(0.4));
   else lmap.setView(toLatLng((d.canvas_width || 1000) / 2, imgH / 2), -1);
 
+  // Only listens while armTruth() has armed it: an ordinary pan or a stray
+  // click must not silently move the reference every sample is measured from.
+  lmap.on('click', function (e) {
+    if (!armingTruth) return;
+    setTruth(e.latlng.lng, imgH - e.latlng.lat);   // inverse of toLatLng
+  });
+
   renderConfig();
+  fillNorthSelects();
+  startTestCompass();
 }
 
 function renderConfig() {
@@ -410,8 +528,306 @@ function renderConfig() {
       + '<td>' + ident + '</td>'
       + '<td class="mono">' + (b.tx_power != null ? b.tx_power : '—') + ' / '
         + (b.path_loss_n != null ? b.path_loss_n : '—') + '</td>'
+      + '<td class="mono">' + (b.height != null ? b.height + ' m' : '—') + '</td>'
       + '<td class="mono">' + (b.map_x != null ? Math.round(b.map_x) + ', ' + Math.round(b.map_y) : 'not placed') + '</td>'
       + '<td><span class="pill ' + (heard ? 'p-ok' : 'p-idle') + '">' + (heard ? 'heard' : 'silent') + '</span></td>'
+      + '</tr>';
+  }).join('');
+}
+
+// -- Which way is north on this plan -------------------------------------
+// Dead reckoning on the patron map steers by the compass, so it needs to know
+// how far the plan's "up" sits from magnetic north. Measured from a pair of
+// beacons because their true bearing is already known from the map -- no
+// protractor, no guessing at the building's orientation.
+const NORTH_URL = "{% url 'set_floorplan_north' %}";
+let liveCompass = null;      // degrees clockwise from magnetic north
+let pendingNorth = null;     // captured but not yet saved
+
+function onTestOrientation(e) {
+  let hd = null;
+  if (typeof e.webkitCompassHeading === 'number' && !isNaN(e.webkitCompassHeading)) {
+    hd = e.webkitCompassHeading;
+  } else if (e.absolute && typeof e.alpha === 'number' && !isNaN(e.alpha)) {
+    hd = 360 - e.alpha;
+  }
+  if (hd === null) return;
+  liveCompass = (hd + 360) % 360;
+  const el = document.getElementById('compassNow');
+  if (el) el.textContent = 'compass: ' + liveCompass.toFixed(0) + '\u00b0 from north';
+}
+
+function startTestCompass() {
+  const attach = function () {
+    window.addEventListener('deviceorientationabsolute', onTestOrientation, true);
+    window.addEventListener('deviceorientation', onTestOrientation, true);
+  };
+  try {
+    if (typeof DeviceOrientationEvent !== 'undefined'
+        && typeof DeviceOrientationEvent.requestPermission === 'function') {
+      DeviceOrientationEvent.requestPermission()
+        .then(function (st) { if (st === 'granted') attach(); })
+        .catch(function () {});
+    } else { attach(); }
+  } catch (err) { /* no compass on this machine */ }
+}
+
+// Bearing from one map point to another, in the same convention the patron map
+// uses: 0 is the top of the plan, growing clockwise, and stored y runs downward.
+function mapBearing(ax, ay, bx, by) {
+  return (Math.atan2(bx - ax, -(by - ay)) * 180 / Math.PI + 360) % 360;
+}
+
+function fillNorthSelects() {
+  const from = document.getElementById('northFrom');
+  const to = document.getElementById('northTo');
+  if (!from || !to || !mapData) return;
+  const opts = (mapData.beacons || [])
+    .filter(function (b) { return b.map_x != null && b.map_y != null; })
+    .map(function (b) {
+      return '<option value="' + b.beacon_id + '">'
+           + escapeHtml(b.label || ('#' + b.beacon_id)) + '</option>';
+    }).join('');
+  from.innerHTML = opts;
+  to.innerHTML = opts;
+  const list = mapData.beacons || [];
+  if (list.length > 1) to.value = list[1].beacon_id;
+  const saved = document.getElementById('northSaved');
+  if (saved) saved.textContent = (mapData.north_offset_deg || 0).toFixed(1) + '\u00b0';
+}
+
+window.captureNorth = function () {
+  if (liveCompass === null) {
+    alert('No compass reading yet.\n\nThis needs a phone with a magnetometer, over https, with '
+        + 'motion access allowed. A laptop will not report a heading.');
+    return;
+  }
+  const fromId = document.getElementById('northFrom').value;
+  const toId = document.getElementById('northTo').value;
+  if (fromId === toId) { alert('Pick two different beacons.'); return; }
+  const a = (mapData.beacons || []).find(function (b) { return String(b.beacon_id) === String(fromId); });
+  const b2 = (mapData.beacons || []).find(function (b) { return String(b.beacon_id) === String(toId); });
+  if (!a || !b2) return;
+  const bearing = mapBearing(a.map_x, a.map_y, b2.map_x, b2.map_y);
+  // The plan's up-direction, expressed as a compass bearing.
+  pendingNorth = (liveCompass - bearing + 360) % 360;
+  document.getElementById('northSaveBtn').disabled = false;
+  document.getElementById('northReadout').innerHTML =
+    'On the map that direction is <span class="mono text-slate-300">' + bearing.toFixed(1)
+    + '\u00b0</span>; your compass says <span class="mono text-slate-300">' + liveCompass.toFixed(1)
+    + '\u00b0</span> &rarr; offset <span class="mono" style="color:#10b981">' + pendingNorth.toFixed(1)
+    + '\u00b0</span>. <span class="text-slate-500">Currently saved: '
+    + (mapData.north_offset_deg || 0).toFixed(1) + '\u00b0</span>';
+};
+
+window.saveNorth = async function () {
+  if (pendingNorth === null) return;
+  const body = new URLSearchParams({
+    floorplan_id: mapData.floor_plan_id,
+    north_offset_deg: pendingNorth.toFixed(2),
+  });
+  const r = await fetch(NORTH_URL, {
+    method: 'POST',
+    headers: { 'X-CSRFToken': CSRF, 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: body,
+  }).then(function (x) { return x.json(); });
+  if (!r.success) { alert(r.error || 'Could not save'); return; }
+  mapData.north_offset_deg = r.north_offset_deg;
+  document.getElementById('northSaved').textContent = r.north_offset_deg.toFixed(1) + '\u00b0';
+  document.getElementById('northSaveBtn').disabled = true;
+  pendingNorth = null;
+  document.getElementById('northReadout').innerHTML =
+    'Saved. The patron map will steer by this from now on. '
+    + 'Currently saved: <span id="northSaved" class="mono text-slate-300">'
+    + r.north_offset_deg.toFixed(1) + '\u00b0</span>';
+};
+
+// -- Calibration against ground truth ------------------------------------
+// The page can already say what it thinks; without somewhere to enter what is
+// actually true, a wrong dot is uninterpretable -- bad calibration, a shadowed
+// beacon and a beacon entered at the wrong spot all look identical. Everything
+// below exists to make those cases distinguishable.
+const CAL_URL = "{% url 'calibrate_beacon' %}";
+let truthPoint = null;        // {x, y} canvas units: where the operator says they are
+let armingTruth = false;
+let truthMarker = null;
+const calSamples = {};        // beacon_id -> [{rssi, dist}, ...]
+const calFits = {};           // beacon_id -> {tx, n, r2, count, spread}
+
+window.armTruth = function () {
+  if (!lmap) { alert('Start the test first, so the map is loaded.'); return; }
+  armingTruth = true;
+  document.getElementById('truthNote').textContent = 'Click the map where you are standing...';
+};
+
+function setTruth(x, y) {
+  truthPoint = { x: x, y: y };
+  armingTruth = false;
+  document.getElementById('recordBtn').disabled = false;
+  const ll = toLatLng(x, y);
+  if (!truthMarker) {
+    truthMarker = L.circleMarker(ll, { radius: 7, color: '#f59e0b', fillColor: '#f59e0b',
+                                       fillOpacity: 0.9, weight: 2 })
+      .addTo(lmap).bindTooltip('You said you are here', { direction: 'top' });
+  } else {
+    truthMarker.setLatLng(ll);
+  }
+  document.getElementById('truthNote').textContent =
+    'Standing at ' + Math.round(x) + ', ' + Math.round(y) + ' -- press Record.';
+  renderCalibration();
+}
+
+function trueDistanceM(b) {
+  if (!truthPoint || !mapData.pixels_per_meter) return null;
+  return Math.hypot(b.map_x - truthPoint.x, b.map_y - truthPoint.y) / mapData.pixels_per_meter;
+}
+
+function medianOf(buf) {
+  const sorted = [...buf].sort((x, y) => x - y);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+// One sample per beacon per press, taken from the median of its recent window
+// rather than a single packet -- a lone reflected packet 15 dB out would
+// otherwise be fitted as though it were the truth.
+window.recordSample = function () {
+  if (!truthPoint) { alert('Set your position on the map first.'); return; }
+  let taken = 0;
+  const missing = [];
+  (mapData.beacons || []).forEach(function (b) {
+    const buf = rssiBuffers[b.beacon_id];
+    if (!buf || !buf.length) { missing.push(b.label || ('#' + b.beacon_id)); return; }
+    const d = trueDistanceM(b);
+    if (d == null || d < 0.25) return;   // closer than ~0.25 m the log-distance model says nothing
+    (calSamples[b.beacon_id] = calSamples[b.beacon_id] || []).push({ rssi: medianOf(buf), dist: d });
+    taken++;
+  });
+  if (!taken) {
+    alert('No beacon was heard just now, so nothing was recorded.'
+        + (missing.length ? '\n\nNot heard: ' + missing.join(', ') : ''));
+    return;
+  }
+  fitAll();
+  renderCalibration();
+  document.getElementById('truthNote').textContent = missing.length
+    ? ('Recorded ' + taken + '. Not heard here: ' + missing.join(', '))
+    : ('Recorded ' + taken + ' -- move a couple of metres and record again.');
+};
+
+window.clearSamples = function () {
+  Object.keys(calSamples).forEach(function (k) { delete calSamples[k]; });
+  Object.keys(calFits).forEach(function (k) { delete calFits[k]; });
+  renderCalibration();
+};
+
+// rssi = tx - 10n*log10(d) is a straight line in log10(d), so tx and n fall out
+// of an ordinary least-squares fit: the intercept is the 1 m reference and the
+// slope is -10n. R-squared is shown because a fit taken over too narrow a range
+// of distances can look confident and mean nothing.
+function fitAll() {
+  Object.keys(calSamples).forEach(function (id) {
+    const pts = calSamples[id];
+    const spread = new Set(pts.map(function (p) { return p.dist.toFixed(1); })).size;
+    if (pts.length < 3 || spread < 3) { calFits[id] = { count: pts.length, spread: spread }; return; }
+    let sx = 0, sy = 0;
+    pts.forEach(function (p) { sx += Math.log10(p.dist); sy += p.rssi; });
+    const mx = sx / pts.length, my = sy / pts.length;
+    let sxy = 0, sxx = 0;
+    pts.forEach(function (p) {
+      const dx = Math.log10(p.dist) - mx;
+      sxy += dx * (p.rssi - my); sxx += dx * dx;
+    });
+    if (sxx <= 0) { calFits[id] = { count: pts.length, spread: spread }; return; }
+    const slope = sxy / sxx, intercept = my - slope * mx;
+    let ssRes = 0, ssTot = 0;
+    pts.forEach(function (p) {
+      const pred = intercept + slope * Math.log10(p.dist);
+      ssRes += (p.rssi - pred) * (p.rssi - pred);
+      ssTot += (p.rssi - my) * (p.rssi - my);
+    });
+    calFits[id] = {
+      tx: Math.round(intercept),
+      n: Math.round((-slope / 10) * 100) / 100,
+      r2: ssTot > 0 ? 1 - ssRes / ssTot : 0,
+      count: pts.length,
+      spread: spread,
+    };
+  });
+}
+
+window.applyFit = async function (id) {
+  const f = calFits[id];
+  if (!f || f.tx == null) return;
+  if (f.n < 1 || f.n > 6) {
+    alert('The fitted exponent is ' + f.n + ', which is outside anything physical (1 to 6).\n\n'
+        + 'That normally means every sample was taken at a similar distance, or a beacon was '
+        + 'blocked while you recorded. Clear and take samples further apart.');
+    return;
+  }
+  const body = new URLSearchParams({ beacon_id: id, tx_power: f.tx, path_loss_n: f.n });
+  const r = await fetch(CAL_URL, {
+    method: 'POST',
+    headers: { 'X-CSRFToken': CSRF, 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: body,
+  }).then(function (x) { return x.json(); });
+  if (!r.success) { alert(r.error || 'Could not save'); return; }
+  const b = (mapData.beacons || []).find(function (q) { return String(q.beacon_id) === String(id); });
+  if (b) { b.tx_power = r.beacon.tx_power; b.path_loss_n = r.beacon.path_loss_n; }
+  renderCalibration();
+  renderConfig();
+};
+
+function renderCalibration() {
+  const body = document.getElementById('calBody');
+  if (!body) return;
+  const total = Object.keys(calSamples).reduce(function (a, k) { return a + calSamples[k].length; }, 0);
+  document.getElementById('calCount').textContent = total ? total + ' sample(s)' : 'no samples';
+  if (!mapData || !(mapData.beacons || []).length) return;
+  if (!mapData.pixels_per_meter) {
+    body.innerHTML = '<tr><td colspan="8" class="text-xs p-4" style="color:var(--warning)">'
+      + 'Map scale is not set, so a true distance cannot be worked out.</td></tr>';
+    return;
+  }
+  body.innerHTML = mapData.beacons.map(function (b) {
+    const id = b.beacon_id;
+    const trueD = trueDistanceM(b);
+    const buf = rssiBuffers[id];
+    let measured = null;
+    if (buf && buf.length) {
+      const cal = calibrationFor(b);
+      measured = horizontalDistance(rssiToDistance(medianOf(buf), cal.txPower, cal.n), b.height);
+    }
+    const err = (trueD != null && measured != null) ? measured - trueD : null;
+    // Amber past half a metre, red past one: in a room this size a metre of
+    // ranging error is most of the way across it.
+    const errColour = err == null ? ''
+      : (Math.abs(err) > 1 ? 'color:#ef4444'
+      : (Math.abs(err) > 0.5 ? 'color:#f59e0b' : 'color:#10b981'));
+    const f = calFits[id] || {};
+    let fitCell = '<span class="text-slate-600">-</span>';
+    let fitNote = '';
+    let action = '';
+    if (f.tx != null) {
+      fitCell = '<span class="mono">' + f.tx + ' / ' + f.n + '</span>';
+      fitNote = '<span class="pill ' + (f.r2 > 0.8 ? 'p-ok' : 'p-idle') + '">R2 '
+              + Math.round(f.r2 * 100) + '%</span>';
+      action = '<button class="btn btn-ghost" style="padding:2px 8px;font-size:11px" '
+             + 'onclick="applyFit(' + id + ')">Apply</button>';
+    } else if (f.count) {
+      fitNote = '<span class="text-slate-500 text-xs">need 3+ distances</span>';
+    }
+    return '<tr>'
+      + '<td>' + escapeHtml(b.label || ('#' + id)) + '</td>'
+      + '<td class="mono">' + (trueD != null ? trueD.toFixed(2) + ' m' : '-') + '</td>'
+      + '<td class="mono">' + (measured != null ? measured.toFixed(2) + ' m'
+          : '<span class="text-slate-600">silent</span>') + '</td>'
+      + '<td class="mono" style="' + errColour + '">'
+        + (err != null ? (err > 0 ? '+' : '') + err.toFixed(2) + ' m' : '-') + '</td>'
+      + '<td class="mono">' + ((calSamples[id] || []).length) + '</td>'
+      + '<td>' + fitCell + '</td>'
+      + '<td>' + fitNote + '</td>'
+      + '<td>' + action + '</td>'
       + '</tr>';
   }).join('');
 }
@@ -441,6 +857,7 @@ function escapeHtml(s) {
 function tick() {
   renderDiagnostics();
   renderConfig();
+  renderCalibration();
   const fix = trilaterate();
   const note = document.getElementById('fixNote');
   if (!fix) return;

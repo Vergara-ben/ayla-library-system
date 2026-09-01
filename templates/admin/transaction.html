@@ -9,7 +9,7 @@
     <script src="{% static 'js/theme.js' %}"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="{% static 'js/tailwind-theme.js' %}"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha384-iw3OoTErCYJJB9mCa8LNS2hbsQ7M3C0EpIsO/H5+EGAkPGc6rk+V8i04oW/K5xq0" crossorigin="anonymous" referrerpolicy="no-referrer">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@400;700&display=swap" rel="stylesheet">
@@ -111,7 +111,8 @@
             margin-right: 0.75rem;
         }
     </style>
-    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js" integrity="sha384-hStSInNIZ8ljtOVrmrgf7zdHMapaLBWoSnPTtF0nzsybp4+LuhDz6sHuEVpWIX8o" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="{% static 'js/qrsource.js' %}"></script>
     <link rel="stylesheet" href="{% static 'css/admin-enhance.css' %}">
     <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
     <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
@@ -130,11 +131,8 @@
                 </button>
                 <h2 class="logo-text text-lg tracking-wider text-slate-200 uppercase">Transactions History</h2>
             </div>
-            <div class="flex items-center gap-4">
-                <span class="bg-cyan-950 text-cyan-400 text-xs px-2.5 py-1 rounded font-bold border border-cyan-800 tracking-wider">{% if request.session.admin_role == 'Staff' %}STAFF{% else %}ADMIN{% endif %}</span>
-                <div class="w-8 h-8 rounded-full bg-cyan-900 border border-cyan-700 flex items-center justify-center text-xs font-bold text-cyan-200">
-                    AD
-                </div>
+            <div class="flex items-center gap-3">
+                {% include 'admin/_headeractions.html' with accent='cyan' %}
             </div>
         </header>
 
@@ -380,7 +378,9 @@
     <!-- Transaction Processing Modal -->
     <div id="transaction-modal" class="fixed inset-0 z-50 hidden">
         <div class="absolute inset-0 bg-black/80" onclick="closeTransactionModal()"></div>
-        <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+        <div id="transaction-panel"
+             class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-h-[90vh] overflow-y-auto"
+             style="max-width: 42rem; transition: max-width .35s cubic-bezier(.4,0,.2,1);">
             <div class="rounded-xl border border-slate-700 overflow-hidden shadow-2xl" style="background-color: var(--bg-card);">
                 <div class="p-5 border-b border-slate-700 flex items-center justify-between">
                     <div class="flex items-center gap-2">
@@ -391,7 +391,8 @@
                         <i class="fa-solid fa-times"></i>
                     </button>
                 </div>
-                <div class="p-5 space-y-5">
+                <div class="flex items-stretch">
+                <div class="p-5 space-y-5 flex-1 min-w-0">
                     {% csrf_token %}
                     <!-- Transaction Type Selection -->
                     <div>
@@ -430,7 +431,7 @@
                         <div id="patron-search-panel">
                             <div class="relative">
                                 <i class="fa-solid fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-xs"></i>
-                                <input type="text" id="patron-search" placeholder="Search patron by name or email..." class="w-full bg-slate-950/80 border border-slate-800 rounded-lg pl-9 pr-4 py-2 text-xs text-slate-300 focus:outline-none focus:border-cyan-800 placeholder-slate-600 transition-colors">
+                                <input type="text" id="patron-search" placeholder="Search patron by name, ID, email or mobile..." class="w-full bg-slate-950/80 border border-slate-800 rounded-lg pl-9 pr-4 py-2 text-xs text-slate-300 focus:outline-none focus:border-cyan-800 placeholder-slate-600 transition-colors">
                                 <div id="patron-dropdown" class="absolute z-10 w-full mt-1 bg-slate-900 border border-slate-800 rounded-lg shadow-xl max-h-48 overflow-y-auto hidden">
                                     <!-- Patron options will be populated here -->
                                 </div>
@@ -439,8 +440,8 @@
 
                         <!-- Identity QR scan panel -->
                         <div id="patron-scan-panel" class="hidden">
-                            <div class="relative aspect-video bg-slate-900 rounded-lg overflow-hidden mb-3">
-                                <video id="patron-qr-video" class="w-full h-full object-cover" autoplay playsinline></video>
+                            <div id="patron-cam-box" class="relative aspect-video w-full max-w-[260px] mx-auto bg-slate-900 rounded-lg overflow-hidden mb-3">
+                                <video id="patron-qr-video" class="w-full h-full object-contain" autoplay playsinline></video>
                                 <canvas id="patron-qr-canvas" class="hidden"></canvas>
                                 <div id="patron-scanner-loading" class="absolute inset-0 flex items-center justify-center text-slate-400 text-xs">
                                     <i class="fa-solid fa-spinner fa-spin mr-2"></i>
@@ -488,8 +489,8 @@
 
                         <!-- QR scan panel -->
                         <div id="book-scan-panel" class="hidden">
-                            <div class="relative aspect-video bg-slate-900 rounded-lg overflow-hidden mb-4">
-                                <video id="qr-video" class="w-full h-full object-cover" autoplay playsinline></video>
+                            <div id="book-cam-box" class="relative aspect-video w-full max-w-[260px] mx-auto bg-slate-900 rounded-lg overflow-hidden mb-4">
+                                <video id="qr-video" class="w-full h-full object-contain" autoplay playsinline></video>
                                 <canvas id="qr-canvas" class="hidden"></canvas>
                                 <div id="scanner-loading" class="absolute inset-0 flex items-center justify-center text-slate-400 text-xs">
                                     <i class="fa-solid fa-spinner fa-spin mr-2"></i>
@@ -523,6 +524,31 @@
 
                     <!-- Success/Error Messages -->
                     <div id="transaction-message" class="hidden rounded-lg p-3 text-xs"></div>
+                </div>
+
+                <!-- Book detail, shown beside the transaction rather than over it, so -->
+                <!-- staff can read a book's details without losing what they have -->
+                <!-- already staged. -->
+                <!-- A div, not an <aside>: this template's responsive CSS styles the -->
+                <!-- sidebar by tag name, so at <=1024px an <aside> here inherited      -->
+                <!-- position:fixed; left:-100% and flew off the screen.                -->
+                <div id="book-detail-pane" role="complementary" aria-label="Book details"
+                     class="hidden flex-shrink-0 border-l border-slate-700 overflow-y-auto"
+                     style="width: 22rem; background-color: var(--bg-main);">
+                    <div class="p-5 border-b border-slate-700 flex items-center justify-between gap-2">
+                        <div class="flex items-center gap-2 min-w-0">
+                            <i class="fa-solid fa-book text-slate-400 text-xs flex-shrink-0"></i>
+                            <h3 class="text-sm font-bold text-slate-200 tracking-wide truncate">Book Details</h3>
+                        </div>
+                        <button type="button" onclick="hideBookDetail()" aria-label="Close book details"
+                                class="text-slate-400 hover:text-slate-200 flex-shrink-0">
+                            <i class="fa-solid fa-times"></i>
+                        </button>
+                    </div>
+                    <div id="book-detail-body" class="p-5 space-y-4 text-xs">
+                        <p class="text-slate-500">Loading&hellip;</p>
+                    </div>
+                </div>
                 </div>
             </div>
         </div>
@@ -793,16 +819,48 @@
         openTransactionModalBtn.addEventListener('click', openTransactionModal);
 
         function openTransactionModal() {
+            // Reset first. Closing the modal used to leave everything standing --
+            // the patron field still holding the last selected name, that patron
+            // still selected, and any staged books still queued. Reopening it and
+            // typing then appended to the old name ("Ben Vergara" + "jose"), so the
+            // search returned nothing and looked broken; worse, the leftover books
+            // could be processed by accident on the next transaction.
+            resetTransactionForm();
             transactionModal.classList.remove('hidden');
             switchBookTab('search');     // default to manual search; camera starts only on the Scan tab
             switchPatronTab('search');
         }
 
+        function resetTransactionForm() {
+            clearPatronSelection();
+            scannedBooks = [];
+            updateScannedBooksList();
+            const bookField = document.getElementById('book-search');
+            if (bookField) bookField.value = '';
+            ['book-dropdown', 'patron-dropdown'].forEach(function (id) {
+                const dd = document.getElementById(id);
+                if (dd) { dd.innerHTML = ''; dd.classList.add('hidden'); }
+            });
+            // Transaction type is a radio group, not a field with a value.
+            document.querySelectorAll('input[name="transaction_type"]')
+                .forEach(function (r) { r.checked = false; });
+            // A warning from the previous attempt ("Book already scanned") would
+            // otherwise still be sitting there against an empty form.
+            const msg = document.getElementById('transaction-message');
+            if (msg) { msg.textContent = ''; msg.className = 'hidden rounded-lg p-3 text-xs'; }
+        }
+
         function closeTransactionModal() {
+            hideBookDetail();
             transactionModal.classList.add('hidden');
             stopCamera();
             stopPatronCamera();
         }
+
+        // Which input each scan panel is using -- the computer's camera, or a
+        // handheld scanner plugged into the desk. Assigned once the panels exist,
+        // so both switch functions cope with them still being null.
+        let bookScanSource = null, patronScanSource = null;
 
         // Switch between manual search and QR scan for adding books.
         function switchBookTab(tab) {
@@ -819,13 +877,13 @@
                 searchPanel.classList.add('hidden');
                 scanBtn.classList.add(...activeCls); scanBtn.classList.remove(...idleCls);
                 searchBtn.classList.remove(...activeCls); searchBtn.classList.add(...idleCls);
-                startCamera();
+                if (bookScanSource) bookScanSource.activate(); else startCamera();
             } else {
                 searchPanel.classList.remove('hidden');
                 scanPanel.classList.add('hidden');
                 searchBtn.classList.add(...activeCls); searchBtn.classList.remove(...idleCls);
                 scanBtn.classList.remove(...activeCls); scanBtn.classList.add(...idleCls);
-                stopCamera();
+                if (bookScanSource) bookScanSource.deactivate(); else stopCamera();
             }
         }
 
@@ -844,14 +902,40 @@
                 searchPanel.classList.add('hidden');
                 scanBtn.classList.add(...activeCls); scanBtn.classList.remove(...idleCls);
                 searchBtn.classList.remove(...activeCls); searchBtn.classList.add(...idleCls);
-                startPatronCamera();
+                if (patronScanSource) patronScanSource.activate(); else startPatronCamera();
             } else {
                 searchPanel.classList.remove('hidden');
                 scanPanel.classList.add('hidden');
                 searchBtn.classList.add(...activeCls); searchBtn.classList.remove(...idleCls);
                 scanBtn.classList.remove(...activeCls); scanBtn.classList.add(...idleCls);
-                stopPatronCamera();
+                if (patronScanSource) patronScanSource.deactivate(); else stopPatronCamera();
             }
+        }
+
+        // Both panels take either input. The handheld and the camera hand the
+        // same string to the same function, so nothing downstream has to know
+        // which one was used.
+        if (window.AylaQRSource) {
+            bookScanSource = AylaQRSource.attach({
+                panel: '#book-scan-panel',
+                camera: '#book-cam-box',
+                startCamera: startCamera,
+                stopCamera: stopCamera,
+                onCode: handleQRCode,
+                status: '#scan-status',
+                deviceStatus: 'Ready. Scan a book to add it to the list below.',
+                hint: "Scan the QR label on the book's copy.",
+            });
+            patronScanSource = AylaQRSource.attach({
+                panel: '#patron-scan-panel',
+                camera: '#patron-cam-box',
+                startCamera: startPatronCamera,
+                stopCamera: stopPatronCamera,
+                onCode: handlePatronQRCode,
+                status: '#patron-scan-status',
+                deviceStatus: "Ready. Scan the patron's card.",
+                hint: "Scan the QR code on the patron's library card.",
+            });
         }
 
         // Transaction Processing JavaScript
@@ -913,7 +997,7 @@
         });
 
         function searchPatrons(query) {
-            fetch(`/admin-portal/manage-patron/?search=${encodeURIComponent(query)}`, {
+            fetch(`/admin-portal/patron-search/?search=${encodeURIComponent(query)}`, {
                 headers: {
                     'X-Requested-With': 'XMLHttpRequest'
                 }
@@ -1243,6 +1327,92 @@
                 });
         }
 
+        // ── Book detail pane ────────────────────────────────────────────────
+        // Opens beside the transaction instead of on top of it. A second modal
+        // would have covered the staged list and the patron, which is exactly
+        // the context someone is checking the book against.
+        const EXPANDED_WIDTH = '64rem';
+        const COLLAPSED_WIDTH = '42rem';
+        let detailBookId = null;
+
+        function showBookDetail(bookId) {
+            const pane = document.getElementById('book-detail-pane');
+            const panel = document.getElementById('transaction-panel');
+            const body = document.getElementById('book-detail-body');
+
+            // Clicking the same book again closes it, so the button toggles.
+            if (detailBookId === bookId && !pane.classList.contains('hidden')) {
+                hideBookDetail();
+                return;
+            }
+            detailBookId = bookId;
+
+            pane.classList.remove('hidden');
+            panel.style.maxWidth = EXPANDED_WIDTH;
+            body.innerHTML = '<p class="text-slate-500">Loading&hellip;</p>';
+
+            fetch(`/admin-portal/book-details/${bookId}/`)
+                .then(r => r.json())
+                .then(data => {
+                    // The pane may have been closed, or another book opened, while
+                    // this was in flight -- rendering then would show the wrong book.
+                    if (detailBookId !== bookId) return;
+                    if (!data.success) {
+                        body.innerHTML = '<p class="text-rose-400">' + (data.error || 'Could not load this book.') + '</p>';
+                        return;
+                    }
+                    body.innerHTML = renderBookDetail(data, bookId);
+                })
+                .catch(() => {
+                    if (detailBookId !== bookId) return;
+                    body.innerHTML = '<p class="text-rose-400">Could not load this book.</p>';
+                });
+        }
+
+        function hideBookDetail() {
+            detailBookId = null;
+            document.getElementById('book-detail-pane').classList.add('hidden');
+            document.getElementById('transaction-panel').style.maxWidth = COLLAPSED_WIDTH;
+        }
+
+        function detailRow(label, value) {
+            return '<div>'
+                 + '<p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">' + label + '</p>'
+                 + '<p class="text-xs text-slate-300 mt-0.5 break-words">' + (value || 'N/A') + '</p>'
+                 + '</div>';
+        }
+
+        function renderBookDetail(d, bookId) {
+            const esc = s => String(s == null ? '' : s)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+            return ''
+                + '<div>'
+                +   '<h4 class="text-sm font-bold text-slate-100 leading-snug">' + esc(d.title) + '</h4>'
+                +   '<p class="text-xs text-slate-500 mt-1">' + esc(d.author) + '</p>'
+                +   '<span class="inline-block mt-2 px-2 py-0.5 rounded text-[10px] font-medium '
+                +     getStatusClass(d.status) + '">' + esc(d.status) + '</span>'
+                + '</div>'
+                + '<div class="grid grid-cols-2 gap-3 pt-2 border-t border-slate-800">'
+                +   detailRow('ISBN', esc(d.ISBN))
+                +   detailRow('Genre', esc(d.genre))
+                +   detailRow('Published', esc(d.publication_year))
+                +   detailRow('Copies', esc(d.copies))
+                +   detailRow('Section', esc(d.category))
+                +   detailRow('Shelf', esc(d.shelf))
+                +   detailRow('Shelf level', esc(d.shelf_level))
+                + '</div>'
+                + '<div class="pt-2 border-t border-slate-800">'
+                +   '<p class="text-[10px] uppercase font-bold tracking-wider text-slate-500 mb-2">QR Code</p>'
+                +   (d.qr_code
+                        ? '<div class="bg-white rounded-lg p-3 flex items-center justify-center">'
+                          + '<img src="/admin-portal/book-qr/' + bookId + '/" alt="QR code for '
+                          + esc(d.title) + '" class="w-32 h-32">'
+                          + '</div>'
+                        : '<p class="text-slate-500">No QR code for this book.</p>')
+                + '</div>';
+        }
+
         function addScannedBook(book) {
             // Check if book already scanned
             if (scannedBooks.some(b => b.book_id === book.book_id)) {
@@ -1265,6 +1435,11 @@
             const countSpan = document.getElementById('scanned-count');
             
             if (scannedBooks.length === 0) {
+                // Empty the container too, not just hide it. Returning early left
+                // the last transaction's rows sitting in the DOM -- invisible, but
+                // still there to be revealed by anything that unhides the section.
+                listContainer.innerHTML = '';
+                countSpan.textContent = '0 books';
                 section.classList.add('hidden');
                 return;
             }
@@ -1281,9 +1456,18 @@
                             <span class="inline-block px-2 py-0.5 rounded text-[10px] font-medium ${getStatusClass(book.status)}">${book.status}</span>
                         </div>
                     </div>
-                    <button type="button" onclick="removeScannedBook(${book.book_id})" class="ml-3 text-slate-500 hover:text-rose-400 transition-colors">
-                        <i class="fa-solid fa-times"></i>
-                    </button>
+                    <div class="ml-3 flex items-center gap-2 flex-shrink-0">
+                        <button type="button" onclick="showBookDetail(${book.book_id})" title="View book details"
+                                aria-label="View details for ${book.title.replace(/"/g, '&quot;')}"
+                                class="text-slate-500 hover:text-cyan-400 transition-colors">
+                            <i class="fa-solid fa-circle-info"></i>
+                        </button>
+                        <button type="button" onclick="removeScannedBook(${book.book_id})" title="Remove from this transaction"
+                                aria-label="Remove ${book.title.replace(/"/g, '&quot;')}"
+                                class="text-slate-500 hover:text-rose-400 transition-colors">
+                            <i class="fa-solid fa-times"></i>
+                        </button>
+                    </div>
                 </div>
             `).join('');
         }

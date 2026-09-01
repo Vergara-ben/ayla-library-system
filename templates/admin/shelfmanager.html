@@ -9,13 +9,13 @@
     <script src="{% static 'js/theme.js' %}"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="{% static 'js/tailwind-theme.js' %}"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha384-iw3OoTErCYJJB9mCa8LNS2hbsQ7M3C0EpIsO/H5+EGAkPGc6rk+V8i04oW/K5xq0" crossorigin="anonymous" referrerpolicy="no-referrer">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@400;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{% static 'css/theme.css' %}">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" integrity="sha384-c6Rcwz4e4CITMbu/NBmnNS8yN2sC3cUElMEMfP3vqqKFp7GOYaaBBCqmaWBjmkjb" crossorigin="anonymous" referrerpolicy="no-referrer"/>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" integrity="sha384-NElt3Op+9NBMCYaef5HxeJmU4Xeard/Lku8ek6hoPTvYkQPh3zLIrJP7KiRocsxO" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <style>
         body { font-family: 'Inter', sans-serif; background-color: var(--bg-main); color: var(--text-primary); }
         .logo-text { font-family: 'Rowdies', sans-serif; }
@@ -72,9 +72,8 @@
                 <button class="mobile-menu-btn" onclick="document.querySelector('aside').classList.toggle('open')"><i class="fa-solid fa-bars"></i></button>
                 <h2 class="logo-text text-lg tracking-wider text-slate-200 uppercase">Shelf Manager</h2>
             </div>
-            <div class="flex items-center gap-4">
-                <span class="bg-cyan-950 text-cyan-400 text-xs px-2.5 py-1 rounded font-bold border border-cyan-800 tracking-wider">{% if request.session.admin_role == 'Staff' %}STAFF{% else %}ADMIN{% endif %}</span>
-                <div class="w-8 h-8 rounded-full bg-cyan-900 border border-cyan-700 flex items-center justify-center text-xs font-bold text-cyan-200">AD</div>
+            <div class="flex items-center gap-3">
+                {% include 'admin/_headeractions.html' with accent='cyan' %}
             </div>
         </header>
 
@@ -96,6 +95,13 @@
                 <div class="p-4 border-b border-slate-800 flex items-center gap-2 flex-wrap">
                     <i class="fa-solid fa-map-location-dot text-cyan-600 text-xs"></i>
                     <h4 class="text-sm font-bold text-slate-200 tracking-wide">Floor Plan</h4>
+                    {# The structure below has one root per storey now, so the plan #}
+                    {# beside it needs to be able to follow. Hidden when there is  #}
+                    {# only one floor in service. #}
+                    <select id="miniFloorPicker" onchange="switchMiniFloor(this.value)"
+                            class="hidden text-[11px] font-semibold rounded-md border border-slate-700 px-2 py-1"
+                            style="background-color: var(--bg-main); color: var(--text-primary);"
+                            aria-label="Choose which floor to show"></select>
                     <span class="text-[10px] text-slate-500">click a shelf to find it below</span>
                     <span id="miniMapNote" class="text-[10px] text-amber-500/90 ml-1"></span>
                     <div class="ml-auto flex items-center gap-2">
@@ -114,7 +120,7 @@
                 <div class="p-4 border-b border-slate-800 flex items-center gap-2">
                     <i class="fa-solid fa-sitemap text-cyan-600 text-xs"></i>
                     <h4 class="text-sm font-bold text-slate-200 tracking-wide">Structure</h4>
-                    <span class="text-[10px] text-slate-500">(active floor plan)</span>
+                    <span class="text-[10px] text-slate-500">(floors in service)</span>
                     <button onclick="loadTree()" class="ml-auto text-[10px] text-slate-400 hover:text-cyan-400 flex items-center gap-1"><i class="fa-solid fa-rotate-right"></i> Refresh</button>
                 </div>
                 <div class="tree p-3" id="treeRoot">
@@ -323,6 +329,7 @@
                     + '<button class="tbtn view" title="View" onclick="viewBook(' + node.id + ')"><i class="fa-solid fa-eye"></i></button></div>';
             } else {
                 let a = '';
+                if (node.type === 'floorplan') a += '<button class="tbtn view" title="Show this floor on the plan above" onclick="switchMiniFloor(' + node.id + ')"><i class="fa-solid fa-map-location-dot"></i></button>';
                 if (t.child) a += '<button class="tbtn add" title="Add ' + childWord[t.child] + '" onclick="openAdd(\'' + node.type + '\',' + node.id + ')"><i class="fa-solid fa-plus"></i></button>';
                 if (node.type === 'shelflevel') a += '<button class="tbtn add" title="Add Books" onclick="openPlacement(' + node.id + ', this)"><i class="fa-solid fa-book-medical"></i></button>';
                 if (t.edit) a += '<button class="tbtn edit" title="Rename" onclick="openEdit(\'' + node.type + '\',' + node.id + ',this)"><i class="fa-solid fa-pen"></i></button>';
@@ -370,6 +377,10 @@
         // and a second editable canvas would be two places to change the same
         // thing. Clicking a shelf here just finds it in the tree.
         let miniMap = null, miniH = 0, miniShelves = {}, miniBounds = null;
+        // Which storey the little plan is showing. Null until the tree says which
+        // floors exist, at which point it settles on the lowest one in service.
+        let miniFloorId = null;
+        let floorList = [];
 
         function miniToLatLng(x, y) { return [miniH - y, x]; }
 
@@ -383,17 +394,54 @@
             });
         }
 
+        // The floors come from the tree, which is the one place that already knows
+        // which plans are in service and what each storey is called.
+        function buildMiniFloorPicker() {
+            const picker = document.getElementById('miniFloorPicker');
+            if (!picker) return;
+            if (floorList.length < 2) { picker.classList.add('hidden'); return; }
+            picker.innerHTML = floorList.map(function (f) {
+                return '<option value="' + f.id + '"'
+                     + (f.id === miniFloorId ? ' selected' : '') + '>'
+                     + esc(f.name) + '</option>';
+            }).join('');
+            // Set the value as well as the attribute: once a select has been
+            // touched, the browser keeps the user's choice and ignores `selected`
+            // on freshly written options, so the box would say one floor while
+            // the map drew another.
+            picker.value = String(miniFloorId);
+            picker.classList.remove('hidden');
+        }
+
+        function switchMiniFloor(floorId) {
+            const id = parseInt(floorId, 10);
+            if (!id || id === miniFloorId) return;
+            miniFloorId = id;
+            buildMiniFloorPicker();
+            loadMiniMap();
+        }
+
         async function loadMiniMap() {
             const host = document.getElementById('miniMap');
             const note = document.getElementById('miniMapNote');
             if (!host) return;
 
             let d;
-            try { d = await getJSON(U.mapData); } catch (e) { d = null; }
+            const url = U.mapData + (miniFloorId ? '?floor_plan_id=' + miniFloorId : '');
+            try { d = await getJSON(url); } catch (e) { d = null; }
             if (!d || !d.success) {
                 document.getElementById('miniMapCard').classList.add('hidden');
                 return;
             }
+            document.getElementById('miniMapCard').classList.remove('hidden');
+
+            // Torn down and rebuilt rather than cleared: Leaflet keeps the old
+            // canvas bound to the container, and drawing a second floor into it
+            // stacks two storeys on one map.
+            if (miniMap) { miniMap.remove(); miniMap = null; }
+            miniShelves = {};
+            miniBounds = null;
+            miniFloorId = d.floor_plan_id || miniFloorId;
 
             miniH = d.canvas_height || 800;
             miniMap = L.map('miniMap', {
@@ -432,7 +480,7 @@
             // most likely to expose, so it says so rather than just omitting it.
             note.textContent = unplaced
                 ? unplaced + ' shelf/shelves not placed on the plan yet'
-                : '';
+                : (placed || (d.rooms || []).length ? '' : 'Nothing drawn on this floor yet');
 
             const layers = Object.keys(miniShelves).map(function (k) { return miniShelves[k]; });
             if (placed || (d.rooms || []).length) {
@@ -447,6 +495,16 @@
             } else {
                 miniMap.setView(miniToLatLng((d.canvas_width || 1000) / 2, miniH / 2), -1);
             }
+
+            // The tree is rendered just before this runs and changes the page
+            // height as it does, so Leaflet can measure the container before the
+            // layout settles and then draw everything outside the visible box --
+            // a card that looks empty with the geometry sitting just off-screen.
+            setTimeout(function () {
+                if (!miniMap) return;
+                miniMap.invalidateSize();
+                miniMapFit();
+            }, 0);
         }
 
         function miniMapFit() {
@@ -470,7 +528,8 @@
 
             const row = document.querySelector('.trow[data-type="shelf"][data-id="' + shelfId + '"]');
             if (!row) {
-                // It is on the plan but not under the active floor plan's tree.
+                // Drawn on the plan but missing from the tree, which means its
+                // floor is not in service.
                 document.getElementById('miniMapNote').textContent =
                     'That shelf is not in the structure below.';
                 return;
@@ -515,6 +574,13 @@
             let html = '';
             d.tree.forEach(function (n) { html += renderNode(n, 0); });
             root.innerHTML = html;
+
+            // The plan beside the tree follows the same set of floors.
+            floorList = d.tree.map(function (n) {
+                return { id: n.id, name: n.name, floor_number: n.floor_number };
+            });
+            if (!miniFloorId && floorList.length) miniFloorId = floorList[0].id;
+            buildMiniFloorPicker();
         }
 
         async function tToggle(cb, modelType, id) {
@@ -704,8 +770,12 @@
             else { err.textContent = r.error || 'Failed to add books.'; err.classList.remove('hidden'); }
         }
 
-        loadTree();
-        loadMiniMap();
+        // The tree first: it decides which floors exist, and the plan opens on
+        // whichever one that makes the current floor.
+        (async function () {
+            await loadTree();
+            await loadMiniMap();
+        })();
         loadFlat();
     </script>
     <script src="{% static 'js/admin-enhance.js' %}" defer></script>

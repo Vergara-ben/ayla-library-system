@@ -12,7 +12,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@0,600;1,400&display=swap" rel="stylesheet">
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="{% static 'js/tailwind-theme.js' %}"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha384-iw3OoTErCYJJB9mCa8LNS2hbsQ7M3C0EpIsO/H5+EGAkPGc6rk+V8i04oW/K5xq0" crossorigin="anonymous" referrerpolicy="no-referrer">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@400;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{% static 'css/theme.css' %}">
     <style>
@@ -608,8 +608,7 @@
             <h2 class="page-title">Dashboard</h2>
 
             <div class="navbar-actions">
-                <span class="badge-admin-tag">STAFF</span>
-                <div class="user-avatar" title="{{ admin.fullname }}">{{ admin.fullname|slice:":2"|upper }}</div>
+                {% include 'admin/_headeractions.html' with accent='violet' %}
             </div>
         </header>
 
@@ -656,7 +655,7 @@
                 <section class="panel">
                     <div class="panel-header">
                         <h3 class="panel-title">📋 Recent Transactions</h3>
-                        <a href="{% url 'admin_transaction' %}" class="btn-view-all">View all &rarr;</a>
+                        <a href="{% url 'staff_transaction' %}" class="btn-view-all">View all &rarr;</a>
                     </div>
 
                     <div class="transaction-list">
@@ -731,7 +730,7 @@
                     <section class="panel">
                         <div class="panel-header">
                             <h3 class="panel-title">🚪 Today at a Glance</h3>
-                            <a href="{% url 'admin_log_management' %}" class="btn-view-all">View &rarr;</a>
+                            <a href="{% url 'staff_logs' %}" class="btn-view-all">View &rarr;</a>
                         </div>
                         <div class="log-stats-list">
                             <div class="log-stat-row">

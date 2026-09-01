@@ -204,7 +204,12 @@
   <a href="{% url 'patron_dashboard' %}" class="nav-item"><div class="nav-icon">🏠</div><div class="nav-label">Home</div></a>
   <a href="{% url 'patron_catalog' %}" class="nav-item"><div class="nav-icon">🔍</div><div class="nav-label">Search</div></a>
   <a href="{% url 'patron_map' %}" class="nav-item"><div class="nav-icon">🗺️</div><div class="nav-label">Map</div></a>
+  {% if patron_signed_in %}
   <a href="{% url 'patron_account' %}" class="nav-item"><div class="nav-icon">👤</div><div class="nav-label">Account</div></a>
+  {% else %}
+  {# Tab stays put for a visitor; tapping explains what an account is for. #}
+  <a href="{% url 'patron_login' %}" class="nav-item" onclick="showGuestPrompt(event)"><div class="nav-icon">👤</div><div class="nav-label">Account</div></a>
+  {% endif %}
 </nav>
 
 <script>
@@ -225,5 +230,6 @@ function markAllRead() {
   document.querySelector('.tab-badge').style.display='none';
 }
 </script>
+{% if not patron_signed_in %}{% include 'patron/_guestprompt.html' %}{% endif %}
 </body>
 </html>

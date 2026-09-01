@@ -9,11 +9,16 @@
     <script src="{% static 'js/theme.js' %}"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="{% static 'js/tailwind-theme.js' %}"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha384-iw3OoTErCYJJB9mCa8LNS2hbsQ7M3C0EpIsO/H5+EGAkPGc6rk+V8i04oW/K5xq0" crossorigin="anonymous" referrerpolicy="no-referrer">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@400;700&display=swap" rel="stylesheet">
-    <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+    {# Pinned to a version: the bare unpkg URL serves "whatever is latest", #}
+    {# which cannot be hashed and can change under the app without notice. #}
+    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"
+            integrity="sha384-c9d8RFSL+u3exBOJ4Yp3HUJXS4znl9f+z66d1y54ig+ea249SpqR+w1wyvXz/lk+" crossorigin="anonymous"
+            referrerpolicy="no-referrer"></script>
+    <script src="{% static 'js/qrsource.js' %}"></script>
     
     <link rel="stylesheet" href="{% static 'css/theme.css' %}">
     <style>
@@ -130,11 +135,8 @@
                 </button>
                 <h2 class="logo-text text-lg tracking-wider text-slate-200 uppercase">Manage Books</h2>
             </div>
-            <div class="flex items-center gap-4">
-                <span class="bg-cyan-950 text-cyan-400 text-xs px-2.5 py-1 rounded font-bold border border-cyan-800 tracking-wider">{% if request.session.admin_role == 'Staff' %}STAFF{% else %}ADMIN{% endif %}</span>
-                <div class="w-8 h-8 rounded-full bg-cyan-900 border border-cyan-700 flex items-center justify-center text-xs font-bold text-cyan-200">
-                    AD
-                </div>
+            <div class="flex items-center gap-3">
+                {% include 'admin/_headeractions.html' with accent='cyan' %}
             </div>
         </header>
 
@@ -197,6 +199,15 @@
                             <i class="fa-solid fa-qrcode text-[10px]"></i> Scan QR
                         </button>
                         <div class="flex items-center gap-2 self-end lg:self-auto">
+                            <div class="relative">
+                                {# Material type, not genre: genre says what it is about, this says #}
+                                {# what it physically is -- a magazine, a bound journal, a comic.   #}
+                                <select id="materialFilter" onchange="applyBookFilters()" class="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-400 focus:outline-none pr-8 appearance-none min-w-[120px]">
+                                    <option value="">All Types</option>
+                                    {% for value, label in material_choices %}<option value="{{ value }}" {% if value == material %}selected{% endif %}>{{ label }}</option>{% endfor %}
+                                </select>
+                                <i class="fa-solid fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-slate-600 text-[10px] pointer-events-none"></i>
+                            </div>
                             <div class="relative">
                                 <select id="genreFilter" onchange="applyBookFilters()" class="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-400 focus:outline-none pr-8 appearance-none min-w-[130px]">
                                     <option value="">All Categories</option>
@@ -359,6 +370,12 @@
                         <input type="text" name="genre" id="addGenre" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
                     </div>
                     <div class="space-y-1.5">
+                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Material Type</label>
+                        <select name="material_type" id="addMaterial" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium appearance-none pr-10 cursor-pointer" style="background-color: var(--bg-input);">
+                            {% for value, label in material_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+                        </select>
+                    </div>
+                    <div class="space-y-1.5">
                         <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Cover Image URL</label>
                         <input type="text" name="cover_img_url" id="addCoverImgUrl" placeholder="https://example.com/image.jpg" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
                     </div>
@@ -431,6 +448,12 @@
                         <input type="text" name="genre" id="editGenre" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
                     </div>
                     <div class="space-y-1.5">
+                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Material Type</label>
+                        <select name="material_type" id="editMaterial" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium appearance-none pr-10 cursor-pointer" style="background-color: var(--bg-input);">
+                            {% for value, label in material_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+                        </select>
+                    </div>
+                    <div class="space-y-1.5">
                         <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Cover Image URL</label>
                         <input type="text" name="cover_img_url" id="editCoverImgUrl" placeholder="https://example.com/image.jpg" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
                     </div>
@@ -481,9 +504,13 @@
                     <i class="fa-solid fa-xmark text-sm"></i>
                 </button>
             </div>
-            <div class="flex flex-col gap-4">
-                <div id="qr-reader" class="rounded-lg overflow-hidden"></div>
-                <p class="text-xs text-slate-500 text-center">Point your camera at a book's QR code to search for it</p>
+            <div class="flex flex-col gap-4" id="qr-scan-panel">
+                {# Camera and handheld both feed handleBookQR, so the result panel #}
+                {# below does not care which one read the code. #}
+                <div id="qr-cam-box">
+                    <div id="qr-reader" class="rounded-lg overflow-hidden w-full max-w-[260px] mx-auto"></div>
+                    <p class="text-xs text-slate-500 text-center mt-3">Point your camera at a book's QR code to search for it</p>
+                </div>
                 <div id="scanResult" class="hidden p-4 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
                     <p class="text-xs text-slate-500 mb-2">Scanned QR Code:</p>
                     <p id="scannedQRCode" class="text-sm font-mono text-cyan-400 break-all"></p>
@@ -557,6 +584,10 @@
                         <div id="qrCodeContainer" class="flex items-center justify-center p-4 bg-white rounded-lg">
                             <p class="text-slate-400 text-xs">Loading QR code...</p>
                         </div>
+                        <a id="detailQrDownload" href="#" download
+                           class="mt-3 w-full inline-flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl font-medium text-sm transition-all border border-slate-700 hover:bg-slate-800/50 text-slate-300">
+                            <i class="fa-solid fa-download text-cyan-400"></i> Download QR Code
+                        </a>
                     </div>
                 </div>
             </div>
@@ -618,11 +649,23 @@
                             statusEl.className = 'bg-slate-800/50 text-slate-400 border border-slate-700/40 text-xs px-3 py-1 rounded-full font-semibold tracking-wide whitespace-nowrap';
                         }
 
+                        // Rendered by our own server rather than api.qrserver.com: the
+                        // desk is regularly offline, the payload should not be handed to
+                        // a third party, and a cross-origin image cannot be downloaded
+                        // at all -- <a download> is ignored across origins.
                         const qrContainer = document.getElementById('qrCodeContainer');
+                        const qrDownload = document.getElementById('detailQrDownload');
                         if (data.qr_code) {
-                            qrContainer.innerHTML = `<img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(data.qr_code)}" alt="QR Code" class="w-48 h-48">`;
+                            const qrUrl = `/admin-portal/book-qr/${bookId}/`;
+                            qrContainer.innerHTML = `<img src="${qrUrl}" alt="QR code for ${data.title}" class="w-48 h-48">`;
+                            qrDownload.href = qrUrl + '?download=1';
+                            qrDownload.classList.remove('opacity-50', 'pointer-events-none');
                         } else {
                             qrContainer.innerHTML = '<p class="text-slate-400 text-xs">No QR code available</p>';
+                            // Nothing to save, so the button says so rather than
+                            // downloading a 404 page named like a picture.
+                            qrDownload.href = '#';
+                            qrDownload.classList.add('opacity-50', 'pointer-events-none');
                         }
 
                         document.getElementById('bookDetailsModal').classList.remove('hidden');
@@ -642,55 +685,74 @@
 
         let html5QrcodeScanner = null;
 
-        function openQRScanner() {
-            document.getElementById('qrScannerModal').classList.remove('hidden');
-            document.getElementById('scanResult').classList.add('hidden');
-            
-            if (html5QrcodeScanner) {
-                html5QrcodeScanner.clear();
-            }
+        let bookQRSource = null;
+
+        function startBookQRCamera() {
+            const host = document.getElementById('qr-reader');
+            host.innerHTML = '';
+            if (html5QrcodeScanner) { try { html5QrcodeScanner.clear(); } catch (e) { /* already gone */ } }
 
             html5QrcodeScanner = new Html5Qrcode("qr-reader");
-            const config = { fps: 10, qrbox: { width: 250, height: 250 } };
-            
+            const config = { fps: 10, qrbox: { width: 200, height: 200 } };
+
             html5QrcodeScanner.start({ facingMode: "environment" }, config, onScanSuccess)
             .catch(err => {
                 console.error("Error starting scanner", err);
-                alert("Unable to access camera. Please ensure camera permissions are granted.");
+                // Was an alert(), which a librarian had to dismiss before they
+                // could reach the handheld option sitting right above it.
+                html5QrcodeScanner = null;
+                host.innerHTML = '<p class="text-xs text-amber-400 text-center py-8">'
+                    + 'Camera unavailable. Allow camera access, or switch to Scanner device above.</p>';
             });
         }
 
+        function stopBookQRCamera() {
+            if (!html5QrcodeScanner) return;
+            // Cleared first: stop() is async, and a second call arriving before it
+            // settles would try to stop a scanner that is already stopping.
+            const scanner = html5QrcodeScanner;
+            html5QrcodeScanner = null;
+            scanner.stop().then(() => scanner.clear()).catch(err => {
+                console.error("Error stopping scanner", err);
+            });
+        }
+
+        function openQRScanner() {
+            document.getElementById('qrScannerModal').classList.remove('hidden');
+            document.getElementById('scanResult').classList.add('hidden');
+            if (bookQRSource) bookQRSource.activate(); else startBookQRCamera();
+        }
+
         function closeQRScanner() {
-            if (html5QrcodeScanner) {
-                html5QrcodeScanner.stop().then(() => {
-                    html5QrcodeScanner.clear();
-                    html5QrcodeScanner = null;
-                }).catch(err => {
-                    console.error("Error stopping scanner", err);
-                });
-            }
+            if (bookQRSource) bookQRSource.deactivate(); else stopBookQRCamera();
             document.getElementById('qrScannerModal').classList.add('hidden');
         }
 
-        function onScanSuccess(decodedText, decodedResult) {
-            console.log(`Scan result: ${decodedText}`, decodedResult);
-            
-            document.getElementById('scannedQRCode').textContent = decodedText;
-            document.getElementById('scanResult').classList.remove('hidden');
-            
-            // Stop scanning after successful scan
-            if (html5QrcodeScanner) {
-                html5QrcodeScanner.stop().then(() => {
-                    html5QrcodeScanner.clear();
-                    html5QrcodeScanner = null;
-                }).catch(err => {
-                    console.error("Error stopping scanner", err);
-                });
-            }
-            
-            // Search for book by QR code
-            searchBookByQRCode(decodedText);
+        function onScanSuccess(decodedText) {
+            handleBookQR(decodedText);
         }
+
+        // Where both inputs meet.
+        function handleBookQR(code) {
+            code = (code || '').trim();
+            if (!code) return;
+            document.getElementById('scannedQRCode').textContent = code;
+            document.getElementById('scanResult').classList.remove('hidden');
+            stopBookQRCamera();
+            searchBookByQRCode(code);
+        }
+
+        if (window.AylaQRSource) {
+            bookQRSource = AylaQRSource.attach({
+                panel: '#qr-scan-panel',
+                camera: '#qr-cam-box',
+                startCamera: startBookQRCamera,
+                stopCamera: stopBookQRCamera,
+                onCode: handleBookQR,
+                hint: "Scan the QR label on the book's copy.",
+            });
+        }
+
 
         function searchBookByQRCode(qrCode) {
             fetch(`/admin-portal/search-book-by-qr/?qr_code=${encodeURIComponent(qrCode)}`)
@@ -850,9 +912,11 @@
             var q = (document.getElementById('searchInput').value || '').trim();
             var g = document.getElementById('genreFilter').value;
             var s = document.getElementById('statusFilter').value;
+            var m = (document.getElementById('materialFilter') || {}).value;
             if (q) p.set('q', q);
             if (s) p.set('status', s);
             if (g) p.set('genre', g);
+            if (m) p.set('material', m);
             var qs = p.toString();
             location.href = "{% url 'admin_management' %}" + (qs ? '?' + qs : '');
         }

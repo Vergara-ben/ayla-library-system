@@ -8,7 +8,7 @@
 <title>AYLA Library — Floor Map</title>
 <script src="{% static 'js/theme.js' %}"></script>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" integrity="sha384-c6Rcwz4e4CITMbu/NBmnNS8yN2sC3cUElMEMfP3vqqKFp7GOYaaBBCqmaWBjmkjb" crossorigin="anonymous" referrerpolicy="no-referrer"/>
 <link rel="stylesheet" href="{% static 'css/theme.css' %}">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
@@ -24,6 +24,18 @@
   body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);height:100vh;height:100svh;display:flex;flex-direction:column;overflow:hidden;}
 
   .navbar{flex-shrink:0;background:var(--nav-bg);backdrop-filter:blur(20px);border-bottom:1px solid var(--border);padding:14px 20px;display:flex;align-items:center;gap:12px;z-index:200;}
+  .floor-picker{
+    margin-left:auto; margin-right:8px;
+    background:var(--surface2); color:var(--text);
+    border:1px solid var(--border); border-radius:10px;
+    padding:7px 10px; font-family:inherit; font-size:12px; font-weight:600;
+    cursor:pointer; max-width:150px;
+  }
+  .floor-note{
+    margin-top:8px; padding:10px 12px; border-radius:10px;
+    background:var(--surface2); border:1px solid var(--border);
+    font-size:12px; line-height:1.5;
+  }
   .back-btn{width:36px;height:36px;border-radius:10px;border:1px solid var(--border);background:var(--surface2);display:flex;align-items:center;justify-content:center;cursor:pointer;text-decoration:none;color:var(--text);font-size:16px;}
   .nav-title{font-family:'Syne',sans-serif;font-size:18px;font-weight:800;flex:1;}
   .floor-toggle{display:flex;gap:4px;}
@@ -138,7 +150,10 @@
 <body>
 <nav class="navbar">
   <a href="{% if target.book_id %}{% url 'patron_book_details' target.book_id %}{% else %}{% url 'patron_catalog' %}{% endif %}" class="back-btn">←</a>
-  <div class="nav-title">Floor Map</div>
+  <div class="nav-title" id="navTitle">Floor Map</div>
+  {# Hidden until the payload says there is more than one floor in service, so #}
+  {# a single-floor library never sees a control it cannot use. #}
+  <select id="floorPicker" class="floor-picker" onchange="switchFloor(this.value)" style="display:none" aria-label="Choose a floor"></select>
   <button type="button" class="theme-toggle" data-theme-toggle></button>
 </nav>
 
@@ -182,7 +197,7 @@
   </div>
 </div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" integrity="sha384-NElt3Op+9NBMCYaef5HxeJmU4Xeard/Lku8ek6hoPTvYkQPh3zLIrJP7KiRocsxO" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <script>
 const targetData = JSON.parse(document.getElementById('targetData').textContent || '{}');
 
@@ -266,8 +281,21 @@ let lastSmoothPos = null;        // smoothing baseline
 // ceiling, computed in posJumpMaxPx() once mapData is loaded.
 const MAX_WALK_SPEED_MPS = 2.2;  // brisk walk; an implied jump faster than this is noise, not motion
 const TRILATERATE_INTERVAL_MS = 1000;
-const POS_SMOOTHING = 0.5;       // exponential moving-average factor
+const POS_SMOOTHING = 0.5;       // moving-average factor while actually walking
 const BEACON_STALE_MS = 6000;    // a beacon unheard this long stops influencing the fix
+
+const POS_SMOOTHING_STILL = 0.06;  // near-parked: creeps toward the mean rather than chasing noise
+
+// Telling "standing still" from "walking" cannot be done on the gap between
+// two consecutive fixes: at realistic noise levels that gap is regularly a
+// metre either way while the patron has not moved at all, so a simple
+// threshold fires constantly and the marker wanders anyway. Averaging is what
+// separates them -- random error cancels out, real walking does not. So the
+// last MOTION_WINDOW fixes are compared against the MOTION_WINDOW before them,
+// and it is the distance between those two averages that decides.
+const MOTION_WINDOW = 4;
+const MOTION_THRESHOLD_M = 1.2;
+let recentFixes = [];
 
 function posJumpMaxPx() {
   const ppm = mapData && mapData.pixels_per_meter;
@@ -275,8 +303,87 @@ function posJumpMaxPx() {
   return MAX_WALK_SPEED_MPS * (TRILATERATE_INTERVAL_MS / 1000) * ppm;
 }
 
+function meanOf(points) {
+  let sx = 0, sy = 0;
+  for (const p of points) { sx += p.x; sy += p.y; }
+  return { x: sx / points.length, y: sy / points.length };
+}
+
+// Note the default while the window is still filling: responsive, not clamped.
+// Being slow to believe someone has started walking is the worse failure -- a
+// dot that sits frozen for the first few seconds of a walk reads as broken,
+// whereas a little extra wobble merely reads as imprecise.
+function isActuallyMoving(pos) {
+  recentFixes.push(pos);
+  if (recentFixes.length > MOTION_WINDOW * 2) recentFixes.shift();
+  const ppm = mapData && mapData.pixels_per_meter;
+  if (!ppm || recentFixes.length < MOTION_WINDOW * 2) return true;
+  const older = meanOf(recentFixes.slice(0, MOTION_WINDOW));
+  const newer = meanOf(recentFixes.slice(MOTION_WINDOW));
+  return Math.hypot(newer.x - older.x, newer.y - older.y) > MOTION_THRESHOLD_M * ppm;
+}
+
 
 const NAV_DATA_URL = "{% url 'get_patron_map_data' %}";
+
+// ── Floors ────────────────────────────────────────────────────────────────
+// The library has more than one storey, so the map has to say which one it is
+// showing. The floor is chosen by the server: the one the target book sits on
+// when navigating to a book, otherwise the lowest floor in service. This lets
+// the patron look at the others.
+//
+// Positioning is not floor-aware and cannot be: the beacons live on one floor,
+// and BLE passes through a slab well enough that a beacon below can outrank
+// one beside you. So the "you are here" marker is only meaningful on the floor
+// the beacons are installed on, and the note below says so rather than letting
+// a dot appear on a floor it was never measured against.
+function currentFloorId() {
+  const params = new URLSearchParams(location.search);
+  const raw = params.get('floor');
+  return raw && /^\d+$/.test(raw) ? raw : null;
+}
+
+function buildFloorPicker(data) {
+  const floors = data.floors || [];
+  const picker = document.getElementById('floorPicker');
+  const title = document.getElementById('navTitle');
+  // With a picker the floor is already named there, and repeating it in the
+  // title just wraps the navbar on a phone. Only a single-floor library puts
+  // the floor in the title, where there is room for it and no control to say it.
+  if (!picker || floors.length < 2) {
+    if (data.floor_label && title) title.textContent = data.floor_label;
+    return;
+  }
+  if (title) title.textContent = 'Floor Map';
+
+  picker.innerHTML = floors.map(function (f) {
+    const label = f.name && f.name !== f.label ? (f.label + ' — ' + f.name) : f.label;
+    return '<option value="' + f.floor_plan_id + '"' + (f.is_current ? ' selected' : '') + '>'
+         + label.replace(/</g, '&lt;') + '</option>';
+  }).join('');
+  picker.style.display = '';
+}
+
+// Which floor the target shelf lives on, for the "it is upstairs" message.
+// The floors payload does not carry shelves, so this asks the server, which
+// already resolves a shelf to its floor for exactly this purpose.
+let targetFloorCache = null;
+function findTargetFloor(data) {
+  if (targetFloorCache !== null) return targetFloorCache;
+  const floors = data.floors || [];
+  const known = floors.filter(function (f) { return f.floor_plan_id === data.target_floor_id; });
+  targetFloorCache = known.length ? known[0] : null;
+  return targetFloorCache;
+}
+
+function switchFloor(floorId) {
+  const params = new URLSearchParams(location.search);
+  params.set('floor', floorId);
+  // A full reload rather than a redraw: the beacons, waypoints, scale and north
+  // offset all belong to the floor, and half-swapping them is how a marker ends
+  // up plotted against another floor's geometry.
+  location.search = params.toString();
+}
 const NAV_ROUTE_URL = "{% url 'get_navigation_route' %}";
 
 // Flip y so stored (x, y) is a top-left pixel origin (matches the admin tool).
@@ -295,7 +402,17 @@ async function fetchJSON(url) {
 
 async function initMap() {
   let data;
-  try { data = await fetchJSON(NAV_DATA_URL); } catch (e) { setStatus('amber', 'Map unavailable'); return; }
+  // Carry the chosen floor, or the target shelf so the server can open on the
+  // floor that shelf is on -- the client knows the shelf, not the floor.
+  const q = new URLSearchParams();
+  const chosen = currentFloorId();
+  if (chosen) q.set('floor', chosen);
+  // The shelf goes along even when a floor is chosen: the server prefers the
+  // explicit floor for *which map to draw*, but still needs the shelf to say
+  // which floor that shelf is on, for the "it is upstairs" message.
+  if (targetData.shelf_id) q.set('shelf', targetData.shelf_id);
+  const url = q.toString() ? NAV_DATA_URL + '?' + q.toString() : NAV_DATA_URL;
+  try { data = await fetchJSON(url); } catch (e) { setStatus('amber', 'Map unavailable'); return; }
   if (!data.success) {
     document.getElementById('shelfName').textContent = 'No floor plan available';
     document.getElementById('shelfPath').textContent = data.error || '';
@@ -304,6 +421,7 @@ async function initMap() {
   }
   mapData = data;
   imgW = data.canvas_width; imgH = data.canvas_height;
+  buildFloorPicker(data);
 
   const bounds = [[0, 0], [imgH, imgW]];
 
@@ -394,7 +512,22 @@ async function initMap() {
 
   if (targetData.shelf_name) {
     document.getElementById('shelfName').textContent = 'Target: ' + targetData.shelf_name;
-    document.getElementById('shelfPath').textContent = 'Enable Bluetooth to start navigating';
+    // The patron can page through the other floors while navigating, and the
+    // target will not be on most of them. Saying which floor it *is* on beats
+    // showing a target line against a map that does not contain it -- and it is
+    // the only sensible answer to a cross-floor trip, since routes stop at the
+    // floor boundary.
+    const onThisFloor = (data.shelves || []).some(function (sh) {
+      return sh.shelf_id === targetData.shelf_id;
+    });
+    if (onThisFloor) {
+      document.getElementById('shelfPath').textContent = 'Enable Bluetooth to start navigating';
+    } else {
+      const home = findTargetFloor(data);
+      document.getElementById('shelfPath').textContent = home
+        ? (targetData.shelf_name + ' is on the ' + home.label + '. Switch floors to see the route.')
+        : (targetData.shelf_name + ' is not on this floor.');
+    }
   } else {
     document.getElementById('shelfPath').textContent = 'Open a book and tap "View on Map" to navigate to its shelf';
   }
@@ -403,13 +536,23 @@ async function initMap() {
 
 // Position Threshold filtering: cap implausible jumps and apply an exponential
 // moving average so the continuous live position marker stays stable.
+//
+// RSSI never sits still. Standing in one spot, every fix lands somewhere
+// slightly different, and with a single smoothing factor the marker chases all
+// of it -- which is why the dot kept drifting even when nobody was moving. The
+// factor is therefore chosen per fix from isActuallyMoving(): heavy averaging
+// while stationary, which also settles the marker onto the mean of the recent
+// estimates (the better guess at where a stationary patron actually is), and
+// responsive tracking the moment there is real displacement to follow.
 function applyPositionThreshold(pos) {
+  const moving = isActuallyMoving(pos);
   if (!lastSmoothPos) { lastSmoothPos = pos; return pos; }
   let dx = pos.x - lastSmoothPos.x, dy = pos.y - lastSmoothPos.y;
   const dist = Math.hypot(dx, dy);
   const cap = posJumpMaxPx();
   if (dist > cap) { const k = cap / dist; dx *= k; dy *= k; }
-  const smoothed = { x: lastSmoothPos.x + POS_SMOOTHING * dx, y: lastSmoothPos.y + POS_SMOOTHING * dy };
+  const alpha = moving ? POS_SMOOTHING : POS_SMOOTHING_STILL;
+  const smoothed = { x: lastSmoothPos.x + alpha * dx, y: lastSmoothPos.y + alpha * dy };
   lastSmoothPos = smoothed;
   return smoothed;
 }
@@ -467,10 +610,105 @@ function renderDisplayedPosition() {
   } else {
     patronMarker.setLatLng(ll);
   }
+  if (headingMarker) headingMarker.setLatLng(ll);
   if (routeLine && lastRoutePoints && lastRoutePoints.length > 1) {
     const glued = [{ x: displayedPos.x, y: displayedPos.y }].concat(lastRoutePoints.slice(1));
     routeLine.setLatLngs(glued.map((p) => toLatLng(p.x, p.y)));
   }
+}
+
+// ── Which way the patron is facing ────────────────────────────────────────
+// Three beacons give a point, never a bearing: trilateration cannot say which
+// way someone is turned, only where they are. Facing comes from the phone's
+// own compass instead, which is why it is tracked separately from position and
+// survives standing still -- turning on the spot moves this and nothing else.
+let headingDeg = null;        // degrees clockwise from the top of the floor plan
+let headingMarker = null;
+
+// A compass reads degrees from magnetic north; the floor plan is drawn in
+// whatever orientation it was drawn in. This is how far the plan's "up" sits
+// from north, so the two can be reconciled.
+//
+// This used to be a hardcoded 0, i.e. an assumption that the plan was drawn
+// with north at the top. That was survivable while it only aimed a decorative
+// arrow. Dead reckoning steers by it, so a wrong value no longer looks
+// slightly off -- it walks the marker away at a fixed angle from wherever the
+// patron actually went. It is now measured per floor plan on the Position
+// Test page and served with the map.
+function northOffsetDeg() {
+  return (mapData && typeof mapData.north_offset_deg === 'number')
+    ? mapData.north_offset_deg : 0;
+}
+
+const HEADING_SMOOTHING = 0.25;   // compass output is jumpy too; ease it like position
+
+function headingArrowSvg() {
+  const c = AylaTheme.color('--blue');
+  // Sits above the dot rather than over it, so "where I am" stays readable
+  // and this only ever answers "which way am I pointed".
+  return '<svg width="46" height="46" viewBox="0 0 46 46">'
+       + '<path d="M23 2 L29.5 15 L16.5 15 Z" fill="' + c + '" opacity="0.9"/>'
+       + '</svg>';
+}
+
+function renderHeading() {
+  if (headingDeg === null || !displayedPos) return;
+  if (!headingMarker) {
+    headingMarker = L.marker(toLatLng(displayedPos.x, displayedPos.y), {
+      icon: L.divIcon({
+        className: '',
+        iconSize: [46, 46],
+        iconAnchor: [23, 23],   // rotate about the dot, so the arrow orbits it
+        html: '<div id="headingArrow" style="width:46px;height:46px;transition:transform .12s linear;">'
+            + headingArrowSvg() + '</div>',
+      }),
+      interactive: false,
+      keyboard: false,
+    }).addTo(positionLayer);
+  }
+  const el = document.getElementById('headingArrow');
+  if (el) el.style.transform = 'rotate(' + headingDeg.toFixed(1) + 'deg)';
+}
+
+function onDeviceOrientation(e) {
+  let hd = null;
+  if (typeof e.webkitCompassHeading === 'number' && !isNaN(e.webkitCompassHeading)) {
+    hd = e.webkitCompassHeading;          // iOS reports clockwise from north already
+  } else if (e.absolute && typeof e.alpha === 'number' && !isNaN(e.alpha)) {
+    hd = 360 - e.alpha;                   // the spec's alpha runs anticlockwise
+  }
+  if (hd === null) return;
+
+  const target = (hd - northOffsetDeg() + 360) % 360;
+  if (headingDeg === null) {
+    headingDeg = target;
+  } else {
+    // Ease along the shorter way round, so 359 -> 1 does not spin the arrow
+    // most of a turn backwards.
+    const diff = ((target - headingDeg + 540) % 360) - 180;
+    headingDeg = (headingDeg + HEADING_SMOOTHING * diff + 360) % 360;
+  }
+  renderHeading();
+}
+
+// Called from the same tap that starts BLE: iOS only grants the compass from a
+// user gesture, and a phone without one simply never fires the event, so the
+// arrow stays absent rather than pointing somewhere invented.
+function startHeadingTracking() {
+  const attach = function () {
+    window.addEventListener('deviceorientationabsolute', onDeviceOrientation, true);
+    window.addEventListener('deviceorientation', onDeviceOrientation, true);
+  };
+  try {
+    if (typeof DeviceOrientationEvent !== 'undefined'
+        && typeof DeviceOrientationEvent.requestPermission === 'function') {
+      DeviceOrientationEvent.requestPermission()
+        .then(function (state) { if (state === 'granted') attach(); })
+        .catch(function () { /* declined: position still works, facing just is not shown */ });
+    } else {
+      attach();
+    }
+  } catch (err) { /* no compass on this device */ }
 }
 
 async function computeRoute() {
@@ -575,6 +813,28 @@ function rssiToDistance(rssi, txPower, n) {
   const p = (txPower == null) ? DEFAULT_TX_POWER : txPower;
   const exp = (n == null || n <= 0) ? DEFAULT_PATH_LOSS_N : n;
   return Math.pow(10, (p - rssi) / (10 * exp));
+}
+
+// How high a patron holds a phone. Not an administrator setting: it is a
+// property of people rather than of the building, nobody can measure it per
+// beacon, and inviting it to be tuned would be false precision. 1.2 m is the
+// usual figure for a phone carried while walking.
+const RECEIVER_HEIGHT_M = 1.2;
+
+// rssiToDistance() measures the straight line through the air; the solver works
+// in the floor plane. A beacon fixed 2.4 m up is 1.2 m above the phone, so
+// someone standing directly beneath it ranges at 1.2 m rather than 0 -- and the
+// error is worst exactly where they are closest to it. Taking the vertical leg
+// back out is Pythagoras.
+//
+// Noise can make the measured slant shorter than the height difference, which
+// has no triangle; the honest horizontal answer there is zero, i.e. directly
+// underneath. A beacon whose height was never measured is left uncorrected.
+function horizontalDistance(slantM, beaconHeightM) {
+  if (beaconHeightM == null) return slantM;
+  const dz = beaconHeightM - RECEIVER_HEIGHT_M;
+  const flat = slantM * slantM - dz * dz;
+  return flat > 0 ? Math.sqrt(flat) : 0;
 }
 
 // Configured calibration wins; then whatever the beacon advertised; then the
@@ -720,6 +980,68 @@ function onAdvertisement(e) {
   } catch (_) { /* ignore malformed advertisements */ }
 }
 
+// The patron is inside the library, not outside its walls -- so a fix that
+// lands beyond the drawn rooms is known to be wrong before anything else is
+// considered. Three beacons give the solver no redundancy, so a single
+// shadowed reading (a body between phone and beacon costs 10-20 dB) is enough
+// to throw the solution well past the boundary; in testing roughly half of all
+// raw fixes landed outside this floor plan's only room. The room outline is
+// therefore treated as a measurement in its own right, and the estimate is
+// snapped back to the nearest point on it.
+const MIN_GEOMETRY_QUALITY = 0.01;   // see the collinearity guard below
+
+function roomPolygons() {
+  // Not cached: mapData is fetched once, this runs at most once a second, and
+  // a stale cache would silently outlive an edited floor plan.
+  return (mapData.rooms || []).map((r) => r.geometry).filter((g) => g && g.length >= 3);
+}
+
+function pointInPolygon(x, y, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i][0], yi = poly[i][1], xj = poly[j][0], yj = poly[j][1];
+    if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+// Closest point on the polygon's outline, tested edge by edge. The clamped
+// position sits exactly on the wall, which is a place a patron can genuinely
+// stand -- pulling it further inside would be inventing precision.
+function nearestPointOnPolygon(x, y, poly) {
+  let best = null;
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i], b = poly[(i + 1) % poly.length];
+    const dx = b[0] - a[0], dy = b[1] - a[1];
+    const len = dx * dx + dy * dy;
+    const t = len ? Math.max(0, Math.min(1, ((x - a[0]) * dx + (y - a[1]) * dy) / len)) : 0;
+    const px = a[0] + t * dx, py = a[1] + t * dy;
+    const d = Math.hypot(x - px, y - py);
+    if (!best || d < best.d) best = { x: px, y: py, d: d };
+  }
+  return best;
+}
+
+// Inside any room: left alone. Outside every room: snapped to the nearest wall
+// of whichever room is closest. A plan with no drawn rooms has nothing to clamp
+// against, so fall back to the canvas -- looser, but it still keeps the marker
+// on the map instead of somewhere off in space.
+function clampToRooms(pos) {
+  const polys = roomPolygons();
+  if (!polys.length) {
+    return { x: Math.min(Math.max(pos.x, 0), imgW), y: Math.min(Math.max(pos.y, 0), imgH) };
+  }
+  for (const poly of polys) {
+    if (pointInPolygon(pos.x, pos.y, poly)) return pos;
+  }
+  let best = null;
+  for (const poly of polys) {
+    const q = nearestPointOnPolygon(pos.x, pos.y, poly);
+    if (!best || q.d < best.d) best = q;
+  }
+  return { x: best.x, y: best.y };
+}
+
 function trilaterate() {
   if (!mapData) return;
   // Beacon coordinates are canvas units and rssiToDistance() gives metres, so
@@ -742,8 +1064,10 @@ function trilaterate() {
     if (!buf || !buf.length || !seen || (now - seen) > BEACON_STALE_MS) return;
     const rssi = median(buf);
     const cal = calibrationFor(b);
-    // metres → canvas units, so every term below is in the same unit
-    pts.push({ x: b.x, y: b.y, d: rssiToDistance(rssi, cal.txPower, cal.n) * scale });
+    const slant = rssiToDistance(rssi, cal.txPower, cal.n);
+    // slant metres -> horizontal metres -> canvas units, so every term below
+    // is both flat and in the same unit
+    pts.push({ x: b.x, y: b.y, d: horizontalDistance(slant, b.height) * scale });
   });
   if (pts.length < 3) {
     // Say why nothing is happening — silence here is what makes a beacon
@@ -762,10 +1086,33 @@ function trilaterate() {
     Sxx += ax * ax; Sxy += ax * ay; Syy += ay * ay; Sxb += ax * bb; Syb += ay * bb;
   }
   const det = Sxx * Syy - Sxy * Sxy;
-  if (Math.abs(det) < 1e-6) return;
+  // Beacons on, or near, a single straight line leave the position
+  // undetermined along that line. The previous test compared det against 1e-6,
+  // but det scales as the fourth power of the coordinates: this floor plan's
+  // three beacons give 5.9e11, and beacons a single degree off a straight line
+  // still give 9.7e6, so it could only ever catch mathematically exact
+  // collinearity and never the near-degenerate layouts that actually occur.
+  //
+  // The eigenvalue ratio of the same 2x2 matrix is scale-free -- multiplying
+  // every coordinate by k scales both eigenvalues by k^2 and leaves the ratio
+  // alone -- and falls smoothly to zero as the layout collapses onto a line.
+  // This deployment's beacons score 0.31; ten degrees off a line scores 0.03
+  // and five degrees 0.008, so 0.01 rejects the genuinely unusable while
+  // leaving a wide margin over any sane placement.
+  const trace = Sxx + Syy;
+  const disc = Math.sqrt(Math.max((Sxx - Syy) * (Sxx - Syy) + 4 * Sxy * Sxy, 0));
+  const lambdaMax = (trace + disc) / 2, lambdaMin = (trace - disc) / 2;
+  // Written so that a NaN ratio (all beacons at one point) fails the test too.
+  if (!(lambdaMax > 0 && lambdaMin / lambdaMax > MIN_GEOMETRY_QUALITY)) {
+    setStatus('amber', 'Beacons are too close to a straight line to fix a position');
+    return;
+  }
   const x = (Syy * Sxb - Sxy * Syb) / det;
   const y = (Sxx * Syb - Sxy * Sxb) / det;
-  if (isFinite(x) && isFinite(y)) setPatronPosition({ x: x, y: y });
+  // Clamped before smoothing, not after: applyPositionThreshold() folds each
+  // fix into lastSmoothPos, so an unclamped outlier would go on dragging the
+  // marker for several seconds after it had been drawn in the right place.
+  if (isFinite(x) && isFinite(y)) setPatronPosition(clampToRooms({ x: x, y: y }));
 }
 
 // Three different things stop Bluetooth working here, and they need three
@@ -812,6 +1159,13 @@ const BLE_HELP = {
 
 async function enableBLE() {
   closeBTModal();
+
+  // Asked for here, while the tap that opened this is still the current user
+  // gesture -- iOS grants the compass on that basis and nothing else. Kept
+  // ahead of the BLE checks below so a phone without Bluetooth can still show
+  // which way it is pointed.
+  startHeadingTracking();
+
   const reason = bleUnavailableReason();
   if (reason) {
     setStatus('amber', BLE_HELP[reason].status);
@@ -898,6 +1252,11 @@ function withTimeout(promise, ms) {
 
 function startTrilateration() {
   if (bleInterval) clearInterval(bleInterval);
+  // Start from a clean slate: fixes recorded before a restart say nothing about
+  // whether the patron is moving now, and a half-full window of stale
+  // positions would decide that question wrongly for its first few seconds.
+  recentFixes = [];
+  lastSmoothPos = null;
   bleInterval = setInterval(trilaterate, TRILATERATE_INTERVAL_MS);
 }
 

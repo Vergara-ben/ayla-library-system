@@ -9,18 +9,28 @@
     <script src="{% static 'js/theme.js' %}"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="{% static 'js/tailwind-theme.js' %}"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha384-iw3OoTErCYJJB9mCa8LNS2hbsQ7M3C0EpIsO/H5+EGAkPGc6rk+V8i04oW/K5xq0" crossorigin="anonymous" referrerpolicy="no-referrer">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@400;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" integrity="sha384-c6Rcwz4e4CITMbu/NBmnNS8yN2sC3cUElMEMfP3vqqKFp7GOYaaBBCqmaWBjmkjb" crossorigin="anonymous" referrerpolicy="no-referrer"/>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" integrity="sha384-NElt3Op+9NBMCYaef5HxeJmU4Xeard/Lku8ek6hoPTvYkQPh3zLIrJP7KiRocsxO" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <!-- Leaflet-Geoman: vector drawing/editing toolset for the room polygons -->
-    <link rel="stylesheet" href="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.15.0/dist/leaflet-geoman.css"/>
-    <script src="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.15.0/dist/leaflet-geoman.min.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.15.0/dist/leaflet-geoman.css" integrity="sha384-3jHmTFTPlLttjNI+VFprBmNfYUnXQETbCPpKFYVRormN4xiY7LJ2O8hJIl4fOI6w" crossorigin="anonymous" referrerpolicy="no-referrer"/>
+    <script src="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.15.0/dist/leaflet-geoman.min.js" integrity="sha384-rqFXmGZwatf7AY/C9/uHmhD/DV1r2v4Ex2gHlA2INrgbwoW1fGxOis8qaKVnf4Ib" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 
     <link rel="stylesheet" href="{% static 'css/theme.css' %}">
     <style>
+        #drawReadout {
+            position: absolute; left: 14px; bottom: 14px; z-index: 500;
+            background: var(--bg-modal, #101826); color: var(--text-primary, #e2e8f0);
+            border: 1px solid var(--border-color, #334155); border-radius: 8px;
+            padding: 7px 12px; font-size: 12px; pointer-events: none;
+            box-shadow: 0 4px 14px rgba(0,0,0,.35);
+        }
+        #drawReadout.hidden { display: none; }
+        .map-workspace { position: relative; }
+
         body {
             font-family: 'Inter', sans-serif;
             background-color: var(--bg-main);
@@ -263,17 +273,11 @@
                 </button>
                 <h2 class="logo-text text-lg tracking-wider text-slate-200 uppercase">Floor Plan Management</h2>
             </div>
-            <div class="flex items-center gap-4">
-                {# Beacons are configured here, so this is where the question #}
-                {# "did that actually work?" gets asked. Kept off the sidebar: #}
-                {# it is a setup instrument, not a daily destination. #}
+            <div class="flex items-center gap-3">
                 <a href="{% url 'position_test' %}" class="text-xs text-slate-400 hover:text-cyan-400 flex items-center gap-1.5" title="Check positioning against the real beacons">
                     <i class="fa-solid fa-flask"></i> Position Test
                 </a>
-                <span class="bg-cyan-950 text-cyan-400 text-xs px-2.5 py-1 rounded font-bold border border-cyan-800 tracking-wider">ADMIN</span>
-                <div class="w-8 h-8 rounded-full bg-cyan-900 border border-cyan-700 flex items-center justify-center text-xs font-bold text-cyan-200">
-                    AD
-                </div>
+                {% include 'admin/_headeractions.html' with accent='cyan' %}
             </div>
         </header>
 
@@ -321,6 +325,7 @@
                             <tr class="border-b border-slate-800/80 text-[10px] font-bold tracking-wider text-slate-500 uppercase bg-slate-900/5">
                                 <th class="py-3 px-6">Floor Plan ID</th>
                                 <th class="py-3 px-6">Name</th>
+                                <th class="py-3 px-6">Floor</th>
                                 <th class="py-3 px-6">Canvas</th>
                                 <th class="py-3 px-6">Status</th>
                                 <th class="py-3 px-6">Renovation Notice</th>
@@ -333,6 +338,16 @@
                             <tr class="hover:bg-slate-800/10 transition-colors">
                                 <td class="py-4 px-6 font-mono text-slate-400">#{{ floorplan.floor_plan_id }}</td>
                                 <td class="py-4 px-6 font-semibold text-slate-200">{{ floorplan.name }}</td>
+                                <td class="py-4 px-6">
+                                    {# Which storey this is. Orders the patron's floor switcher and #}
+                                    {# names each entry, so it has to match the building rather     #}
+                                    {# than the order the plans happened to be drawn in.            #}
+                                    <div class="flex items-center gap-1">
+                                        <input type="number" id="floor-{{ floorplan.floor_plan_id }}" value="{{ floorplan.floor_number }}" min="-5" max="100" step="1" class="w-14 rounded px-1.5 py-0.5 text-[10px] text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700" style="background-color: var(--bg-input);">
+                                        <button type="button" onclick="saveFloorNumber({{ floorplan.floor_plan_id }})" class="text-[10px] font-bold px-1.5 py-0.5 rounded border border-slate-700 text-cyan-400 hover:bg-slate-800/60">Set</button>
+                                    </div>
+                                    <div class="text-[9px] text-slate-500 mt-1">{{ floorplan.floor_label }}</div>
+                                </td>
                                 <td class="py-4 px-6 font-mono text-slate-400">
                                     {{ floorplan.canvas_width|floatformat:0 }} × {{ floorplan.canvas_height|floatformat:0 }}
                                     {# Scale is what makes BLE trilateration possible at all. #}
@@ -387,7 +402,7 @@
                             </tr>
                             {% empty %}
                             <tr>
-                                <td colspan="6" class="py-8 text-center text-slate-500">No floor plans found.</td>
+                                <td colspan="8" class="py-8 text-center text-slate-500">No floor plans found.</td>
                             </tr>
                             {% endfor %}
                         </tbody>
@@ -414,6 +429,22 @@
                         <span id="planLiveBadge" class="hidden text-[10px] font-bold uppercase tracking-wide px-2 py-1 rounded bg-amber-500/10 text-amber-500 border border-amber-500/20">Draft — not visible to patrons</span>
                     </div>
                     <div class="flex items-center gap-2 self-end sm:self-auto flex-wrap">
+                        {# Drawing aids. Separated from the placement tools by a divider #}
+                        {# because they change how drawing behaves rather than what is    #}
+                        {# being drawn. #}
+                        <button id="aid-rightAngles" type="button" onclick="toggleDrawAid('rightAngles')" title="Snap each new wall square to the one before it"
+                                class="mode-btn mode-active bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-emerald-400 text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
+                            <i class="fa-solid fa-vector-square text-[10px]"></i> Right Angles
+                        </button>
+                        <button id="aid-grid" type="button" onclick="toggleDrawAid('grid')" title="Snap corners to the grid"
+                                class="mode-btn mode-active bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-emerald-400 text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
+                            <i class="fa-solid fa-magnet text-[10px]"></i> Snap
+                        </button>
+                        <button id="aid-showGrid" type="button" onclick="toggleDrawAid('showGrid')" title="Show or hide the grid"
+                                class="mode-btn mode-active bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-slate-300 text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
+                            <i class="fa-solid fa-border-all text-[10px]"></i> Grid
+                        </button>
+                        <span class="w-px h-5 bg-slate-800 mx-1"></span>
                         <button id="btnRoom" type="button" onclick="setMode('room')" class="mode-btn bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-cyan-400 text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
                             <i class="fa-solid fa-draw-polygon text-[10px]"></i> Draw Room
                         </button>
@@ -463,6 +494,10 @@
                          never covers the canvas and stays open while dragging. -->
                     <div class="map-workspace">
                         <div id="mapConfig"></div>
+                        {# Length and corner angle while dragging, so a right   #}
+                        {# angle is confirmed before the click rather than      #}
+                        {# discovered afterwards. #}
+                        <div id="drawReadout" class="hidden"></div>
                         <aside id="mapInspector" class="map-inspector">
                             <div class="map-inspector-head">
                                 <span id="inspectorKind" class="map-inspector-kind">Nothing selected</span>
@@ -893,7 +928,12 @@
                         <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Path-loss exponent</label>
                         <input type="number" id="beaconPathLoss" step="0.1" min="1" max="6" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" placeholder="2.0">
                     </div>
+                    <div class="space-y-1.5 col-span-2">
+                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Mounting height (metres above floor)</label>
+                        <input type="number" id="beaconHeight" step="0.1" min="0" max="10" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" placeholder="e.g. 2.4">
+                    </div>
                     <p class="col-span-2 text-[10px] text-slate-500">Measure RSSI one metre from this beacon. Indoors with metal shelving the exponent is nearer 2.5–3.5 than the 2.0 of free space.</p>
+                    <p class="col-span-2 text-[10px] text-slate-500">Height is how far above the floor the beacon is fixed. Ranging measures the straight line through the air, so without it a beacon overhead reads as further away than it is — worst directly beneath it. Leave blank if you have not measured it.</p>
                 </div>
                 <div class="space-y-1.5">
                     <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Label (optional)</label>
@@ -1077,6 +1117,22 @@
             window.location.reload();
         }
 
+        async function saveFloorNumber(planId) {
+            const input = document.getElementById('floor-' + planId);
+            const body = new URLSearchParams({ floorplan_id: planId, floor_number: input.value.trim() });
+            const res = await fetch("{% url 'set_floorplan_floor_number' %}", {
+                method: 'POST', body: body,
+                headers: {
+                    'X-CSRFToken': '{{ csrf_token }}',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+            });
+            const data = await res.json();
+            if (!data.success) { alert(data.error || 'Could not save the floor number.'); return; }
+            window.location.reload();
+        }
+
         function toggleSidebar() {
             document.querySelector('aside').classList.toggle('open');
         }
@@ -1231,6 +1287,11 @@
 
         let lmap = null;
         let imgW = 0, imgH = 0, floorPlanId = null;
+        const roomAngleMarks = {};
+        // Canvas units per metre for this plan, when the Administrator has
+        // measured it. Lets the grid and the drawing readout speak in metres
+        // instead of arbitrary canvas units.
+        let planScale = null;
         let mode = null;            // 'room' | 'shelf' | 'beacon' | 'waypoint' | null
         let placingShelfId = null;  // set while positioning an unplaced shelf (Fig. 48)
         let resizeShelfId = null;   // shelf open in the resize modal
@@ -1665,7 +1726,10 @@
                 + (d.namespace_id ? '<p class="insp-note">NS ' + esc(d.namespace_id) + ' &middot; ID ' + esc(d.instance_id || '—') + '</p>' : '')
                 + '<p class="insp-note">Calibration: '
                     + (d.tx_power != null ? d.tx_power + ' dBm @ 1 m' : '<span style="color:var(--warning)">not measured</span>')
-                    + ' &middot; n=' + (d.path_loss_n != null ? d.path_loss_n : '2.0 (default)') + '</p>'
+                    + ' &middot; n=' + (d.path_loss_n != null ? d.path_loss_n : '2.0 (default)')
+                    + ' &middot; height '
+                    + (d.height != null ? d.height + ' m' : '<span style="color:var(--warning)">not measured</span>')
+                    + '</p>'
                 + '<div class="map-actions">'
                 + '<button class="map-action-btn" onclick="mapEditBeacon(' + id + ')"><i class="fa-solid fa-pen"></i> Edit identity &amp; calibration</button>'
                 + '<button class="map-action-btn danger" onclick="mapDeleteBeacon(' + id + ')"><i class="fa-solid fa-trash"></i> Delete beacon</button>'
@@ -1824,7 +1888,8 @@
             // Every field, not just the two: leftovers from an edit would
             // otherwise be saved against the new beacon being placed.
             ['beaconUuid', 'beaconLabel', 'beaconMajor', 'beaconMinor',
-             'beaconNamespace', 'beaconInstance', 'beaconTxPower', 'beaconPathLoss']
+             'beaconNamespace', 'beaconInstance', 'beaconTxPower', 'beaconPathLoss',
+             'beaconHeight']
                 .forEach(function (id) {
                     const el = document.getElementById(id);
                     if (el) el.value = '';
@@ -1875,6 +1940,7 @@
             document.getElementById('beaconInstance').value = d.instance_id || '';
             document.getElementById('beaconTxPower').value = (d.tx_power != null) ? d.tx_power : '';
             document.getElementById('beaconPathLoss').value = (d.path_loss_n != null) ? d.path_loss_n : '';
+            document.getElementById('beaconHeight').value = (d.height != null) ? d.height : '';
             syncBeaconFields();
 
             const title = document.getElementById('beaconModalTitle');
@@ -1896,6 +1962,7 @@
                 instance_id: document.getElementById('beaconInstance').value.trim(),
                 tx_power: document.getElementById('beaconTxPower').value.trim(),
                 path_loss_n: document.getElementById('beaconPathLoss').value.trim(),
+                height: document.getElementById('beaconHeight').value.trim(),
             };
 
             if (editingBeaconId !== null) {
@@ -1964,6 +2031,11 @@
             poly.on('contextmenu', function (e) { L.DomEvent.stop(e); showRoomInspector(r.room_id); });
             poly.on('click', function (e) { if (mode) return; L.DomEvent.stop(e); showRoomInspector(r.room_id); });
             roomShapes[r.room_id] = poly;
+            // The square-corner marks, so which corners are already right is
+            // visible on the plan rather than something to measure by eye.
+            if (roomAngleMarks[r.room_id]) lmap.removeLayer(roomAngleMarks[r.room_id]);
+            const marks = rightAngleMarks(r.geometry);
+            if (marks.length) roomAngleMarks[r.room_id] = L.layerGroup(marks).addTo(lmap);
 
             // Drag the body to move the whole room. Only live while this
             // room's own resize handles are showing (the "selected" state) —
@@ -2771,11 +2843,279 @@
         let pendingGeometry = null;
         let drawTargetRoomId = null;      // set when tracing an already-created room
 
+
+        // ── Drawing aids ──────────────────────────────────────────────────
+        // Drawing a room freehand gives you corners that are 89 or 92 degrees
+        // and a plan that looks subtly wrong for ever. Three things fix that,
+        // and they are what any CAD tool gives you:
+        //
+        //   Right angles  each new segment snaps to square with the one before
+        //                 it when it is close, so a corner is exactly 90.
+        //   Grid          vertices land on a grid, so walls line up with each
+        //                 other rather than being a few units out.
+        //   Readout       length and corner angle shown while you drag, so you
+        //                 can see 90.0 before committing rather than after.
+        //
+        // All three are toggles: a room that genuinely is not rectangular has
+        // to remain drawable.
+        const drawAids = { rightAngles: true, grid: true, showGrid: true };
+        const ORTHO_TOLERANCE_DEG = 12;   // how far off square still counts as "meant to be square"
+        let gridLayer = null;
+        let guideLayer = null;
+        let drawVertices = [];
+
+        function gridStepUnits() {
+            // A metre is the useful spacing when the scale is known; without it
+            // fall back to something that divides the canvas sensibly.
+            const ppm = mapScale();
+            if (ppm && ppm > 0) return ppm;
+            return Math.max(10, Math.round(Math.min(imgW, imgH) / 20));
+        }
+
+        function mapScale() {
+            return (typeof planScale === 'number' && planScale > 0) ? planScale : null;
+        }
+
+        function snapToGrid(pt) {
+            if (!drawAids.grid) return pt;
+            const g = gridStepUnits();
+            return { x: Math.round(pt.x / g) * g, y: Math.round(pt.y / g) * g };
+        }
+
+        // Square the new segment against the previous one. Projecting onto the
+        // nearest axis (rather than nudging the angle) is what makes the corner
+        // exactly 90 rather than merely closer to it.
+        function snapRightAngle(pt, prev) {
+            if (!drawAids.rightAngles || !prev) return pt;
+            const dx = pt.x - prev.x, dy = pt.y - prev.y;
+            if (!dx && !dy) return pt;
+            const angle = Math.atan2(dy, dx);
+            const quarter = Math.PI / 2;
+            const nearest = Math.round(angle / quarter) * quarter;
+            const offBy = Math.abs(((angle - nearest + Math.PI) % (2 * Math.PI)) - Math.PI);
+            if (offBy > ORTHO_TOLERANCE_DEG * Math.PI / 180) return pt;
+            const len = dx * Math.cos(nearest) + dy * Math.sin(nearest);
+            return { x: prev.x + len * Math.cos(nearest), y: prev.y + len * Math.sin(nearest) };
+        }
+
+        function constrainPoint(pt, prev) {
+            // Right angle first, then grid: squaring a gridded point can pull it
+            // back off the grid, whereas gridding a squared point keeps both.
+            return snapToGrid(snapRightAngle(pt, prev));
+        }
+
+        // Snapping each segment as it is drawn cannot square the *closing*
+        // segment -- that one is whatever gap is left between the last corner
+        // and the first, so a four-click rectangle came out with two square
+        // corners and two a degree or so off. Squaring the finished shape is
+        // the only thing that fixes the last corner.
+        //
+        // Each edge is classified as horizontal or vertical, then both its
+        // endpoints are pulled onto a shared y (or x). Repeating that converges
+        // on a shape whose every corner is exactly 90.
+        function orthogonalise(geometry) {
+            const n = geometry.length;
+            if (n < 4) return geometry;
+            const pts = geometry.map(function (g) { return { x: g[0], y: g[1] }; });
+
+            // Only for shapes that were clearly meant to be rectilinear: a room
+            // with a genuinely angled wall must survive being drawn.
+            const tol = ORTHO_TOLERANCE_DEG * Math.PI / 180;
+            for (let i = 0; i < n; i++) {
+                const a = pts[i], b = pts[(i + 1) % n];
+                const ang = Math.atan2(b.y - a.y, b.x - a.x);
+                const nearest = Math.round(ang / (Math.PI / 2)) * (Math.PI / 2);
+                const off = Math.abs(((ang - nearest + Math.PI) % (2 * Math.PI)) - Math.PI);
+                if (off > tol) return geometry;   // leave a deliberately angled room alone
+            }
+
+            for (let pass = 0; pass < 12; pass++) {
+                for (let i = 0; i < n; i++) {
+                    const a = pts[i], b = pts[(i + 1) % n];
+                    if (Math.abs(b.x - a.x) >= Math.abs(b.y - a.y)) {
+                        const y = (a.y + b.y) / 2; a.y = y; b.y = y;      // horizontal wall
+                    } else {
+                        const x = (a.x + b.x) / 2; a.x = x; b.x = x;      // vertical wall
+                    }
+                }
+            }
+            return pts.map(function (q) {
+                const g = snapToGrid(q);
+                return [Math.round(g.x * 100) / 100, Math.round(g.y * 100) / 100];
+            });
+        }
+
+        function drawGrid() {
+            if (gridLayer) { lmap.removeLayer(gridLayer); gridLayer = null; }
+            if (!drawAids.showGrid) return;
+            const g = gridStepUnits();
+            const lines = [];
+            const colour = AylaTheme.color('--border-color');
+            for (let x = 0; x <= imgW + 0.5; x += g) {
+                lines.push(L.polyline([toLatLng(x, 0), toLatLng(x, imgH)],
+                    { color: colour, weight: x % (g * 5) === 0 ? 1 : 0.5,
+                      opacity: x % (g * 5) === 0 ? 0.55 : 0.28, interactive: false }));
+            }
+            for (let y = 0; y <= imgH + 0.5; y += g) {
+                lines.push(L.polyline([toLatLng(0, y), toLatLng(imgW, y)],
+                    { color: colour, weight: y % (g * 5) === 0 ? 1 : 0.5,
+                      opacity: y % (g * 5) === 0 ? 0.55 : 0.28, interactive: false }));
+            }
+            gridLayer = L.layerGroup(lines).addTo(lmap);
+            if (gridLayer.bringToBack) gridLayer.bringToBack();
+        }
+
+        function unitsToLabel(units) {
+            const ppm = mapScale();
+            return ppm ? (units / ppm).toFixed(2) + ' m' : Math.round(units) + ' u';
+        }
+
+        function clearGuides() {
+            if (guideLayer) { lmap.removeLayer(guideLayer); guideLayer = null; }
+            const box = document.getElementById('drawReadout');
+            if (box) box.classList.add('hidden');
+        }
+
+        // Dashed rays along the two square directions from the last corner, so
+        // alignment is visible before the click rather than inferred after it.
+        function showGuides(prev, cursor) {
+            clearGuides();
+            if (!prev) return;
+            const reach = Math.max(imgW, imgH);
+            const rays = [];
+            const accent = AylaTheme.color('--accent') || '#0e7490';
+            [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(function (d) {
+                rays.push(L.polyline([
+                    toLatLng(prev.x, prev.y),
+                    toLatLng(prev.x + d[0] * reach, prev.y + d[1] * reach),
+                ], { color: accent, weight: 1, opacity: 0.35, dashArray: '4,6', interactive: false }));
+            });
+            rays.push(L.polyline([toLatLng(prev.x, prev.y), toLatLng(cursor.x, cursor.y)],
+                { color: accent, weight: 2, opacity: 0.9, interactive: false }));
+            guideLayer = L.layerGroup(rays).addTo(lmap);
+        }
+
+        function cornerAngle(a, b, c) {
+            // Interior angle at b, in degrees.
+            const v1 = { x: a.x - b.x, y: a.y - b.y };
+            const v2 = { x: c.x - b.x, y: c.y - b.y };
+            const m1 = Math.hypot(v1.x, v1.y), m2 = Math.hypot(v2.x, v2.y);
+            if (!m1 || !m2) return null;
+            let cos = (v1.x * v2.x + v1.y * v2.y) / (m1 * m2);
+            cos = Math.max(-1, Math.min(1, cos));
+            return Math.acos(cos) * 180 / Math.PI;
+        }
+
+        function updateReadout(prev, cursor) {
+            const box = document.getElementById('drawReadout');
+            if (!box || !prev) return;
+            const len = Math.hypot(cursor.x - prev.x, cursor.y - prev.y);
+            let angleText = '';
+            if (drawVertices.length >= 2) {
+                const a = drawVertices[drawVertices.length - 2];
+                const ang = cornerAngle(a, prev, cursor);
+                if (ang !== null) {
+                    const square = Math.abs(ang - 90) < 0.5;
+                    angleText = '<span class="' + (square ? 'text-emerald-400' : 'text-slate-300') + '">'
+                              + ang.toFixed(1) + '&deg;' + (square ? ' &#9633;' : '') + '</span>';
+                }
+            }
+            box.innerHTML = '<span class="text-slate-400">Length</span> <b>' + unitsToLabel(len) + '</b>'
+                          + (angleText ? ' &nbsp;<span class="text-slate-400">Corner</span> ' + angleText : '');
+            box.classList.remove('hidden');
+        }
+
+        function onDrawMouseMove(e) {
+            if (!drawVertices.length) return;
+            const prev = drawVertices[drawVertices.length - 1];
+            const raw = canvasXY(e.latlng);
+            const pt = constrainPoint(raw, prev);
+            showGuides(prev, pt);
+            updateReadout(prev, pt);
+        }
+
+        function wireDrawingAids() {
+            lmap.on('pm:drawstart', function () {
+                drawVertices = [];
+                lmap.on('mousemove', onDrawMouseMove);
+            });
+
+            lmap.on('pm:vertexadded', function (e) {
+                const prev = drawVertices.length ? drawVertices[drawVertices.length - 1] : null;
+                const pt = constrainPoint(canvasXY(e.latlng), prev);
+                const ll = L.latLng(toLatLng(pt.x, pt.y));
+                // Move both the vertex marker and the working polyline's last
+                // point: Geoman has already placed them at the raw position, and
+                // leaving either behind draws a shape that is not the one saved.
+                if (e.marker && e.marker.setLatLng) e.marker.setLatLng(ll);
+                if (e.workingLayer && e.workingLayer.getLatLngs) {
+                    const lls = e.workingLayer.getLatLngs();
+                    if (lls.length) { lls[lls.length - 1] = ll; e.workingLayer.setLatLngs(lls); }
+                }
+                drawVertices.push(pt);
+            });
+
+            lmap.on('pm:drawend', function () {
+                lmap.off('mousemove', onDrawMouseMove);
+                drawVertices = [];
+                clearGuides();
+            });
+        }
+
+        window.toggleDrawAid = function (key) {
+            drawAids[key] = !drawAids[key];
+            if (key === 'showGrid') drawGrid();
+            const btn = document.getElementById('aid-' + key);
+            if (btn) btn.classList.toggle('mode-active', drawAids[key]);
+            if (key === 'rightAngles' && !drawAids.rightAngles) clearGuides();
+        };
+
+        // Small square drawn inside any corner that is already square, which is
+        // the convention on a floor plan and answers "is that corner right?"
+        // for shapes that already exist.
+        function rightAngleMarks(geometry) {
+            const marks = [];
+            const n = geometry.length;
+            if (n < 3) return marks;
+            const size = Math.max(6, gridStepUnits() * 0.22);
+            for (let i = 0; i < n; i++) {
+                const a = { x: geometry[(i - 1 + n) % n][0], y: geometry[(i - 1 + n) % n][1] };
+                const b = { x: geometry[i][0], y: geometry[i][1] };
+                const c = { x: geometry[(i + 1) % n][0], y: geometry[(i + 1) % n][1] };
+                const ang = cornerAngle(a, b, c);
+                if (ang === null || Math.abs(ang - 90) > 1) continue;
+                const u1 = norm(a, b), u2 = norm(c, b);
+                marks.push(L.polyline([
+                    toLatLng(b.x + u1.x * size, b.y + u1.y * size),
+                    toLatLng(b.x + (u1.x + u2.x) * size, b.y + (u1.y + u2.y) * size),
+                    toLatLng(b.x + u2.x * size, b.y + u2.y * size),
+                // Fixed green, not a theme token: this mark means "this corner
+                // is square", and --accent2 resolves to grey here, which reads
+                // as decoration rather than confirmation.
+                ], { color: '#10b981', weight: 1.6, opacity: 0.9, interactive: false }));
+            }
+            return marks;
+        }
+
+        function norm(from, at) {
+            const dx = from.x - at.x, dy = from.y - at.y;
+            const m = Math.hypot(dx, dy) || 1;
+            return { x: dx / m, y: dy / m };
+        }
+
         function onRoomDrawn(e) {
             // Read the target before clearMode(), which resets it.
             const targetRoomId = drawTargetRoomId;
             drawnRoomLayer = e.layer;
-            pendingGeometry = latLngsToGeometry(e.layer.getLatLngs());
+            let geom = latLngsToGeometry(e.layer.getLatLngs());
+            if (drawAids.rightAngles) {
+                geom = orthogonalise(geom);
+                // Redraw at the squared coordinates so what is saved is what is
+                // shown -- otherwise the confirmation dialog describes a shape
+                // the Administrator is not looking at.
+                e.layer.setLatLngs(geometryToLatLngs(geom));
+            }
+            pendingGeometry = geom;
             clearMode();                             // the shape is drawn; stand the tool down
             if (targetRoomId) { saveShapeForExistingRoom(targetRoomId); }
             else { openRoomPlace(); }
@@ -2942,6 +3282,7 @@
 
             floorPlanId = data.floor_plan_id;
             imgW = data.canvas_width; imgH = data.canvas_height;
+            planScale = (typeof data.pixels_per_meter === 'number') ? data.pixels_per_meter : null;
             populateShelves(data.shelves);
             rooms = data.rooms || [];
 
@@ -2964,6 +3305,8 @@
                 drawPolyline: false, drawRectangle: false, drawText: false, drawPolygon: false,
                 editMode: false, dragMode: false, cutPolygon: false, removalMode: false, rotateMode: false });
             lmap.on('pm:create', onRoomDrawn);
+            wireDrawingAids();
+            drawGrid();
             setTimeout(function () { lmap.invalidateSize(); }, 200);
 
             (data.rooms || []).forEach(addRoomShape);

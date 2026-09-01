@@ -1,0 +1,140 @@
+{% comment %}
+The right-hand side of every portal header: desk mode, then the profile menu.
+
+Twelve near-identical copies of this markup had drifted across twenty-five
+templates, differing only in whitespace and accent colour, which is why the
+avatar circle was a dead div on every one of them. One include instead.
+
+`accent` picks the portal's colour (cyan for Administrator, violet for Library
+Staff). `portal_user` comes from the context processor, so no view has to pass
+it. `desk_mode` is only set on Log Management; elsewhere it is simply absent,
+which is what hides the badge.
+{% endcomment %}
+{% firstof accent 'cyan' as hdr_accent %}
+
+<div class="flex items-center gap-3">
+
+    {% if extra %}{{ extra }}{% endif %}
+
+    {% if desk_mode %}
+    <span class="bg-amber-500/15 text-amber-400 text-xs px-2.5 py-1 rounded font-bold border border-amber-600/40 tracking-wider">DESK MODE</span>
+    {% else %}
+
+    {% if hdr_accent == 'violet' %}
+    <span class="bg-violet-950 text-violet-400 text-xs px-2.5 py-1 rounded font-bold border border-violet-800 tracking-wider">{% if request.session.admin_role == 'Staff' %}STAFF{% else %}ADMIN{% endif %}</span>
+    {% else %}
+    <span class="bg-cyan-950 text-cyan-400 text-xs px-2.5 py-1 rounded font-bold border border-cyan-800 tracking-wider">{% if request.session.admin_role == 'Staff' %}STAFF{% else %}ADMIN{% endif %}</span>
+    {% endif %}
+
+    {# Arming desk mode hands the computer to a patron, so it belongs wherever #}
+    {# the librarian happens to be standing -- not only on the one page it     #}
+    {# confines the browser to. #}
+    <form method="post" action="{% url 'desk_arm' %}" class="inline-block"
+          onsubmit="return confirm('Hand this computer to the patron?\n\nThis browser stays on Log Management until someone enters their account password.')">
+        {% csrf_token %}
+        <button type="submit" title="Hand this computer to a patron"
+                class="flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-bold tracking-wide transition-colors
+                       border-amber-600/40 text-amber-400 hover:bg-amber-500/10">
+            <i class="fa-solid fa-lock text-[11px]"></i>
+            <span class="hidden sm:inline">Desk Mode</span>
+        </button>
+    </form>
+
+    {% endif %}
+
+    {# ── Profile menu ───────────────────────────────────────────────────── #}
+    {# Hidden while desk mode is armed. The patron standing at this screen has #}
+    {# no business seeing the librarian's name and email, and Logout would let #}
+    {# them end the session -- which is precisely what the lock exists to      #}
+    {# prevent. Log Management already masks patron emails in this mode; the   #}
+    {# staff account deserves the same treatment.                              #}
+    {% if not desk_mode %}
+    <div class="relative" id="profileMenuWrap">
+        <button type="button" id="profileMenuBtn" onclick="togglePortalProfile(event)"
+                aria-haspopup="true" aria-expanded="false" aria-label="Account menu"
+                class="w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold transition-colors
+                       {% if hdr_accent == 'violet' %}bg-violet-900 border border-violet-700 text-violet-200 hover:bg-violet-800{% else %}bg-cyan-900 border border-cyan-700 text-cyan-200 hover:bg-cyan-800{% endif %}">
+            {{ portal_user.initials }}
+        </button>
+
+        <div id="profileMenu"
+             class="hidden absolute right-0 mt-2 w-72 rounded-xl border shadow-2xl z-[60] overflow-hidden"
+             style="background-color: var(--bg-modal); border-color: var(--border-modal);">
+
+            <div class="p-4 border-b" style="border-color: var(--border-modal);">
+                <p class="text-sm font-bold text-slate-100 break-words">{{ portal_user.fullname|default:"Account" }}</p>
+                <p class="text-xs text-slate-400 mt-0.5 break-all">{{ portal_user.email }}</p>
+                <div class="flex items-center gap-2 mt-2.5">
+                    <span class="text-[10px] px-2 py-0.5 rounded font-bold tracking-wider
+                                 {% if hdr_accent == 'violet' %}bg-violet-950 text-violet-400 border border-violet-800{% else %}bg-cyan-950 text-cyan-400 border border-cyan-800{% endif %}">
+                        {% if portal_user.role == 'Staff' %}LIBRARY STAFF{% else %}ADMINISTRATOR{% endif %}
+                    </span>
+                    {% if portal_user.account_status %}
+                    <span class="text-[10px] px-2 py-0.5 rounded font-bold tracking-wider
+                                 {% if portal_user.account_status == 'Active' %}bg-emerald-500/10 text-emerald-400 border border-emerald-500/20{% else %}bg-slate-800/60 text-slate-400 border border-slate-700/40{% endif %}">
+                        {{ portal_user.account_status|upper }}
+                    </span>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="p-2">
+                <button type="button" onclick="closePortalProfile(); openPortalPwModal();"
+                        class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-slate-300 hover:bg-slate-800/40 hover:text-slate-100 transition-colors text-left">
+                    <i class="fa-solid fa-key w-4 text-xs text-slate-500"></i>
+                    <span class="text-sm">Change Password</span>
+                </button>
+                <a href="{% if portal_user.role == 'Staff' %}{% url 'staff_logout' %}{% else %}{% url 'admin_logout' %}{% endif %}"
+                   class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-slate-300 hover:bg-slate-800/40 hover:text-rose-300 transition-colors">
+                    <i class="fa-solid fa-right-from-bracket w-4 text-xs text-slate-500"></i>
+                    <span class="text-sm">Logout</span>
+                </a>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+{% if not desk_mode %}<style>
+    #profileMenu {
+        transform-origin: top right;
+        transition: opacity .15s ease, transform .15s ease;
+    }
+    #profileMenu.is-closing,
+    #profileMenu.hidden { opacity: 0; transform: scale(.96) translateY(-4px); }
+    #profileMenu.is-open { opacity: 1; transform: none; }
+    @media (prefers-reduced-motion: reduce) { #profileMenu { transition: none; } }
+</style>
+
+<script>
+    function togglePortalProfile(e) {
+        if (e) e.stopPropagation();
+        var menu = document.getElementById('profileMenu');
+        if (menu.classList.contains('hidden')) {
+            menu.classList.remove('hidden');
+            // Next frame, so the browser has painted the closed state and the
+            // transition actually runs rather than being skipped.
+            requestAnimationFrame(function () { menu.classList.add('is-open'); });
+            document.getElementById('profileMenuBtn').setAttribute('aria-expanded', 'true');
+        } else {
+            closePortalProfile();
+        }
+    }
+
+    function closePortalProfile() {
+        var menu = document.getElementById('profileMenu');
+        if (!menu || menu.classList.contains('hidden')) return;
+        menu.classList.remove('is-open');
+        document.getElementById('profileMenuBtn').setAttribute('aria-expanded', 'false');
+        setTimeout(function () { menu.classList.add('hidden'); }, 150);
+    }
+
+    document.addEventListener('click', function (e) {
+        var wrap = document.getElementById('profileMenuWrap');
+        if (wrap && !wrap.contains(e.target)) closePortalProfile();
+    });
+    document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') closePortalProfile();
+    });
+</script>
+{% endif %}

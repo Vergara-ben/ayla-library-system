@@ -1,0 +1,272 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en" data-module="admin">
+<head>
+    <meta charset="UTF-8">
+    <meta name="theme-color" content="#ffffff">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ayla Admin Panel - Activity Logs</title>
+    <script src="{% static 'js/theme.js' %}"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="{% static 'js/tailwind-theme.js' %}"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha384-iw3OoTErCYJJB9mCa8LNS2hbsQ7M3C0EpIsO/H5+EGAkPGc6rk+V8i04oW/K5xq0" crossorigin="anonymous" referrerpolicy="no-referrer">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'css/theme.css' %}">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-main);
+            color: var(--text-primary);
+        }
+        .logo-text { font-family: 'Rowdies', sans-serif; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: var(--bg-main); }
+        ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
+
+        .log-table { width: 100%; border-collapse: collapse; }
+        .log-table th {
+            text-align: left;
+            font-size: 10px;
+            letter-spacing: .08em;
+            text-transform: uppercase;
+            font-weight: 700;
+            color: var(--text-muted, #64748b);
+            padding: 10px 14px;
+            border-bottom: 1px solid var(--border-color);
+            white-space: nowrap;
+        }
+        .log-table td {
+            padding: 11px 14px;
+            border-bottom: 1px solid var(--border-color);
+            font-size: 13px;
+            vertical-align: top;
+        }
+        .log-table tr:last-child td { border-bottom: none; }
+        .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+
+        .role-pill {
+            display: inline-block;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: .05em;
+            padding: 2px 8px;
+            border-radius: 999px;
+            border: 1px solid transparent;
+            white-space: nowrap;
+        }
+        .role-Admin  { background: rgba(6,182,212,.12);  color: #22d3ee; border-color: rgba(14,116,144,.5); }
+        .role-Staff  { background: rgba(139,92,246,.12); color: #a78bfa; border-color: rgba(109,40,217,.5); }
+        .role-Patron { background: rgba(16,185,129,.12); color: #34d399; border-color: rgba(5,150,105,.5); }
+        .role-System { background: rgba(100,116,139,.15); color: #94a3b8; border-color: rgba(71,85,105,.5); }
+
+        .filter-field {
+            background-color: var(--bg-input);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 8px 12px;
+            font-size: 13px;
+            color: var(--text-primary);
+        }
+        .filter-field:focus { outline: none; border-color: #0e7490; }
+
+        @media (max-width: 1024px) {
+            aside { position: fixed; left: -100%; top: 0; height: 100vh; z-index: 50; transition: left .3s ease; }
+            aside.open { left: 0; }
+            .mobile-menu-btn { display: flex !important; }
+            main { padding: 1rem; }
+        }
+        @media (max-width: 768px) {
+            header { padding: 0 1rem; }
+            header h2 { font-size: 1rem; }
+        }
+        .mobile-menu-btn { display: none; align-items: center; justify-content: center; width: 40px; height: 40px; margin-right: .75rem; color: var(--text-secondary); }
+    </style>
+</head>
+<body class="flex h-screen overflow-hidden">
+
+    {% include 'admin/_sidebar.html' with active='activity' %}
+
+    <div class="flex-1 flex flex-col overflow-hidden">
+
+        <header class="h-16 flex-shrink-0 flex items-center justify-between px-8" style="background-color: var(--bg-main);">
+            <div class="flex items-center">
+                <button class="mobile-menu-btn" onclick="toggleSidebar()">
+                    <i class="fa-solid fa-bars"></i>
+                </button>
+                <h2 class="logo-text text-lg tracking-wider text-slate-200 uppercase">Activity Logs</h2>
+            </div>
+            <div class="flex items-center gap-3">
+                {% include 'admin/_headeractions.html' with accent='cyan' %}
+            </div>
+        </header>
+
+        <main class="flex-1 overflow-y-auto p-8 space-y-6">
+
+            {# Says what this is, because the visitor logbook next to it in the #}
+            {# sidebar is also called a log and answers a completely different  #}
+            {# question. #}
+            <div class="rounded-xl border border-slate-800/80 p-4" style="background-color: var(--bg-card);">
+                <div class="flex items-start gap-3">
+                    <i class="fa-solid fa-user-shield text-cyan-500 mt-1"></i>
+                    <div class="text-xs text-slate-400 leading-relaxed">
+                        <span class="font-bold text-slate-200">Who did what, in every portal.</span>
+                        Every record-changing action by an Administrator, Library Staff member or
+                        Patron is written here as it happens, along with the actions the system takes
+                        on its own. It is read-only by design &mdash; an audit trail with an edit
+                        button proves nothing, because any entry could then have been changed by the
+                        person it names.
+                        <span class="text-slate-500">Looking for who visited the library? That is Log Management.</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-2 lg:grid-cols-5 gap-4">
+                <div class="rounded-xl border border-slate-800/80 p-4" style="background-color: var(--bg-card);">
+                    <p class="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1">Total entries</p>
+                    <p class="text-2xl font-bold text-slate-100">{{ total_logs }}</p>
+                </div>
+                {% for key, label, count in role_stats %}
+                <a href="?role={{ key }}" class="rounded-xl border border-slate-800/80 p-4 block hover:border-slate-700 transition-colors" style="background-color: var(--bg-card);">
+                    <p class="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1">{{ label }}</p>
+                    <p class="text-2xl font-bold text-slate-100">{{ count }}</p>
+                </a>
+                {% endfor %}
+            </div>
+
+            <form method="get" class="rounded-xl border border-slate-800/80 p-4" style="background-color: var(--bg-card);">
+                <div class="flex flex-wrap items-end gap-3">
+                    <div class="flex-1 min-w-[220px]">
+                        <label class="block text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1.5">Search</label>
+                        <input type="text" name="q" value="{{ q }}" class="filter-field w-full"
+                               placeholder="name, patron, detail or record id">
+                    </div>
+                    <div>
+                        <label class="block text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1.5">Role</label>
+                        <select name="role" class="filter-field">
+                            <option value="">All roles</option>
+                            {% for key, label in role_choices %}
+                            <option value="{{ key }}" {% if role == key %}selected{% endif %}>{{ label }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1.5">Action</label>
+                        <select name="action" class="filter-field">
+                            <option value="">All actions</option>
+                            {% for a in all_actions %}
+                            <option value="{{ a }}" {% if action == a %}selected{% endif %}>{{ a }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1.5">Record type</label>
+                        <select name="entity" class="filter-field">
+                            <option value="">All types</option>
+                            {% for e in all_entities %}
+                            <option value="{{ e }}" {% if entity == e %}selected{% endif %}>{{ e }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1.5">From</label>
+                        <input type="date" name="from" value="{{ date_from }}" class="filter-field">
+                    </div>
+                    <div>
+                        <label class="block text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1.5">To</label>
+                        <input type="date" name="to" value="{{ date_to }}" class="filter-field">
+                    </div>
+                    <button type="submit" class="px-5 py-2 rounded-lg bg-cyan-700/30 text-cyan-300 border border-cyan-800/50 font-semibold text-sm hover:bg-cyan-700/40 transition-colors">
+                        <i class="fa-solid fa-filter"></i> Filter
+                    </button>
+                    {% if is_filtered %}
+                    <a href="{% url 'activity_logs' %}" class="px-4 py-2 rounded-lg border border-slate-700/80 text-slate-300 hover:text-slate-100 hover:bg-slate-800/40 font-semibold text-sm transition-colors">
+                        Clear
+                    </a>
+                    {% endif %}
+                </div>
+            </form>
+
+            <div class="rounded-xl border border-slate-800/80 overflow-hidden" style="background-color: var(--bg-card);">
+                <div style="overflow-x:auto">
+                    <table class="log-table">
+                        <thead>
+                            <tr>
+                                <th>When</th>
+                                <th>Who</th>
+                                <th>Role</th>
+                                <th>Action</th>
+                                <th>Record</th>
+                                <th>Detail</th>
+                                <th>Patron</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for log in page_obj %}
+                            <tr>
+                                <td class="mono text-slate-400 whitespace-nowrap">{{ log.timestamp|date:"M j, Y" }}<br><span class="text-slate-500">{{ log.timestamp|date:"H:i:s" }}</span></td>
+                                <td class="text-slate-200">{{ log.actor_name }}</td>
+                                <td><span class="role-pill role-{{ log.actor_role }}">{{ log.actor_role|upper }}</span></td>
+                                <td class="text-slate-300">{{ log.action }}</td>
+                                <td class="text-slate-400">{{ log.entity_type }}{% if log.entity_id %} <span class="mono text-slate-500">#{{ log.entity_id }}</span>{% endif %}</td>
+                                <td class="text-slate-400" style="max-width:380px">{{ log.detail|default:"&mdash;" }}</td>
+                                <td class="text-slate-400">{% if log.patron %}{{ log.patron.fullname }}{% else %}<span class="text-slate-600">&mdash;</span>{% endif %}</td>
+                            </tr>
+                            {% empty %}
+                            <tr>
+                                <td colspan="7" class="text-center text-slate-500 text-sm" style="padding:48px 14px">
+                                    {% if is_filtered %}
+                                        No activity matches those filters.
+                                        <a href="{% url 'activity_logs' %}" class="text-cyan-400 hover:text-cyan-300">Clear them</a>
+                                        to see everything.
+                                    {% else %}
+                                        Nothing has been recorded yet. Entries appear here as soon as
+                                        anyone changes a record in any portal.
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="flex items-center justify-between px-5 py-4 border-t border-slate-800 text-xs text-slate-500 flex-wrap gap-3">
+                    <span class="font-medium">
+                        Showing <span class="text-slate-400">{{ page_obj|length }}</span>
+                        of <span class="text-slate-400">{{ filtered_count }}</span>
+                        {% if is_filtered %}matching {% endif %}entr{{ filtered_count|pluralize:"y,ies" }}
+                    </span>
+
+                    {% if page_obj.paginator.num_pages > 1 %}
+                    <div class="flex items-center gap-1">
+                        {% if page_obj.has_previous %}
+                            <a href="?page={{ page_obj.previous_page_number }}{% if querystring %}&{{ querystring }}{% endif %}" class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors">&larr; Prev</a>
+                        {% else %}
+                            <button class="px-3 py-1.5 rounded border border-slate-800 text-slate-600 font-medium cursor-not-allowed" disabled>&larr; Prev</button>
+                        {% endif %}
+
+                        <span class="px-3 py-1.5 text-slate-400 font-medium">
+                            Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}
+                        </span>
+
+                        {% if page_obj.has_next %}
+                            <a href="?page={{ page_obj.next_page_number }}{% if querystring %}&{{ querystring }}{% endif %}" class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors">Next &rarr;</a>
+                        {% else %}
+                            <button class="px-3 py-1.5 rounded border border-slate-800 text-slate-600 font-medium cursor-not-allowed" disabled>Next &rarr;</button>
+                        {% endif %}
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+        </main>
+    </div>
+
+    <script>
+        function toggleSidebar() {
+            document.querySelector('aside').classList.toggle('open');
+        }
+    </script>
+</body>
+</html>

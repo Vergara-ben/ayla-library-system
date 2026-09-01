@@ -20,12 +20,12 @@
 
         body {
             font-family: 'Plus Jakarta Sans', sans-serif;
-            background-color: var(--bg-dark);
             color: var(--text-main);
             min-height: 100vh;
             display: flex;
             overflow-x: hidden;
             position: relative;
+
         }
 
         /* --- Main Content Section --- */
@@ -375,8 +375,25 @@
     <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
     <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
     <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
+    <style>
+        /* admin-theme.css sets `body { background-image: none !important }` to
+           kill some old ambient glows, and it loads after the block above, so
+           the sign-in photograph has to be reinstated here and match that
+           weight. Scoped to .auth-bg so only the two sign-in pages are
+           affected -- the rule it overrides still applies everywhere else. */
+        body.auth-bg {
+            background-color: transparent !important;
+            background-image:
+                linear-gradient(var(--auth-overlay-1), var(--auth-overlay-2)),
+                url("{% static 'images/ayla2.jpg' %}") !important;
+            background-size: cover !important;
+            background-position: center !important;
+            background-repeat: no-repeat !important;
+            background-attachment: fixed !important;
+        }
+    </style>
 </head>
-<body>
+<body class="auth-bg">
 
     <main class="main-container">
         <div class="brand-logo brand-logo-hero">
