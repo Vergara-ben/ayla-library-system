@@ -412,7 +412,19 @@
     --glass-border:   rgba(15, 23, 42, 0.50);
     --on-glass:       #0f172a;
 
-    /* flat-design primitives */
+    /* flat-design primitives.
+
+       Four steps, and nothing outside them. The markup had drifted across
+       rounded-lg (630 uses), rounded-xl (192) and rounded-2xl (62) for boxes
+       doing the same job, so the point of naming these is to give every one of
+       those a defined place to land:
+
+           xs  chips and status tags
+           sm  icon buttons and row actions
+           --  buttons, inputs, sidebar links
+           lg  cards, panels and modals -- the largest anything gets   */
+    --radius-xs:   6px;
+    --radius-sm:   8px;
     --radius:     10px;
     --radius-lg:  14px;
     --shadow:     none;                              /* flat by default */

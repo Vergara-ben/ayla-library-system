@@ -114,8 +114,12 @@ aside .bg-cyan-950\/50, aside .bg-violet-950\/50 {
 
 /* ---- 3. Cards & panels ------------------------------------------------- */
 [style*="--bg-card"] {
-    border-radius: var(--radius-lg);
-    box-shadow: none;
+    /* !important for the same reason as the modal rule below: the markup says
+       rounded-xl / rounded-2xl and the CDN injects those at runtime. Measured
+       before adding it, every card on Manage Books rendered at 12px from
+       rounded-xl -- this rule had never once taken effect. */
+    border-radius: var(--radius-lg) !important;
+    box-shadow: none !important;
     transition: border-color .15s ease;
 }
 
@@ -150,8 +154,12 @@ table tbody tr:hover { background: var(--bg-subtle) !important; }
 
 /* ---- 7. Modals — the one place depth is allowed ---------------------- */
 [style*="--bg-modal"] {
-    border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-pop);
+    /* !important because the markup carries rounded-2xl and shadow-2xl, which
+       the Tailwind CDN injects at runtime and which therefore beat plain
+       declarations here regardless of file order. Without it this rule has
+       been quietly losing: modal cards rendered at 16px, not the token. */
+    border-radius: var(--radius-lg) !important;
+    box-shadow: var(--shadow-pop) !important;
 }
 
 /* ---- 8. Scrollbars ----------------------------------------------------- */
@@ -182,4 +190,207 @@ aside .theme-toggle.is-wide:hover {
     background: var(--bg-subtle);
     color: var(--accent);
     border-color: transparent;
+}
+
+/* ---- 11. Page header --------------------------------------------------
+   Two scaffolds grew up in parallel and never met:
+
+     .top-navbar  +  h2.page-title      4 pages  (admin/staff dashboard, indoormap)
+     header.h-16  +  h2.logo-text      26 pages  (everything else)
+
+   They differ in more than layout. .page-title inherits the page font at 14px
+   with 1.5px tracking on a --bg-darker bar; .logo-text is 18px in *Rowdies* --
+   a display face meant for the wordmark, reused for page titles by copy-paste
+   -- on a --bg-main bar with no bottom border. Clicking from Dashboard to
+   Manage Books changed the typeface of the page title, which is the kind of
+   thing nobody can name but everybody sees.
+
+   Both are pinned here to the same bar and the same title. --bg-main and the
+   bottom border win because 26 pages beat 4, and because a header needs an
+   edge for the same reason the sidebar has one.
+
+   !important throughout: the h-16 side carries its background in an inline
+   style attribute, and its geometry comes from Tailwind utilities the CDN
+   injects at runtime. Neither loses to plain source order.               */
+
+.top-navbar,
+header.h-16 {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    height: 64px !important;
+    flex-shrink: 0 !important;
+    padding: 0 32px !important;
+    background-color: var(--bg-main) !important;
+    border-bottom: 1px solid var(--border-color) !important;
+}
+
+.page-title,
+header h2.logo-text {
+    font-family: 'Inter', system-ui, sans-serif !important;
+    font-size: 13px !important;
+    font-weight: 700 !important;
+    letter-spacing: .08em !important;
+    text-transform: uppercase !important;
+    color: var(--text-primary) !important;
+    margin: 0 !important;
+}
+
+/* The floating profile menu is the one thing in the header that sits above
+   the page, so it takes the elevation token rather than a bare shadow-2xl. */
+#profileMenu {
+    box-shadow: var(--shadow-pop) !important;
+    border-radius: var(--radius-lg) !important;
+}
+
+/* ---- 12. Control geometry ---------------------------------------------
+   The markup grew four button paddings (px-5 py-2.5, px-4 py-2.5, px-4 py-2,
+   px-3 py-1.5), four micro type sizes, two icon-button radii and three
+   different "Cancel" class strings -- all for controls that read as the same
+   thing. None of that is visible as a decision; it just makes the product look
+   assembled rather than designed.
+
+   Two tiers, and nothing else:
+
+       medium   40px tall, --radius        primary and secondary actions
+       small    32px square, --radius-sm   icon buttons and row actions
+
+   Geometry only. Colour is left entirely to section 5 and to the accent
+   tokens, so nothing here fights the border-color and background !important
+   rules already in this file.                                            */
+
+/* ---- 12a. Micro type --------------------------------------------------
+   text-[9px], text-[10px] and text-[11px] are used interchangeably for the
+   same tier -- badges, chips, row actions, table headers. Substring matching
+   catches all three wherever Tailwind generated them, which is the same
+   technique section 2 already uses for border opacity. */
+[class*="text-[9px]"],
+[class*="text-[10px]"],
+[class*="text-[11px]"] {
+    font-size: 10px !important;
+}
+
+/* ---- 12b. Two control tiers -------------------------------------------
+   Measured on Manage Books, the same page carried buttons at 24, 29, 30, 40
+   and 46px -- toolbar actions at 29 sitting directly beside 32px icon
+   buttons, and Prev/Next at 46 for no reason anyone chose.
+
+   The four paddings already in the markup map cleanly onto two tiers, so the
+   tiers are drawn from what the markup meant rather than imposed on it:
+
+       px-3 py-1.5                        -> small,  32px
+       px-4 py-2 / py-2.5 / px-5 py-2.5   -> medium, 40px
+
+   Deliberately not collapsing both into one 40px tier: this is a dense
+   administrative UI, and inflating every toolbar button would cost rows of
+   table on screen to buy nothing. Small matches the 32px icon buttons it sits
+   next to, which is the mismatch that actually reads as sloppy.
+
+   Scoped to button and a throughout, so a chip, a table cell or a layout div
+   sharing a padding class is never caught. */
+
+button.px-3.py-1\.5, a.px-3.py-1\.5 {
+    min-height: 32px !important;
+    padding: 0 12px !important;
+    border-radius: var(--radius-sm) !important;
+    font-weight: 600 !important;
+}
+
+button.px-4.py-2, a.px-4.py-2,
+button.px-4.py-2\.5, a.px-4.py-2\.5,
+button.px-5.py-2\.5, a.px-5.py-2\.5 {
+    min-height: 40px !important;
+    padding: 0 18px !important;
+    border-radius: var(--radius) !important;
+    font-size: 13px !important;
+    font-weight: 600 !important;
+}
+
+/* Shared by both tiers: centre the label and its icon on one baseline. The
+   markup already says flex on most of these and forgets to on the rest, which
+   is why a button with an icon sat a pixel or two off its neighbour. */
+button.px-3.py-1\.5, a.px-3.py-1\.5,
+button.px-4.py-2, a.px-4.py-2,
+button.px-4.py-2\.5, a.px-4.py-2\.5,
+button.px-5.py-2\.5, a.px-5.py-2\.5 {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 7px !important;
+    line-height: 1 !important;
+    letter-spacing: .01em !important;
+}
+
+/* ---- 12c. Small controls: icon buttons and row actions ----------------
+   w-7 h-7 is 28px and splits between `rounded` on row actions and
+   `rounded-lg` on modal close buttons -- the same box, two corners. One
+   square, one radius, and 32px because 28 is below the comfortable minimum
+   for a target you are expected to hit repeatedly down a table. */
+.w-7.h-7 {
+    width: 32px !important;
+    height: 32px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    border-radius: var(--radius-sm) !important;
+    flex-shrink: 0 !important;
+}
+
+/* ---- 12d. Tags and pills ----------------------------------------------
+   The two badge shapes are a real distinction and both are kept: a squared
+   tag for an intrinsic property (condition), a pill for a changing state
+   (availability). Only the corner is pinned to the scale; 12a has already
+   levelled their type. */
+span[class*="text-[9px]"][class*="rounded"]:not([class*="rounded-full"]),
+span[class*="text-[10px]"][class*="rounded"]:not([class*="rounded-full"]),
+span[class*="text-[11px]"][class*="rounded"]:not([class*="rounded-full"]) {
+    border-radius: var(--radius-xs) !important;
+}
+
+/* ---- 13. Modal overlays ------------------------------------------------
+   Three things had drifted apart, and only two of them are safe to unify.
+
+   POSITION. 31 overlays are `absolute inset-0`, the rest `fixed`. The
+   absolute ones render correctly today only because <body> never scrolls --
+   the page's scrolling happens inside <main>. That is a coincidence of the
+   current layout, not a decision, and it breaks silently the day any page
+   lets the body scroll. All of them become fixed.
+
+   SCRIM. Three mechanisms for one backdrop: bg-black/60, bg-black/70, and an
+   inline style="background: var(--scrim)". theme.css already redirects the
+   first to the token; the rest join it here so light and dark stay honest.
+
+   Z-INDEX is deliberately NOT flattened. The ladder reads 40, 50, 60, 70, 80,
+   which is ugly, but 70 (transaction modals) and 80 (change password) sit
+   above the base layer on purpose -- they open from inside another modal.
+   Levelling them would let a nested dialog open behind its own parent, which
+   is a far worse bug than an untidy scale. Only the base overlays are pinned
+   together, and only the one real collision is fixed.
+
+   Keyed on the structural signal -- inset-0 plus a backdrop -- never on an id
+   substring: 39 ids in these templates contain "modal", including headings
+   like beaconModalTitle, and position:fixed on an <h3> would be its own bug. */
+
+.inset-0.bg-black\/60,
+.inset-0.bg-black\/70,
+.inset-0.modal-overlay,
+.inset-0[style*="--scrim"] {
+    position: fixed !important;
+    background: var(--scrim) !important;
+}
+
+/* The base layer. The explicit z-[70] and z-[80] overlays keep their own
+   value and so stay above this, which is what they were written to do. */
+.inset-0.z-40,
+.inset-0.z-50,
+.inset-0.z-\[60\] {
+    z-index: 60 !important;
+}
+
+/* The one genuine collision: the header's profile dropdown carried the same
+   z-[60] as eight modal overlays, so which one won depended on DOM order.
+   A dropdown belongs under a dialog, so it moves down rather than the
+   dialogs moving up. */
+#profileMenu {
+    z-index: 50 !important;
 }
