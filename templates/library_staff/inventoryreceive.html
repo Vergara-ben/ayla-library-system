@@ -43,6 +43,7 @@
     <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
     <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
     <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
+    <script src="{% static 'js/ayla-dialog.js' %}"></script>
 </head>
 <body class="flex h-screen overflow-hidden">
 
@@ -101,29 +102,29 @@
 
                         <div id="shipmentFields" class="grid grid-cols-2 gap-4">
                             <div>
-                                <label class="field-label">Supplier</label>
-                                <input type="text" name="supplier" class="field-input" placeholder="Who shipped it">
+                                <label for="f_supplier" class="field-label">Supplier</label>
+                                <input id="f_supplier" type="text" name="supplier" class="field-input" placeholder="Who shipped it">
                             </div>
                             <div>
-                                <label class="field-label">PO number</label>
-                                <input type="text" name="po_number" class="field-input" placeholder="PO-2026-001">
+                                <label for="f_po_number" class="field-label">PO number</label>
+                                <input id="f_po_number" type="text" name="po_number" class="field-input" placeholder="PO-2026-001">
                             </div>
                         </div>
 
                         <div id="donationFields" class="hidden space-y-4">
                             <div class="grid grid-cols-2 gap-4">
                                 <div>
-                                    <label class="field-label">Donor name</label>
+                                    <label for="rcvDonor" class="field-label">Donor name</label>
                                     <input type="text" name="donor_name" id="rcvDonor" class="field-input" placeholder="Who donated it">
                                 </div>
                                 <div>
-                                    <label class="field-label">Date donated</label>
-                                    <input type="date" name="donated_date" class="field-input" value="{{ today }}">
+                                    <label for="f_donated_date" class="field-label">Date donated</label>
+                                    <input id="f_donated_date" type="date" name="donated_date" class="field-input" value="{{ today }}">
                                 </div>
                             </div>
                             <div>
-                                <label class="field-label">Accessioning stage</label>
-                                <select name="processing_stage" class="field-input">
+                                <label for="f_processing_stage" class="field-label">Accessioning stage</label>
+                                <select id="f_processing_stage" name="processing_stage" class="field-input">
                                     {% for value, label in stage_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
                                 </select>
                             </div>
@@ -134,7 +135,7 @@
                             <p class="text-[11px] uppercase font-bold tracking-wider text-violet-500">Books in this delivery</p>
 
                             <div>
-                                <label class="field-label">Already catalogued?</label>
+                                <label for="rcvBook" class="field-label">Already catalogued?</label>
                                 <select id="rcvBook" class="field-input" onchange="onPickCatalogued()">
                                     <option value="">&mdash; New title, enter its details below &mdash;</option>
                                     {% for b in books %}<option value="{{ b.book_id }}" data-title="{{ b.title }}" data-author="{{ b.author }}">{{ b.title }} &mdash; {{ b.author }}</option>{% endfor %}
@@ -143,26 +144,26 @@
 
                             <div id="newTitleFields" class="space-y-3">
                                 <div>
-                                    <label class="field-label">Title</label>
+                                    <label for="rcvTitle" class="field-label">Title</label>
                                     <input type="text" id="rcvTitle" class="field-input" placeholder="As printed on the book">
                                 </div>
                                 <div class="grid grid-cols-2 gap-3">
                                     <div>
-                                        <label class="field-label">Author</label>
+                                        <label for="rcvAuthor" class="field-label">Author</label>
                                         <input type="text" id="rcvAuthor" class="field-input" placeholder="Surname, First name">
                                     </div>
                                     <div>
-                                        <label class="field-label">ISBN</label>
+                                        <label for="rcvIsbn" class="field-label">ISBN</label>
                                         <input type="text" id="rcvIsbn" class="field-input" placeholder="978-...">
                                     </div>
                                 </div>
                                 <div class="grid grid-cols-2 gap-3">
                                     <div>
-                                        <label class="field-label">Publication year</label>
+                                        <label for="rcvYear" class="field-label">Publication year</label>
                                         <input type="number" id="rcvYear" class="field-input" placeholder="2024" min="1000" max="2100">
                                     </div>
                                     <div>
-                                        <label class="field-label">Genre</label>
+                                        <label for="rcvGenre" class="field-label">Genre</label>
                                         <input type="text" id="rcvGenre" class="field-input" placeholder="Fiction, Reference, ...">
                                     </div>
                                 </div>
@@ -171,13 +172,13 @@
 
                             <div class="grid grid-cols-2 gap-3">
                                 <div>
-                                    <label class="field-label">Condition on arrival</label>
+                                    <label for="rcvCondition" class="field-label">Condition on arrival</label>
                                     <select id="rcvCondition" class="field-input">
                                         {% for value, label in condition_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
                                     </select>
                                 </div>
                                 <div>
-                                    <label class="field-label">Number of copies</label>
+                                    <label for="rcvQty" class="field-label">Number of copies</label>
                                     <input type="number" id="rcvQty" class="field-input" value="1" min="1" max="100">
                                 </div>
                             </div>
@@ -200,8 +201,8 @@
 
                         <input type="hidden" name="items" id="rcvItemsField" value="">
                         <div>
-                            <label class="field-label">Notes</label>
-                            <input type="text" name="notes" class="field-input" placeholder="Verified against the delivery note, etc.">
+                            <label for="f_notes" class="field-label">Notes</label>
+                            <input id="f_notes" type="text" name="notes" class="field-input" placeholder="Verified against the delivery note, etc.">
                         </div>
 
                         <button type="submit" class="w-full bg-violet-600/20 text-violet-400 border border-violet-600/30 px-4 py-3 rounded-lg text-sm font-semibold hover:bg-violet-600/30 transition-colors">

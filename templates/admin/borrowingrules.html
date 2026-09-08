@@ -38,6 +38,7 @@
     <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
     <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
     <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
+    <script src="{% static 'js/ayla-dialog.js' %}"></script>
 </head>
 <body class="flex h-screen overflow-hidden">
 
@@ -78,28 +79,28 @@
                         {% csrf_token %}
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
                             <div class="space-y-1.5">
-                                <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Loan Period (days)</label>
-                                <input type="number" name="loan_period_days" min="1" value="{{ rule.loan_period_days }}" required class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                                <label for="f_loan_period_days" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Loan Period (days)</label>
+                                <input id="f_loan_period_days" type="number" name="loan_period_days" min="1" value="{{ rule.loan_period_days }}" required class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
                                 <p class="text-[10px] text-slate-500">How many days a book can be borrowed before it is due.</p>
                             </div>
                             <div class="space-y-1.5">
-                                <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Borrowing Limit (books)</label>
-                                <input type="number" name="max_books_per_patron" min="1" value="{{ rule.max_books_per_patron }}" required class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                                <label for="f_max_books_per_patron" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Borrowing Limit (books)</label>
+                                <input id="f_max_books_per_patron" type="number" name="max_books_per_patron" min="1" value="{{ rule.max_books_per_patron }}" required class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
                                 <p class="text-[10px] text-slate-500">Maximum active borrows allowed per patron.</p>
                             </div>
                             <div class="space-y-1.5">
-                                <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Fine per Day (₱)</label>
-                                <input type="number" name="fine_per_day" min="0" step="0.01" value="{{ rule.fine_per_day }}" required class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                                <label for="f_fine_per_day" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Fine per Day (₱)</label>
+                                <input id="f_fine_per_day" type="number" name="fine_per_day" min="0" step="0.01" value="{{ rule.fine_per_day }}" required class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
                                 <p class="text-[10px] text-slate-500">Penalty charged for each day a book is overdue.</p>
                             </div>
                             <div class="space-y-1.5">
-                                <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Grace Period (days)</label>
-                                <input type="number" name="grace_period_days" min="0" value="{{ rule.grace_period_days }}" required class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                                <label for="f_grace_period_days" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Grace Period (days)</label>
+                                <input id="f_grace_period_days" type="number" name="grace_period_days" min="0" value="{{ rule.grace_period_days }}" required class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
                                 <p class="text-[10px] text-slate-500">Days after the due date before fines start accruing.</p>
                             </div>
                             <div class="space-y-1.5 sm:col-span-2">
-                                <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Lost Book Fee (₱)</label>
-                                <input type="number" name="lost_book_fee" min="0" step="0.01" value="{{ rule.lost_book_fee }}" required class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                                <label for="f_lost_book_fee" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Lost Book Fee (₱)</label>
+                                <input id="f_lost_book_fee" type="number" name="lost_book_fee" min="0" step="0.01" value="{{ rule.lost_book_fee }}" required class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
                                 <p class="text-[10px] text-slate-500">Flat fee applied when a borrowed book is marked Lost.</p>
                             </div>
                         </div>

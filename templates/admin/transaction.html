@@ -117,6 +117,7 @@
     <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
     <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
     <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
+    <script src="{% static 'js/ayla-dialog.js' %}"></script>
 </head>
 <body class="flex h-screen overflow-hidden">
 
@@ -396,10 +397,10 @@
                     {% csrf_token %}
                     <!-- Transaction Type Selection -->
                     <div>
-                        <label class="block text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider">Transaction Type</label>
+                        <label for="f_transaction_type" class="block text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider">Transaction Type</label>
                         <div class="flex gap-3">
                             <label class="flex items-center gap-2 cursor-pointer">
-                                <input type="radio" name="transaction_type" value="Borrow" class="w-4 h-4 text-cyan-500 bg-slate-900 border-slate-700 focus:ring-cyan-500 focus:ring-offset-slate-900">
+                                <input id="f_transaction_type" type="radio" name="transaction_type" value="Borrow" class="w-4 h-4 text-cyan-500 bg-slate-900 border-slate-700 focus:ring-cyan-500 focus:ring-offset-slate-900">
                                 <span class="text-sm text-slate-300">Borrow</span>
                             </label>
                             <label class="flex items-center gap-2 cursor-pointer">
@@ -591,7 +592,7 @@
             </div>
             <div class="px-6 py-5 space-y-4">
                 <div>
-                    <label class="text-[10px] uppercase tracking-wide text-slate-500 font-bold">New due date</label>
+                    <label for="dueDateInput" class="text-[10px] uppercase tracking-wide text-slate-500 font-bold">New due date</label>
                     <input type="date" id="dueDateInput" class="mt-1.5 w-full bg-slate-950/80 border border-slate-800 rounded-lg px-3 py-2 text-xs font-mono text-slate-300 focus:outline-none focus:border-cyan-800">
                 </div>
                 <p class="text-[11px] text-slate-500 leading-relaxed">Applies immediately — no approval step, since staff is the one setting it. Recorded the same way an approved extension request is.</p>
@@ -769,7 +770,10 @@
         async function respondExtension(extensionId, action) {
             let staffNote = '';
             if (action === 'decline') {
-                staffNote = prompt('Reason for declining (optional, shown to the patron):', '') || '';
+                staffNote = await AylaDialog.prompt(
+                    'Reason for declining — optional, and shown to the patron.', '',
+                    { title: 'Decline extension', multiline: true, confirmLabel: 'Decline' });
+                // null is Cancel; an empty string is a deliberate no-reason.
                 if (staffNote === null) return;
             }
             const row = document.getElementById('ext-row-' + extensionId);

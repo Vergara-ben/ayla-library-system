@@ -632,10 +632,26 @@ html {
 ::-webkit-scrollbar-thumb:hover { background: rgb(var(--tw-slate-600)); }
 
 /* Visible keyboard focus everywhere — important for the accessibility
-   requirement, and it costs nothing visually until a key is used. */
+   requirement, and it costs nothing visually until a key is used.
+
+   !important is doing real work here, not papering over a specificity guess.
+   The templates carry 239 Tailwind `focus:outline-none` utilities, and the
+   Tailwind CDN injects its stylesheet at runtime — after this file in document
+   order — so without it this rule loses every time. Tabbing through a form gave
+   no visible focus ring at all, which was measurably true rather than
+   theoretical: the element matched :focus-visible while computing
+   outline-style: none. */
 :focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 2px;
+    outline: 2px solid var(--accent) !important;
+    outline-offset: 2px !important;
+}
+
+/* Some controls sit flush against a container edge, where a 2px ring at a 2px
+   offset is clipped. A matching shadow keeps the indicator visible there. */
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 28%, transparent);
 }
 
 /* Modal scrims are a theme token rather than a hard-coded black */

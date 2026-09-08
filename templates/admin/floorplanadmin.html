@@ -21,11 +21,15 @@
 
     <link rel="stylesheet" href="{% static 'css/theme.css' %}">
     <style>
+        /* Rides with the pointer rather than sitting in the corner: the
+           number answers "how long is this edge", and reading it means looking
+           away from the very line being drawn if it lives somewhere else. */
         #drawReadout {
-            position: absolute; left: 14px; bottom: 14px; z-index: 500;
+            position: absolute; z-index: 500; left: 0; top: 0;
             background: var(--bg-modal, #101826); color: var(--text-primary, #e2e8f0);
             border: 1px solid var(--border-color, #334155); border-radius: 8px;
-            padding: 7px 12px; font-size: 12px; pointer-events: none;
+            padding: 5px 9px; font-size: 11.5px; line-height: 1.5;
+            pointer-events: none; white-space: nowrap;
             box-shadow: 0 4px 14px rgba(0,0,0,.35);
         }
         #drawReadout.hidden { display: none; }
@@ -159,6 +163,54 @@
         @media (max-width: 1100px) {
             .map-workspace { grid-template-columns: minmax(0, 1fr); }
         }
+        .see-btn {
+            background-color: var(--bg-card);
+            border: 1px solid var(--border-color);
+            color: var(--text-muted);
+            font-size: 10px; font-weight: 700; letter-spacing: .02em;
+            padding: 4px 8px; border-radius: 7px; transition: all .15s;
+        }
+        .see-btn:hover { color: var(--text-primary); }
+        /* On is the resting state: a plan with everything visible is the one
+           an Administrator expects to find, so hiding is what looks unusual. */
+        .see-btn.on { color: var(--text-primary); border-color: var(--accent-cyan); }
+        .see-btn:not(.on) { opacity: .45; text-decoration: line-through; }
+
+        .insp-suggest {
+            display: flex; flex-direction: column; gap: 7px;
+            border: 1px solid var(--warning);
+            border-radius: 8px; padding: 9px 10px; margin: 8px 0;
+            background-color: rgba(245, 158, 11, .08);
+            font-size: 11px; line-height: 1.5; color: var(--text-primary);
+        }
+
+        .readiness {
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            overflow: hidden;
+            background-color: var(--bg-card);
+        }
+        .readiness-head {
+            width: 100%;
+            display: flex; align-items: center; justify-content: space-between;
+            gap: 10px; padding: 8px 12px; cursor: pointer;
+            background: none; border: 0; text-align: left;
+        }
+        .readiness-head:hover { background-color: rgba(148, 163, 184, .06); }
+        .readiness-summary { font-size: 11px; font-weight: 700; letter-spacing: .02em; }
+        .readiness-chevron { font-size: 10px; color: var(--text-muted); }
+        .readiness-body { border-top: 1px solid var(--border-color); padding: 4px 0; }
+        .readiness-item { display: flex; gap: 9px; padding: 7px 12px; align-items: flex-start; }
+        .readiness-item + .readiness-item { border-top: 1px solid rgba(148, 163, 184, .10); }
+        .readiness-dot {
+            width: 7px; height: 7px; border-radius: 50%; margin-top: 5px; flex: none;
+        }
+        .readiness-dot.blocker { background-color: var(--danger); }
+        .readiness-dot.warning { background-color: var(--warning); }
+        .readiness-text { font-size: 11px; font-weight: 600; color: var(--text-primary); }
+        .readiness-detail { font-size: 10px; color: var(--text-muted); line-height: 1.5; margin-top: 2px; }
+        .readiness-counts { font-size: 10px; color: var(--text-muted); font-weight: 500; }
+
         .map-inspector {
             border: 1px solid var(--border-color);
             border-radius: 10px;
@@ -259,6 +311,7 @@
     <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
     <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
     <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
+    <script src="{% static 'js/ayla-dialog.js' %}"></script>
 </head>
 <body class="flex h-screen overflow-hidden">
 
@@ -390,7 +443,7 @@
                                         <button data-floorplan-id="{{ floorplan.floor_plan_id }}" data-notice="{{ floorplan.renovation_notice|default:"" }}" data-message="{{ floorplan.renovation_message|default:"" }}" onclick="openRenovationModalFromData(this)" class="w-7 h-7 rounded border border-slate-800 text-amber-500/70 hover:text-amber-400 hover:bg-amber-950/20 transition-colors" title="Toggle Renovation">
                                             <i class="fa-solid fa-hammer text-[10px]"></i>
                                         </button>
-                                        <form method="post" action="{% url 'delete_floorplan' %}" class="inline" onsubmit="return confirm('Are you sure you want to delete this floor plan?');">
+                                        <form method="post" action="{% url 'delete_floorplan' %}" class="inline" data-confirm="Are you sure you want to delete this floor plan?">
                                             {% csrf_token %}
                                             <input type="hidden" name="floorplan_id" value="{{ floorplan.floor_plan_id }}">
                                             <button type="submit" class="w-7 h-7 rounded border border-slate-800 text-rose-500/70 hover:text-rose-400 hover:bg-rose-950/20 transition-colors" title="Delete">
@@ -444,9 +497,22 @@
                                 class="mode-btn mode-active bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-slate-300 text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
                             <i class="fa-solid fa-border-all text-[10px]"></i> Grid
                         </button>
+                        <button id="btnUndoVertex" type="button" onclick="undoLastVertex()" title="Remove the last corner you placed (Ctrl+Z or Backspace)"
+                                class="mode-btn hidden bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-amber-400 text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
+                            <i class="fa-solid fa-rotate-left text-[10px]"></i> Undo point
+                        </button>
                         <span class="w-px h-5 bg-slate-800 mx-1"></span>
                         <button id="btnRoom" type="button" onclick="setMode('room')" class="mode-btn bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-cyan-400 text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
                             <i class="fa-solid fa-draw-polygon text-[10px]"></i> Draw Room
+                        </button>
+                        <button id="btnStairs" type="button" onclick="setMode('stairs')" class="mode-btn bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-rose-400 text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
+                            <i class="fa-solid fa-stairs text-[10px]"></i> Draw Stairs
+                        </button>
+                        <button id="btnObstacle" type="button" onclick="setMode('obstacle')" class="mode-btn bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-amber-400 text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
+                            <i class="fa-solid fa-chair text-[10px]"></i> Draw Obstacle
+                        </button>
+                        <button id="btnShelfDraw" type="button" onclick="setMode('shelfdraw')" class="mode-btn bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-purple-400 text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
+                            <i class="fa-solid fa-draw-polygon text-[10px]"></i> Draw Shelf
                         </button>
                         <button id="btnShelf" type="button" onclick="setMode('shelf')" class="mode-btn bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-purple-400 text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
                             <i class="fa-solid fa-box text-[10px]"></i> Place Shelf
@@ -454,12 +520,38 @@
                         <button id="btnBeacon" type="button" onclick="setMode('beacon')" class="mode-btn bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-blue-400 text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
                             <i class="fa-solid fa-tower-broadcast text-[10px]"></i> Place Beacon
                         </button>
+                        <span class="w-px h-5 bg-slate-800 mx-1"></span>
+                        <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500 mr-1">Show</span>
+                        <button id="see-rooms" type="button" onclick="toggleLayer('rooms')" class="see-btn">Rooms</button>
+                        <button id="see-doors" type="button" onclick="toggleLayer('doors')" class="see-btn">Doors</button>
+                        <button id="see-shelves" type="button" onclick="toggleLayer('shelves')" class="see-btn">Shelves</button>
+                        <button id="see-obstacles" type="button" onclick="toggleLayer('obstacles')" class="see-btn">Furniture</button>
+                        <button id="see-stairs" type="button" onclick="toggleLayer('stairs')" class="see-btn">Stairs</button>
+                        <button id="see-beacons" type="button" onclick="toggleLayer('beacons')" class="see-btn">Beacons</button>
+                        <button id="see-waypoints" type="button" onclick="toggleLayer('waypoints')" class="see-btn">Waypoints</button>
+                        <span class="w-px h-5 bg-slate-800 mx-1"></span>
+                        <button id="btnGenerateRoute" type="button" onclick="generateRoute()" title="Lay a walkable network from the rooms, doors and shelves"
+                                class="mode-btn bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-emerald-300 text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
+                            <i class="fa-solid fa-wand-magic-sparkles text-[10px]"></i> Generate Route
+                        </button>
                         <button id="btnWaypoint" type="button" onclick="setMode('waypoint')" class="mode-btn bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-emerald-400 text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
                             <i class="fa-solid fa-circle-nodes text-[10px]"></i> Place Waypoint
                         </button>
                     </div>
                 </div>
                 <div class="px-5 pt-4">
+                    <!-- What still stops this plan working. Everything it lists
+                         fails silently otherwise, which is why it is on screen
+                         rather than behind a menu. -->
+                    <div id="readinessPanel" class="readiness mb-3">
+                        <button type="button" class="readiness-head" onclick="toggleReadiness()">
+                            <span id="readinessSummary" class="readiness-summary">Checking this floor plan&hellip;</span>
+                            <span class="readiness-actions">
+                                <span id="readinessChevron" class="readiness-chevron">&#9662;</span>
+                            </span>
+                        </button>
+                        <div id="readinessBody" class="readiness-body hidden"></div>
+                    </div>
                     <div id="mapModeHint" class="text-[11px] text-slate-500 mb-3">
                         <strong class="text-slate-400">Draw Room</strong> traces a room shape on the blank canvas &mdash; click each corner, then click the first point again to close it.
                         <strong class="text-slate-400">Edit Rooms</strong> lets you drag a room's corners to reshape it; each room is independent, so reshaping one never disturbs the others.
@@ -507,7 +599,7 @@
                             </div>
                             <div id="inspectorBody" class="map-inspector-body">
                                 <p class="map-inspector-empty">
-                                    Click a room, shelf, waypoint, beacon or door on the map to edit it here.
+                                    Click a room, shelf, furniture, stairway, waypoint, beacon or door on the map to edit it here.
                                 </p>
                             </div>
                         </aside>
@@ -541,7 +633,7 @@
                                 <button onclick="openEditRoomModalFromData(this.closest('.flex.items-center.justify-between'))" class="text-amber-500/70 hover:text-amber-400 text-xs" title="Edit Room">
                                     <i class="fa-solid fa-pen"></i>
                                 </button>
-                                <form method="post" action="{% url 'delete_room' %}" class="inline" onsubmit="return confirm('Delete this room and all its shelves?');">
+                                <form method="post" action="{% url 'delete_room' %}" class="inline" data-confirm="Delete this room and all its shelves?">
                                     {% csrf_token %}
                                     <input type="hidden" name="room_id" value="{{ room.room_id }}">
                                     <button type="submit" class="text-rose-500/70 hover:text-rose-400 text-xs">
@@ -572,7 +664,7 @@
                                     <span class="text-[10px] text-slate-500">({{ shelf.map_x }}, {{ shelf.map_y }})</span>
                                     <span class="text-[10px] text-slate-500">Room: {{ room.name }}</span>
                                 </div>
-                                <form method="post" action="{% url 'delete_shelf' %}" class="inline" onsubmit="return confirm('Delete this shelf and all its shelf levels?');">
+                                <form method="post" action="{% url 'delete_shelf' %}" class="inline" data-confirm="Delete this shelf and all its shelf levels?">
                                     {% csrf_token %}
                                     <input type="hidden" name="shelf_id" value="{{ shelf.shelf_id }}">
                                     <button type="submit" class="text-rose-500/70 hover:text-rose-400 text-xs">
@@ -602,7 +694,7 @@
                                         <span class="text-xs font-medium text-slate-300">{{ level.category|default:level.level_number }}</span>
                                         <span class="text-[10px] text-slate-500">Level {{ level.level_number }} · Shelf: {{ shelf.name }}</span>
                                     </div>
-                                    <form method="post" action="{% url 'delete_shelf_level' %}" class="inline" onsubmit="return confirm('Delete this shelf level?');">
+                                    <form method="post" action="{% url 'delete_shelf_level' %}" class="inline" data-confirm="Delete this shelf level?">
                                         {% csrf_token %}
                                         <input type="hidden" name="shelf_level_id" value="{{ level.shelf_level_id }}">
                                         <button type="submit" class="text-rose-500/70 hover:text-rose-400 text-xs">
@@ -635,22 +727,22 @@
             <form method="post" class="space-y-4 text-xs">
                 {% csrf_token %}
                 <div class="space-y-1.5">
-                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Floor Plan Name</label>
-                    <input type="text" name="name" placeholder="e.g. Ground Floor" maxlength="255" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" required>
+                    <label for="f_name" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Floor Plan Name</label>
+                    <input id="f_name" type="text" name="name" placeholder="e.g. Ground Floor" maxlength="255" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" required>
                 </div>
                 <div class="grid grid-cols-2 gap-3">
                     <div class="space-y-1.5">
-                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Canvas Width</label>
-                        <input type="number" name="canvas_width" value="1000" min="100" max="10000" step="10" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" required>
+                        <label for="f_canvas_width" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Canvas Width</label>
+                        <input id="f_canvas_width" type="number" name="canvas_width" value="1000" min="100" max="10000" step="10" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" required>
                     </div>
                     <div class="space-y-1.5">
-                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Canvas Height</label>
-                        <input type="number" name="canvas_height" value="800" min="100" max="10000" step="10" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" required>
+                        <label for="f_canvas_height" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Canvas Height</label>
+                        <input id="f_canvas_height" type="number" name="canvas_height" value="800" min="100" max="10000" step="10" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" required>
                     </div>
                 </div>
                 <div class="space-y-1.5">
-                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Scale — canvas units per metre</label>
-                    <input type="number" name="pixels_per_meter" placeholder="e.g. 50" min="0.1" max="1000" step="0.1" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                    <label for="f_pixels_per_meter" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Scale — canvas units per metre</label>
+                    <input id="f_pixels_per_meter" type="number" name="pixels_per_meter" placeholder="e.g. 50" min="0.1" max="1000" step="0.1" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
                     <p class="text-[10px] text-slate-500 leading-relaxed">
                         Measure one wall in the library, see how many canvas units it spans, and divide.
                         <strong class="text-amber-500">BLE positioning stays off until this is set</strong> —
@@ -673,48 +765,6 @@
         </div>
     </div>
 
-    <!-- Add Room Modal -->
-    <div id="addRoomModal" class="hidden absolute inset-0 bg-black/60 z-40 flex items-center justify-center p-4 overflow-y-auto">
-        <div class="w-full max-w-lg rounded-2xl border p-6 flex flex-col gap-5 shadow-2xl relative my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color);">
-            <div class="flex items-center justify-between">
-                <h3 class="text-base font-bold text-slate-200 tracking-wide">Add Room</h3>
-                <button type="button" onclick="closeAddRoomModal()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40 transition-colors">
-                    <i class="fa-solid fa-xmark text-sm"></i>
-                </button>
-            </div>
-            <form method="post" action="{% url 'add_room' %}" class="space-y-4 text-xs">
-                {% csrf_token %}
-                <input type="hidden" name="floorplan_id" id="roomFloorplanId">
-                <div class="space-y-1.5">
-                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Room Name</label>
-                    <input type="text" name="name" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" required>
-                </div>
-                <div class="grid grid-cols-2 gap-4">
-                    <div class="space-y-1.5">
-                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Map X</label>
-                        <input type="number" step="0.1" name="map_x" value="0" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
-                    </div>
-                    <div class="space-y-1.5">
-                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Map Y</label>
-                        <input type="number" step="0.1" name="map_y" value="0" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
-                    </div>
-                </div>
-                <div class="space-y-1.5">
-                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Description</label>
-                    <textarea name="description" rows="2" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);"></textarea>
-                </div>
-                <div class="pt-4 flex items-center justify-end gap-3">
-                    <button type="button" onclick="closeAddRoomModal()" class="px-5 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:text-slate-100 hover:bg-slate-800/40 font-semibold tracking-wide transition-colors min-w-[100px]">
-                        Cancel
-                    </button>
-                    <button type="submit" class="bg-cyan-700 hover:bg-cyan-600 text-white font-bold px-5 py-2.5 rounded-lg flex items-center gap-2 tracking-wide transition-colors shadow-md">
-                        <i class="fa-solid fa-check text-xs"></i> Add Room
-                    </button>
-                </div>
-            </form>
-        </div>
-    </div>
-
     <!-- Edit Room Modal -->
     <div id="editRoomModal" class="hidden absolute inset-0 bg-black/60 z-40 flex items-center justify-center p-4 overflow-y-auto">
         <div class="w-full max-w-lg rounded-2xl border p-6 flex flex-col gap-5 shadow-2xl relative my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color);">
@@ -728,21 +778,21 @@
                 {% csrf_token %}
                 <input type="hidden" name="room_id" id="editRoomId">
                 <div class="space-y-1.5">
-                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Room Name</label>
+                    <label for="editRoomName" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Room Name</label>
                     <input type="text" name="name" id="editRoomName" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" required>
                 </div>
                 <div class="grid grid-cols-2 gap-4">
                     <div class="space-y-1.5">
-                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Map X</label>
+                        <label for="editRoomMapX" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Map X</label>
                         <input type="number" step="0.1" name="map_x" id="editRoomMapX" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
                     </div>
                     <div class="space-y-1.5">
-                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Map Y</label>
+                        <label for="editRoomMapY" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Map Y</label>
                         <input type="number" step="0.1" name="map_y" id="editRoomMapY" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
                     </div>
                 </div>
                 <div class="space-y-1.5">
-                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Description</label>
+                    <label for="editRoomDescription" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Description</label>
                     <textarea name="description" id="editRoomDescription" rows="2" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);"></textarea>
                 </div>
                 <div class="pt-4 flex items-center justify-end gap-3">
@@ -751,86 +801,6 @@
                     </button>
                     <button type="submit" class="bg-cyan-700 hover:bg-cyan-600 text-white font-bold px-5 py-2.5 rounded-lg flex items-center gap-2 tracking-wide transition-colors shadow-md">
                         <i class="fa-solid fa-check text-xs"></i> Update Room
-                    </button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <!-- Add Shelf Modal -->
-    <div id="addShelfModal" class="hidden absolute inset-0 bg-black/60 z-40 flex items-center justify-center p-4 overflow-y-auto">
-        <div class="w-full max-w-lg rounded-2xl border p-6 flex flex-col gap-5 shadow-2xl relative my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color);">
-            <div class="flex items-center justify-between">
-                <h3 class="text-base font-bold text-slate-200 tracking-wide">Add Shelf</h3>
-                <button type="button" onclick="closeAddShelfModal()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40 transition-colors">
-                    <i class="fa-solid fa-xmark text-sm"></i>
-                </button>
-            </div>
-            <form method="post" action="{% url 'add_shelf' %}" class="space-y-4 text-xs">
-                {% csrf_token %}
-                <input type="hidden" name="floorplan_id" id="shelfFloorplanId">
-                <div class="space-y-1.5">
-                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Room</label>
-                    <select name="room_id" id="shelfRoomId" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" required>
-                        <option value="">Select a Room</option>
-                    </select>
-                </div>
-                <div class="space-y-1.5">
-                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Shelf Name</label>
-                    <input type="text" name="name" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" required>
-                </div>
-                <div class="grid grid-cols-2 gap-4">
-                    <div class="space-y-1.5">
-                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Map X</label>
-                        <input type="number" step="0.1" name="map_x" value="0" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
-                    </div>
-                    <div class="space-y-1.5">
-                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Map Y</label>
-                        <input type="number" step="0.1" name="map_y" value="0" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
-                    </div>
-                </div>
-                <div class="space-y-1.5">
-                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Description</label>
-                    <textarea name="description" rows="2" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);"></textarea>
-                </div>
-                <div class="pt-4 flex items-center justify-end gap-3">
-                    <button type="button" onclick="closeAddShelfModal()" class="px-5 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:text-slate-100 hover:bg-slate-800/40 font-semibold tracking-wide transition-colors min-w-[100px]">
-                        Cancel
-                    </button>
-                    <button type="submit" class="bg-cyan-700 hover:bg-cyan-600 text-white font-bold px-5 py-2.5 rounded-lg flex items-center gap-2 tracking-wide transition-colors shadow-md">
-                        <i class="fa-solid fa-check text-xs"></i> Add Shelf
-                    </button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <!-- Add Shelf Level Modal -->
-    <div id="addShelfLevelModal" class="hidden absolute inset-0 bg-black/60 z-40 flex items-center justify-center p-4 overflow-y-auto">
-        <div class="w-full max-w-lg rounded-2xl border p-6 flex flex-col gap-5 shadow-2xl relative my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color);">
-            <div class="flex items-center justify-between">
-                <h3 class="text-base font-bold text-slate-200 tracking-wide">Add Shelf Level</h3>
-                <button type="button" onclick="closeAddShelfLevelModal()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40 transition-colors">
-                    <i class="fa-solid fa-xmark text-sm"></i>
-                </button>
-            </div>
-            <form method="post" action="{% url 'add_shelf_level' %}" class="space-y-4 text-xs">
-                {% csrf_token %}
-                <input type="hidden" name="shelf_id" id="shelfLevelShelfId">
-                <div class="space-y-1.5">
-                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Level Number</label>
-                    <input type="number" name="level_number" value="1" min="1" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" required>
-                </div>
-                <div class="space-y-1.5">
-                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Category</label>
-                    <input type="text" name="category" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" placeholder="e.g. Fiction, Economics">
-                </div>
-                <div class="pt-4 flex items-center justify-end gap-3">
-                    <button type="button" onclick="closeAddShelfLevelModal()" class="px-5 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:text-slate-100 hover:bg-slate-800/40 font-semibold tracking-wide transition-colors min-w-[100px]">
-                        Cancel
-                    </button>
-                    <button type="submit" class="bg-cyan-700 hover:bg-cyan-600 text-white font-bold px-5 py-2.5 rounded-lg flex items-center gap-2 tracking-wide transition-colors shadow-md">
-                        <i class="fa-solid fa-check text-xs"></i> Add Shelf Level
                     </button>
                 </div>
             </form>
@@ -850,11 +820,11 @@
                 {% csrf_token %}
                 <input type="hidden" name="floorplan_id" id="renovationFloorplanId">
                 <div class="space-y-1.5">
-                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Renovation Notice</label>
+                    <label for="renovationNotice" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Renovation Notice</label>
                     <input type="text" name="renovation_notice" id="renovationNotice" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" placeholder="e.g., Under Renovation">
                 </div>
                 <div class="space-y-1.5">
-                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Renovation Message</label>
+                    <label for="renovationMessage" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Renovation Message</label>
                     <textarea name="renovation_message" id="renovationMessage" rows="3" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" placeholder="Additional details about the renovation..."></textarea>
                 </div>
                 <div class="pt-4 flex items-center justify-end gap-3">
@@ -879,12 +849,14 @@
                 </button>
             </div>
             <div class="space-y-4 text-xs">
+                <p id="beaconInheritNote" class="hidden rounded-lg border border-cyan-900/50 bg-cyan-950/20 px-3 py-2 text-[10px] text-slate-400 leading-relaxed">
+                </p>
                 <div class="space-y-1.5">
-                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Beacon UUID</label>
+                    <label for="beaconUuid" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Beacon UUID</label>
                     <input type="text" id="beaconUuid" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" placeholder="e.g., 550e8400-e29b-41d4-a716-446655440000">
                 </div>
                 <div class="space-y-1.5">
-                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">How it advertises</label>
+                    <label for="beaconAdvType" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">How it advertises</label>
                     <select id="beaconAdvType" onchange="syncBeaconFields()" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
                         <option value="iBeacon">iBeacon (Apple manufacturer data)</option>
                         <option value="Eddystone">Eddystone-UID (service 0xFEAA)</option>
@@ -900,43 +872,52 @@
                 </div>
                 <div id="beaconIBeaconFields" class="grid grid-cols-2 gap-3">
                     <div class="space-y-1.5">
-                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Major</label>
+                        <label for="beaconMajor" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Major</label>
                         <input type="number" id="beaconMajor" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" placeholder="optional">
                     </div>
                     <div class="space-y-1.5">
-                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Minor</label>
+                        <label for="beaconMinor" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Minor</label>
                         <input type="number" id="beaconMinor" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" placeholder="optional">
                     </div>
                     <p class="col-span-2 text-[10px] text-slate-500">Beacons usually share one UUID and differ only by major/minor — set both to tell them apart.</p>
                 </div>
                 <div id="beaconEddystoneFields" class="hidden grid grid-cols-2 gap-3">
                     <div class="space-y-1.5">
-                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Namespace (10-byte hex)</label>
+                        <label for="beaconNamespace" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Namespace (10-byte hex)</label>
                         <input type="text" id="beaconNamespace" maxlength="20" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" placeholder="20 hex chars">
                     </div>
                     <div class="space-y-1.5">
-                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Instance (6-byte hex)</label>
+                        <label for="beaconInstance" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Instance (6-byte hex)</label>
                         <input type="text" id="beaconInstance" maxlength="12" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" placeholder="12 hex chars">
                     </div>
                 </div>
-                <div class="grid grid-cols-2 gap-3">
+                {# Every one of these has a working default, so none of them #}
+                {# has to be answered to place a beacon. Folded away so the     #}
+                {# form reads as the two things that actually differ per unit.  #}
+                <details id="beaconAdvanced" class="rounded-lg border border-slate-800" style="background-color: var(--bg-input);">
+                    <summary class="cursor-pointer select-none px-3 py-2.5 text-[11px] font-bold text-slate-300 hover:text-slate-100">
+                        <i class="fa-solid fa-sliders mr-1.5 text-slate-500"></i> Calibration &amp; mounting
+                        <span class="font-normal text-slate-500">— optional, sensible defaults applied</span>
+                    </summary>
+                    <div class="px-3 pb-3 pt-1 grid grid-cols-2 gap-3">
                     <div class="space-y-1.5">
-                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">TX power @ 1 m (dBm)</label>
+                        <label for="beaconTxPower" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">TX power @ 1 m (dBm)</label>
                         <input type="number" id="beaconTxPower" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" placeholder="-59">
                     </div>
                     <div class="space-y-1.5">
-                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Path-loss exponent</label>
-                        <input type="number" id="beaconPathLoss" step="0.1" min="1" max="6" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" placeholder="2.0">
+                        <label for="beaconPathLoss" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Path-loss exponent</label>
+                        <input type="number" id="beaconPathLoss" step="0.1" min="1" max="6" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" placeholder="2.5">
                     </div>
                     <div class="space-y-1.5 col-span-2">
-                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Mounting height (metres above floor)</label>
+                        <label for="beaconHeight" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Mounting height (metres above floor)</label>
                         <input type="number" id="beaconHeight" step="0.1" min="0" max="10" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" placeholder="e.g. 2.4">
                     </div>
-                    <p class="col-span-2 text-[10px] text-slate-500">Measure RSSI one metre from this beacon. Indoors with metal shelving the exponent is nearer 2.5–3.5 than the 2.0 of free space.</p>
+                    <p class="col-span-2 text-[10px] text-slate-500">Measure RSSI one metre from this beacon. The exponent defaults to 2.5, which suits a room with shelving; 2.0 is free space and 3.5 is a heavily obstructed aisle. Too low reads distances long, too high reads them short.</p>
                     <p class="col-span-2 text-[10px] text-slate-500">Height is how far above the floor the beacon is fixed. Ranging measures the straight line through the air, so without it a beacon overhead reads as further away than it is — worst directly beneath it. Leave blank if you have not measured it.</p>
-                </div>
+                    </div>
+                </details>
                 <div class="space-y-1.5">
-                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Label (optional)</label>
+                    <label for="beaconLabel" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Label (optional)</label>
                     <input type="text" id="beaconLabel" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" placeholder="e.g., North-East Corner">
                 </div>
                 <div class="pt-4 flex items-center justify-end gap-3">
@@ -962,11 +943,11 @@
             </div>
             <div class="space-y-4 text-xs">
                 <div class="space-y-1.5">
-                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Label (optional)</label>
+                    <label for="waypointLabel" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Label (optional)</label>
                     <input type="text" id="waypointLabel" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" placeholder="e.g., Aisle 1 Junction">
                 </div>
                 <div class="space-y-1.5">
-                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Link to Shelf (optional)</label>
+                    <label for="waypointShelf" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Link to Shelf (optional)</label>
                     <select id="waypointShelf" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
                         <option value="">No shelf</option>
                     </select>
@@ -994,22 +975,6 @@
             document.body.style.overflow = 'auto';
         }
 
-        function openAddRoomModal(floorplanId) {
-            document.getElementById('roomFloorplanId').value = floorplanId;
-            document.getElementById('addRoomModal').classList.remove('hidden');
-            document.body.style.overflow = 'hidden';
-        }
-
-        function openAddRoomModalFromData(button) {
-            const floorplanId = button.getAttribute('data-floorplan-id');
-            openAddRoomModal(floorplanId);
-        }
-
-        function closeAddRoomModal() {
-            document.getElementById('addRoomModal').classList.add('hidden');
-            document.body.style.overflow = 'auto';
-        }
-
         function openEditRoomModal(roomId, name, mapX, mapY, description) {
             document.getElementById('editRoomId').value = roomId;
             document.getElementById('editRoomName').value = name;
@@ -1034,52 +999,7 @@
             document.body.style.overflow = 'auto';
         }
 
-        function openAddShelfModal(floorplanId) {
-            document.getElementById('shelfFloorplanId').value = floorplanId;
-            
-            // Populate room dropdown based on floorplan
-            const roomSelect = document.getElementById('shelfRoomId');
-            roomSelect.innerHTML = '<option value="">Select a Room</option>';
-            
-            // Find all rooms for this floorplan from the DOM
-            const floorplanElement = document.querySelector(`[data-floorplan-id="${floorplanId}"]`).closest('.rounded-xl');
-            const roomElements = floorplanElement.querySelectorAll('[data-room-id]');
-            
-            roomElements.forEach(roomElement => {
-                const roomId = roomElement.getAttribute('data-room-id');
-                const roomName = roomElement.getAttribute('data-name');
-                const option = document.createElement('option');
-                option.value = roomId;
-                option.textContent = roomName;
-                roomSelect.appendChild(option);
-            });
-            
-            document.getElementById('addShelfModal').classList.remove('hidden');
-            document.body.style.overflow = 'hidden';
-        }
-
-        function openAddShelfModalFromData(button) {
-            const floorplanId = button.getAttribute('data-floorplan-id');
-            openAddShelfModal(floorplanId);
-        }
-
-        function closeAddShelfModal() {
-            document.getElementById('addShelfModal').classList.add('hidden');
-            document.body.style.overflow = 'auto';
-        }
-
-        function openAddShelfLevelModal(shelfId) {
-            document.getElementById('shelfLevelShelfId').value = shelfId;
-            document.getElementById('addShelfLevelModal').classList.remove('hidden');
-            document.body.style.overflow = 'hidden';
-        }
-
-        function closeAddShelfLevelModal() {
-            document.getElementById('addShelfLevelModal').classList.add('hidden');
-            document.body.style.overflow = 'auto';
-        }
-
-        function openRenovationModal(floorplanId, notice, message) {
+                function openRenovationModal(floorplanId, notice, message) {
             document.getElementById('renovationFloorplanId').value = floorplanId;
             document.getElementById('renovationNotice').value = notice || '';
             document.getElementById('renovationMessage').value = message || '';
@@ -1141,25 +1061,19 @@
         document.addEventListener('keydown', function(e) {
             if (e.key === 'Escape') {
                 closeAddModal();
-                closeAddRoomModal();
                 closeEditRoomModal();
-                closeAddShelfModal();
-                closeAddShelfLevelModal();
                 closeRenovationModal();
             }
         });
 
         // Close modals when clicking outside
-        ['addFloorPlanModal', 'addRoomModal', 'editRoomModal', 'addShelfModal', 'addShelfLevelModal', 'renovationModal'].forEach(modalId => {
+        ['addFloorPlanModal', 'editRoomModal', 'renovationModal'].forEach(modalId => {
             const el = document.getElementById(modalId);
             if (!el) return;
             el.addEventListener('click', function(e) {
                 if (e.target === this) {
                     if (modalId === 'addFloorPlanModal') closeAddModal();
-                    else if (modalId === 'addRoomModal') closeAddRoomModal();
                     else if (modalId === 'editRoomModal') closeEditRoomModal();
-                    else if (modalId === 'addShelfModal') closeAddShelfModal();
-                    else if (modalId === 'addShelfLevelModal') closeAddShelfLevelModal();
                     else if (modalId === 'renovationModal') closeRenovationModal();
                 }
             });
@@ -1175,16 +1089,106 @@
             </div>
             <div class="space-y-4 text-xs">
                 <div class="space-y-1.5">
-                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Room Name</label>
+                    <label for="placeRoomName" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Room Name</label>
                     <input type="text" id="placeRoomName" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" placeholder="e.g., Main Reading Room">
                 </div>
                 <div class="space-y-1.5">
-                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Description (optional)</label>
+                    <label for="placeRoomDesc" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Description (optional)</label>
                     <input type="text" id="placeRoomDesc" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
                 </div>
                 <div class="pt-2 flex items-center justify-end gap-3">
                     <button type="button" onclick="closeRoomPlaceModal()" class="px-5 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:text-slate-100 hover:bg-slate-800/40 font-semibold tracking-wide transition-colors min-w-[100px]">Cancel</button>
                     <button type="button" onclick="submitRoomPlace()" class="bg-cyan-700 hover:bg-cyan-600 text-white font-bold px-5 py-2.5 rounded-lg flex items-center gap-2 tracking-wide transition-colors shadow-md"><i class="fa-solid fa-check text-xs"></i> Save Room</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Place Stairway Modal (map) -->
+    <div id="placeStairsModal" class="hidden absolute inset-0 bg-black/60 z-40 flex items-center justify-center p-4 overflow-y-auto">
+        <div class="w-full max-w-md rounded-2xl border p-6 flex flex-col gap-5 shadow-2xl relative my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color);">
+            <div class="flex items-center justify-between">
+                <h3 class="text-base font-bold text-slate-200 tracking-wide">Add Stairway</h3>
+                <button type="button" onclick="closeStairsPlaceModal()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40 transition-colors"><i class="fa-solid fa-xmark text-sm"></i></button>
+            </div>
+            <div class="space-y-4 text-xs">
+                <div class="grid grid-cols-2 gap-3">
+                    <div class="space-y-1.5">
+                        <label for="placeStairsKind" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Type</label>
+                        <select id="placeStairsKind" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-rose-700 font-medium" style="background-color: var(--bg-input);">
+                            <option value="Stairs">Staircase</option>
+                            <option value="Elevator">Lift / elevator</option>
+                            <option value="Ramp">Ramp</option>
+                        </select>
+                    </div>
+                    <div class="space-y-1.5">
+                        <label for="placeStairsDir" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Direction</label>
+                        <select id="placeStairsDir" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-rose-700 font-medium" style="background-color: var(--bg-input);">
+                            <option value="both">Up and down</option>
+                            <option value="up">Goes up</option>
+                            <option value="down">Goes down</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="space-y-1.5">
+                    <label for="placeStairsTo" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Reaches which floor?</label>
+                    <select id="placeStairsTo" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-rose-700 font-medium" style="background-color: var(--bg-input);"></select>
+                    <p class="text-[10px] text-slate-500">This is what lets the map walk a patron to the right stairs when their book is on another floor.</p>
+                </div>
+                <div class="space-y-1.5">
+                    <label for="placeStairsBearing" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Which way do the steps run? (degrees)</label>
+                    <input type="number" id="placeStairsBearing" min="0" max="359" step="15" value="0" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-rose-700 font-medium" style="background-color: var(--bg-input);">
+                    <p class="text-[10px] text-slate-500">0 = climbing towards the top of the map, 90 = towards the right. The treads are drawn across this.</p>
+                </div>
+                <div class="space-y-1.5">
+                    <label for="placeStairsName" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Label (optional)</label>
+                    <input type="text" id="placeStairsName" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-rose-700 font-medium" style="background-color: var(--bg-input);" placeholder="e.g., North Stairs">
+                </div>
+                <div class="pt-2 flex items-center justify-end gap-3">
+                    <button type="button" onclick="closeStairsPlaceModal()" class="px-5 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:text-slate-100 hover:bg-slate-800/40 font-semibold tracking-wide transition-colors min-w-[100px]">Cancel</button>
+                    <button type="button" onclick="submitStairsPlace()" class="bg-rose-700 hover:bg-rose-600 text-white font-bold px-5 py-2.5 rounded-lg flex items-center gap-2 tracking-wide transition-colors shadow-md"><i class="fa-solid fa-check text-xs"></i> Save Stairway</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Place Obstacle Modal (map) -->
+    <div id="placeObstacleModal" class="hidden absolute inset-0 bg-black/60 z-40 flex items-center justify-center p-4 overflow-y-auto">
+        <div class="w-full max-w-md rounded-2xl border p-6 flex flex-col gap-5 shadow-2xl relative my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color);">
+            <div class="flex items-center justify-between">
+                <h3 class="text-base font-bold text-slate-200 tracking-wide">Add Obstacle</h3>
+                <button type="button" onclick="closeObstaclePlaceModal()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40 transition-colors"><i class="fa-solid fa-xmark text-sm"></i></button>
+            </div>
+            <div class="space-y-4 text-xs">
+                <div class="space-y-1.5">
+                    <label for="placeObstacleKind" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">What is it?</label>
+                    <select id="placeObstacleKind" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-amber-700 font-medium" style="background-color: var(--bg-input);">
+                        <option value="Table">Table</option>
+                        <option value="Counter">Counter / desk</option>
+                        <option value="Seating">Seating area</option>
+                        <option value="Pillar">Pillar / column</option>
+                        <option value="Partition">Partition / divider</option>
+                        <option value="Equipment">Equipment</option>
+                        <option value="Other">Other obstacle</option>
+                    </select>
+                </div>
+                <label class="flex items-start gap-2.5 cursor-pointer rounded-lg border border-slate-800 px-3 py-2.5" style="background-color: var(--bg-input);">
+                    <input type="checkbox" id="placeObstacleHoldsBooks" class="accent-cyan-600 w-3.5 h-3.5 mt-0.5">
+                    <span class="text-[11px] text-slate-300 leading-relaxed">
+                        <strong class="text-slate-200">Books are kept on this</strong><br>
+                        <span class="text-slate-500">Saves it as somewhere books live rather than as
+                        furniture, so patrons can be routed to it and its books can be shelved on it.
+                        Leave unticked for a plain reading table or a pillar.</span>
+                    </span>
+                </label>
+                <div class="space-y-1.5">
+                    <label for="placeObstacleName" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Label (optional)</label>
+                    <input type="text" id="placeObstacleName" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-amber-700 font-medium" style="background-color: var(--bg-input);" placeholder="e.g., Study Table 3">
+                    <p class="text-[10px] text-slate-500">Leave blank for things nobody needs to name, like a pillar.</p>
+                </div>
+                <div class="pt-2 flex items-center justify-end gap-3">
+                    <button type="button" onclick="closeObstaclePlaceModal()" class="px-5 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:text-slate-100 hover:bg-slate-800/40 font-semibold tracking-wide transition-colors min-w-[100px]">Cancel</button>
+                    <button type="button" onclick="submitObstaclePlace()" class="bg-amber-700 hover:bg-amber-600 text-white font-bold px-5 py-2.5 rounded-lg flex items-center gap-2 tracking-wide transition-colors shadow-md"><i class="fa-solid fa-check text-xs"></i> Save Obstacle</button>
                 </div>
             </div>
         </div>
@@ -1203,15 +1207,15 @@
             <p class="text-[10px] text-slate-500 -mt-3">Drag the shelf's handles for quick adjustments — use this only when you need a precise number.</p>
             <div class="grid grid-cols-2 gap-3 text-xs">
                 <div class="space-y-1.5">
-                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Width (along the run)</label>
+                    <label for="resizeShelfWidth" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Width (along the run)</label>
                     <input id="resizeShelfWidth" type="number" min="4" max="2000" step="1" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
                 </div>
                 <div class="space-y-1.5">
-                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Depth (front to back)</label>
+                    <label for="resizeShelfDepth" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Depth (front to back)</label>
                     <input id="resizeShelfDepth" type="number" min="4" max="2000" step="1" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
                 </div>
                 <div class="space-y-1.5 col-span-2">
-                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Rotation (degrees, 0–359)</label>
+                    <label for="resizeShelfRotation" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Rotation (degrees, 0–359)</label>
                     <input id="resizeShelfRotation" type="number" min="0" max="359" step="1" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
                 </div>
             </div>
@@ -1232,20 +1236,44 @@
                 <button type="button" onclick="closeShelfPlaceModal()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40 transition-colors"><i class="fa-solid fa-xmark text-sm"></i></button>
             </div>
             <div class="space-y-4 text-xs">
+                <div id="placeShelfKindRow" class="space-y-1.5 hidden">
+                    <label for="placeShelfKind" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">What is it?</label>
+                    <select id="placeShelfKind" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                        <option value="Shelf">Shelf / bookcase</option>
+                        <option value="Table">Table</option>
+                        <option value="Display">Display stand</option>
+                        <option value="Cart">Trolley / cart</option>
+                        <option value="Ledge">Window ledge</option>
+                    </select>
+                    <p class="text-[10px] text-slate-500">All of these hold books, so all of them can be navigated to.</p>
+                </div>
                 <div class="space-y-1.5">
-                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Room</label>
+                    <label for="placeShelfRoom" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Room</label>
                     <select id="placeShelfRoom" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
                         <option value="">Select a room…</option>
                     </select>
                 </div>
                 <div class="space-y-1.5">
-                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Shelf Name</label>
+                    <label for="placeShelfName" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Shelf Name</label>
                     <input type="text" id="placeShelfName" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" placeholder="e.g., Shelf A">
                 </div>
                 <div class="space-y-1.5">
-                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Description (optional)</label>
+                    <label for="placeShelfDesc" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Description (optional)</label>
                     <input type="text" id="placeShelfDesc" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
                 </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div class="space-y-1.5">
+                        <label for="placeShelfLevels" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">How many levels?</label>
+                        <input type="number" id="placeShelfLevels" min="0" max="20" value="1" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                    </div>
+                    <div class="space-y-1.5">
+                        <label for="placeShelfColumns" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">How many columns?</label>
+                        <input type="number" id="placeShelfColumns" min="1" max="12" value="1" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                    </div>
+                </div>
+                <p class="text-[10px] text-slate-500 -mt-1">Boards from the bottom up, and bays across if the
+                    unit is divided. They are made now rather than one at a time in Shelf Manager &mdash;
+                    set levels to 0 to place an empty bay and fill it in later.</p>
                 <div class="pt-2 flex items-center justify-end gap-3">
                     <button type="button" onclick="closeShelfPlaceModal()" class="px-5 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:text-slate-100 hover:bg-slate-800/40 font-semibold tracking-wide transition-colors min-w-[100px]">Cancel</button>
                     <button type="button" onclick="submitShelfPlace()" class="bg-cyan-700 hover:bg-cyan-600 text-white font-bold px-5 py-2.5 rounded-lg flex items-center gap-2 tracking-wide transition-colors shadow-md"><i class="fa-solid fa-check text-xs"></i> Save Shelf</button>
@@ -1261,16 +1289,28 @@
         const URLS = {
             mapData: "{% url 'get_map_data' %}",
             addRoom: "{% url 'add_room' %}",
+            addObstacle: "{% url 'add_obstacle' %}",
+            addStairway: "{% url 'add_stairway' %}",
+            editStairway: "{% url 'edit_stairway' %}",
+            deleteStairway: "{% url 'delete_stairway' %}",
+            editObstacle: "{% url 'edit_obstacle' %}",
+            deleteObstacle: "{% url 'delete_obstacle' %}",
             editRoom: "{% url 'edit_room' %}",
             deleteRoom: "{% url 'delete_room' %}",
             addDoor: "{% url 'add_door' %}",
             moveDoor: "{% url 'move_door' %}",
+            editDoor: "{% url 'edit_door' %}",
+            readiness: "{% url 'floor_plan_readiness' %}",
+            generateWaypoints: "{% url 'generate_waypoints' %}",
             deleteDoor: "{% url 'delete_door' %}",
             flipDoor: "{% url 'flip_door' %}",
             placeShelf: "{% url 'place_shelf' %}",
             moveShelf: "{% url 'move_shelf' %}",
             rotateShelf: "{% url 'rotate_shelf' %}",
             resizeShelf: "{% url 'resize_shelf' %}",
+            setShelfGrid: "{% url 'set_shelf_grid' %}",
+            editShelf: "{% url 'edit_shelf' %}",
+            editObstacle: "{% url 'edit_obstacle' %}",
             editShelf: "{% url 'edit_shelf' %}",
             unplaceShelf: "{% url 'unplace_shelf' %}",
             addShelf: "{% url 'add_shelf' %}",
@@ -1296,6 +1336,18 @@
         let placingShelfId = null;  // set while positioning an unplaced shelf (Fig. 48)
         let resizeShelfId = null;   // shelf open in the resize modal
         let doorRoomId = null;      // room awaiting a door click
+
+        // True while the next map click is meant to PLACE something rather than
+        // select something. Every shape on the map ends its click handler with
+        // L.DomEvent.stop(), which is right for selection -- but it also meant
+        // the placing click never reached the map at all. Clicking the wall to
+        // put a door on it just re-selected the room, and a door only appeared
+        // when the click happened to miss every shape, landing on whichever
+        // wall was nearest to that stray point: the "door goes to a random
+        // side" behaviour. Placement now takes precedence over selection.
+        function pendingPlacement() {
+            return doorRoomId !== null || placingShelfId !== null;
+        }
         let pending = null;         // {x, y} of the click being confirmed
         let selectedWaypointId = null;
         let rooms = [];             // [{room_id, name, ...}] for the shelf dropdown
@@ -1503,6 +1555,7 @@
             // gesture the map uses to deselect whatever is selected.
             layer.on('click', function (e) {
                 if (handlers.enabled && !handlers.enabled()) return;
+                if (pendingPlacement()) return;   // let the placing click through
                 L.DomEvent.stop(e);
             });
         }
@@ -1517,7 +1570,28 @@
                 },
                 body: new URLSearchParams(data).toString(),
             });
-            return res.json();
+            const payload = await res.json();
+            // Anything posted from this page changes the plan, so the readiness
+            // panel is re-checked centrally rather than at forty call sites --
+            // one of which would inevitably be forgotten and leave the panel
+            // confidently describing a plan that no longer exists.
+            if (payload && payload.success) {
+                scheduleReadiness();
+                // A newly drawn shape is added to the map by its own code path,
+                // which knows nothing about what is currently hidden.
+                if (typeof window.applyLayerVisibility === 'function') {
+                    setTimeout(window.applyLayerVisibility, 0);
+                }
+            }
+            return payload;
+        }
+
+        let readinessTimer = null;
+        function scheduleReadiness() {
+            clearTimeout(readinessTimer);
+            readinessTimer = setTimeout(function () {
+                if (typeof window.refreshReadiness === 'function') window.refreshReadiness();
+            }, 400);
         }
 
         const DEFAULT_MODE_HINT = document.getElementById('mapModeHint')
@@ -1556,23 +1630,45 @@
         window.setMode = function (m) {
             mode = (mode === m) ? null : m;
             if (mode !== 'room') { drawTargetRoomId = null; resetModeHint(); }
+            if (mode === 'stairs') {
+                const hint = document.getElementById('mapModeHint');
+                if (hint) hint.innerHTML = '<strong class="text-rose-400">Drawing a stairway</strong>'
+                        + ' — trace the footprint of the steps. You will say which floor it reaches next.';
+            }
+            if (mode === 'shelfdraw') {
+                const hint = document.getElementById('mapModeHint');
+                if (hint) hint.innerHTML = '<strong class="text-purple-400">Drawing a shelf</strong>'
+                        + ' — trace a shelf that is not a rectangle: the ones set into a corner,'
+                        + ' or a run that turns. Click each corner, then double-click to finish.';
+            }
+            if (mode === 'obstacle') {
+                const hint = document.getElementById('mapModeHint');
+                if (hint) hint.innerHTML = '<strong class="text-amber-500">Drawing an obstacle</strong>'
+                        + ' — trace a table, counter or pillar: click each corner, then double-click to finish.';
+            }
 
             // 'room' is a Geoman polygon draw, not a click-to-place mode. Both
             // listen for map clicks, so only one may ever be armed at a time.
             stopRoomEdit();
             if (lmap && lmap.pm) lmap.pm.disableDraw();
 
-            if (mode === 'room') {
+            // Both trace a polygon, so both arm Geoman the same way. Which one
+            // is armed decides only what the finished shape is saved as.
+            if (mode === 'room' || mode === 'obstacle' || mode === 'stairs' || mode === 'shelfdraw') {
                 if (!lmap || !lmap.pm) { alert('Drawing tools are still loading — try again in a moment.'); mode = null; }
                 else lmap.pm.enableDraw('Polygon', { snappable: true, snapDistance: 12, finishOn: 'dblclick' });
             }
 
-            [['btnRoom', 'room'], ['btnShelf', 'shelf'], ['btnBeacon', 'beacon'], ['btnWaypoint', 'waypoint']].forEach(function (p) {
+            [['btnRoom', 'room'], ['btnObstacle', 'obstacle'], ['btnStairs', 'stairs'],
+             ['btnShelfDraw', 'shelfdraw'], ['btnShelf', 'shelf'],
+             ['btnBeacon', 'beacon'], ['btnWaypoint', 'waypoint']].forEach(function (p) {
                 const el = document.getElementById(p[0]);
                 if (el) el.classList.toggle('mode-active', mode === p[1]);
             });
             const el = document.getElementById('mapConfig');
-            if (el) el.style.cursor = (mode && mode !== 'room') ? 'crosshair' : '';
+            if (el) el.style.cursor =
+                (mode && mode !== 'room' && mode !== 'obstacle' && mode !== 'stairs'
+                 && mode !== 'shelfdraw') ? 'crosshair' : '';
         };
 
         async function onMapClick(e) {
@@ -1587,8 +1683,13 @@
                 const r = await postData(URLS.addDoor, {
                     room_id: roomId, map_x: pos.x, map_y: pos.y,
                 });
-                if (r.success) addDoorShape(r.door);
-                else alert(r.error || 'Failed to add the door');
+                if (r.success) {
+                    // The server has already looked for a room on the far side;
+                    // the inspector offers it rather than assuming it.
+                    r.door.suggested_room_b = r.suggested_room_b || null;
+                    addDoorShape(r.door);
+                    showDoorInspector(r.door.door_id);
+                } else alert(r.error || 'Failed to add the door');
                 return;
             }
 
@@ -1631,7 +1732,7 @@
             }).addTo(lmap);
             m.bindTooltip('📡 ' + (b.label || 'Beacon') + ' — ' + b.beacon_uuid, { direction: 'top' });
             m.on('contextmenu', function (e) { L.DomEvent.stop(e); showBeaconInspector(b.beacon_id); });
-            m.on('click', function (e) { L.DomEvent.stop(e); showBeaconInspector(b.beacon_id); });
+            m.on('click', function (e) { if (pendingPlacement()) return; L.DomEvent.stop(e); showBeaconInspector(b.beacon_id); });
 
             let dragStartLatLng = null;
             m.on('dragstart', function () { dragStartLatLng = m.getLatLng(); });
@@ -1673,9 +1774,10 @@
             const body = document.getElementById('inspectorBody');
             if (body) {
                 body.innerHTML = '<p class="map-inspector-empty">'
-                    + 'Click a room, shelf, waypoint, beacon or door on the map to edit it here.</p>';
+                    + 'Click a room, shelf, furniture, stairway, waypoint, beacon or door on the map to edit it here.</p>';
             }
             if (typeof selectedShelfId !== 'undefined' && selectedShelfId !== null) deselectShelf();
+            if (typeof selectedDoorId !== 'undefined' && selectedDoorId !== null) window.deselectDoor();
         }
         window.clearInspector = clearInspector;
 
@@ -1699,6 +1801,8 @@
             else if (kind === 'waypoint') showWaypointInspector(id);
             else if (kind === 'beacon') showBeaconInspector(id);
             else if (kind === 'door') showDoorInspector(id);
+            else if (kind === 'stairs') showStairsInspector(id);
+            else if (kind === 'obstacle') showObstacleInspector(id);
         }
         window.refreshInspector = refreshInspector;
 
@@ -1726,7 +1830,7 @@
                 + (d.namespace_id ? '<p class="insp-note">NS ' + esc(d.namespace_id) + ' &middot; ID ' + esc(d.instance_id || '—') + '</p>' : '')
                 + '<p class="insp-note">Calibration: '
                     + (d.tx_power != null ? d.tx_power + ' dBm @ 1 m' : '<span style="color:var(--warning)">not measured</span>')
-                    + ' &middot; n=' + (d.path_loss_n != null ? d.path_loss_n : '2.0 (default)')
+                    + ' &middot; n=' + (d.path_loss_n != null ? d.path_loss_n : '2.5 (default)')
                     + ' &middot; height '
                     + (d.height != null ? d.height + ' m' : '<span style="color:var(--warning)">not measured</span>')
                     + '</p>'
@@ -1738,10 +1842,8 @@
         }
         window.showBeaconInspector = showBeaconInspector;
 
-        function openBeaconPopup(id) { showBeaconInspector(id); }
-
-        window.mapDeleteBeacon = async function (id) {
-            if (!confirm('Delete this beacon?')) return;
+                window.mapDeleteBeacon = async function (id) {
+            if (!await AylaDialog.confirm('Delete this beacon?')) return;
             const r = await postData(URLS.deleteBeacon, { beacon_id: id });
             if (r.success) {
                 lmap.removeLayer(beaconMarkers[id].marker);
@@ -1777,7 +1879,7 @@
                 ? '🟢 ' + (w.label || 'Waypoint') + ' → ' + w.linked_shelf_name
                 : '🟢 ' + (w.label || 'Waypoint');
             m.bindTooltip(tip, { direction: 'top' });
-            m.on('click', function (e) { L.DomEvent.stop(e); onWaypointClick(w.waypoint_id); });
+            m.on('click', function (e) { if (pendingPlacement()) return; L.DomEvent.stop(e); onWaypointClick(w.waypoint_id); });
             // Left-click on a waypoint is reserved for connecting two of them,
             // so only right-click opens it in the panel.
             m.on('contextmenu', function (e) { L.DomEvent.stop(e); showWaypointInspector(w.waypoint_id); });
@@ -1844,10 +1946,8 @@
         }
         window.showWaypointInspector = showWaypointInspector;
 
-        function openWaypointPopup(id) { showWaypointInspector(id); }
-
-        window.mapDeleteWaypoint = async function (id) {
-            if (!confirm('Delete this waypoint and all its connections?')) return;
+                window.mapDeleteWaypoint = async function (id) {
+            if (!await AylaDialog.confirm('Delete this waypoint and all its connections?')) return;
             const r = await postData(URLS.deleteWaypoint, { waypoint_id: id });
             if (r.success) {
                 Object.keys(connections).forEach(function (cid) {
@@ -1881,6 +1981,21 @@
         }
 
         // ---- modals ----
+        // The most recently added beacon on this floor. A deployment is one
+        // batch of identical hardware, so it is very nearly the settings the
+        // next one needs -- and the page reloads after every save, so this is
+        // read back off the map rather than remembered in a variable that
+        // would not survive.
+        function lastBeaconPlaced() {
+            let newest = null;
+            Object.keys(beaconMarkers).forEach(function (id) {
+                const b = beaconMarkers[id] && beaconMarkers[id].data;
+                if (!b) return;
+                if (!newest || Number(b.beacon_id) > Number(newest.beacon_id)) newest = b;
+            });
+            return newest;
+        }
+
         window.openBeaconModal = function () {
             editingBeaconId = null;
             const title = document.getElementById('beaconModalTitle');
@@ -1894,9 +2009,54 @@
                     const el = document.getElementById(id);
                     if (el) el.value = '';
                 });
+            // The fold goes back to closed, so the next beacon does not open
+            // with the last one's calibration showing.
+            const advFold = document.getElementById('beaconAdvanced');
+            if (advFold) advFold.open = false;
             const type = document.getElementById('beaconAdvType');
             if (type) { type.value = 'iBeacon'; syncBeaconFields(); }
+
+            // ── Carry the batch forward ────────────────────────────────────
+            // Everything except what physically differs between two units of
+            // the same batch: the minor tells them apart and the label says
+            // where this one is, so those two stay blank and everything else
+            // is inherited. Fifteen beacons then cost one number each.
+            const prev = lastBeaconPlaced();
+            const note = document.getElementById('beaconInheritNote');
+            if (prev) {
+                const carry = {
+                    beaconUuid: prev.beacon_uuid,
+                    beaconMajor: prev.major,
+                    beaconNamespace: prev.namespace_id,
+                    beaconInstance: prev.instance_id,
+                    beaconTxPower: prev.tx_power,
+                    beaconPathLoss: prev.path_loss_n,
+                    beaconHeight: prev.height,
+                };
+                Object.keys(carry).forEach(function (id) {
+                    const el = document.getElementById(id);
+                    const v = carry[id];
+                    if (el && v !== null && v !== undefined && String(v).length) el.value = v;
+                });
+                if (prev.advertisement_type && type) {
+                    type.value = prev.advertisement_type;
+                    syncBeaconFields();
+                }
+                if (note) {
+                    note.innerHTML = 'Carried over from <strong class="text-slate-300">'
+                        + esc(prev.label || ('beacon #' + prev.beacon_id)) + '</strong>'
+                        + ' — change anything that differs. Only the '
+                        + '<strong class="text-cyan-400">minor</strong> and the label are blank.';
+                    note.classList.remove('hidden');
+                }
+            } else if (note) {
+                note.classList.add('hidden');
+            }
+
             document.getElementById('beaconModal').classList.remove('hidden');
+            // Straight to the one field that always has to be typed.
+            const minor = document.getElementById('beaconMinor');
+            if (minor) setTimeout(function () { minor.focus(); }, 50);
         };
         window.closeBeaconModal = function () {
             editingBeaconId = null;
@@ -2007,12 +2167,211 @@
         let roomEditingId = null;   // room currently open for reshaping
 
         // Stored geometry is [x, y] in canvas space; Leaflet wants [lat, lng].
+        const obstacleShapes = {};
+        const obstacleData = {};    // obstacle_id -> its payload, for the panel
+        const stairwayShapes = {};
+        let otherFloors = [];
+
         function geometryToLatLngs(points) {
             return points.map(function (p) { return toLatLng(p[0], p[1]); });
         }
         function latLngsToGeometry(latlngs) {
             const ring = Array.isArray(latlngs[0]) ? latlngs[0] : latlngs;
             return ring.map(function (ll) { return [ll.lng, imgH - ll.lat]; });
+        }
+
+        // Obstacles are drawn plainer than rooms on purpose: they are context,
+        // not something to click into. Amber separates them at a glance from the
+        // rooms (accent) and the shelves (purple), and a pillar is filled more
+        // solidly than a table because you cannot walk through either but one
+        // of them is structural.
+        const OBSTACLE_STYLE = {
+            Pillar:    { fill: 0.55, dash: null },
+            Partition: { fill: 0.40, dash: '6,4' },
+            Counter:   { fill: 0.30, dash: null },
+            Seating:   { fill: 0.18, dash: '4,4' },
+        };
+
+        // The conventional stair symbol: footprint, treads across the
+        // direction of travel, and an arrow at the top end. Drawn from the
+        // treads the server computed, so the editor, both indoor maps and the
+        // printed sheet all show the same steps in the same places.
+        // Every layer this draws is kept, not just the outline. Editing a
+        // stairway changes its treads and its arrow as well as its shape, so
+        // redrawing means removing all of them -- and the treads and the arrow
+        // were previously added to the map and then forgotten, with no handle
+        // to remove them by.
+        function addStairwayShape(st) {
+            if (!st.geometry || st.geometry.length < 3) return;
+            const rose = '#be123c';
+            const layers = [];
+            const poly = L.polygon(geometryToLatLngs(st.geometry), {
+                color: rose, weight: 1.8, fillColor: rose,
+                fillOpacity: st.is_active === false ? 0.05 : 0.14,
+                opacity: st.is_active === false ? 0.35 : 1,
+            }).addTo(lmap);
+            layers.push(poly);
+
+            const tip = st.label + (st.destination ? ' → ' + st.destination
+                                                   : ' (not linked to a floor yet)');
+            poly.bindTooltip(tip, { direction: 'top', sticky: true });
+            poly.on('contextmenu', function (e) {
+                L.DomEvent.stop(e);
+                removeStairway(st.stairway_id, st.label);
+            });
+            // Left-click opens it in the properties panel, like every other
+            // shape on this map. Without this a stairway could be drawn and
+            // deleted but never configured: its type, direction, the floor it
+            // reaches and its bearing were all fixed at the moment it was
+            // drawn, with no way back to any of them.
+            poly.on('click', function (e) {
+                if (mode || pendingPlacement()) return;
+                L.DomEvent.stop(e);
+                showStairsInspector(st.stairway_id);
+            });
+
+            (st.treads || []).forEach(function (t) {
+                layers.push(L.polyline([toLatLng(t[0][0], t[0][1]), toLatLng(t[1][0], t[1][1])],
+                           { color: rose, weight: 1, opacity: 0.75, interactive: false })
+                 .addTo(lmap));
+            });
+
+            // Which way is up, drawn along the bearing through the middle.
+            if (st.direction !== 'both') {
+                const rad = (st.bearing || 0) * Math.PI / 180;
+                const ux = Math.sin(rad), uy = -Math.cos(rad);
+                const sign = (st.direction === 'down') ? -1 : 1;
+                const reach = 22;
+                const x1 = st.map_x - ux * reach * sign, y1 = st.map_y - uy * reach * sign;
+                const x2 = st.map_x + ux * reach * sign, y2 = st.map_y + uy * reach * sign;
+                layers.push(L.polyline([toLatLng(x1, y1), toLatLng(x2, y2)],
+                           { color: rose, weight: 2, opacity: 0.95, interactive: false }).addTo(lmap));
+                // Arrowhead as two short strokes back from the tip.
+                [1, -1].forEach(function (side) {
+                    const a = rad + side * 2.6;
+                    layers.push(L.polyline([toLatLng(x2, y2),
+                                toLatLng(x2 - Math.sin(a) * 8, y2 + Math.cos(a) * 8)],
+                               { color: rose, weight: 2, opacity: 0.95, interactive: false }).addTo(lmap));
+                });
+            }
+            stairwayShapes[st.stairway_id] = { layers: layers, poly: poly, data: st };
+        }
+
+        function removeStairwayShape(id) {
+            const entry = stairwayShapes[id];
+            if (!entry) return;
+            entry.layers.forEach(function (l) { lmap.removeLayer(l); });
+            delete stairwayShapes[id];
+        }
+
+        // A <select> built from a list of [value, label] pairs, with the
+        // current value preselected.
+        function selectField(label, id, options, current) {
+            return '<div class="insp-field" style="margin-bottom:6px">'
+                + '<label for="' + id + '">' + label + '</label>'
+                + '<select id="' + id + '">'
+                + options.map(function (o) {
+                    return '<option value="' + esc(o[0]) + '"'
+                        + (String(o[0]) === String(current == null ? '' : current) ? ' selected' : '')
+                        + '>' + esc(o[1]) + '</option>';
+                  }).join('')
+                + '</select></div>';
+        }
+
+        function showStairsInspector(id) {
+            const entry = stairwayShapes[id]; if (!entry) return;
+            const st = entry.data;
+            mapSelection = { kind: 'stairs', id: id };
+
+            const floors = [['', 'Not linked yet']].concat((otherFloors || []).map(function (f) {
+                return [f.floor_plan_id, f.label + (f.name && f.name !== f.label ? ' — ' + f.name : '')];
+            }));
+
+            renderInspector('stairs', 'Stairway', id, esc(st.label || 'Stairway'),
+                selectField('Type', 'inspStairKind',
+                            [['Stairs', 'Staircase'], ['Elevator', 'Lift / elevator'], ['Ramp', 'Ramp']],
+                            st.kind)
+                + selectField('Direction', 'inspStairDir',
+                              [['up', 'Goes up'], ['down', 'Goes down'], ['both', 'Up and down']],
+                              st.direction)
+                + selectField('Reaches which floor', 'inspStairTo', floors, st.connects_to || '')
+                + '<div class="insp-field" style="margin-bottom:6px">'
+                + '<label for="inspStairBearing">Which way the steps run (degrees)</label>'
+                + '<input id="inspStairBearing" type="number" min="0" max="359" step="15" value="'
+                + Math.round(st.bearing || 0) + '"></div>'
+                + '<div class="insp-field" style="margin-bottom:6px">'
+                + '<label for="inspStairName">Label</label>'
+                + '<input id="inspStairName" type="text" value="' + esc(st.name || '') + '" placeholder="e.g. North Stairs"></div>'
+                + '<div class="map-actions">'
+                + '<button class="map-action-btn" onclick="applyStairsInspector(' + id + ')"><i class="fa-solid fa-check"></i> Apply changes</button>'
+                + '<button class="map-action-btn danger" onclick="removeStairwayById(' + id + ')"><i class="fa-solid fa-trash"></i> Delete stairway</button>'
+                + '</div>'
+                + '<p class="insp-note">'
+                + (st.destination
+                    ? 'Patrons routing to a book on ' + esc(st.destination) + ' are sent through here.'
+                    : '<span style="color:var(--warning)">Not linked to a floor yet</span> — until it is, cross-floor navigation cannot use it.')
+                + '</p>'
+                + '<p class="insp-note">The footprint alone cannot say which end is the bottom, so the '
+                + 'bearing is what the treads and the direction arrow are drawn from.</p>');
+        }
+        window.showStairsInspector = showStairsInspector;
+
+        // Looking the label up here rather than baking it into the onclick
+        // attribute: a stairway named with an apostrophe would otherwise end
+        // the JavaScript string early and break the whole panel.
+        window.removeStairwayById = function (id) {
+            const entry = stairwayShapes[id];
+            removeStairway(id, (entry && entry.data && entry.data.label) || 'this stairway');
+        };
+
+        window.applyStairsInspector = async function (id) {
+            const entry = stairwayShapes[id]; if (!entry) return;
+            const r = await postData(URLS.editStairway, {
+                stairway_id: id,
+                kind: document.getElementById('inspStairKind').value,
+                direction: document.getElementById('inspStairDir').value,
+                connects_to: document.getElementById('inspStairTo').value,
+                bearing: document.getElementById('inspStairBearing').value || 0,
+                name: document.getElementById('inspStairName').value.trim(),
+            });
+            if (!r.success) { alert(r.error || 'Failed to save the stairway'); return; }
+            // The server recomputes the treads from the new bearing and kind,
+            // so the shape is redrawn from what came back rather than patched.
+            removeStairwayShape(id);
+            addStairwayShape(r.stairway);
+            showStairsInspector(id);
+            inspectorSaved('Stairway saved.');
+        };
+
+
+        function addObstacleShape(o) {
+            if (!o.geometry || o.geometry.length < 3) return;
+            const style = OBSTACLE_STYLE[o.kind] || { fill: 0.25, dash: null };
+            const amber = '#b45309';
+            const poly = L.polygon(geometryToLatLngs(o.geometry), {
+                color: amber,
+                weight: 1.5,
+                dashArray: style.dash,
+                fillColor: amber,
+                fillOpacity: o.is_active === false ? 0.06 : style.fill,
+                opacity: o.is_active === false ? 0.35 : 1,
+            }).bindTooltip(o.label + (o.is_active === false ? ' (hidden from patrons)' : ''),
+                           { direction: 'top', sticky: true }).addTo(lmap);
+
+            poly.on('contextmenu', function (e) {
+                L.DomEvent.stop(e);
+                removeObstacle(o.obstacle_id, o.label);
+            });
+            // Furniture could be drawn and deleted and nothing else: no click
+            // handler, no panel, no way to rename it or fix a corner short of
+            // deleting it and drawing it again.
+            poly.on('click', function (e) {
+                if (mode || pendingPlacement()) return;
+                L.DomEvent.stop(e);
+                showObstacleInspector(o.obstacle_id);
+            });
+            obstacleShapes[o.obstacle_id] = poly;
+            obstacleData[o.obstacle_id] = o;
         }
 
         function addRoomShape(r) {
@@ -2029,7 +2388,7 @@
             // Persist a reshape only after the Administrator confirms it.
             poly.on('pm:update', function (e) { confirmRoomReshape(e.target); });
             poly.on('contextmenu', function (e) { L.DomEvent.stop(e); showRoomInspector(r.room_id); });
-            poly.on('click', function (e) { if (mode) return; L.DomEvent.stop(e); showRoomInspector(r.room_id); });
+            poly.on('click', function (e) { if (mode || pendingPlacement()) return; L.DomEvent.stop(e); showRoomInspector(r.room_id); });
             roomShapes[r.room_id] = poly;
             // The square-corner marks, so which corners are already right is
             // visible on the plan rather than something to measure by eye.
@@ -2085,11 +2444,10 @@
         }
         window.showRoomInspector = showRoomInspector;
 
-        function openRoomPopup(id) { showRoomInspector(id); }
-
-        window.renameRoom = async function (id) {
+                window.renameRoom = async function (id) {
             const poly = roomShapes[id]; if (!poly) return;
-            const name = prompt('Room name:', poly._aylaRoomName || '');
+            const name = await AylaDialog.prompt('Room name', poly._aylaRoomName || '',
+                                                { title: 'Rename room' });
             if (name === null) return;                       // cancelled
             if (!name.trim()) { alert('Room name cannot be empty'); return; }
             const r = await postData(URLS.editRoom, { room_id: id, name: name.trim() });
@@ -2099,7 +2457,7 @@
 
         window.deleteRoomShape = async function (id) {
             const poly = roomShapes[id]; if (!poly) return;
-            if (!confirm('Delete "' + (poly._aylaRoomName || 'this room') + '"?\n\nIts shelves and their book placements are removed with it. This cannot be undone.')) return;
+            if (!await AylaDialog.confirm('Delete "' + (poly._aylaRoomName || 'this room') + '"?\n\nIts shelves and their book placements are removed with it. This cannot be undone.')) return;
             const r = await postData(URLS.deleteRoom, { room_id: id });
             if (r.success) window.location.reload();
             else alert(r.error || 'Failed to delete the room');
@@ -2143,10 +2501,130 @@
         }
         window.stopRoomEdit = stopRoomEdit;
 
+        // ---- Corner dragging ------------------------------------------------
+        // Geoman's vertex editing, the same tool the rooms already use. One
+        // shape at a time, chosen deliberately, so a stray drag cannot pull a
+        // corner off something the Administrator was not editing.
+        let cornerEdit = null;   // { kind: 'shelf'|'obstacle', id, layer, original }
+
+        function startCornerEdit(kind, id, layer, label) {
+            stopCornerEdit();
+            clearMode();
+            cornerEdit = { kind: kind, id: id, layer: layer,
+                           original: layer.getLatLngs() };
+            layer.pm.enable({ allowSelfIntersection: false });
+            const hint = document.getElementById('mapModeHint');
+            if (hint) {
+                hint.innerHTML = '<strong class="text-cyan-400">Reshaping "' + esc(label) + '"</strong>'
+                    + ' \u2014 drag its corners; each one saves as you drop it. '
+                    + 'Click "Done" in the panel to stop.';
+            }
+            refreshInspector();
+        }
+
+        window.stopCornerEdit = function () {
+            if (!cornerEdit) return;
+            if (cornerEdit.layer && cornerEdit.layer.pm) cornerEdit.layer.pm.disable();
+            const was = cornerEdit;
+            cornerEdit = null;
+            resetModeHint();
+            if (was.kind === 'shelf') showShelfInspector(was.id);
+            else showObstacleInspector(was.id);
+        };
+        function stopCornerEdit() { if (cornerEdit) window.stopCornerEdit(); }
+
+        function isCornerEditing(kind, id) {
+            return !!(cornerEdit && cornerEdit.kind === kind
+                      && String(cornerEdit.id) === String(id));
+        }
+
+        // Saved on drop rather than on a Save button: a shape half-dragged and
+        // then navigated away from would otherwise keep its old outline while
+        // showing the new one.
+        async function saveCorners(kind, id, layer) {
+            const geometry = latLngsToGeometry(layer.getLatLngs());
+            const url = (kind === 'shelf') ? URLS.editShelf : URLS.editObstacle;
+            const key = (kind === 'shelf') ? 'shelf_id' : 'obstacle_id';
+            const body = { geometry: JSON.stringify(geometry) };
+            body[key] = id;
+            const r = await postData(url, body);
+            if (!r.success) {
+                alert(r.error || 'Could not save the new shape');
+                if (cornerEdit && cornerEdit.original) layer.setLatLngs(cornerEdit.original);
+                return;
+            }
+            if (kind === 'shelf' && shelfShapes[id]) {
+                const data = shelfShapes[id].data;
+                data.geometry = r.geometry || geometry;
+                if (r.map_x != null) { data.map_x = r.map_x; data.map_y = r.map_y; }
+                shelfShapes[id].poly.setTooltipContent(shelfTooltip(data));
+            } else if (kind === 'obstacle' && obstacleData[id]) {
+                obstacleData[id].geometry = geometry;
+            }
+            if (cornerEdit) cornerEdit.original = layer.getLatLngs();
+            inspectorSaved('Shape saved.');
+        }
+
+        // ---- Furniture panel -------------------------------------------------
+        function showObstacleInspector(id) {
+            const poly = obstacleShapes[id];
+            const o = obstacleData[id];
+            if (!poly || !o) return;
+            mapSelection = { kind: 'obstacle', id: id };
+            const editing = isCornerEditing('obstacle', id);
+            renderInspector('obstacle', 'Furniture', id, esc(o.label || 'Furniture'),
+                '<p class="insp-note">' + esc(o.kind || 'Object')
+                + ((o.geometry && o.geometry.length) ? ' \u00b7 ' + o.geometry.length + ' corners' : '')
+                + (o.is_active === false ? ' \u00b7 hidden from patrons' : '') + '</p>'
+                + '<div class="map-actions">'
+                + (editing
+                    ? '<button class="map-action-btn" onclick="stopCornerEdit()"><i class="fa-solid fa-check"></i> Done reshaping</button>'
+                    : '<button class="map-action-btn" onclick="reshapeObstacle(' + id + ')"><i class="fa-solid fa-draw-polygon"></i> Drag corners</button>')
+                + '<button class="map-action-btn danger" onclick="removeObstacleById(' + id + ')"><i class="fa-solid fa-trash"></i> Delete</button>'
+                + '</div>'
+                + '<p class="insp-note">Furniture is drawn on the map and routed around, but nothing '
+                + 'is catalogued on it. A table that holds books is a shelf instead.</p>');
+        }
+        window.showObstacleInspector = showObstacleInspector;
+
+        window.removeObstacleById = function (id) {
+            const o = obstacleData[id];
+            removeObstacle(id, (o && o.label) || 'this object');
+        };
+
+        window.reshapeObstacle = function (id) {
+            const poly = obstacleShapes[id];
+            const o = obstacleData[id];
+            if (!poly || !o) return;
+            poly.on('pm:update', function () { saveCorners('obstacle', id, poly); });
+            startCornerEdit('obstacle', id, poly, o.label || 'furniture');
+        };
+
+        window.reshapeShelf = function (id) {
+            const entry = shelfShapes[id]; if (!entry) return;
+            deselectShelf();
+            entry.poly.on('pm:update', function () { saveCorners('shelf', id, entry.poly); });
+            startCornerEdit('shelf', id, entry.poly, entry.data.name || 'shelf');
+        };
+
         // ---- Doors ---------------------------------------------------------
         // Drawn as a floor-plan symbol: the opening across the wall plus a
         // quarter-circle swing arc, so the way into a room is obvious.
         const doorShapes = {};       // door_id -> { layers: [], data }
+
+        // Mirrors the server's bounds in library/views.py. A door narrower than
+        // DOOR_MIN_W is not a doorway; one wider than DOOR_MAX_W is a missing
+        // wall. Clamping here as well means a drag stops at the limit rather
+        // than travelling on and being rejected on release.
+        const DOOR_MIN_W = 6, DOOR_MAX_W = 400, DOOR_DEFAULT_W = 28;
+        let selectedDoorId = null;
+        let doorHandles = [];
+
+        function doorTooltip(d) {
+            const name = d.label || 'Door';
+            if (d.room_b_name) return '\ud83d\udeaa ' + name + ' \u2014 ' + d.room_name + ' \u2194 ' + d.room_b_name;
+            return '\ud83d\udeaa ' + name + (d.room_name ? ' \u2014 ' + d.room_name : '');
+        }
 
         function doorGeometry(d) {
             const rad = (d.rotation || 0) * Math.PI / 180;
@@ -2188,14 +2666,14 @@
             }).addTo(lmap);
             const jamb = L.polyline([toLatLng(g.a[0], g.a[1]), toLatLng(g.b[0], g.b[1])], {
                 color: accent, weight: 3, opacity: 1,
-            }).bindTooltip('🚪 ' + (d.label || 'Door'), { direction: 'top', sticky: true }).addTo(lmap);
+            }).bindTooltip(doorTooltip(d), { direction: 'top', sticky: true }).addTo(lmap);
             const sweep = L.polyline(g.arc.map(function (p) { return toLatLng(p[0], p[1]); }), {
                 color: accent, weight: 1, opacity: 0.7, dashArray: '3,3',
             }).addTo(lmap);
 
             [jamb, sweep].forEach(function (layer) {
                 layer.on('contextmenu', function (e) { L.DomEvent.stop(e); showDoorInspector(d.door_id); });
-                layer.on('click', function (e) { if (mode) return; L.DomEvent.stop(e); showDoorInspector(d.door_id); });
+                layer.on('click', function (e) { if (mode || pendingPlacement()) return; L.DomEvent.stop(e); showDoorInspector(d.door_id); });
             });
             doorShapes[d.door_id] = { layers: [opening, jamb, sweep], data: d };
 
@@ -2225,6 +2703,7 @@
 
         function removeDoorShape(id) {
             const entry = doorShapes[id]; if (!entry) return;
+            if (selectedDoorId === id) window.deselectDoor(true);
             entry.layers.forEach(function (l) { lmap.removeLayer(l); });
             delete doorShapes[id];
         }
@@ -2237,26 +2716,201 @@
             });
         }
 
+        // Which rooms this doorway joins, and the offer to link the far one.
+        //
+        // A door is a hole in a wall, and a wall usually has a room on each
+        // side. Recording only one meant a shared doorway had to be drawn
+        // twice, and left nothing able to say which rooms connect -- which is
+        // the question a route is made of.
+        function roomOptionsFor(door) {
+            const opts = [['', 'Nothing (exterior door)']];
+            Object.keys(roomShapes).forEach(function (rid) {
+                if (String(rid) === String(door.room_id)) return;   // not itself
+                opts.push([rid, roomShapes[rid]._aylaRoomName || ('Room ' + rid)]);
+            });
+            return opts;
+        }
+
+        function doorRoomsBlock(d) {
+            const joins = d.room_b
+                ? '<p class="insp-note">Joins <strong>' + esc(d.room_name || 'this room')
+                  + '</strong> and <strong>' + esc(d.room_b_name) + '</strong>.</p>'
+                : '<p class="insp-note">Opens from <strong>' + esc(d.room_name || 'this room')
+                  + '</strong> only \u2014 nothing recorded on the far side.</p>';
+
+            // Shown only while the far side is still unset: once it is linked,
+            // the select below is the way to change it.
+            const suggestion = (!d.room_b && d.suggested_room_b)
+                ? '<div class="insp-suggest">'
+                  + '<span><strong>' + esc(d.suggested_room_b.name) + '</strong>\'s wall runs '
+                  + 'through this doorway. Link them so a route may pass between the two?</span>'
+                  + '<button class="map-action-btn" onclick="linkDoorRoom(' + d.door_id + ', '
+                  + d.suggested_room_b.room_id + ')"><i class="fa-solid fa-link"></i> Link</button>'
+                  + '</div>'
+                : '';
+
+            return joins + suggestion
+                + selectField('Room on the far side', 'inspDoorRoomB',
+                              roomOptionsFor(d), d.room_b || '');
+        }
+
+        // Applying the suggestion, and applying the dropdown, are the same act.
+        window.linkDoorRoom = async function (doorId, roomId) {
+            const entry = doorShapes[doorId]; if (!entry) return;
+            const r = await postData(URLS.editDoor, { door_id: doorId, room_b: roomId || '' });
+            if (!r.success) { alert(r.error || 'Failed to link the rooms'); return; }
+            const suggested = entry.data.suggested_room_b;
+            entry.data = r.door;
+            entry.data.suggested_room_b = suggested;
+            redrawDoorShape(entry);
+            showDoorInspector(doorId);
+            inspectorSaved(r.door.room_b ? 'Rooms linked.' : 'Link removed.');
+        };
+
+        // ---- Door resizing -------------------------------------------------
+        // A door is a segment lying along its wall, so the only free dimension
+        // is its length. Dragging one end holds the OTHER end still, which is
+        // what "make this doorway wider" means when standing in the building:
+        // the far jamb does not move, so the centre shifts by half.
+        function doorEnds(d) {
+            const rad = (d.rotation || 0) * Math.PI / 180;
+            const ux = Math.cos(rad), uy = Math.sin(rad);
+            const half = (d.width || DOOR_DEFAULT_W) / 2;
+            return {
+                ux: ux, uy: uy,
+                a: { x: d.x - ux * half, y: d.y - uy * half },
+                b: { x: d.x + ux * half, y: d.y + uy * half },
+            };
+        }
+
+        function positionDoorHandles(id) {
+            const entry = doorShapes[id]; if (!entry) return;
+            const ends = doorEnds(entry.data);
+            doorHandles.forEach(function (h) {
+                const p = (h.end === 'a') ? ends.a : ends.b;
+                h.marker.setLatLng(toLatLng(p.x, p.y));
+            });
+        }
+
+        // `quiet` is for the case where the door is on its way out: re-rendering
+        // its panel there would redraw the details of something about to stop
+        // existing.
+        window.deselectDoor = function (quiet) {
+            doorHandles.forEach(function (h) { lmap.removeLayer(h.marker); });
+            doorHandles = [];
+            const was = selectedDoorId;
+            selectedDoorId = null;
+            if (!quiet && was !== null && doorShapes[was]) showDoorInspector(was);
+        };
+
+        window.selectDoor = function (id) {
+            const entry = doorShapes[id]; if (!entry) return;
+            doorHandles.forEach(function (h) { lmap.removeLayer(h.marker); });
+            doorHandles = [];
+            selectedDoorId = id;
+
+            ['a', 'b'].forEach(function (end) {
+                const marker = L.marker([0, 0], {
+                    draggable: true, zIndexOffset: 1000,
+                    icon: L.divIcon({ className: 'geo-handle corner', iconSize: [12, 12], iconAnchor: [6, 6] }),
+                }).addTo(lmap);
+
+                let fixed = null, ux = 0, uy = 0, sign = 1;
+
+                marker.on('dragstart', function () {
+                    const d = doorShapes[id].data;
+                    const ends = doorEnds(d);
+                    ux = ends.ux; uy = ends.uy;
+                    // The end NOT being dragged is the anchor.
+                    fixed = (end === 'a') ? ends.b : ends.a;
+                    sign = (end === 'a') ? -1 : 1;
+                });
+
+                marker.on('drag', function (e) {
+                    const d = doorShapes[id].data;
+                    const p = canvasXY(e.target.getLatLng());
+                    // Only movement along the wall counts; across it is ignored,
+                    // because a door cannot leave the wall it is cut into.
+                    const t = (p.x - fixed.x) * ux + (p.y - fixed.y) * uy;
+                    let mag = t * sign;
+                    if (!(mag > 0)) mag = DOOR_MIN_W;
+                    mag = Math.max(DOOR_MIN_W, Math.min(DOOR_MAX_W, mag));
+                    d.width = mag;
+                    d.x = fixed.x + ux * sign * mag / 2;
+                    d.y = fixed.y + uy * sign * mag / 2;
+                    redrawDoorShape(doorShapes[id]);
+                    positionDoorHandles(id);
+                });
+
+                marker.on('dragend', async function () {
+                    const d = doorShapes[id].data;
+                    const r = await postData(URLS.editDoor, {
+                        door_id: id, width: Math.round(d.width),
+                        map_x: d.x, map_y: d.y,
+                    });
+                    if (r.success) {
+                        doorShapes[id].data = r.door;
+                        redrawDoorShape(doorShapes[id]);
+                        positionDoorHandles(id);
+                        showDoorInspector(id);
+                        inspectorSaved('Door resized.');
+                    } else {
+                        alert(r.error || 'Failed to resize the door');
+                    }
+                });
+
+                doorHandles.push({ end: end, marker: marker });
+            });
+
+            positionDoorHandles(id);
+            showDoorInspector(id);
+        };
+
+        window.applyDoorInspector = async function (id) {
+            const entry = doorShapes[id]; if (!entry) return;
+            const raw = parseFloat(document.getElementById('inspDoorW').value);
+            if (!isFinite(raw) || raw < DOOR_MIN_W || raw > DOOR_MAX_W) {
+                alert('Door width must be between ' + DOOR_MIN_W + ' and ' + DOOR_MAX_W + '.');
+                return;
+            }
+            const sel = document.getElementById('inspDoorRoomB');
+            const payload = { door_id: id, width: Math.round(raw) };
+            if (sel) payload.room_b = sel.value || '';
+            const r = await postData(URLS.editDoor, payload);
+            if (!r.success) { alert(r.error || 'Failed to save the door'); return; }
+            const suggested = entry.data.suggested_room_b;
+            entry.data = r.door;
+            entry.data.suggested_room_b = suggested;
+            redrawDoorShape(entry);
+            if (selectedDoorId === id) positionDoorHandles(id);
+            showDoorInspector(id);
+            inspectorSaved('Door resized.');
+        };
+
         function showDoorInspector(id) {
             mapSelection = { kind: 'door', id: id };
             const entry = doorShapes[id]; if (!entry) return;
             const d = entry.data;
             renderInspector('door', 'Door', id, esc(d.label || 'Door'),
                 '<div class="insp-grid">'
-                + field('Width', 'inspDoorW', Math.round(d.width || 28), { readonly: true })
+                + field('Width', 'inspDoorW', Math.round(d.width || DOOR_DEFAULT_W))
                 + field('Angle', 'inspDoorRot', Math.round(d.rotation || 0), { readonly: true })
                 + '</div>'
+                + doorRoomsBlock(d)
                 + '<div class="map-actions">'
+                + '<button class="map-action-btn" onclick="applyDoorInspector(' + id + ')"><i class="fa-solid fa-check"></i> Apply changes</button>'
+                + (selectedDoorId === id
+                    ? '<button class="map-action-btn" onclick="deselectDoor()"><i class="fa-solid fa-xmark"></i> Hide end grips</button>'
+                    : '<button class="map-action-btn" onclick="selectDoor(' + id + ')"><i class="fa-solid fa-left-right"></i> Show end grips</button>')
                 + '<button class="map-action-btn" onclick="flipDoor(' + id + ')"><i class="fa-solid fa-right-left"></i> Flip swing</button>'
                 + '<button class="map-action-btn danger" onclick="removeDoor(' + id + ')"><i class="fa-solid fa-trash"></i> Delete door</button>'
                 + '</div>'
-                + '<p class="insp-note">Drag the door along the wall to move it; the angle follows the wall automatically.</p>');
+                + '<p class="insp-note">Drag the door along the wall to move it, or drag either end grip to '
+                + 'change how wide the opening is. The angle always follows the wall.</p>');
         }
         window.showDoorInspector = showDoorInspector;
 
-        function openDoorPopup(id) { showDoorInspector(id); }
-
-        window.flipDoor = async function (id) {
+                window.flipDoor = async function (id) {
             const entry = doorShapes[id]; if (!entry) return;
             lmap.closePopup();
             const r = await postData(URLS.flipDoor, { door_id: id });
@@ -2270,7 +2924,7 @@
 
         window.removeDoor = async function (id) {
             lmap.closePopup();
-            if (!confirm('Delete this door?')) return;
+            if (!await AylaDialog.confirm('Delete this door?')) return;
             const r = await postData(URLS.deleteDoor, { door_id: id });
             if (r.success) removeDoorShape(id);
             else alert(r.error || 'Failed to delete the door');
@@ -2458,7 +3112,26 @@
             });
         }
 
+        // A shelf set into a corner is traced rather than sized, so it
+        // carries its own outline and the width/depth/rotation trio no longer
+        // describes it. Both shapes resolve here.
+        function isTraced(s) {
+            return !!(s.geometry && s.geometry.length >= 3);
+        }
+
+        function shelfOutline(s) {
+            if (isTraced(s)) {
+                return s.geometry.map(function (p) { return toLatLng(p[0], p[1]); });
+            }
+            return shelfCorners(s.map_x, s.map_y, s.rotation, s.width, s.depth);
+        }
+
         function shelfTooltip(s) {
+            const what = s.kind && s.kind !== 'Shelf' ? s.kind.toLowerCase() : 'shelf';
+            if (isTraced(s)) {
+                return '📚 ' + (s.name || 'Shelf') + ' · traced ' + what
+                     + ' · ' + s.geometry.length + ' corners';
+            }
             return '📚 ' + (s.name || 'Shelf') + ' · '
                 + Math.round(s.width || SHELF_W) + '×' + Math.round(s.depth || SHELF_D)
                 + ' · ' + Math.round(s.rotation || 0) + '°';
@@ -2466,18 +3139,36 @@
 
         function redrawShelf(entry) {
             const s = entry.data;
-            entry.poly.setLatLngs(shelfCorners(s.map_x, s.map_y, s.rotation, s.width, s.depth));
+            entry.poly.setLatLngs(shelfOutline(s));
             entry.poly.setTooltipContent(shelfTooltip(s));
+        }
+
+        // A table with books on it is stored as a Shelf, because that is what
+        // lets a book be found on one -- but it is not a bookcase, and drawing
+        // both in the same purple made a room of furniture unreadable. Three
+        // families, three colours: bookcases, furniture that holds books, and
+        // furniture that holds none.
+        const SHELF_KIND_COLOUR = {
+            Shelf: '--cover-3',       // a bookcase: the purple shelves have always been
+            Table: '--cover-6',
+            Display: '--cover-6',
+            Cart: '--cover-6',
+            Ledge: '--cover-6',
+        };
+
+        function shelfColour(s) {
+            return AylaTheme.color(SHELF_KIND_COLOUR[s.kind] || '--cover-3');
         }
 
         function addShelfMarker(s) {
             if (s.map_x == null || s.map_y == null) return;   // unplaced
-            const poly = L.polygon(shelfCorners(s.map_x, s.map_y, s.rotation, s.width, s.depth), {
-                color: AylaTheme.color('--cover-3'), weight: 2,
-                fillColor: AylaTheme.color('--cover-3'), fillOpacity: 0.55,
+            const tint = shelfColour(s);
+            const poly = L.polygon(shelfOutline(s), {
+                color: tint, weight: 2,
+                fillColor: tint, fillOpacity: 0.55,
             }).bindTooltip(shelfTooltip(s), { direction: 'top', sticky: true }).addTo(lmap);
             poly.on('contextmenu', function (e) { L.DomEvent.stop(e); showShelfInspector(s.shelf_id); });
-            poly.on('click', function (e) { if (mode) return; L.DomEvent.stop(e); showShelfInspector(s.shelf_id); });
+            poly.on('click', function (e) { if (mode || pendingPlacement()) return; L.DomEvent.stop(e); showShelfInspector(s.shelf_id); });
             shelfShapes[s.shelf_id] = { poly: poly, data: s };
 
             // Drag the body to move the shelf — live only while selected
@@ -2485,15 +3176,32 @@
             let moveStart = null;
             makeBodyDraggable(poly, {
                 enabled: function () { return selectedShelfId === s.shelf_id; },
-                onDragStart: function () { moveStart = { x: shelfLive.map_x, y: shelfLive.map_y }; },
+                onDragStart: function () {
+                    moveStart = { x: shelfLive.map_x, y: shelfLive.map_y,
+                                  geometry: shelfLive.geometry
+                                      ? shelfLive.geometry.map(function (p) { return [p[0], p[1]]; })
+                                      : null };
+                },
                 onMove: function (dx, dy) {
                     shelfLive.map_x = moveStart.x + dx;
                     shelfLive.map_y = moveStart.y + dy;
+                    // Translated from the outline as it was when the drag began,
+                    // not from the last frame -- accumulating the offset would
+                    // drift the shape a little further on every mouse move.
+                    if (moveStart.geometry) {
+                        shelfLive.geometry = translateGeometry(moveStart.geometry, dx, dy);
+                    }
                     redrawShelfLive();
                 },
                 onEnd: async function () {
                     const r = await postData(URLS.moveShelf, { shelf_id: s.shelf_id, map_x: shelfLive.map_x, map_y: shelfLive.map_y });
-                    if (r.success) { Object.assign(s, { map_x: r.map_x, map_y: r.map_y }); commitShelfEdit(s.shelf_id); }
+                    if (r.success) {
+                        Object.assign(s, { map_x: r.map_x, map_y: r.map_y });
+                        // The server slides the outline by the same offset; take
+                        // its answer so the two can never drift apart.
+                        if (r.geometry) s.geometry = r.geometry;
+                        commitShelfEdit(s.shelf_id);
+                    }
                     else { alert(r.error || 'Failed to move the shelf'); cancelShelfEdit(); }
                 },
             });
@@ -2527,9 +3235,19 @@
                 + (editing
                     ? '<button class="map-action-btn" onclick="deselectShelf()"><i class="fa-solid fa-xmark"></i> Hide drag handles</button>'
                     : '<button class="map-action-btn" onclick="selectShelf(' + id + ')"><i class="fa-solid fa-arrows-up-down-left-right"></i> Show drag handles</button>')
+                + (isCornerEditing('shelf', id)
+                    ? '<button class="map-action-btn" onclick="stopCornerEdit()"><i class="fa-solid fa-check"></i> Done reshaping</button>'
+                    : '<button class="map-action-btn" onclick="reshapeShelf(' + id + ')"><i class="fa-solid fa-draw-polygon"></i> Drag corners</button>')
+                + '<button class="map-action-btn" onclick="editShelfGrid(' + id + ')"><i class="fa-solid fa-table-cells"></i> Levels &amp; columns</button>'
                 + '<button class="map-action-btn" onclick="renameShelf(' + id + ')"><i class="fa-solid fa-pen"></i> Rename</button>'
                 + '<button class="map-action-btn danger" onclick="unplaceShelf(' + id + ')"><i class="fa-solid fa-eye-slash"></i> Unplace</button>'
-                + '</div>');
+                + '</div>'
+                + (isTraced(s)
+                    ? '<p class="insp-note">Traced from ' + s.geometry.length + ' corners, so it '
+                      + 'keeps that shape: drag to move it, use the round handle to turn it. '
+                      + 'Width and depth do not describe it, so there are no resize grips — '
+                      + 'redraw it to change its shape.</p>'
+                    : ''));
         }
         window.showShelfInspector = showShelfInspector;
 
@@ -2579,9 +3297,7 @@
             inspectorSaved(changes.length ? 'Saved ' + changes.join(' and ') + '.' : 'Nothing changed.');
         };
 
-        function openShelfPopup(id) { showShelfInspector(id); }
-
-        // ---- Unified "selected" editing: resize handles + rotate handle +
+                // ---- Unified "selected" editing: resize handles + rotate handle +
         // body-drag all live at once, like a shape selected in a design tool.
         let selectedShelfId = null;
         let shelfLive = null;          // working copy of {map_x,map_y,rotation,width,depth}
@@ -2615,9 +3331,27 @@
         ];
         const MIN_SHELF_SIZE = 6;
 
+        // Slide or turn an outline without changing its shape. The same two
+        // transforms the server applies, so what is dragged is what is saved.
+        function translateGeometry(geometry, dx, dy) {
+            return geometry.map(function (p) { return [p[0] + dx, p[1] + dy]; });
+        }
+
+        function rotateGeometry(geometry, degrees, cx, cy) {
+            const rad = degrees * Math.PI / 180;
+            const cos = Math.cos(rad), sin = Math.sin(rad);
+            return geometry.map(function (p) {
+                const ox = p[0] - cx, oy = p[1] - cy;
+                return [cx + ox * cos - oy * sin, cy + ox * sin + oy * cos];
+            });
+        }
+
         function redrawShelfLive() {
             const entry = shelfShapes[selectedShelfId]; if (!entry) return;
-            entry.poly.setLatLngs(shelfCorners(shelfLive.map_x, shelfLive.map_y, shelfLive.rotation, shelfLive.width, shelfLive.depth));
+            // shelfOutline() prefers a traced outline; going straight to
+            // shelfCorners() here is what collapsed a traced shelf into the
+            // default rectangle the instant anybody dragged it.
+            entry.poly.setLatLngs(shelfOutline(shelfLive));
             entry.poly.setTooltipContent(shelfTooltip(shelfLive));
             positionShelfHandles();
         }
@@ -2630,7 +3364,19 @@
                 entry.marker.setLatLng(toLatLng(local.x, local.y));
             });
             if (shelfRotateHandleMarker) {
-                const p = localToCanvas(0, -hd - ROTATE_HANDLE_GAP, shelfLive.map_x, shelfLive.map_y, shelfLive.rotation);
+                // A traced shelf's stored depth says nothing about how far the
+                // outline actually reaches, so the handle would end up sitting
+                // inside the shape it is meant to turn. Measure the outline.
+                let reach = hd;
+                if (isTraced(shelfLive)) {
+                    reach = 0;
+                    shelfLive.geometry.forEach(function (pt) {
+                        const local = canvasToLocal(pt[0], pt[1], shelfLive.map_x,
+                                                    shelfLive.map_y, shelfLive.rotation);
+                        reach = Math.max(reach, -local.y);
+                    });
+                }
+                const p = localToCanvas(0, -reach - ROTATE_HANDLE_GAP, shelfLive.map_x, shelfLive.map_y, shelfLive.rotation);
                 shelfRotateHandleMarker.setLatLng(toLatLng(p.x, p.y));
             }
         }
@@ -2647,7 +3393,13 @@
 
         function drawShelfHandles(id) {
             clearShelfHandles();
-            SHELF_RESIZE_HANDLES.forEach(function (spec) {
+            // Width and depth describe a rectangle. They say nothing about a
+            // shelf that was traced corner by corner, and dragging them only
+            // changed two numbers nothing reads back -- so the resize grips
+            // are not offered on one. Moving and turning still work, and
+            // reshaping means redrawing it.
+            const traced = isTraced(shelfShapes[id] && shelfShapes[id].data);
+            (traced ? [] : SHELF_RESIZE_HANDLES).forEach(function (spec) {
                 const size = spec.corner ? 12 : 10;
                 const marker = L.marker([0, 0], {
                     draggable: true, zIndexOffset: 1000,
@@ -2706,8 +3458,14 @@
                 draggable: true, zIndexOffset: 1001,
                 icon: L.divIcon({ className: 'geo-handle rotate', iconSize: [14, 14], iconAnchor: [7, 7] }),
             }).addTo(lmap);
-            let rotOriginCx = 0, rotOriginCy = 0;
-            rotMarker.on('dragstart', function () { rotOriginCx = shelfLive.map_x; rotOriginCy = shelfLive.map_y; });
+            let rotOriginCx = 0, rotOriginCy = 0, rotOriginDeg = 0, rotOriginGeom = null;
+            rotMarker.on('dragstart', function () {
+                rotOriginCx = shelfLive.map_x; rotOriginCy = shelfLive.map_y;
+                rotOriginDeg = shelfLive.rotation || 0;
+                rotOriginGeom = shelfLive.geometry
+                    ? shelfLive.geometry.map(function (p) { return [p[0], p[1]]; })
+                    : null;
+            });
             rotMarker.on('drag', function (e) {
                 const px = e.latlng.lng, py = imgH - e.latlng.lat;
                 const angleDeg = Math.atan2(py - rotOriginCy, px - rotOriginCx) * 180 / Math.PI;
@@ -2715,13 +3473,24 @@
                 if (!freeRotateHeld) rotation = Math.round(rotation / 90) * 90;
                 rotation = ((rotation % 360) + 360) % 360;
                 shelfLive.rotation = rotation;
+                // A traced outline is not derived from the rotation, so turning
+                // the shelf has to turn the outline itself or nothing moves on
+                // screen until the save comes back and it jumps.
+                if (rotOriginGeom) {
+                    shelfLive.geometry = rotateGeometry(rotOriginGeom, rotation - rotOriginDeg,
+                                                        rotOriginCx, rotOriginCy);
+                }
                 showShelfEditHint('<strong class="text-cyan-400">Rotating</strong> — ' + Math.round(rotation) + '°'
                     + (freeRotateHeld ? ' (free)' : ' (snapped to 90°; hold Shift for free rotation)') + '.');
                 redrawShelfLive();
             });
             rotMarker.on('dragend', async function () {
                 const r = await postData(URLS.rotateShelf, { shelf_id: id, rotation: shelfLive.rotation });
-                if (r.success) { shelfShapes[id].data.rotation = r.rotation; commitShelfEdit(id); }
+                if (r.success) {
+                    shelfShapes[id].data.rotation = r.rotation;
+                    if (r.geometry) shelfShapes[id].data.geometry = r.geometry;
+                    commitShelfEdit(id);
+                }
                 else { alert(r.error || 'Failed to rotate the shelf'); cancelShelfEdit(); }
             });
             shelfRotateHandleMarker = rotMarker;
@@ -2816,10 +3585,45 @@
             window.closeResizeShelfModal();
         };
 
+        // Adding boards after the fact. Only ever adds: a level carries books,
+        // and losing a shelf full of them to a mistyped number is not a
+        // mistake worth making easy, so anything surplus is reported and left
+        // for the Administrator to delete on purpose.
+        window.editShelfGrid = async function (id) {
+            const entry = shelfShapes[id]; if (!entry) return;
+            const levels = await AylaDialog.prompt(
+                'How many levels should "' + (entry.data.name || 'this shelf') + '" have?',
+                '', { title: 'Levels & columns',
+                      detail: 'Counting boards from the bottom up. Existing levels are kept.' });
+            if (levels === null) return;
+            const columns = await AylaDialog.prompt(
+                'And how many columns across?', '1',
+                { title: 'Levels & columns',
+                  detail: 'One for an ordinary bay; more if the unit is divided into bays.' });
+            if (columns === null) return;
+
+            const r = await postData(URLS.setShelfGrid, {
+                shelf_id: id, levels: levels, columns: columns });
+            if (!r.success) { alert(r.error || 'Could not change the levels'); return; }
+
+            let note = r.added
+                ? (r.added + ' level' + (r.added === 1 ? '' : 's') + ' added.')
+                : 'Nothing to add — those levels already exist.';
+            if (r.surplus && r.surplus.length) {
+                note += '\n\n' + r.surplus.length + ' existing level(s) are outside that grid and '
+                      + 'were left alone: ' + r.surplus.map(function (l) {
+                            return l.label + (l.books ? ' (' + l.books + ' books)' : '');
+                        }).join(', ') + '. Delete them in Shelf Manager if they are wrong.';
+            }
+            alert(note);
+            inspectorSaved('Levels updated.');
+        };
+
         window.renameShelf = async function (id) {
             const entry = shelfShapes[id]; if (!entry) return;
             lmap.closePopup();
-            const name = prompt('Shelf name:', entry.data.name || '');
+            const name = await AylaDialog.prompt('Shelf name', entry.data.name || '',
+                                                { title: 'Rename shelf' });
             if (name === null) return;                       // cancelled
             if (!name.trim()) { alert('Shelf name cannot be empty'); return; }
             const r = await postData(URLS.editShelf, { shelf_id: id, name: name.trim() });
@@ -2831,7 +3635,7 @@
         window.unplaceShelf = async function (id) {
             const entry = shelfShapes[id]; if (!entry) return;
             lmap.closePopup();
-            if (!confirm('Remove "' + entry.data.name + '" from the floor plan?\n\nThe shelf and its books are kept — only its position is cleared.')) return;
+            if (!await AylaDialog.confirm('Remove "' + entry.data.name + '" from the floor plan?\n\nThe shelf and its books are kept — only its position is cleared.')) return;
             const r = await postData(URLS.unplaceShelf, { shelf_id: id });
             if (r.success) window.location.reload();
             else alert(r.error || 'Failed to unplace the shelf');
@@ -2858,11 +3662,20 @@
         //
         // All three are toggles: a room that genuinely is not rectangular has
         // to remain drawable.
-        const drawAids = { rightAngles: true, grid: true, showGrid: true };
+        // Snap-to-grid starts OFF. It quantises every click to gridStepUnits(),
+        // which on a 1400x1000 plan is 50 canvas units and on a scaled plan is
+        // a whole metre -- so the length beside the cursor climbed in 50s and
+        // no exact size could be drawn at all. The grid is still drawn, and the
+        // Snap button turns the behaviour back on when it is wanted.
+        const drawAids = { rightAngles: true, grid: false, showGrid: true };
         const ORTHO_TOLERANCE_DEG = 12;   // how far off square still counts as "meant to be square"
         let gridLayer = null;
         let guideLayer = null;
         let drawVertices = [];
+        // Declared here, beside the vertex list it belongs with, and above
+        // everything that reads it -- a `let` read before its declaration runs
+        // throws, and the throw is silent inside an event handler.
+        let drawing = false;
 
         function gridStepUnits() {
             // A metre is the useful spacing when the scale is known; without it
@@ -2965,9 +3778,32 @@
             if (gridLayer.bringToBack) gridLayer.bringToBack();
         }
 
+        // Pixels first, always. The plan is traced against a drawing whose
+        // units the librarian already thinks in -- one canvas pixel per
+        // centimetre here -- so the raw number is the one being aimed at, and
+        // the metric conversion is the cross-check rather than the headline.
         function unitsToLabel(units) {
             const ppm = mapScale();
-            return ppm ? (units / ppm).toFixed(2) + ' m' : Math.round(units) + ' u';
+            const px = (units < 100 ? units.toFixed(1).replace(/\.0$/, '')
+                                    : String(Math.round(units))) + ' px';
+            return ppm ? px + ' <span class="text-slate-500">\u00b7 '
+                       + (units / ppm).toFixed(2) + ' m</span>' : px;
+        }
+
+        // Keeps the badge next to the pointer without letting it fall off the
+        // edge -- it flips to the left once there is no room on the right.
+        function placeReadout(box, containerPoint) {
+            const wrap = document.querySelector('.map-workspace');
+            if (!wrap || !containerPoint) return;
+            const pad = 16;
+            const w = box.offsetWidth || 140;
+            const h = box.offsetHeight || 28;
+            let x = containerPoint.x + pad;
+            let y = containerPoint.y - h - 10;
+            if (x + w > wrap.clientWidth - 4) x = containerPoint.x - w - pad;
+            if (y < 4) y = containerPoint.y + pad;
+            box.style.left = Math.max(4, x) + 'px';
+            box.style.top = Math.max(4, y) + 'px';
         }
 
         function clearGuides() {
@@ -3006,9 +3842,30 @@
             return Math.acos(cos) * 180 / Math.PI;
         }
 
-        function updateReadout(prev, cursor) {
+        function runningPerimeter(cursor) {
+            let total = 0;
+            for (let i = 1; i < drawVertices.length; i++) {
+                total += Math.hypot(drawVertices[i].x - drawVertices[i - 1].x,
+                                    drawVertices[i].y - drawVertices[i - 1].y);
+            }
+            const last = drawVertices[drawVertices.length - 1];
+            return total + Math.hypot(cursor.x - last.x, cursor.y - last.y);
+        }
+
+        function updateReadout(prev, cursor, containerPoint) {
             const box = document.getElementById('drawReadout');
-            if (!box || !prev) return;
+            if (!box) return;
+            // Before the first corner is placed there is no edge to measure, so
+            // the badge reports where the pointer actually is instead -- which
+            // is what you want when lining the first vertex up with a wall.
+            if (!prev) {
+                box.innerHTML = '<span class="text-slate-400">At</span> <b>'
+                              + Math.round(cursor.x) + ', ' + Math.round(cursor.y) + '</b>'
+                              + ' <span class="text-slate-500">px</span>';
+                box.classList.remove('hidden');
+                placeReadout(box, containerPoint);
+                return;
+            }
             const len = Math.hypot(cursor.x - prev.x, cursor.y - prev.y);
             let angleText = '';
             if (drawVertices.length >= 2) {
@@ -3020,27 +3877,263 @@
                               + ang.toFixed(1) + '&deg;' + (square ? ' &#9633;' : '') + '</span>';
                 }
             }
+            // The running total matters for a room: it is the figure that has
+            // to match the tape measure once the shape closes.
+            let totalText = '';
+            if (drawVertices.length >= 2) {
+                totalText = '<br><span class="text-slate-400">Total</span> '
+                          + unitsToLabel(runningPerimeter(cursor));
+            }
             box.innerHTML = '<span class="text-slate-400">Length</span> <b>' + unitsToLabel(len) + '</b>'
-                          + (angleText ? ' &nbsp;<span class="text-slate-400">Corner</span> ' + angleText : '');
+                          + (angleText ? ' &nbsp;<span class="text-slate-400">Corner</span> ' + angleText : '')
+                          + totalText;
             box.classList.remove('hidden');
+            placeReadout(box, containerPoint);
         }
 
         function onDrawMouseMove(e) {
-            if (!drawVertices.length) return;
-            const prev = drawVertices[drawVertices.length - 1];
+            const prev = drawVertices.length ? drawVertices[drawVertices.length - 1] : null;
             const raw = canvasXY(e.latlng);
-            const pt = constrainPoint(raw, prev);
-            showGuides(prev, pt);
-            updateReadout(prev, pt);
+            const pt = prev ? constrainPoint(raw, prev) : raw;
+            if (prev) showGuides(prev, pt);
+            updateReadout(prev, pt, e.containerPoint);
         }
 
+        // Undoing one corner, rather than the whole shape. Escape cancels the
+        // entire outline, which is the only thing that existed before: a single
+        // misplaced corner meant tracing the room again from scratch.
+        //
+        // Geoman's own toolbar drives its "Remove Last Vertex" action through
+        // this method, so it is the supported path even though the name is
+        // underscored. It disables the draw outright when only one corner is
+        // left, which is the right behaviour -- a one-corner shape is nothing.
+        window.undoLastVertex = function () {
+            if (!lmap || !lmap.pm || !drawing) return;
+            const draw = lmap.pm.Draw && lmap.pm.Draw.Polygon;
+            if (!draw || typeof draw._removeLastVertex !== 'function') return;
+            draw._removeLastVertex();
+            // Our own vertex list feeds the readout, the right-angle snap and
+            // the alignment guides; leaving it a corner ahead of the shape
+            // would measure and snap against a corner no longer there.
+            if (drawVertices.length) drawVertices.pop();
+            clearGuides();
+            const box = document.getElementById('drawReadout');
+            if (box) box.classList.add('hidden');
+        };
+
+        function showUndoVertex(on) {
+            const btn = document.getElementById('btnUndoVertex');
+            if (btn) btn.classList.toggle('hidden', !on);
+        }
+
+        // Backspace and Ctrl+Z both mean "take that corner back" to different
+        // people, so both are accepted. Ignored while typing, or the width box
+        // in the properties panel could not be corrected with Backspace.
+        function onDrawKeydown(e) {
+            if (!drawing) return;
+            const t = e.target;
+            if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+            const undo = (e.key === 'Backspace') || ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z'));
+            if (!undo) return;
+            e.preventDefault();
+            window.undoLastVertex();
+        }
+
+        // Deriving the walkable network instead of clicking it out by hand.
+        //
+        // Only generated waypoints are replaced, so this stays safe to press a
+        // second time after correcting the first result -- which is the whole
+        // reason the marker exists on the model.
+        window.generateRoute = async function () {
+            const existing = Object.keys(waypointMarkers).length;
+            const warning = existing
+                ? '\n\nWaypoints you placed or moved by hand are kept. Any laid down by a '
+                  + 'previous run of this are replaced.'
+                : '';
+            const yes = await AylaDialog.confirm(
+                'Lay a walkable route across this floor plan?',
+                { title: 'Generate route',
+                  detail: 'A pair of waypoints goes either side of every doorway, one in the '
+                        + 'open middle of each room, and one in front of each shelf. They are '
+                        + 'joined wherever the straight line between them is genuinely '
+                        + 'walkable — never through a wall, never through furniture.' + warning,
+                  confirmLabel: 'Generate' });
+            if (!yes) return;
+
+            const r = await postData(URLS.generateWaypoints, { floor_plan_id: floorPlanId });
+            if (!r.success) { alert(r.error || 'Could not generate a route'); return; }
+
+            const parts = [r.placed + ' waypoint' + (r.placed === 1 ? '' : 's'),
+                           r.connections + ' connection' + (r.connections === 1 ? '' : 's')];
+            if (r.replaced) parts.push(r.replaced + ' replaced');
+            if (r.kept_manual) parts.push(r.kept_manual + ' of yours kept');
+            let msg = parts.join(', ') + '.';
+            if (r.unreachable && r.unreachable.length) {
+                msg += '\n\nNothing could be placed in: ' + r.unreachable.join(', ')
+                     + '. A room with no door has no way in.';
+            }
+            await AylaDialog.confirm(msg, {
+                title: 'Route generated', confirmLabel: 'Reload the map', cancelLabel: 'Stay' })
+                && window.location.reload();
+        };
+
+        // Showing and hiding whole kinds of thing while drawing.
+        //
+        // A finished floor plan is a dense drawing -- rooms under shelves under
+        // furniture, with waypoints and their connections over the top -- and
+        // tracing one more wall through all of it is guesswork. Hiding is only
+        // ever about what is on screen: nothing here changes a single record,
+        // and what a patron sees is unaffected.
+        const LAYER_KINDS = ['rooms', 'doors', 'shelves', 'obstacles', 'stairs',
+                             'beacons', 'waypoints'];
+        const layerShown = {};
+        LAYER_KINDS.forEach(function (k) { layerShown[k] = true; });
+
+        // Every Leaflet layer belonging to one kind, whatever shape its
+        // registry happens to take.
+        function layersOfKind(kind) {
+            const out = [];
+            const push = function (l) { if (l) out.push(l); };
+            if (kind === 'rooms') {
+                Object.keys(roomShapes).forEach(function (k) { push(roomShapes[k]); });
+            } else if (kind === 'doors') {
+                Object.keys(doorShapes).forEach(function (k) {
+                    (doorShapes[k].layers || []).forEach(push);
+                });
+            } else if (kind === 'shelves') {
+                Object.keys(shelfShapes).forEach(function (k) { push(shelfShapes[k].poly); });
+            } else if (kind === 'obstacles') {
+                Object.keys(obstacleShapes).forEach(function (k) { push(obstacleShapes[k]); });
+            } else if (kind === 'stairs') {
+                Object.keys(stairwayShapes).forEach(function (k) {
+                    (stairwayShapes[k].layers || []).forEach(push);
+                });
+            } else if (kind === 'beacons') {
+                Object.keys(beaconMarkers).forEach(function (k) { push(beaconMarkers[k].marker); });
+            } else if (kind === 'waypoints') {
+                Object.keys(waypointMarkers).forEach(function (k) { push(waypointMarkers[k].marker); });
+                // The lines go with the points: connections between waypoints
+                // nobody can see are just clutter with no anchor.
+                Object.keys(connections).forEach(function (k) { push(connections[k].polyline); });
+            }
+            return out;
+        }
+
+        // Re-applied after anything is added, so a shelf drawn while shelves
+        // are hidden does not pop back into view on its own.
+        function applyLayerVisibility() {
+            LAYER_KINDS.forEach(function (kind) {
+                const on = layerShown[kind];
+                layersOfKind(kind).forEach(function (l) {
+                    const present = lmap.hasLayer(l);
+                    if (on && !present) l.addTo(lmap);
+                    else if (!on && present) lmap.removeLayer(l);
+                });
+                const btn = document.getElementById('see-' + kind);
+                if (btn) btn.classList.toggle('on', on);
+            });
+        }
+        window.applyLayerVisibility = applyLayerVisibility;
+
+        window.toggleLayer = function (kind) {
+            layerShown[kind] = !layerShown[kind];
+            // Something hidden cannot stay selected: the panel would be editing
+            // a shape that is no longer on screen to check against.
+            if (!layerShown[kind] && inspectorSel) {
+                const owner = { rooms: 'room', doors: 'door', shelves: 'shelf',
+                                stairs: 'stairs', beacons: 'beacon',
+                                waypoints: 'waypoint' }[kind];
+                if (owner && inspectorSel.kind === owner) clearInspector();
+            }
+            applyLayerVisibility();
+            try {
+                localStorage.setItem('ayla.floorplan.layers', JSON.stringify(layerShown));
+            } catch (e) { /* private window, or storage off: not worth failing over */ }
+        };
+
+        function restoreLayerVisibility() {
+            try {
+                const saved = JSON.parse(localStorage.getItem('ayla.floorplan.layers') || '{}');
+                LAYER_KINDS.forEach(function (k) {
+                    if (typeof saved[k] === 'boolean') layerShown[k] = saved[k];
+                });
+            } catch (e) { /* fall back to everything visible */ }
+            applyLayerVisibility();
+        }
+
+        // ---- Readiness -----------------------------------------------------
+        // Re-run after anything that could change the answer, so the panel is
+        // never quietly out of date about the plan in front of you.
+        let readinessOpen = false;
+
+        window.toggleReadiness = function () {
+            readinessOpen = !readinessOpen;
+            const body = document.getElementById('readinessBody');
+            const chev = document.getElementById('readinessChevron');
+            if (body) body.classList.toggle('hidden', !readinessOpen);
+            if (chev) chev.textContent = readinessOpen ? '\u25b4' : '\u25be';
+        };
+
+        async function refreshReadiness() {
+            const summary = document.getElementById('readinessSummary');
+            const body = document.getElementById('readinessBody');
+            if (!summary || !floorPlanId) return;
+            let data;
+            try {
+                const res = await fetch(URLS.readiness + '?floor_plan_id=' + floorPlanId,
+                                        { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+                data = await res.json();
+            } catch (e) {
+                summary.textContent = 'Could not check this floor plan.';
+                return;
+            }
+            if (!data.success) { summary.textContent = data.error || 'Check failed.'; return; }
+
+            const c = data.counts || {};
+            const counts = '<span class="readiness-counts">' + c.rooms + ' rooms &middot; '
+                + c.doors + ' doors &middot; ' + c.waypoints + ' waypoints &middot; '
+                + c.beacons + ' beacons</span>';
+
+            if (data.ready && !data.warnings) {
+                summary.innerHTML = '<span style="color:var(--success)">\u2713 Ready to go live</span> &nbsp; ' + counts;
+            } else {
+                const parts = [];
+                if (data.blockers) parts.push('<span style="color:var(--danger)">' + data.blockers
+                    + (data.blockers === 1 ? ' blocker' : ' blockers') + '</span>');
+                if (data.warnings) parts.push('<span style="color:var(--warning)">' + data.warnings
+                    + (data.warnings === 1 ? ' warning' : ' warnings') + '</span>');
+                summary.innerHTML = parts.join(' &middot; ') + ' &nbsp; ' + counts;
+            }
+
+            body.innerHTML = (data.issues || []).map(function (i) {
+                return '<div class="readiness-item">'
+                    + '<span class="readiness-dot ' + i.level + '"></span>'
+                    + '<span><span class="readiness-text">' + esc(i.text) + '</span>'
+                    + (i.detail ? '<div class="readiness-detail">' + esc(i.detail) + '</div>' : '')
+                    + '</span></div>';
+            }).join('') || '<div class="readiness-item"><span class="readiness-text">'
+                          + 'Nothing outstanding.</span></div>';
+        }
+        window.refreshReadiness = refreshReadiness;
+
         function wireDrawingAids() {
-            lmap.on('pm:drawstart', function () {
+            // Geoman fires vertex events on the shape being drawn, not on the
+            // map. Listening on the map therefore received nothing at all, and
+            // because every aid keys off the vertex list, all three of them --
+            // the right-angle snap, the alignment rays and the measurement
+            // readout -- sat silently idle while looking perfectly wired up.
+            lmap.on('pm:drawstart', function (e) {
                 drawVertices = [];
+                drawing = true;
+                showUndoVertex(true);
+                document.addEventListener('keydown', onDrawKeydown);
                 lmap.on('mousemove', onDrawMouseMove);
+                if (e && e.workingLayer && e.workingLayer.on) {
+                    e.workingLayer.on('pm:vertexadded', onVertexAdded);
+                }
             });
 
-            lmap.on('pm:vertexadded', function (e) {
+            function onVertexAdded(e) {
                 const prev = drawVertices.length ? drawVertices[drawVertices.length - 1] : null;
                 const pt = constrainPoint(canvasXY(e.latlng), prev);
                 const ll = L.latLng(toLatLng(pt.x, pt.y));
@@ -3053,10 +4146,16 @@
                     if (lls.length) { lls[lls.length - 1] = ll; e.workingLayer.setLatLngs(lls); }
                 }
                 drawVertices.push(pt);
-            });
+            }
 
-            lmap.on('pm:drawend', function () {
+            lmap.on('pm:drawend', function (e) {
+                drawing = false;
+                showUndoVertex(false);
+                document.removeEventListener('keydown', onDrawKeydown);
                 lmap.off('mousemove', onDrawMouseMove);
+                if (e && e.workingLayer && e.workingLayer.off) {
+                    e.workingLayer.off('pm:vertexadded', onVertexAdded);
+                }
                 drawVertices = [];
                 clearGuides();
             });
@@ -3106,6 +4205,9 @@
         function onRoomDrawn(e) {
             // Read the target before clearMode(), which resets it.
             const targetRoomId = drawTargetRoomId;
+            const wasObstacle = (mode === 'obstacle');
+            const wasShelfDraw = (mode === 'shelfdraw');
+            const wasStairs = (mode === 'stairs');
             drawnRoomLayer = e.layer;
             let geom = latLngsToGeometry(e.layer.getLatLngs());
             if (drawAids.rightAngles) {
@@ -3117,12 +4219,15 @@
             }
             pendingGeometry = geom;
             clearMode();                             // the shape is drawn; stand the tool down
-            if (targetRoomId) { saveShapeForExistingRoom(targetRoomId); }
+            if (wasShelfDraw) { openShelfPlace(true); }
+            else if (wasStairs) { openStairsPlace(); }
+            else if (wasObstacle) { openObstaclePlace(); }
+            else if (targetRoomId) { saveShapeForExistingRoom(targetRoomId); }
             else { openRoomPlace(); }
         }
 
         async function saveShapeForExistingRoom(roomId) {
-            if (!confirm('Save this shape for the selected room?')) {
+            if (!await AylaDialog.confirm('Save this shape for the selected room?')) {
                 if (drawnRoomLayer) { lmap.removeLayer(drawnRoomLayer); drawnRoomLayer = null; }
                 pendingGeometry = null;
                 return;
@@ -3219,7 +4324,95 @@
             else alert(r.error || 'Failed to save room');
         };
 
-        window.openShelfPlace = function () {
+        // ── Stairways ────────────────────────────────────────────────
+        // Bearing is asked for rather than inferred. The footprint alone cannot
+        // say which end is the bottom -- a rectangle is the same rectangle
+        // whichever way you climb it -- and the treads and the arrow both hang
+        // off that answer.
+        window.openStairsPlace = function () {
+            document.getElementById('placeStairsName').value = '';
+            document.getElementById('placeStairsKind').value = 'Stairs';
+            document.getElementById('placeStairsDir').value = 'both';
+            document.getElementById('placeStairsBearing').value = '0';
+            const sel = document.getElementById('placeStairsTo');
+            sel.innerHTML = '<option value="">Not linked yet</option>';
+            (otherFloors || []).forEach(function (f) {
+                const o = document.createElement('option');
+                o.value = f.floor_plan_id;
+                o.textContent = f.label + (f.name && f.name !== f.label ? ' — ' + f.name : '');
+                sel.appendChild(o);
+            });
+            document.getElementById('placeStairsModal').classList.remove('hidden');
+        };
+        window.closeStairsPlaceModal = function () {
+            document.getElementById('placeStairsModal').classList.add('hidden');
+            if (drawnRoomLayer) { lmap.removeLayer(drawnRoomLayer); drawnRoomLayer = null; }
+            pendingGeometry = null;
+        };
+        window.submitStairsPlace = async function () {
+            if (!pendingGeometry) { alert('Draw the stairway shape on the map first.'); return; }
+            const r = await postData(URLS.addStairway, {
+                floor_plan_id: floorPlanId,
+                kind: document.getElementById('placeStairsKind').value,
+                direction: document.getElementById('placeStairsDir').value,
+                bearing: document.getElementById('placeStairsBearing').value || 0,
+                connects_to: document.getElementById('placeStairsTo').value,
+                name: document.getElementById('placeStairsName').value.trim(),
+                geometry: JSON.stringify(pendingGeometry),
+            });
+            if (r.success) { drawnRoomLayer = null; window.location.reload(); }
+            else alert(r.error || 'Failed to save the stairway');
+        };
+        window.removeStairway = async function (id, label) {
+            if (!await AylaDialog.confirm('Remove ' + label + ' from the floor plan?')) return;
+            const r = await postData(URLS.deleteStairway, { stairway_id: id });
+            if (r.success) window.location.reload();
+            else alert(r.error || 'Failed to remove it');
+        };
+
+        // ── Obstacles ────────────────────────────────────────────────
+        // Deliberately lighter than the room dialog: a pillar needs no name and
+        // no description, so the only required choice is what kind of thing it
+        // is, and the name is there for the cases worth labelling.
+        window.openObstaclePlace = function () {
+            document.getElementById('placeObstacleHoldsBooks').checked = false;
+            document.getElementById('placeObstacleName').value = '';
+            document.getElementById('placeObstacleKind').value = 'Table';
+            document.getElementById('placeObstacleModal').classList.remove('hidden');
+        };
+        window.closeObstaclePlaceModal = function () {
+            document.getElementById('placeObstacleModal').classList.add('hidden');
+            if (drawnRoomLayer) { lmap.removeLayer(drawnRoomLayer); drawnRoomLayer = null; }
+            pendingGeometry = null;
+        };
+        window.submitObstaclePlace = async function () {
+            if (!pendingGeometry) { alert('Draw the shape on the map first.'); return; }
+            const holds = document.getElementById('placeObstacleHoldsBooks').checked;
+            const r = await postData(URLS.addObstacle, {
+                floor_plan_id: floorPlanId,
+                kind: document.getElementById('placeObstacleKind').value,
+                name: document.getElementById('placeObstacleName').value.trim(),
+                geometry: JSON.stringify(pendingGeometry),
+                holds_books: holds ? '1' : '0',
+            });
+            if (r.success) { drawnRoomLayer = null; window.location.reload(); }
+            else alert(r.error || 'Failed to save the obstacle');
+        };
+        window.removeObstacle = async function (id, label) {
+            if (!await AylaDialog.confirm('Remove ' + label + ' from the floor plan?')) return;
+            const r = await postData(URLS.deleteObstacle, { obstacle_id: id });
+            if (r.success) window.location.reload();
+            else alert(r.error || 'Failed to remove it');
+        };
+
+        // `traced` distinguishes the two ways in: Place Shelf clicks a point
+        // and the server builds a rectangle from width/depth; Draw Shelf hands
+        // over an outline that has already been drawn.
+        let shelfIsTraced = false;
+        window.openShelfPlace = function (traced) {
+            shelfIsTraced = !!traced;
+            const kindRow = document.getElementById('placeShelfKindRow');
+            if (kindRow) kindRow.classList.toggle('hidden', !shelfIsTraced);
             const sel = document.getElementById('placeShelfRoom');
             sel.innerHTML = '<option value="">Select a room…</option>';
             (rooms || []).forEach(function (rm) {
@@ -3239,13 +4432,24 @@
             const name = document.getElementById('placeShelfName').value.trim();
             if (!roomId) { alert('Place a room first, then pick it here.'); return; }
             if (!name) { alert('Shelf name is required'); return; }
-            if (!pending) return;
-            const r = await postData(URLS.addShelf, {
+
+            const payload = {
                 room_id: roomId, name: name,
                 description: document.getElementById('placeShelfDesc').value.trim(),
-                map_x: pending.x, map_y: pending.y,
-            });
-            if (r.success) { window.location.reload(); }
+                levels: document.getElementById('placeShelfLevels').value,
+                columns: document.getElementById('placeShelfColumns').value,
+            };
+            if (shelfIsTraced) {
+                if (!pendingGeometry) { alert('Draw the shape on the map first.'); return; }
+                payload.geometry = JSON.stringify(pendingGeometry);
+                payload.kind = document.getElementById('placeShelfKind').value;
+            } else {
+                if (!pending) return;
+                payload.map_x = pending.x;
+                payload.map_y = pending.y;
+            }
+            const r = await postData(URLS.addShelf, payload);
+            if (r.success) { drawnRoomLayer = null; window.location.reload(); }
             else alert(r.error || 'Failed to save shelf');
         };
 
@@ -3306,10 +4510,15 @@
                 editMode: false, dragMode: false, cutPolygon: false, removalMode: false, rotateMode: false });
             lmap.on('pm:create', onRoomDrawn);
             wireDrawingAids();
+            refreshReadiness();
             drawGrid();
             setTimeout(function () { lmap.invalidateSize(); }, 200);
 
             (data.rooms || []).forEach(addRoomShape);
+            // After rooms so furniture sits on top of the floor it stands on.
+            (data.obstacles || []).forEach(addObstacleShape);
+            otherFloors = data.other_floors || [];
+            (data.stairways || []).forEach(addStairwayShape);
             (data.rooms || []).forEach(function (r) { (r.doors || []).forEach(addDoorShape); });
             renderUnmappedRooms(data.rooms);
             renderUnplacedShelves(data.shelves);
@@ -3317,6 +4526,11 @@
             (data.beacons || []).forEach(addBeaconMarker);
             (data.waypoints || []).forEach(addWaypointMarker);
             (data.connections || []).forEach(addConnectionLine);
+
+            // Last, once every layer exists: applying the saved preferences to
+            // a map that has not drawn anything yet would hide nothing and then
+            // let it all appear anyway.
+            restoreLayerVisibility();
         }
 
         document.addEventListener('DOMContentLoaded', function () {

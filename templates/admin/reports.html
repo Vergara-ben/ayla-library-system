@@ -70,6 +70,7 @@
     <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
     <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
     <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
+    <script src="{% static 'js/ayla-dialog.js' %}"></script>
 </head>
 <body class="flex h-screen overflow-hidden">
 
@@ -95,8 +96,8 @@
             <form method="get" action="{% url 'admin_reports' %}" class="rounded-xl border border-slate-800/80 p-5" style="background-color: var(--bg-card);">
                 <div class="flex flex-col lg:flex-row lg:items-end gap-4">
                     <div class="flex-1 space-y-1.5">
-                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Report Type</label>
-                        <select name="type" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                        <label for="f_type" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Report Type</label>
+                        <select id="f_type" name="type" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
                             {% for value, label in report_types %}
                             <option value="{{ value }}" {% if value == selected_type %}selected{% endif %}>{{ label }}</option>
                             {% endfor %}
@@ -107,12 +108,12 @@
                     {# something you ought to be able to fill in.                      #}
                     <div id="date-fields" class="flex items-end gap-4 overflow-hidden{% if is_snapshot %} is-collapsed{% endif %}">
                         <div class="space-y-1.5">
-                            <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Start Date</label>
-                            <input type="date" name="start" value="{{ start_date }}" {% if is_snapshot %}disabled{% endif %} class="rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                            <label for="f_start" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Start Date</label>
+                            <input id="f_start" type="date" name="start" value="{{ start_date }}" {% if is_snapshot %}disabled{% endif %} class="rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
                         </div>
                         <div class="space-y-1.5">
-                            <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">End Date</label>
-                            <input type="date" name="end" value="{{ end_date }}" {% if is_snapshot %}disabled{% endif %} class="rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                            <label for="f_end" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">End Date</label>
+                            <input id="f_end" type="date" name="end" value="{{ end_date }}" {% if is_snapshot %}disabled{% endif %} class="rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
                         </div>
                     </div>
                     <div class="flex items-center gap-2">

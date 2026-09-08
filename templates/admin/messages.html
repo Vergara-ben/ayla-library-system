@@ -38,6 +38,7 @@
     <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
     <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
     <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
+    <script src="{% static 'js/ayla-dialog.js' %}"></script>
 </head>
 <body class="flex h-screen overflow-hidden">
 
@@ -116,7 +117,7 @@
                         </div>
                         {% if selected and selected.status != 'Closed' %}
                         <span class="text-[10px] font-bold px-2 py-1 rounded shrink-0 {% if selected.status == 'Open' %}bg-amber-500/15 text-amber-400 border border-amber-600/40{% else %}bg-emerald-500/10 text-emerald-400 border border-emerald-600/30{% endif %}">{{ selected.get_status_display }}</span>
-                        <form method="post" action="{% url 'close_conversation' %}" onsubmit="return confirm('Close this enquiry? A new question from {{ selected_patron.fullname|escapejs }} will start a fresh one.')">
+                        <form method="post" action="{% url 'close_conversation' %}" data-confirm="Close this enquiry? A new question from {{ selected_patron.fullname|escapejs }} will start a fresh one.">
                             {% csrf_token %}
                             <input type="hidden" name="conversation_id" value="{{ selected.conversation_id }}">
                             <button type="submit" class="text-[11px] font-semibold px-3 py-1.5 rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800/50 whitespace-nowrap">Resolve</button>

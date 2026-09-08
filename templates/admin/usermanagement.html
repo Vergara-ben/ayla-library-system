@@ -48,6 +48,7 @@
     <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
     <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
     <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
+    <script src="{% static 'js/ayla-dialog.js' %}"></script>
 </head>
 <body class="flex h-screen overflow-hidden">
 
@@ -198,7 +199,7 @@
                                         data-id="{{ u.admin_id }}" data-fullname="{{ u.fullname }}"
                                         onclick="openReset(this)"
                                         class="text-slate-400 hover:text-amber-400 transition-colors p-1.5"><i class="fa-solid fa-key"></i></button>
-                                    <form method="post" action="{% url 'toggle_staff_status' u.admin_id %}" onsubmit="return confirm('{% if u.account_status == 'Active' %}Deactivate{% else %}Activate{% endif %} {{ u.fullname }}?');">
+                                    <form method="post" action="{% url 'toggle_staff_status' u.admin_id %}" data-confirm="{% if u.account_status == 'Active' %}Deactivate{% else %}Activate{% endif %} {{ u.fullname }}?">
                                         {% csrf_token %}
                                         {% if u.account_status == 'Active' %}
                                         <button title="Deactivate" class="text-slate-400 hover:text-rose-400 transition-colors p-1.5"><i class="fa-solid fa-user-slash"></i></button>
@@ -229,26 +230,26 @@
             <form id="userForm" method="post" action="{% url 'create_staff' %}" class="px-6 py-5 space-y-4">
                 {% csrf_token %}
                 <div>
-                    <label class="field-label">Full Name</label>
+                    <label for="f_fullname" class="field-label">Full Name</label>
                     <input type="text" name="fullname" id="f_fullname" class="field-input" required>
                 </div>
                 <div>
-                    <label class="field-label">Email</label>
+                    <label for="f_email" class="field-label">Email</label>
                     <input type="email" name="email" id="f_email" class="field-input" required>
                 </div>
                 <div id="passwordWrap">
-                    <label class="field-label">Password</label>
+                    <label for="f_password" class="field-label">Password</label>
                     <input type="text" name="password" id="f_password" class="field-input" placeholder="Min. 6 characters">
                 </div>
                 <div class="grid grid-cols-2 gap-4">
                     <div>
-                        <label class="field-label">Role</label>
+                        <label for="f_role" class="field-label">Role</label>
                         <select name="role" id="f_role" class="field-input">
                             {% for value, label in role_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
                         </select>
                     </div>
                     <div>
-                        <label class="field-label">Status</label>
+                        <label for="f_status" class="field-label">Status</label>
                         <select name="account_status" id="f_status" class="field-input">
                             {% for value, label in status_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
                         </select>
@@ -297,7 +298,7 @@
                 {% csrf_token %}
                 <p class="text-xs text-slate-400">Set a new password for <span id="resetName" class="text-slate-200 font-semibold"></span>.</p>
                 <div>
-                    <label class="field-label">New Password</label>
+                    <label for="r_password" class="field-label">New Password</label>
                     <input type="text" name="password" id="r_password" class="field-input" placeholder="Min. 6 characters" required>
                 </div>
                 <div class="flex items-center justify-end gap-2 pt-2">

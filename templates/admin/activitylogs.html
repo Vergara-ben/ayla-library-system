@@ -83,6 +83,7 @@
         }
         .mobile-menu-btn { display: none; align-items: center; justify-content: center; width: 40px; height: 40px; margin-right: .75rem; color: var(--text-secondary); }
     </style>
+    <script src="{% static 'js/ayla-dialog.js' %}"></script>
 </head>
 <body class="flex h-screen overflow-hidden">
 
@@ -138,13 +139,13 @@
             <form method="get" class="rounded-xl border border-slate-800/80 p-4" style="background-color: var(--bg-card);">
                 <div class="flex flex-wrap items-end gap-3">
                     <div class="flex-1 min-w-[220px]">
-                        <label class="block text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1.5">Search</label>
-                        <input type="text" name="q" value="{{ q }}" class="filter-field w-full"
+                        <label for="f_q" class="block text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1.5">Search</label>
+                        <input id="f_q" type="text" name="q" value="{{ q }}" class="filter-field w-full"
                                placeholder="name, patron, detail or record id">
                     </div>
                     <div>
-                        <label class="block text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1.5">Role</label>
-                        <select name="role" class="filter-field">
+                        <label for="f_role" class="block text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1.5">Role</label>
+                        <select id="f_role" name="role" class="filter-field">
                             <option value="">All roles</option>
                             {% for key, label in role_choices %}
                             <option value="{{ key }}" {% if role == key %}selected{% endif %}>{{ label }}</option>
@@ -152,8 +153,8 @@
                         </select>
                     </div>
                     <div>
-                        <label class="block text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1.5">Action</label>
-                        <select name="action" class="filter-field">
+                        <label for="f_action" class="block text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1.5">Action</label>
+                        <select id="f_action" name="action" class="filter-field">
                             <option value="">All actions</option>
                             {% for a in all_actions %}
                             <option value="{{ a }}" {% if action == a %}selected{% endif %}>{{ a }}</option>
@@ -161,8 +162,8 @@
                         </select>
                     </div>
                     <div>
-                        <label class="block text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1.5">Record type</label>
-                        <select name="entity" class="filter-field">
+                        <label for="f_entity" class="block text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1.5">Record type</label>
+                        <select id="f_entity" name="entity" class="filter-field">
                             <option value="">All types</option>
                             {% for e in all_entities %}
                             <option value="{{ e }}" {% if entity == e %}selected{% endif %}>{{ e }}</option>
@@ -170,12 +171,12 @@
                         </select>
                     </div>
                     <div>
-                        <label class="block text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1.5">From</label>
-                        <input type="date" name="from" value="{{ date_from }}" class="filter-field">
+                        <label for="f_from" class="block text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1.5">From</label>
+                        <input id="f_from" type="date" name="from" value="{{ date_from }}" class="filter-field">
                     </div>
                     <div>
-                        <label class="block text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1.5">To</label>
-                        <input type="date" name="to" value="{{ date_to }}" class="filter-field">
+                        <label for="f_to" class="block text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1.5">To</label>
+                        <input id="f_to" type="date" name="to" value="{{ date_to }}" class="filter-field">
                     </div>
                     <button type="submit" class="px-5 py-2 rounded-lg bg-cyan-700/30 text-cyan-300 border border-cyan-800/50 font-semibold text-sm hover:bg-cyan-700/40 transition-colors">
                         <i class="fa-solid fa-filter"></i> Filter

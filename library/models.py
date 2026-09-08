@@ -1,9 +1,11 @@
+import math
+
 from django.db import models
 from django.utils import timezone
 from datetime import time
 
-from .modules import MODULE_KEYS, MODULE_LABELS, clean_module_keys
-from .names import compose_name, name_matches, parse_name
+from .modules import MODULE_LABELS, clean_module_keys
+from .names import compose_name, parse_name
 
 
 class ActiveLocationManager(models.Manager):
@@ -119,10 +121,14 @@ class BLEBeacon(models.Model):
     # Eddystone-UID: 10-byte namespace + 6-byte instance, stored as hex.
     namespace_id = models.CharField(max_length=32, blank=True, null=True)
     instance_id = models.CharField(max_length=16, blank=True, null=True)
-    # Calibration. tx_power is the RSSI measured one metre from this beacon and
-    # path_loss_n the environment exponent (2.0 free space; 2.5-3.5 indoors with
-    # metal shelving). Both are per-beacon because they differ per unit and per
-    # aisle; null falls back to the conservative defaults in the client.
+    # Calibration. tx_power is the RSSI measured one metre from this beacon, and
+    # path_loss_n the environment exponent: 2.5 by default, which suits a room
+    # with shelving in it. 2.0 is free space -- the one value that is never true
+    # in a library -- and 3.5 is a heavily obstructed aisle. Too low reads every
+    # distance long, too high reads them short.
+    #
+    # Both are per-beacon because they genuinely differ per unit and per aisle;
+    # null falls back to the client's defaults.
     tx_power = models.IntegerField(blank=True, null=True)
     path_loss_n = models.FloatField(blank=True, null=True)
     map_x = models.FloatField()
@@ -188,6 +194,27 @@ class Door(models.Model):
         on_delete=models.CASCADE,
         db_column='room_id'
     )
+    # The room on the far side, when this doorway joins two of them.
+    #
+    # A door is one hole in one wall, and that wall usually has a room on each
+    # side. Recording only one of them meant a shared doorway had to be drawn
+    # twice -- two symbols on one wall, free to drift apart, with nothing
+    # saying they were the same opening -- and left the system unable to
+    # answer "which rooms connect to which", which is the question navigation
+    # is really made of.
+    #
+    # Nullable because plenty of doors are not shared: a door to a corridor
+    # that was never drawn as a room, or to the outside, has no far side.
+    # SET_NULL rather than CASCADE, because deleting the far room should
+    # demote this to an exterior door, not destroy the doorway itself.
+    room_b = models.ForeignKey(
+        Room,
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        related_name='doors_far_side',
+        db_column='room_b_id'
+    )
     map_x = models.FloatField()
     map_y = models.FloatField()
     width = models.FloatField(default=28)       # opening size, canvas units
@@ -203,9 +230,171 @@ class Door(models.Model):
         return self.label or f"Door {self.door_id}"
 
 
+# ─── 3c. OBSTACLES / FURNITURE ────────────────────────────────
+class Obstacle(models.Model):
+    """Anything drawn on the floor that is neither a room nor a shelf.
+
+    Reading tables, the issue counter, structural pillars, planters, a
+    partition — the things a patron has to walk around. They were missing
+    entirely, which made the map read as a set of empty rooms with shelves
+    floating in them, and left a patron following a route with no idea that a
+    row of tables sits between them and the aisle.
+
+    Shaped like Room deliberately: a polygon in canvas coordinates with the
+    centroid kept as the label anchor, so everything that already knows how to
+    draw a room can draw one of these with no new geometry code.
+
+    `kind` exists so the map can style a pillar differently from a table
+    without anyone having to name every single object.
+    """
+
+    KIND_CHOICES = [
+        ('Table', 'Table'),
+        ('Counter', 'Counter / desk'),
+        ('Seating', 'Seating area'),
+        ('Pillar', 'Pillar / column'),
+        ('Partition', 'Partition / divider'),
+        ('Equipment', 'Equipment'),
+        ('Other', 'Other obstacle'),
+    ]
+
+    obstacle_id = models.AutoField(primary_key=True)
+    floor_plan = models.ForeignKey(
+        FloorPlan,
+        on_delete=models.CASCADE,
+        db_column='floor_plan_id'
+    )
+    kind = models.CharField(max_length=20, choices=KIND_CHOICES, default='Table')
+    # Optional: "Study table 3" is worth labelling, a pillar is not.
+    name = models.CharField(max_length=255, blank=True, null=True)
+    geometry = models.JSONField(blank=True, null=True)
+    map_x = models.FloatField(default=0)
+    map_y = models.FloatField(default=0)
+    # Whether patrons see it. A partition that comes down for an event can be
+    # switched off without deleting the shape and redrawing it next time.
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = 'Obstacles'
+        ordering = ['kind', 'obstacle_id']
+        indexes = [models.Index(fields=['floor_plan', 'is_active'])]
+
+    @property
+    def label(self):
+        """What to write on the map: the given name, else the kind."""
+        return (self.name or '').strip() or self.get_kind_display()
+
+    def __str__(self):
+        return f'{self.get_kind_display()} #{self.obstacle_id}'
+
+
+# ─── 3d. STAIRWAYS / LIFTS ────────────────────────────────────
+class Stairway(models.Model):
+    """A way between floors: a staircase, a lift, or a ramp.
+
+    Not an obstacle with a label on it, for two reasons.
+
+    A stair is drawn differently. On any real floor plan it is a footprint with
+    tread lines across it and an arrow showing which way is up -- a plain
+    rectangle says "something is here" where the convention says "these are
+    steps, and they rise that way". `bearing` is what lets the map draw the
+    treads perpendicular to the direction of travel instead of guessing.
+
+    And a stair is the only object on the plan that means something on a
+    *different* floor. `connects_to` is the point of this model: until now
+    Waypoint had no notion of a stair, so a route stopped dead at the floor
+    boundary and the patron was told the book was upstairs without being told
+    how to get there. With the link recorded, the map can walk them to the foot
+    of the right staircase and hand over at the landing.
+    """
+
+    KIND_CHOICES = [
+        ('Stairs', 'Staircase'),
+        ('Elevator', 'Lift / elevator'),
+        ('Ramp', 'Ramp'),
+    ]
+    DIRECTION_CHOICES = [
+        ('up', 'Goes up'),
+        ('down', 'Goes down'),
+        ('both', 'Up and down'),
+    ]
+
+    stairway_id = models.AutoField(primary_key=True)
+    floor_plan = models.ForeignKey(
+        FloorPlan, on_delete=models.CASCADE, db_column='floor_plan_id',
+        related_name='stairways',
+    )
+    kind = models.CharField(max_length=20, choices=KIND_CHOICES, default='Stairs')
+    name = models.CharField(max_length=255, blank=True, null=True)
+
+    # Footprint, same shape as a room or an obstacle.
+    geometry = models.JSONField(blank=True, null=True)
+    map_x = models.FloatField(default=0)
+    map_y = models.FloatField(default=0)
+
+    # Degrees clockwise from canvas "up", along the direction of travel. Treads
+    # are drawn across this, so a stair running north-south gets horizontal
+    # steps rather than a rectangle full of guesswork.
+    bearing = models.FloatField(default=0)
+    direction = models.CharField(max_length=8, choices=DIRECTION_CHOICES, default='both')
+
+    # The floor at the other end. Nullable because a plan is often drawn before
+    # the floor above it exists, and a stair with nowhere to go is still worth
+    # showing -- it is a real thing in the room.
+    connects_to = models.ForeignKey(
+        FloorPlan, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='stairways_arriving', db_column='connects_to_id',
+    )
+
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = 'Stairways'
+        ordering = ['kind', 'stairway_id']
+        indexes = [models.Index(fields=['floor_plan', 'is_active'])]
+
+    @property
+    def label(self):
+        return (self.name or '').strip() or self.get_kind_display()
+
+    @property
+    def destination_label(self):
+        """"2nd floor", or empty when this stair is not linked to anything yet."""
+        return self.connects_to.floor_label if self.connects_to_id else ''
+
+    def __str__(self):
+        return f'{self.get_kind_display()} #{self.stairway_id}'
+
+
 # ─── 4. SHELVES ───────────────────────────────────────────────
 class Shelf(models.Model):
+    # What the thing physically is. All of these hold books, which is what
+    # makes them a Shelf rather than an Obstacle: a book points at a ShelfLevel,
+    # so anything a book can sit on has to be one of these. An Obstacle is
+    # furniture that a route has to go around and nothing lives on.
+    KIND_CHOICES = [
+        ('Shelf', 'Shelf / bookcase'),
+        ('Table', 'Table'),
+        ('Display', 'Display stand'),
+        ('Cart', 'Trolley / cart'),
+        ('Ledge', 'Window ledge'),
+    ]
+
+    # Where the unit is fixed. A wall or ceiling unit occupies plan area but
+    # not floor area -- you walk underneath it -- so it is drawn differently and
+    # must not be treated as something a route has to go around.
+    MOUNT_CHOICES = [
+        ('Floor', 'Stands on the floor'),
+        ('Wall', 'Fixed to the wall'),
+        ('Ceiling', 'Hung from the ceiling'),
+    ]
+
     shelf_id = models.AutoField(primary_key=True)
+    kind = models.CharField(max_length=20, choices=KIND_CHOICES, default='Shelf')
+    mount = models.CharField(max_length=10, choices=MOUNT_CHOICES, default='Floor')
+    # Height of the lowest shelf above the floor, in metres. Only meaningful
+    # for a unit that is off the ground; null means nobody measured it.
+    mount_height_m = models.FloatField(blank=True, null=True)
     room = models.ForeignKey(
         Room,
         on_delete=models.CASCADE,
@@ -223,11 +412,51 @@ class Shelf(models.Model):
     # carries its own; rotation is applied about the centre of this rectangle.
     width = models.FloatField(default=46)       # along the shelf run
     depth = models.FloatField(default=14)       # front to back
+    # A traced outline, for the shelves that are not rectangles -- the ones
+    # tucked into a corner at an angle, and the run that turns. Null keeps the
+    # width/depth/rotation rectangle above, which is what every shelf drawn
+    # before this field existed still uses, so none of them move.
+    geometry = models.JSONField(blank=True, null=True)
     description = models.TextField(blank=True, null=True)
     is_active = models.BooleanField(default=True)
 
     class Meta:
         db_table = 'Shelves'
+
+    @property
+    def label(self):
+        """'Shelf A', or 'Table 3 (table)' when the kind is worth saying."""
+        bits = []
+        if self.kind and self.kind != 'Shelf':
+            bits.append(self.get_kind_display().lower())
+        if self.mount and self.mount != 'Floor':
+            bits.append('%s-mounted' % self.mount.lower())
+        return f'{self.name} ({", ".join(bits)})' if bits else self.name
+
+    @property
+    def is_elevated(self):
+        """Off the floor, so a route passes under it rather than around it."""
+        return self.mount in ('Wall', 'Ceiling')
+
+    def footprint(self):
+        """The outline to draw, as [[x, y], ...] in canvas units.
+
+        One answer for both shapes, computed once here rather than in each of
+        the four maps that draw a shelf: the traced polygon when there is one,
+        otherwise the corners of the rotated rectangle.
+        """
+        if self.geometry and len(self.geometry) >= 3:
+            return [[float(p[0]), float(p[1])] for p in self.geometry]
+        if self.map_x is None or self.map_y is None:
+            return []
+        rad = math.radians(self.rotation or 0)
+        cos, sin = math.cos(rad), math.sin(rad)
+        hw, hd = (self.width or 46) / 2.0, (self.depth or 14) / 2.0
+        return [
+            [round(self.map_x + dx * cos - dy * sin, 2),
+             round(self.map_y + dx * sin + dy * cos, 2)]
+            for dx, dy in ((-hw, -hd), (hw, -hd), (hw, hd), (-hw, hd))
+        ]
 
     def __str__(self):
         return self.name
@@ -251,6 +480,14 @@ class Waypoint(models.Model):
         null=True,
         db_column='linked_shelf'
     )
+    # Laid down by "Generate walkable route" rather than placed by hand.
+    #
+    # The distinction is what makes generation safe to re-run: pressing the
+    # button again replaces only what the button made. Without it the second
+    # press would quietly destroy every correction the Administrator had made
+    # since the first -- which is the fastest way to make a helpful feature
+    # one nobody dares touch.
+    is_generated = models.BooleanField(default=False)
 
     class Meta:
         db_table = 'Waypoints'
@@ -293,13 +530,41 @@ class ShelfLevel(models.Model):
     )
     level_number = models.IntegerField()
     category = models.CharField(max_length=255, blank=True, null=True)
+    # The flat top of the unit, above the highest shelf. Not a numbered level:
+    # in a library this full it is a real place books end up, and calling it
+    # "Level 5" would send someone looking inside the case for something
+    # sitting on top of it.
+    is_top = models.BooleanField(default=False)
+    # The space underneath, which in a library this full is a real place books
+    # are kept -- and, like the top, is not a numbered shelf inside the case.
+    is_under = models.BooleanField(default=False)
+    # Bays across the run, for units divided both ways. Null means the level is
+    # not subdivided, which is every shelf that existed before this field.
+    column_number = models.IntegerField(blank=True, null=True)
     is_active = models.BooleanField(default=True)
 
     class Meta:
         db_table = 'Shelf_Levels'
 
+    @property
+    def label(self):
+        base = ('Top' if self.is_top
+                else 'Underneath' if self.is_under
+                else f'Level {self.level_number}')
+        if self.column_number:
+            return f'{base}, Column {self.column_number}'
+        return base
+
+    @property
+    def short_label(self):
+        """For a QR label, where the width is measured in millimetres."""
+        base = ('Top' if self.is_top
+                else 'Under' if self.is_under
+                else f'L{self.level_number}')
+        return f'{base}C{self.column_number}' if self.column_number else base
+
     def __str__(self):
-        return f"Level {self.level_number} - {self.category}"
+        return f"{self.label} - {self.category}"
 
 
 # ─── 9. BOOKS ─────────────────────────────────────────────────
@@ -341,6 +606,40 @@ class Book(models.Model):
         null=True,
         db_column='shelf_level_id'
     )
+    # Where along the level this copy sits: 1 is the leftmost book, counting
+    # from the end you reach first walking up to the shelf.
+    #
+    # The shelf level says which board it is on; this says where along it. A
+    # patron standing in front of a full bay still has to read every spine
+    # without it, which is the difference between a catalogue that says where
+    # a book lives and one that actually locates it.
+    #
+    # Nullable, and deliberately not enforced unique: shelving drifts as books
+    # are borrowed and put back, so a slot is the best record of where a book
+    # was last seen rather than a guarantee of where it is now.
+    shelf_slot = models.PositiveIntegerField(blank=True, null=True)
+    # How worn the copy is. Three steps rather than five: with New/Fair/Poor
+    # in the list, two people looking at the same book pick different words,
+    # and a scale nobody applies consistently is worse than a coarse one.
+    CONDITION_CHOICES = [
+        ('Good', 'Good'),
+        ('Worn', 'Worn'),
+        ('Damaged', 'Damaged'),
+    ]
+    condition = models.CharField(max_length=10, choices=CONDITION_CHOICES,
+                                 default='Good')
+
+    # The call number written on the spine, e.g. "FIC A31p 1963": the class,
+    # the author's Cutter mark, the first letter of the title, and the year.
+    #
+    # Derived rather than typed, because every part of it already exists on the
+    # record -- asking a cataloguer to retype what the genre, author, title and
+    # year already say is how the two drift apart. Stored rather than computed
+    # on the fly because it goes on a printed label: once a spine is labelled,
+    # the number must not change underneath it because somebody corrected a
+    # genre. Blank means "work it out"; anything typed here is kept.
+    call_number = models.CharField(max_length=64, blank=True, null=True)
+
     title = models.CharField(max_length=255)
     author = models.CharField(max_length=255)
     publication_year = models.IntegerField(blank=True, null=True)
@@ -355,6 +654,104 @@ class Book(models.Model):
     )
     cover_img_url = models.CharField(max_length=255, blank=True, null=True)
     qr_code = models.CharField(max_length=255, blank=True, null=True)
+
+    # Second and third letters of the surname, as digits. A real Cutter table
+    # is a printed book of them; this is a house scheme that is deterministic,
+    # spreads names evenly, and can be overridden per book by anybody who wants
+    # the published number instead.
+    @staticmethod
+    def _cutter_digits(surname):
+        digits = ''
+        for ch in surname[1:]:
+            if ch.isalpha():
+                digits += str(((ord(ch.lower()) - ord('a')) % 9) + 1)
+            if len(digits) == 2:
+                break
+        return digits or '1'
+
+    @staticmethod
+    def _surname_of(author):
+        """Austen from "Austen, Jane" or from "Jane Austen"."""
+        author = (author or '').strip()
+        if not author:
+            return ''
+        if ',' in author:
+            return author.split(',', 1)[0].strip()
+        return author.split()[-1]
+
+    @staticmethod
+    def _title_letter(title):
+        """First letter that carries meaning: "The Quiet Sea" files under q."""
+        words = [w for w in (title or '').split() if w]
+        if words and words[0].lower() in ('a', 'an', 'the'):
+            words = words[1:]
+        for word in words:
+            for ch in word:
+                if ch.isalpha():
+                    return ch.lower()
+        return ''
+
+    def location_label(self, short=False):
+        """'Shelf A Column 1 Level 2', or 'A C1 L2' where space is tight.
+
+        Shelf, then across, then up -- the order somebody walks it: find the
+        bay, find the bay's section, then look up to the board. The short form
+        is the same three facts for a narrow column or a printed label.
+
+        A top or an underside is named rather than numbered, because "L5" sends
+        somebody to the fifth board of a case whose books are on its lid.
+        """
+        level = self.shelf_level
+        if level is None:
+            return ''
+        shelf = level.shelf
+        name = (getattr(shelf, 'name', '') or '').strip()
+        if short and name:
+            # "Shelf A" is written "A": the word is the same on every bay and
+            # carries nothing once the column is only a few characters wide.
+            words = name.split()
+            if len(words) > 1 and words[0].lower() in ('shelf', 'bay', 'case', 'rack'):
+                name = ' '.join(words[1:])
+
+        parts = [name] if name else []
+        if level.column_number:
+            parts.append(('C%d' % level.column_number) if short
+                         else ('Column %d' % level.column_number))
+        if level.is_top:
+            parts.append('Top')
+        elif level.is_under:
+            parts.append('Under' if short else 'Underneath')
+        elif level.level_number:
+            parts.append(('L%d' % level.level_number) if short
+                         else ('Level %d' % level.level_number))
+        return ' '.join(parts)
+
+    @property
+    def location(self):
+        """The long form, for a template that cannot pass arguments."""
+        return self.location_label()
+
+    @property
+    def location_short(self):
+        return self.location_label(short=True)
+
+    def derive_call_number(self):
+        """The spine number this copy would be given."""
+        klass = ''.join(ch for ch in (self.genre or '') if ch.isalpha())[:3].upper()
+        surname = self._surname_of(self.author)
+        mark = ''
+        if surname:
+            mark = surname[0].upper() + self._cutter_digits(surname) + self._title_letter(self.title)
+        year = str(self.publication_year) if self.publication_year else ''
+        return ' '.join(p for p in (klass or 'GEN', mark, year) if p)
+
+    def save(self, *args, **kwargs):
+        # Filled here rather than at each of the four places a book can be
+        # created, so an imported book and a hand-entered one are numbered the
+        # same way. Never recomputed: a spine already labelled keeps its number.
+        if not (self.call_number or '').strip():
+            self.call_number = self.derive_call_number()
+        super().save(*args, **kwargs)
 
     objects = models.Manager()
     active_locations = ActiveLocationManager()

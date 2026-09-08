@@ -47,6 +47,7 @@
     <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
     <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
     <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
+    <script src="{% static 'js/ayla-dialog.js' %}"></script>
 </head>
 <body class="flex h-screen overflow-hidden">
 
@@ -330,29 +331,54 @@ function parseEddystone(e) {
   return { txPower: v.getInt8(1), namespace: hex(v, 2, 12), instance: hex(v, 12, 18) };
 }
 
+// A UUID is the same UUID however it was typed. Vendors print theirs
+// unhyphenated on the sticker, their configuration apps show them hyphenated,
+// and some show them upper case -- so the configured value and the advertised
+// one routinely disagree on punctuation while naming the identical beacon.
+// Comparing the hex digits alone is what lets
+// "FDA50693-A4E2-4FB1-AFCF-C6EB07647825" match
+// "fda50693a4e24fb1afcfc6eb07647825", as it must: a punctuation-sensitive
+// compare rejects every single packet while the configuration looks perfectly
+// correct on screen, and all the map can report is that no beacons were seen.
+function hexOnly(value) {
+  return String(value == null ? '' : value).toLowerCase().replace(/[^0-9a-f]/g, '');
+}
+
+// Bluetooth's short UUID forms are the 128-bit UUID with the rest implied, so
+// 'feaa', '0xFEAA' and '0000feaa-0000-1000-8000-00805f9b34fb' all name one
+// service. The browser always reports the long form; an Administrator will
+// usually have typed a short one.
+const BLUETOOTH_BASE_SUFFIX = '00001000800000805f9b34fb';
+function canonicalServiceUuid(value) {
+  const h = hexOnly(value);
+  if (h.length === 4) return '0000' + h + BLUETOOTH_BASE_SUFFIX;
+  if (h.length === 8) return h + BLUETOOTH_BASE_SUFFIX;
+  return h;
+}
+
 function matchBeacon(e) {
   if (!mapData) return null;
   const ib = parseIBeacon(e);
   const ed = parseEddystone(e);
-  const advUuids = (e.uuids || []).map((u) => String(u).toLowerCase());
+  const advUuids = (e.uuids || []).map(canonicalServiceUuid);
   const name = e.device && e.device.name;
 
   for (const b of mapData.beacons) {
     const type = b.advertisement_type || 'iBeacon';
-    const bu = String(b.beacon_uuid || '').toLowerCase();
+    const bu = hexOnly(b.beacon_uuid);
     if (type === 'iBeacon' && ib) {
-      if (ib.uuid !== bu) continue;
+      if (!bu || hexOnly(ib.uuid) !== bu) continue;
       if (b.major != null && b.major !== ib.major) continue;
       if (b.minor != null && b.minor !== ib.minor) continue;
       return { beacon: b, advertisedTxPower: ib.measuredPower };
     }
     if (type === 'Eddystone' && ed) {
-      if (b.namespace_id && b.namespace_id !== ed.namespace) continue;
-      if (b.instance_id && b.instance_id !== ed.instance) continue;
+      if (b.namespace_id && hexOnly(b.namespace_id) !== ed.namespace) continue;
+      if (b.instance_id && hexOnly(b.instance_id) !== ed.instance) continue;
       if (!b.namespace_id && !b.instance_id) continue;
       return { beacon: b, advertisedTxPower: ed.txPower - 41 };
     }
-    if (type === 'ServiceUUID' && advUuids.includes(bu)) return { beacon: b, advertisedTxPower: null };
+    if (type === 'ServiceUUID' && bu && advUuids.includes(canonicalServiceUuid(b.beacon_uuid))) return { beacon: b, advertisedTxPower: null };
     if (type === 'DeviceName' && name && name === b.label) return { beacon: b, advertisedTxPower: null };
   }
   return null;
@@ -509,8 +535,11 @@ function renderConfig() {
   // A duplicate identity is worth calling out here rather than leaving it to
   // show up as a position that will not move: beacons ship with identical
   // factory defaults, and three of those can never be told apart.
-  const identity = (b) => [b.advertisement_type, b.beacon_uuid, b.major, b.minor,
-                           b.namespace_id, b.instance_id].join('|').toLowerCase();
+  // Normalised the same way matching normalises, so two rows that spell one
+  // UUID differently are still recognised as the same beacon twice over.
+  const identity = (b) => [b.advertisement_type, hexOnly(b.beacon_uuid), b.major,
+                           b.minor, hexOnly(b.namespace_id),
+                           hexOnly(b.instance_id)].join('|').toLowerCase();
   const counts = {};
   mapData.beacons.forEach((b) => { counts[identity(b)] = (counts[identity(b)] || 0) + 1; });
 

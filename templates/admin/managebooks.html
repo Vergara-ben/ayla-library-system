@@ -19,6 +19,16 @@
             integrity="sha384-c9d8RFSL+u3exBOJ4Yp3HUJXS4znl9f+z66d1y54ig+ea249SpqR+w1wyvXz/lk+" crossorigin="anonymous"
             referrerpolicy="no-referrer"></script>
     <script src="{% static 'js/qrsource.js' %}"></script>
+    <style>
+        /* Same cart rows as Shelf Manager's "Add Books to Shelf Level", so the
+           two pickers do not read as two different ideas. */
+        .tbtn { width: 24px; height: 24px; border-radius: 6px; border: 1px solid var(--border-color); display: flex; align-items: center; justify-content: center; font-size: 10px; cursor: pointer; background: transparent; flex-shrink: 0; }
+        .tbtn.add { color: var(--accent); } .tbtn.add:hover { background: var(--tint-accent); }
+        .tbtn.del { color: var(--danger); } .tbtn.del:hover { background: var(--tint-danger); }
+        .pick-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border-color); background: rgba(2, 6, 23, 0.4); }
+        .pick-row:hover { border-color: var(--accent); }
+        .pick-row.group { border-style: dashed; }
+    </style>
     
     <link rel="stylesheet" href="{% static 'css/theme.css' %}">
     <style>
@@ -121,6 +131,7 @@
     <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
     <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
     <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
+    <script src="{% static 'js/ayla-dialog.js' %}"></script>
 </head>
 <body class="flex h-screen overflow-hidden">
 
@@ -182,6 +193,9 @@
                             <i class="fa-solid fa-upload"></i> Import Excel
                         </button>
                         <input type="file" id="excelFileInput" accept=".xlsx" style="display: none;" onchange="uploadExcelFile(this)">
+                        <button onclick="openLabelPicker()" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-amber-500/90 text-[11px] font-semibold px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors">
+                            <i class="fa-solid fa-print"></i> <span id="toolbarLabelsLabel">Print QR Labels</span>
+                        </button>
                         <button onclick="openAddModal()" class="bg-cyan-700/30 text-cyan-400 border border-cyan-800/80 hover:bg-cyan-700/50 text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
                             <i class="fa-solid fa-plus text-[10px]"></i> Add Book
                         </button>
@@ -198,6 +212,7 @@
                         <button onclick="openQRScanner()" class="bg-cyan-700/30 text-cyan-400 border border-cyan-800/80 hover:bg-cyan-700/50 text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
                             <i class="fa-solid fa-qrcode text-[10px]"></i> Scan QR
                         </button>
+
                         <div class="flex items-center gap-2 self-end lg:self-auto">
                             <div class="relative">
                                 {# Material type, not genre: genre says what it is about, this says #}
@@ -205,6 +220,13 @@
                                 <select id="materialFilter" onchange="applyBookFilters()" class="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-400 focus:outline-none pr-8 appearance-none min-w-[120px]">
                                     <option value="">All Types</option>
                                     {% for value, label in material_choices %}<option value="{{ value }}" {% if value == material %}selected{% endif %}>{{ label }}</option>{% endfor %}
+                                </select>
+                                <i class="fa-solid fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-slate-600 text-[10px] pointer-events-none"></i>
+                            </div>
+                            <div class="relative">
+                                <select id="copiesFilter" onchange="applyBookFilters()" title="How many copies of the title the library holds" class="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-400 focus:outline-none pr-8 appearance-none min-w-[130px]">
+                                    <option value="">Any copies</option>
+                                    {% for value, label in copies_choices %}<option value="{{ value }}" {% if value == copies %}selected{% endif %}>{{ label }}</option>{% endfor %}
                                 </select>
                                 <i class="fa-solid fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-slate-600 text-[10px] pointer-events-none"></i>
                             </div>
@@ -229,15 +251,19 @@
                     <table class="w-full text-left border-collapse">
                         <thead>
                             <tr class="border-b border-slate-800/80 text-[10px] font-bold tracking-wider text-slate-500 uppercase bg-slate-900/5">
-                                <th class="py-3 px-6 w-16">ID</th>
-                                <th class="py-3 px-6">Book</th>
+                                <th class="py-3 px-4 w-10 text-center">
+                                    <input type="checkbox" id="selectAllBooks" onchange="toggleAllBooks(this)"
+                                           class="accent-cyan-600 w-3.5 h-3.5 align-middle cursor-pointer"
+                                           title="Select every book on this page" aria-label="Select every book on this page">
+                                </th>
+                                <th class="py-3 px-6">Title</th>
                                 <th class="py-3 px-6">Author</th>
-                                <th class="py-3 px-6">ISBN</th>
-                                <th class="py-3 px-6">Call No.</th>
                                 <th class="py-3 px-6 w-20">Year</th>
-                                <th class="py-3 px-6 w-24">Category</th>
+                                <th class="py-3 px-6 w-24">Genre</th>
+                                <th class="py-3 px-6 w-24">Condition</th>
+                                <th class="py-3 px-6">Code label</th>
+                                <th class="py-3 px-6">Location</th>
                                 <th class="py-3 px-6 text-center w-20">Copies</th>
-                                <th class="py-3 px-6 text-center w-24">Available</th>
                                 <th class="py-3 px-6 w-24">Status</th>
                                 <th class="py-3 px-6 text-center w-28">Actions</th>
                             </tr>
@@ -245,7 +271,11 @@
                         <tbody class="divide-y divide-slate-800/40 text-xs text-slate-300">
                             {% for book in books %}
                             <tr class="hover:bg-slate-800/10 transition-colors">
-                                <td class="py-4 px-6 font-mono text-slate-500">{{ book.book_id }}</td>
+                                <td class="py-4 px-4 text-center">
+                                    <input type="checkbox" class="book-tick accent-cyan-600 w-3.5 h-3.5 cursor-pointer"
+                                           value="{{ book.book_id }}" onchange="onBookTick()"
+                                           aria-label="Select {{ book.title }}">
+                                </td>
                                 <td class="py-4 px-6 flex items-start gap-3">
                                     <div class="w-8 h-10 rounded bg-cyan-950/40 border border-cyan-900/30 flex-shrink-0 flex items-center justify-center text-[10px] font-medium text-cyan-700 select-none"></div>
                                     <div>
@@ -254,22 +284,25 @@
                                     </div>
                                 </td>
                                 <td class="py-4 px-6 text-slate-300">{{ book.author }}</td>
-                                <td class="py-4 px-6 font-mono text-slate-400">{{ book.ISBN|default:"-" }}</td>
-                                <td class="py-4 px-6 font-mono text-slate-400">{% if book.shelf_level %}{% if book.shelf_level.shelf %}{{ book.shelf_level.shelf.name }} · {% endif %}{{ book.shelf_level.category|default:book.shelf_level.level_number }}{% else %}-{% endif %}</td>
                                 <td class="py-4 px-6 text-slate-400">{{ book.publication_year|default:"-" }}</td>
                                 <td class="py-4 px-6">
                                     <span class="bg-cyan-950/60 text-cyan-400 border border-cyan-900/40 px-1.5 py-0.5 rounded text-[9px] font-bold tracking-wide uppercase">{{ book.genre|default:"General" }}</span>
                                 </td>
-                                <td class="py-4 px-6 text-center font-semibold text-slate-400">{{ book.copies|default:1 }}</td>
-                                <td class="py-4 px-6 text-center">
-                                    {% if book.status == 'Available' %}
-                                        <span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-bold">{{ book.copies|default:1 }}</span>
-                                    {% elif book.status == 'Borrowed' %}
-                                        <span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-amber-500/10 text-amber-500 border border-amber-500/20 text-[10px] font-bold">0</span>
-                                    {% else %}
-                                        <span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-rose-500/10 text-rose-400 border border-rose-500/20 text-[10px] font-bold">0</span>
-                                    {% endif %}
+                                <td class="py-4 px-6">
+                                    {# Colour carries the meaning at a glance; the word carries it for #}
+                                    {# anyone who cannot tell these two greens and ambers apart.       #}
+                                    <span class="px-1.5 py-0.5 rounded text-[9px] font-bold tracking-wide uppercase border
+                                        {% if book.condition == 'Damaged' %}bg-rose-950/50 text-rose-300 border-rose-800/50
+                                        {% elif book.condition == 'Worn' %}bg-amber-950/50 text-amber-300 border-amber-800/50
+                                        {% else %}bg-slate-800/60 text-slate-400 border-slate-700/50{% endif %}">{{ book.condition|default:"Good" }}</span>
                                 </td>
+                                {# The spine number. Monospaced so a column of them lines up and a #}
+                                {# transposed digit is visible.                                    #}
+                                <td class="py-4 px-6 font-mono text-slate-300 whitespace-nowrap">{{ book.call_number|default:"—" }}</td>
+                                {# Shelf, then across, then up: the order somebody walks it. The #}
+                                {# short form is the title attribute for anyone reading a label. #}
+                                <td class="py-4 px-6 text-slate-400 whitespace-nowrap" title="{{ book.location_short }}">{{ book.location|default:"not shelved" }}</td>
+                                <td class="py-4 px-6 text-center font-semibold text-slate-400">{{ book.copies|default:1 }}</td>
                                 <td class="py-4 px-6">
                                     <span class="text-[10px] font-bold px-2 py-1 rounded-full
                                         {% if book.status == 'Available' %}bg-emerald-950/50 text-emerald-300 border border-emerald-800/50
@@ -290,7 +323,7 @@
                             </tr>
                             {% empty %}
                             <tr>
-                                <td colspan="8" class="py-8 text-center text-slate-500">No books found in the library.</td>
+                                <td colspan="11" class="py-8 text-center text-slate-500">No books found in the library.</td>
                             </tr>
                             {% endfor %}
                         </tbody>
@@ -341,48 +374,49 @@
             </div>
             <form id="addBookForm" method="post" class="space-y-4 text-xs">
                 {% csrf_token %}
+                <p id="addRunNote" class="hidden rounded-lg border border-emerald-900/50 bg-emerald-950/20 px-3 py-2 text-[10px] text-emerald-300 leading-relaxed"></p>
                 {% if error %}
                     <div class="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">{{ error }}</div>
                 {% endif %}
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div class="space-y-1.5">
-                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Title</label>
+                        <label for="addTitle" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Title</label>
                         <input type="text" name="title" id="addTitle" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" required>
                     </div>
                     <div class="space-y-1.5">
-                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Author</label>
+                        <label for="addAuthor" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Author</label>
                         <input type="text" name="author" id="addAuthor" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" required>
                     </div>
                 </div>
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div class="space-y-1.5">
-                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Publication Year</label>
+                        <label for="addPublicationYear" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Publication Year</label>
                         <input type="number" name="publication_year" id="addPublicationYear" min="1000" max="2099" placeholder="e.g. 2023" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
                     </div>
                     <div class="space-y-1.5">
-                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">ISBN</label>
+                        <label for="addIsbn" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">ISBN</label>
                         <input type="text" name="ISBN" id="addIsbn" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
                     </div>
                 </div>
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div class="space-y-1.5">
-                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Genre</label>
+                        <label for="addGenre" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Genre</label>
                         <input type="text" name="genre" id="addGenre" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
                     </div>
                     <div class="space-y-1.5">
-                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Material Type</label>
+                        <label for="addMaterial" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Material Type</label>
                         <select name="material_type" id="addMaterial" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium appearance-none pr-10 cursor-pointer" style="background-color: var(--bg-input);">
                             {% for value, label in material_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
                         </select>
                     </div>
                     <div class="space-y-1.5">
-                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Cover Image URL</label>
+                        <label for="addCoverImgUrl" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Cover Image URL</label>
                         <input type="text" name="cover_img_url" id="addCoverImgUrl" placeholder="https://example.com/image.jpg" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
                     </div>
                 </div>
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div class="space-y-1.5">
-                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Status</label>
+                        <label for="addStatus" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Status</label>
                         <select name="status" id="addStatus" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium appearance-none pr-10 cursor-pointer" style="background-color: var(--bg-input);">
                             <option value="Available">Available</option>
                             <option value="Borrowed">Borrowed</option>
@@ -396,6 +430,9 @@
                 <div class="pt-4 flex items-center justify-end gap-3">
                     <button type="button" onclick="closeAddModal()" class="px-5 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:text-slate-100 hover:bg-slate-800/40 font-semibold tracking-wide transition-colors min-w-[100px]">
                         Cancel
+                    </button>
+                    <button type="button" onclick="submitAndAddAnother()" class="bg-slate-900 border border-slate-700 hover:bg-slate-800/60 text-cyan-400 font-bold px-5 py-2.5 rounded-lg flex items-center gap-2 tracking-wide transition-colors">
+                        <i class="fa-solid fa-plus text-xs"></i> Save &amp; add another
                     </button>
                     <button type="submit" class="bg-cyan-700 hover:bg-cyan-600 text-white font-bold px-5 py-2.5 rounded-lg flex items-center gap-2 tracking-wide transition-colors shadow-md">
                         <i class="fa-solid fa-check text-xs"></i> Add Book
@@ -424,43 +461,43 @@
                 {% endif %}
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div class="space-y-1.5">
-                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Title</label>
+                        <label for="editTitle" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Title</label>
                         <input type="text" name="title" id="editTitle" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" required>
                     </div>
                     <div class="space-y-1.5">
-                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Author</label>
+                        <label for="editAuthor" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Author</label>
                         <input type="text" name="author" id="editAuthor" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" required>
                     </div>
                 </div>
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div class="space-y-1.5">
-                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Publication Year</label>
+                        <label for="editPublicationYear" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Publication Year</label>
                         <input type="number" name="publication_year" id="editPublicationYear" min="1000" max="2099" placeholder="e.g. 2023" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
                     </div>
                     <div class="space-y-1.5">
-                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">ISBN</label>
+                        <label for="editIsbn" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">ISBN</label>
                         <input type="text" name="ISBN" id="editIsbn" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
                     </div>
                 </div>
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div class="space-y-1.5">
-                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Genre</label>
+                        <label for="editGenre" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Genre</label>
                         <input type="text" name="genre" id="editGenre" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
                     </div>
                     <div class="space-y-1.5">
-                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Material Type</label>
+                        <label for="editMaterial" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Material Type</label>
                         <select name="material_type" id="editMaterial" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium appearance-none pr-10 cursor-pointer" style="background-color: var(--bg-input);">
                             {% for value, label in material_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
                         </select>
                     </div>
                     <div class="space-y-1.5">
-                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Cover Image URL</label>
+                        <label for="editCoverImgUrl" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Cover Image URL</label>
                         <input type="text" name="cover_img_url" id="editCoverImgUrl" placeholder="https://example.com/image.jpg" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
                     </div>
                 </div>
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div class="space-y-1.5">
-                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Status</label>
+                        <label for="editStatus" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Status</label>
                         <select name="status" id="editStatus" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium appearance-none pr-10 cursor-pointer" style="background-color: var(--bg-input);">
                             <option value="Available">Available</option>
                             <option value="Borrowed">Borrowed</option>
@@ -471,7 +508,7 @@
                         </select>
                     </div>
                     <div class="space-y-1.5">
-                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Shelf Level</label>
+                        <label for="editShelfLevel" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Shelf Level</label>
                         <div class="relative">
                             <select name="shelf_level" id="editShelfLevel" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium appearance-none pr-10 cursor-pointer" style="background-color: var(--bg-input);">
                                 <option value="">Select shelf level...</option>
@@ -481,6 +518,26 @@
                             </select>
                             <i class="fa-solid fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 text-[10px] pointer-events-none"></i>
                         </div>
+                    </div>
+                    <div class="space-y-1.5">
+                        <label for="editCondition" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Condition</label>
+                        <select name="condition" id="editCondition" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                            <option value="Good">Good</option>
+                            <option value="Worn">Worn</option>
+                            <option value="Damaged">Damaged</option>
+                        </select>
+                    </div>
+                    <div class="space-y-1.5">
+                        <label for="editCallNumber" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Code label</label>
+                        <input type="text" name="call_number" id="editCallNumber" placeholder="e.g. FIC A31p 1963" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                        <p class="text-[10px] text-slate-500">Leave blank and it is worked out from the genre, author, title and year. Clear it to renumber.</p>
+                    </div>
+                    <div class="space-y-1.5">
+                        <label for="editShelfSlot" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Position on the level</label>
+                        <input type="number" name="shelf_slot" id="editShelfSlot" min="1" max="9999" placeholder="e.g. 4"
+                               class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium"
+                               style="background-color: var(--bg-input);">
+                        <p class="text-[10px] text-slate-500">Counting from the left as you face the shelf. Leave blank if it is not recorded.</p>
                     </div>
                 </div>
                 <div class="pt-4 flex items-center justify-end gap-3">
@@ -492,6 +549,158 @@
                     </button>
                 </div>
             </form>
+        </div>
+    </div>
+
+    <!-- Pick books to label (cart-style picker) -->
+    <div id="labelPickerModal" class="hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+        <div class="w-full max-w-3xl rounded-2xl border p-6 flex flex-col gap-4 shadow-2xl my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color); max-height: 90vh;">
+            <div class="flex items-center justify-between">
+                <h3 class="text-base font-bold text-slate-200 tracking-wide">Choose books to label</h3>
+                <button type="button" onclick="closeLabelPicker()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40"><i class="fa-solid fa-xmark text-sm"></i></button>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 min-h-0">
+                <!-- LEFT: the print list -->
+                <div class="flex flex-col rounded-xl border border-slate-800 overflow-hidden" style="background-color: var(--bg-card);">
+                    <div class="px-4 py-2.5 border-b border-slate-800 flex items-center justify-between gap-2 text-xs font-bold text-slate-300">
+                        <span class="flex items-center gap-2"><i class="fa-solid fa-print text-amber-500 text-[11px]"></i> To print <span id="pickCartCount" class="text-amber-400">(0)</span></span>
+                        <button type="button" onclick="clearLabelCart()" class="text-[10px] font-semibold text-slate-500 hover:text-rose-400">Clear all</button>
+                    </div>
+                    <div id="pickCart" class="p-2 space-y-1.5 overflow-y-auto" style="max-height: 46vh; min-height: 200px;"></div>
+                </div>
+                <!-- RIGHT: everything available -->
+                <div class="flex flex-col rounded-xl border border-slate-800 overflow-hidden" style="background-color: var(--bg-card);">
+                    <div class="px-3 py-2.5 border-b border-slate-800">
+                        <div class="relative">
+                            <i class="fa-solid fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-xs"></i>
+                            <input type="text" id="pickSearch" oninput="renderLabelPicker()" placeholder="Search title, author or ISBN..." class="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-3 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-amber-800 placeholder-slate-600">
+                        </div>
+                    </div>
+                    <!-- Labelling a new bay, a refilled level and a single
+                         replacement copy are three different jobs, and mixing
+                         them into one list meant scrolling past every book in
+                         the library to find a shelf. -->
+                    <div class="px-3 pb-2 flex items-center gap-1">
+                        <button type="button" id="pickModeBook" onclick="setPickMode('book')" class="pick-mode on">One by one</button>
+                        <button type="button" id="pickModeLevel" onclick="setPickMode('level')" class="pick-mode">By level</button>
+                        <button type="button" id="pickModeShelf" onclick="setPickMode('shelf')" class="pick-mode">By shelf</button>
+                    </div>
+                    <div id="pickList" class="p-2 space-y-1.5 overflow-y-auto" style="max-height: 46vh; min-height: 200px;"></div>
+                </div>
+            </div>
+
+            <div id="pickNote" class="text-[10px] text-slate-500"></div>
+            <div class="flex items-center justify-end gap-3">
+                <button type="button" onclick="closeLabelPicker()" class="px-5 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:bg-slate-800/40 font-semibold text-xs min-w-[100px]">Cancel</button>
+                <button type="button" id="pickConfirm" onclick="confirmLabelPicker()" class="bg-amber-700 hover:bg-amber-600 text-white font-bold px-5 py-2.5 rounded-lg flex items-center gap-2 text-xs"><i class="fa-solid fa-arrow-right text-xs"></i> Continue <span id="pickConfirmCount"></span></button>
+            </div>
+        </div>
+    </div>
+
+    <style>
+        .pick-mode {
+            font-size: 10px; font-weight: 700; letter-spacing: .02em;
+            padding: 4px 9px; border-radius: 7px;
+            border: 1px solid var(--border-color);
+            background: var(--bg-card); color: var(--text-muted);
+            transition: all .15s;
+        }
+        .pick-mode:hover { color: var(--text-primary); }
+        .pick-mode.on {
+            color: var(--text-primary); border-color: var(--warning);
+            background: rgba(245, 158, 11, .12);
+        }
+    </style>
+
+    <!-- Import result -->
+    <div id="importResultModal" class="hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+        <div class="w-full max-w-lg rounded-2xl border p-6 flex flex-col gap-5 shadow-2xl my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color); max-height: 88vh;">
+            <div class="flex items-center gap-3">
+                <div id="importIcon" class="w-9 h-9 rounded-xl flex items-center justify-center text-base flex-shrink-0"></div>
+                <h3 id="importTitle" class="text-base font-bold text-slate-200 tracking-wide">Import finished</h3>
+            </div>
+
+            <div id="importSummary" class="space-y-2 text-xs overflow-y-auto" style="max-height: 46vh;"></div>
+
+            <div class="flex items-center justify-end gap-2.5 pt-1 flex-wrap">
+                <button type="button" id="importCloseBtn" onclick="closeImportResult()" class="px-4 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:text-slate-100 hover:bg-slate-800/40 font-semibold text-[11px] min-w-[84px]">Done</button>
+                <button type="button" id="importConfirmBtn" onclick="confirmImport(false)" class="hidden bg-emerald-700 hover:bg-emerald-600 text-white font-bold px-4 py-2.5 rounded-lg items-center gap-2 text-[11px]"><i class="fa-solid fa-check text-xs"></i> Confirm import</button>
+                <button type="button" id="importConfirmLabelsBtn" onclick="confirmImport(true)" class="hidden bg-amber-700 hover:bg-amber-600 text-white font-bold px-4 py-2.5 rounded-lg items-center gap-2 text-[11px]"><i class="fa-solid fa-print text-xs"></i> Confirm and print QR labels</button>
+                <button type="button" id="importLabelsBtn" onclick="printImportedLabels()" class="hidden bg-amber-700 hover:bg-amber-600 text-white font-bold px-5 py-2.5 rounded-lg items-center gap-2 text-xs"><i class="fa-solid fa-print text-xs"></i> <span id="importLabelsText">Print QR Labels</span></button>
+            </div>
+        </div>
+    </div>
+
+    <!-- QR Label Sheet Modal -->
+    <div id="labelSheetModal" class="hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 overflow-y-auto">
+        <div class="w-full max-w-lg rounded-2xl border p-6 flex flex-col gap-5 shadow-2xl relative my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color);">
+            <div class="flex items-center justify-between">
+                <h3 class="text-base font-bold text-slate-200 tracking-wide">Print QR Labels</h3>
+                <button type="button" onclick="closeLabelSheet()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40 transition-colors"><i class="fa-solid fa-xmark text-sm"></i></button>
+            </div>
+
+            <p class="text-xs text-slate-400 leading-relaxed">
+                <span id="labelCountNote" class="text-cyan-400 font-bold"></span>
+                Each label carries that copy's own QR code, so two copies of the same title
+                never get the same sticker.
+            </p>
+
+            <div class="space-y-4 text-xs">
+                <div class="grid grid-cols-2 gap-3">
+                    <div class="space-y-1.5">
+                        <label for="labelPaper" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Paper</label>
+                        <select id="labelPaper" onchange="refreshLabelEstimate()" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                            <option value="A4" selected>A4 (210 &times; 297 mm)</option>
+                            <option value="Letter">Short bond / Letter</option>
+                            <option value="Legal">Long bond / Legal</option>
+                        </select>
+                    </div>
+                    <div class="space-y-1.5">
+                        <label for="labelSize" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">QR size (mm)</label>
+                        <input type="number" id="labelSize" value="25" min="12" max="60" step="1" oninput="refreshLabelEstimate()"
+                               class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                    </div>
+                </div>
+
+                <div class="rounded-lg border border-slate-800/80 px-3 py-2.5" style="background-color: var(--bg-input);">
+                    <p class="text-[11px] text-slate-300" id="labelEstimate">&nbsp;</p>
+                </div>
+
+                <div class="space-y-2">
+                    <span class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Print under each QR</span>
+                    <div class="grid grid-cols-2 gap-y-2 gap-x-3 text-slate-300">
+                        <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="labelShowTitle" checked class="accent-cyan-600 w-3.5 h-3.5"> Title</label>
+                        <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="labelShowCopy" checked class="accent-cyan-600 w-3.5 h-3.5"> Copy N of M</label>
+                        <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="labelShowCallNumber" checked class="accent-cyan-600 w-3.5 h-3.5"> Code label</label>
+                        <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="labelShowId" class="accent-cyan-600 w-3.5 h-3.5"> Internal ID</label>
+                        <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="labelShowAuthor" class="accent-cyan-600 w-3.5 h-3.5"> Author</label>
+                        <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="labelShowLocation" checked class="accent-cyan-600 w-3.5 h-3.5"> Shelf location</label>
+                        <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="labelCutGuides" checked class="accent-cyan-600 w-3.5 h-3.5"> Cutting guides</label>
+                    </div>
+                </div>
+
+                <div class="space-y-1.5">
+                    <label for="labelSkip" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Skip the first N spaces</label>
+                    <input type="number" id="labelSkip" value="0" min="0" step="1"
+                           class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                    <p class="text-[10px] text-slate-500">For feeding a part-used sheet back through the printer.</p>
+                </div>
+
+                <div class="rounded-lg border border-amber-900/50 bg-amber-950/20 px-3 py-2.5">
+                    <p class="text-[10px] text-amber-300/90 leading-relaxed">
+                        <i class="fa-solid fa-triangle-exclamation mr-1"></i>
+                        Print at <strong>100% scale</strong> &mdash; turn off &ldquo;Fit to page&rdquo; or &ldquo;Shrink oversized pages&rdquo;.
+                        Then measure one square before you cut the rest: if it is not the size you asked for,
+                        the printer rescaled the sheet.
+                    </p>
+                </div>
+
+                <div class="pt-1 flex items-center justify-end gap-3">
+                    <button type="button" onclick="closeLabelSheet()" class="px-5 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:text-slate-100 hover:bg-slate-800/40 font-semibold tracking-wide transition-colors min-w-[100px]">Cancel</button>
+                    <button type="button" onclick="downloadLabelSheet()" class="bg-cyan-700 hover:bg-cyan-600 text-white font-bold px-5 py-2.5 rounded-lg flex items-center gap-2 tracking-wide transition-colors shadow-md"><i class="fa-solid fa-file-pdf text-xs"></i> Download PDF</button>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -578,6 +787,35 @@
                             <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Total Books</p>
                             <p id="detailCopies" class="text-xs font-bold text-slate-200 mt-1">1 books</p>
                         </div>
+                        <div class="col-span-2">
+                            <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Exact position</p>
+                            <p id="detailExact" class="text-xs font-semibold text-cyan-300 mt-1">Not recorded</p>
+                            <div id="detailStrip" class="hidden flex gap-[2px] items-end mt-2"></div>
+                            <p id="detailNeighbours" class="hidden text-[10px] text-slate-500 mt-1.5 leading-relaxed"></p>
+                        </div>
+                    </div>
+
+                    <!-- Staff-side only. The patron endpoint is separate and
+                         deliberately says nothing about who has had a book. -->
+                    <div class="p-5 rounded-xl border border-slate-800/80 mt-4" style="background-color: var(--bg-card);">
+                        <div class="flex items-center justify-between mb-3">
+                            <h4 class="text-sm font-bold text-slate-200 tracking-wide">Borrowing history</h4>
+                            <span id="detailHistoryCount" class="text-[10px] font-semibold text-slate-500"></span>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-[11px]">
+                                <thead>
+                                    <tr class="text-left text-slate-500 uppercase tracking-wider text-[9px]">
+                                        <th class="pb-2 pr-3 font-bold">Patron</th>
+                                        <th class="pb-2 pr-3 font-bold">Borrowed</th>
+                                        <th class="pb-2 pr-3 font-bold">Due</th>
+                                        <th class="pb-2 pr-3 font-bold">Returned</th>
+                                        <th class="pb-2 font-bold">State</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="detailHistoryBody"></tbody>
+                            </table>
+                        </div>
                     </div>
                     <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
                         <h4 class="text-sm font-bold text-slate-200 tracking-wide mb-3">QR Code</h4>
@@ -596,6 +834,11 @@
 
     <script>
         function openAddModal() {
+            // A new run: the count and its note start over, or the next book
+            // opens claiming credit for the last batch.
+            addedThisRun = 0;
+            const runNote = document.getElementById('addRunNote');
+            if (runNote) runNote.classList.add('hidden');
             document.getElementById('addBookModal').classList.remove('hidden');
             document.getElementById('addBookForm').reset();
         }
@@ -606,6 +849,82 @@
 
         function closeEditModal() {
             window.location.href = '{% url 'admin_management' %}';
+        }
+
+        // The book's own loans, newest first. A link to the transactions page
+        // filtered by title already existed, but answering "who has had this
+        // copy" should not require leaving the book you are looking at.
+        // The level as the spines actually standing on it: a filled block per
+        // copy on the shelf, a hollow one for each that is out, the target
+        // taller. A stored slot cannot show this, because what makes the count
+        // wrong is precisely the copies that are not there.
+        function renderLevelStrip(data) {
+            const strip = document.getElementById('detailStrip');
+            const near = document.getElementById('detailNeighbours');
+            const layout = data.layout;
+            strip.classList.add('hidden');
+            near.classList.add('hidden');
+            if (!layout || !layout.rows || !layout.rows.length) return;
+
+            strip.innerHTML = layout.rows.map(function (r) {
+                const base = 'display:block;width:6px;border-radius:1px;';
+                const style = r.is_focus
+                    ? base + 'height:20px;background:var(--warning);'
+                    : (r.on_shelf
+                        ? base + 'height:14px;background:var(--text-muted);opacity:.55;'
+                        : base + 'height:14px;background:none;border:1px dashed var(--text-muted);opacity:.5;');
+                const tip = r.is_focus ? 'This copy'
+                          : (r.on_shelf ? r.title : r.title + ' \u2014 ' + r.status);
+                return '<i style="' + style + '" title="' + esc(tip) + '"></i>';
+            }).join('');
+            strip.classList.remove('hidden');
+
+            const focus = layout.focus || {};
+            const bits = [];
+            if (focus.on_shelf) {
+                if (focus.space && focus.space !== focus.position) {
+                    bits.push(layout.on_shelf + ' of ' + layout.total
+                              + ' copies are on the shelf, so it is the '
+                              + focus.position + ' spine along, not the ' + focus.space + '.');
+                }
+                if (focus.before) bits.push('After \u201c' + focus.before + '\u201d.');
+                if (focus.after) bits.push('Before \u201c' + focus.after + '\u201d.');
+            } else if (focus.status) {
+                bits.push('This copy is not on the shelf \u2014 ' + focus.status.toLowerCase() + '.');
+            }
+            if (bits.length) {
+                near.textContent = bits.join(' ');
+                near.classList.remove('hidden');
+            }
+        }
+
+        function renderBookHistory(data) {
+            const body = document.getElementById('detailHistoryBody');
+            const count = document.getElementById('detailHistoryCount');
+            const rows = data.history || [];
+            const dash = '\u2014';
+            if (!rows.length) {
+                body.innerHTML = '<tr><td colspan="5" class="py-4 text-slate-500">'
+                    + 'This copy has never been borrowed.</td></tr>';
+                if (count) count.textContent = '';
+                return;
+            }
+            const tone = { Returned: 'text-emerald-400', Out: 'text-amber-400',
+                           Overdue: 'text-rose-400' };
+            body.innerHTML = rows.map(function (t) {
+                return '<tr class="border-t border-slate-800/60">'
+                    + '<td class="py-2 pr-3 text-slate-300">' + esc(t.patron) + '</td>'
+                    + '<td class="py-2 pr-3 text-slate-400">' + esc(t.borrowed || dash) + '</td>'
+                    + '<td class="py-2 pr-3 text-slate-400">' + esc(t.due || dash) + '</td>'
+                    + '<td class="py-2 pr-3 text-slate-400">' + esc(t.returned || dash) + '</td>'
+                    + '<td class="py-2 font-semibold ' + (tone[t.state] || 'text-slate-400') + '">'
+                    + esc(t.state) + '</td></tr>';
+            }).join('');
+            if (count) {
+                count.textContent = (data.history_total > rows.length)
+                    ? ('showing the latest ' + rows.length + ' of ' + data.history_total)
+                    : (rows.length + (rows.length === 1 ? ' loan' : ' loans'));
+            }
         }
 
         function viewBookDetails(bookId) {
@@ -623,6 +942,9 @@
                         document.getElementById('detailSection').textContent = data.category;
                         document.getElementById('detailLocation').textContent = data.shelf;
                         document.getElementById('detailCopies').textContent = data.copies + ' books';
+                        document.getElementById('detailExact').textContent = data.location || 'Not recorded';
+                        renderLevelStrip(data);
+                        renderBookHistory(data);
                         document.getElementById('detailEditLink').href = `/admin-portal/edit-book/${bookId}/`;
 
                         const locateLink = document.getElementById('detailLocateLink');
@@ -791,9 +1113,28 @@
             });
         }
 
+        // Cataloguing is done in runs -- a stack off one trolley shares a
+        // genre, a shelf and usually a publication year. Carrying those forward
+        // and keeping the dialog open turns each subsequent book into a title
+        // and an author.
+        let addAnother = false;
+        let addedThisRun = 0;
+
+        window.submitAndAddAnother = function () {
+            const form = document.getElementById('addBookForm');
+            // Ask the browser to enforce `required` first; without this an
+            // empty title would post and come back as a server error instead
+            // of highlighting the field.
+            if (!form.reportValidity()) return;
+            addAnother = true;
+            form.requestSubmit();
+        };
+
         document.getElementById('addBookForm').addEventListener('submit', function(e) {
             e.preventDefault();
             const formData = new FormData(this);
+            const keepOpen = addAnother;
+            addAnother = false;
             
             fetch('/admin-portal/add-book/', {
                 method: 'POST',
@@ -804,7 +1145,23 @@
             })
             .then(response => response.json())
             .then(data => {
-                if (data.success) {
+                if (data.success && keepOpen) {
+                    addedThisRun += 1;
+                    // What never repeats is cleared; what a run shares stays.
+                    ['addTitle', 'addAuthor', 'addIsbn'].forEach(function (id) {
+                        const el = document.getElementById(id);
+                        if (el) el.value = '';
+                    });
+                    const runNote = document.getElementById('addRunNote');
+                    if (runNote) {
+                        runNote.textContent = addedThisRun + ' book'
+                            + (addedThisRun === 1 ? '' : 's') + ' added this run. Genre, '
+                            + 'shelf and year kept \u2014 change them by hand when one differs.';
+                        runNote.classList.remove('hidden');
+                    }
+                    const first = document.getElementById('addTitle');
+                    if (first) first.focus();
+                } else if (data.success) {
                     window.location.href = '{% url 'admin_management' %}';
                 } else {
                     alert(data.error || 'An error occurred');
@@ -854,6 +1211,9 @@
                 document.getElementById('editCoverImgUrl').value = '{{ initial.cover_img_url|default:"" }}';
                 document.getElementById('editStatus').value = '{{ initial.status|default:"Available" }}';
                 document.getElementById('editShelfLevel').value = '{{ initial.shelf_level_id|default:"" }}';
+                document.getElementById('editShelfSlot').value = '{{ initial.shelf_slot|default:"" }}';
+                document.getElementById('editCondition').value = '{{ initial.condition|default:"Good" }}';
+                document.getElementById('editCallNumber').value = '{{ initial.call_number|default:"" }}';
                 document.getElementById('editBookModal').classList.remove('hidden');
             });
         {% endif %}
@@ -873,35 +1233,44 @@
             }
         });
 
+        // Choosing a file no longer imports it. The file is sent for a preview
+        // first and nothing is written until a confirm button is pressed. That
+        // preview is the real import, run inside a transaction that is then
+        // rolled back, so the figures being confirmed are measured rather than
+        // a second implementation's guess at what the first one would do.
+        let pendingImportFile = null;
+
+        function postImport(file, preview) {
+            const form = new FormData();
+            form.append('excel_file', file);
+            if (preview) form.append('preview', '1');
+            return fetch('{% url 'import_books' %}', {
+                method: 'POST',
+                body: form,
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-CSRFToken': '{{ csrf_token }}'
+                }
+            }).then(response => response.json());
+        }
+
+        function importFailed(error) {
+            console.error('Import failed:', error);
+            showImportResult({
+                success: false,
+                error: 'The server did not return a readable response. Check that you '
+                     + 'are still signed in, then try again.',
+            });
+        }
+
         function uploadExcelFile(input) {
-            if (input.files && input.files[0]) {
-                const formData = new FormData();
-                formData.append('excel_file', input.files[0]);
-                
-                fetch('{% url 'import_books' %}', {
-                    method: 'POST',
-                    body: formData,
-                    headers: {
-                        'X-Requested-With': 'XMLHttpRequest',
-                        'X-CSRFToken': '{{ csrf_token }}'
-                    }
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        alert(data.message);
-                        window.location.href = '{% url 'admin_management' %}';
-                    } else {
-                        alert(data.error || 'An error occurred during import');
-                    }
-                })
-                .catch(error => {
-                    console.error('Import failed:', error);
-                    alert('The import could not be completed. The server did not return a '
-                        + 'readable response - check that you are still signed in, then try again.\n\n'
-                        + error);
-                });
-            }
+            if (!input.files || !input.files[0]) return;
+            pendingImportFile = input.files[0];
+            // Cleared so that picking the same file again after a cancel still
+            // counts as a change and runs the preview again.
+            input.value = '';
+            showImportWorking('Reading ' + pendingImportFile.name + '...');
+            postImport(pendingImportFile, true).then(showImportResult).catch(importFailed);
         }
 
     </script>
@@ -913,14 +1282,537 @@
             var g = document.getElementById('genreFilter').value;
             var s = document.getElementById('statusFilter').value;
             var m = (document.getElementById('materialFilter') || {}).value;
+            var c = (document.getElementById('copiesFilter') || {}).value;
             if (q) p.set('q', q);
             if (s) p.set('status', s);
             if (g) p.set('genre', g);
             if (m) p.set('material', m);
+            if (c) p.set('copies', c);
             var qs = p.toString();
             location.href = "{% url 'admin_management' %}" + (qs ? '?' + qs : '');
         }
     </script>
     <script src="{% static 'js/admin-enhance.js' %}" defer></script>
+
+    <script>
+    // ── Selecting books to print QR labels for ────────────────────────────
+    // Ticks survive paging. Someone labelling a delivery works through several
+    // pages of the table, and losing the selection on every page change would
+    // make the feature useless for the one job it exists to do.
+    (function () {
+        const STORE = 'ayla.labelSelection';
+        const LABELS_URL = "{% url 'book_qr_labels' %}";
+
+        function chosen() {
+            try { return new Set(JSON.parse(sessionStorage.getItem(STORE) || '[]')); }
+            catch (e) { return new Set(); }
+        }
+        function remember(set) {
+            try { sessionStorage.setItem(STORE, JSON.stringify([...set])); }
+            catch (e) { /* private mode: selection just will not survive paging */ }
+        }
+
+        window.onBookTick = function () {
+            const set = chosen();
+            document.querySelectorAll('.book-tick').forEach(function (cb) {
+                if (cb.checked) set.add(Number(cb.value)); else set.delete(Number(cb.value));
+            });
+            remember(set);
+            paintSelection(set);
+        };
+
+        window.toggleAllBooks = function (master) {
+            document.querySelectorAll('.book-tick').forEach(function (cb) { cb.checked = master.checked; });
+            window.onBookTick();
+        };
+
+        function paintSelection(set) {
+            const n = set.size;
+            // One button, in the toolbar beside Import Excel. It always opens
+            // the picker; ticking rows just pre-loads the cart, so the count
+            // rides on the label rather than needing a second button.
+            const lab = document.getElementById('toolbarLabelsLabel');
+            if (lab) lab.textContent = n ? ('Print QR Labels (' + n + ')') : 'Print QR Labels';
+
+            const ticks = [...document.querySelectorAll('.book-tick')];
+            const master = document.getElementById('selectAllBooks');
+            if (master) {
+                const on = ticks.filter(function (cb) { return cb.checked; }).length;
+                master.checked = ticks.length > 0 && on === ticks.length;
+                master.indeterminate = on > 0 && on < ticks.length;
+            }
+        }
+
+        // Restore on load, so paging back and forth keeps the ticks visible.
+        document.addEventListener('DOMContentLoaded', function () {
+            const set = chosen();
+            document.querySelectorAll('.book-tick').forEach(function (cb) {
+                if (set.has(Number(cb.value))) cb.checked = true;
+            });
+            paintSelection(set);
+        });
+
+        // How many fit per page, worked out the same way the PDF does it, so the
+        // number shown before printing is the number that comes out.
+        const PAGE_MM = { A4: [210, 297], Letter: [215.9, 279.4], Legal: [215.9, 355.6] };
+        const MARGIN_MM = 10, PAD_MM = 2, LEADING = 1.18, PT_MM = 25.4 / 72;
+
+        function linesWanted() {
+            return ['labelShowTitle', 'labelShowAuthor', 'labelShowCopy',
+                    'labelShowLocation', 'labelShowId', 'labelShowCallNumber']
+                .filter(function (id) { return document.getElementById(id).checked; }).length;
+        }
+
+        window.refreshLabelEstimate = function () {
+            const paper = document.getElementById('labelPaper').value;
+            let qr = parseFloat(document.getElementById('labelSize').value) || 25;
+            qr = Math.max(12, Math.min(60, qr));
+            const [pw, ph] = PAGE_MM[paper] || PAGE_MM.A4;
+            const fs = Math.max(3.6, Math.min(7.0, qr * 0.235));
+            const textH = linesWanted() * fs * LEADING * PT_MM;
+            const cellW = qr + PAD_MM, cellH = qr + textH + PAD_MM;
+            const cols = Math.max(1, Math.floor((pw - 2 * MARGIN_MM) / cellW));
+            const rows = Math.max(1, Math.floor((ph - 2 * MARGIN_MM) / cellH));
+            const perPage = cols * rows;
+            const count = chosen().size;
+            const skip = Math.max(0, parseInt(document.getElementById('labelSkip').value, 10) || 0);
+            const pages = Math.max(1, Math.ceil((count + skip) / perPage));
+            document.getElementById('labelEstimate').innerHTML =
+                '<strong class="text-cyan-400">' + cols + ' \u00d7 ' + rows + ' = ' + perPage + '</strong> labels per page'
+                + ' \u00b7 ' + count + ' book' + (count === 1 ? '' : 's')
+                + ' \u2192 <strong class="text-cyan-400">' + pages + '</strong> page' + (pages === 1 ? '' : 's');
+        };
+
+        window.openLabelSheet = function (ids) {
+            if (Array.isArray(ids) && ids.length) remember(new Set(ids));
+            const n = chosen().size;
+            if (!n) { alert('Tick at least one book first.'); return; }
+            document.getElementById('labelCountNote').textContent =
+                n + ' book' + (n === 1 ? '' : 's') + ' selected.';
+            document.getElementById('labelSheetModal').classList.remove('hidden');
+            refreshLabelEstimate();
+        };
+        window.closeLabelSheet = function () {
+            document.getElementById('labelSheetModal').classList.add('hidden');
+            if (importSummaryAfterLabels) {
+                const summary = importSummaryAfterLabels;
+                importSummaryAfterLabels = null;
+                showImportResult(summary);
+            }
+        };
+
+        window.downloadLabelSheet = function () {
+            const ids = [...chosen()];
+            if (!ids.length) return;
+            const q = new URLSearchParams({
+                ids: ids.join(','),
+                page: document.getElementById('labelPaper').value,
+                qr_mm: document.getElementById('labelSize').value || '25',
+                skip: document.getElementById('labelSkip').value || '0',
+                show_title: document.getElementById('labelShowTitle').checked ? '1' : '0',
+                show_copy: document.getElementById('labelShowCopy').checked ? '1' : '0',
+                show_call_number: document.getElementById('labelShowCallNumber').checked ? '1' : '0',
+                show_id: document.getElementById('labelShowId').checked ? '1' : '0',
+                show_author: document.getElementById('labelShowAuthor').checked ? '1' : '0',
+                show_location: document.getElementById('labelShowLocation').checked ? '1' : '0',
+                cut_guides: document.getElementById('labelCutGuides').checked ? '1' : '0',
+            });
+            // Same-origin navigation rather than fetch+blob: the PDF is a file
+            // download, and letting the browser own it keeps the filename the
+            // server chose and costs nothing in memory for a big sheet.
+            window.location.href = LABELS_URL + '?' + q.toString();
+            closeLabelSheet();
+        };
+
+        // Called by the import result modal once it knows what it created.
+        window.printLabelsForBooks = function (ids) {
+            if (!ids || !ids.length) return;
+            openLabelSheet(ids);
+        };
+
+        // ── Choosing books to label ───────────────────────────────────────
+        // The same cart shape as "Add Books to Shelf Level" in Shelf Manager
+        // and the module grant in User Management: available on the right,
+        // chosen on the left. Three pickers that look like one idea.
+        const PICKER_URL = "{% url 'book_label_picker_data' %}";
+        let pickBooks = [];        // every book, fetched once
+        let pickById = {};
+        let pickMax = 500;
+
+        function esc(t) {
+            return String(t == null ? '' : t).replace(/[&<>"]/g, function (c) {
+                return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+            });
+        }
+
+        // Shelf levels come first in the available list so a whole trolley can
+        // be added in one click. A shelf holds fourteen books far more often
+        // than someone wants to click fourteen times.
+        // 'level' buckets one board at a time; 'shelf' takes a whole bay,
+        // every board of it, which is the unit somebody relabelling a bookcase
+        // actually works in.
+        function pickGroups(kind) {
+            const buckets = new Map();
+            pickBooks.forEach(function (b) {
+                const byShelf = kind === 'shelf';
+                const id = byShelf ? b.shelf_id : b.level_id;
+                const key = id == null ? 'none' : String(id);
+                if (!buckets.has(key)) {
+                    buckets.set(key, {
+                        key: key,
+                        label: id == null
+                            ? 'Not on a shelf yet'
+                            : (byShelf ? (b.shelf_name || 'Shelf')
+                                       : (b.location || 'Shelf level')),
+                        detail: byShelf ? '' : (b.level_category || ''),
+                        levels: new Set(),
+                        ids: [],
+                    });
+                }
+                const bucket = buckets.get(key);
+                bucket.ids.push(b.book_id);
+                if (b.level_id != null) bucket.levels.add(b.level_id);
+            });
+            // Unshelved last: they are the ones still to be placed.
+            return [...buckets.values()].sort(function (a, b) {
+                if (a.key === 'none') return 1;
+                if (b.key === 'none') return -1;
+                return a.label.localeCompare(b.label, undefined, { numeric: true });
+            });
+        }
+
+        function pickRow(title, sub, action, dashed) {
+            return '<div class="pick-row' + (dashed ? ' group' : '') + '">'
+                 + '<div class="min-w-0"><span class="block text-xs font-medium text-slate-200 truncate">' + title + '</span>'
+                 + '<span class="block text-[10px] text-slate-500 truncate">' + sub + '</span></div>'
+                 + action + '</div>';
+        }
+
+        let pickMode = 'book';
+        window.setPickMode = function (mode) {
+            pickMode = mode;
+            ['book', 'level', 'shelf'].forEach(function (m) {
+                const btn = document.getElementById('pickMode' + m.charAt(0).toUpperCase() + m.slice(1));
+                if (btn) btn.classList.toggle('on', m === mode);
+            });
+            const box = document.getElementById('pickSearch');
+            if (box) {
+                box.placeholder = mode === 'book'
+                    ? 'Search title, author or ISBN...'
+                    : (mode === 'level' ? 'Search shelf levels...' : 'Search shelves...');
+            }
+            renderLabelPicker();
+        };
+
+        window.renderLabelPicker = function () {
+            const q = (document.getElementById('pickSearch').value || '').trim().toLowerCase();
+            const set = new Set(JSON.parse(sessionStorage.getItem('ayla.labelSelection') || '[]'));
+
+            let html = '';
+            if (pickMode === 'book') {
+                const rows = pickBooks.filter(function (b) {
+                    if (set.has(b.book_id)) return false;
+                    if (!q) return true;
+                    return (b.title + ' ' + b.author + ' ' + b.isbn).toLowerCase().indexOf(q) !== -1;
+                });
+                html = rows.slice(0, 400).map(function (b) {
+                    return pickRow(esc(b.title),
+                        esc(b.author) + (b.location ? ' · 📍 ' + esc(b.location) : ' · not shelved'),
+                        '<button class="tbtn add" title="Add" onclick="addBookToCart(' + b.book_id + ')"><i class="fa-solid fa-plus"></i></button>',
+                        false);
+                }).join('');
+                if (rows.length > 400) {
+                    html += '<div class="text-[10px] text-slate-500 p-2 text-center">'
+                          + (rows.length - 400) + ' more — keep typing to narrow it down.</div>';
+                }
+            } else {
+                // A group already fully chosen is still listed, greyed, rather
+                // than vanishing: a shelf disappearing as you add it reads as
+                // the click having gone wrong.
+                const groups = pickGroups(pickMode).filter(function (g) {
+                    return !q || g.label.toLowerCase().indexOf(q) !== -1;
+                });
+                html = groups.map(function (g) {
+                    const left = g.ids.filter(function (id) { return !set.has(id); });
+                    const done = g.ids.length - left.length;
+                    const bays = (pickMode === 'shelf' && g.levels.size)
+                        ? ' · ' + g.levels.size + ' level' + (g.levels.size === 1 ? '' : 's') : '';
+                    const sub = left.length
+                        ? (left.length + ' of ' + g.ids.length + ' still to add'
+                           + (done ? ' · ' + done + ' already in the list' : '')
+                           + bays + (g.detail ? ' · ' + esc(g.detail) : ''))
+                        : ('all ' + g.ids.length + ' already in the list' + bays);
+                    const action = left.length
+                        ? '<button class="tbtn add" title="Add all" onclick="addGroupToCart(\'' + pickMode + '\',\'' + g.key + '\')"><i class="fa-solid fa-plus"></i></button>'
+                        : '<button class="tbtn del" title="Remove all" onclick="removeGroupFromCart(\'' + pickMode + '\',\'' + g.key + '\')"><i class="fa-solid fa-minus"></i></button>';
+                    return pickRow(esc(g.label), sub, action, true);
+                }).join('');
+                if (!groups.length) {
+                    html = '<div class="text-slate-500 text-xs p-3 text-center">'
+                         + (q ? 'Nothing matches that.' : 'No shelves yet.') + '</div>';
+                }
+            }
+            document.getElementById('pickList').innerHTML = html
+                || '<div class="text-slate-500 text-xs p-3 text-center">Nothing left to add.</div>';
+
+            // LEFT — the print list, in shelf order so it reads like the sheet.
+            const chosen = [...set].map(function (id) { return pickById[id]; }).filter(Boolean);
+            chosen.sort(function (a, b) {
+                return (a.location || '\uffff').localeCompare(b.location || '\uffff')
+                    || a.title.localeCompare(b.title);
+            });
+            document.getElementById('pickCart').innerHTML = chosen.length
+                ? chosen.map(function (b) {
+                    return pickRow(esc(b.title),
+                        esc(b.author) + (b.location ? ' · 📍 ' + esc(b.location) : ' · not shelved'),
+                        '<button class="tbtn del" title="Remove" onclick="removeBookFromCart(' + b.book_id + ')"><i class="fa-solid fa-minus"></i></button>',
+                        false);
+                  }).join('')
+                : '<div class="text-slate-600 text-xs p-3 text-center">Click + on a book or a shelf level to add it here.</div>';
+
+            document.getElementById('pickCartCount').textContent = '(' + set.size + ')';
+            document.getElementById('pickConfirmCount').textContent = set.size ? '(' + set.size + ')' : '';
+            const btn = document.getElementById('pickConfirm');
+            btn.disabled = set.size === 0;
+            btn.style.opacity = set.size ? '1' : '0.45';
+
+            const note = document.getElementById('pickNote');
+            note.textContent = set.size > pickMax
+                ? 'That is ' + set.size + ' labels — the sheet holds at most ' + pickMax + '. Remove some first.'
+                : (set.size + ' selected. They print in shelf order, packed tight so no space is wasted.');
+            note.className = set.size > pickMax
+                ? 'text-[10px] text-rose-400 font-semibold'
+                : 'text-[10px] text-slate-500';
+        };
+
+        function saveCart(set) {
+            try { sessionStorage.setItem('ayla.labelSelection', JSON.stringify([...set])); }
+            catch (e) { /* private mode */ }
+            // Keep the table's own checkboxes honest: picking a book here and
+            // seeing its row still unticked would look like the click was lost.
+            document.querySelectorAll('.book-tick').forEach(function (cb) {
+                cb.checked = set.has(Number(cb.value));
+            });
+            paintSelection(set);
+            renderLabelPicker();
+        }
+        function currentCart() {
+            try { return new Set(JSON.parse(sessionStorage.getItem('ayla.labelSelection') || '[]')); }
+            catch (e) { return new Set(); }
+        }
+
+        window.addBookToCart = function (id) { const s = currentCart(); s.add(id); saveCart(s); };
+        window.removeBookFromCart = function (id) { const s = currentCart(); s.delete(id); saveCart(s); };
+        window.clearLabelCart = function () { saveCart(new Set()); };
+        window.removeGroupFromCart = function (kind, key) {
+            const g = pickGroups(kind).find(function (x) { return x.key === key; });
+            if (!g) return;
+            const s = currentCart();
+            g.ids.forEach(function (id) { s.delete(id); });
+            saveCart(s);
+        };
+        window.addGroupToCart = function (kind, key) {
+            const g = pickGroups(kind).find(function (x) { return x.key === key; });
+            if (!g) return;
+            const s = currentCart();
+            g.ids.forEach(function (id) { s.add(id); });
+            saveCart(s);
+        };
+
+        window.openLabelPicker = async function () {
+            document.getElementById('pickSearch').value = '';
+            setPickMode('book');
+            document.getElementById('pickList').innerHTML =
+                '<div class="text-slate-500 text-xs p-3">Loading…</div>';
+            document.getElementById('labelPickerModal').classList.remove('hidden');
+            try {
+                const r = await fetch(PICKER_URL, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+                const d = await r.json();
+                pickBooks = d.books || [];
+                pickMax = d.max_per_sheet || 500;
+                pickById = {};
+                pickBooks.forEach(function (b) { pickById[b.book_id] = b; });
+                // Drop anything that has been deleted since it was ticked.
+                // The selection outlives the page, so without this the count
+                // keeps promising labels for books that no longer exist.
+                const live = currentCart();
+                const pruned = new Set([...live].filter(function (id) { return pickById[id]; }));
+                if (pruned.size !== live.size) saveCart(pruned);
+            } catch (e) {
+                document.getElementById('pickList').innerHTML =
+                    '<div class="text-rose-400 text-xs p-3">Could not load the catalogue. Are you still signed in?</div>';
+                return;
+            }
+            renderLabelPicker();
+        };
+        window.closeLabelPicker = function () {
+            document.getElementById('labelPickerModal').classList.add('hidden');
+        };
+        window.confirmLabelPicker = function () {
+            if (currentCart().size > pickMax) return;
+            closeLabelPicker();
+            openLabelSheet();
+        };
+
+        // ── Import result ────────────────────────────────────────────────
+        // A modal rather than alert(): the result has several parts worth
+        // reading, and printing the labels is an offer, not a question that
+        // has to be answered before the page will move on.
+        let importedIds = [];
+
+        function line(icon, colour, text) {
+            return '<div class="flex items-start gap-2.5 rounded-lg border border-slate-800/70 px-3 py-2" style="background-color: var(--bg-input);">'
+                 + '<i class="fa-solid ' + icon + ' ' + colour + ' text-[11px] mt-0.5"></i>'
+                 + '<span class="text-slate-300 leading-relaxed">' + text + '</span></div>';
+        }
+
+        // Whether the confirmed import should go straight on to the labels.
+        let printAfterImport = false;
+        // Set when a label sheet is opened straight off the back of an import:
+        // the summary then waits until the labels have been dealt with rather
+        // than being buried behind them.
+        let importSummaryAfterLabels = null;
+
+        function showButtons(ids, closeText) {
+            ['importConfirmBtn', 'importConfirmLabelsBtn', 'importLabelsBtn'].forEach(
+                function (id) {
+                    const b = document.getElementById(id);
+                    if (ids.indexOf(id) >= 0) {
+                        b.classList.remove('hidden');
+                        b.classList.add('flex');
+                    } else {
+                        b.classList.add('hidden');
+                        b.classList.remove('flex');
+                    }
+                });
+            const close = document.getElementById('importCloseBtn');
+            close.textContent = closeText;
+            close.classList.toggle('hidden', !closeText);
+        }
+
+        // Every button goes while the server is working: a sheet of 500 rows
+        // takes long enough that a second press is a real possibility, and a
+        // second press would be a second import.
+        // On window because the upload handler lives in an earlier script
+        // block, outside this closure.
+        window.showImportWorking = function (text) {
+            const icon = document.getElementById('importIcon');
+            icon.className = 'w-9 h-9 rounded-xl flex items-center justify-center text-base flex-shrink-0 bg-slate-500/10 text-slate-400 border border-slate-500/25';
+            icon.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+            document.getElementById('importTitle').textContent = 'Working';
+            document.getElementById('importSummary').innerHTML =
+                line('fa-hourglass-half', 'text-slate-400', esc(text));
+            showButtons([], '');
+            document.getElementById('importResultModal').classList.remove('hidden');
+        };
+
+        // A confirm button was pressed: run the import for real, on the same
+        // file the preview measured.
+        window.confirmImport = function (thenPrint) {
+            const file = pendingImportFile;
+            if (!file) return;
+            pendingImportFile = null;          // one press, one import
+            printAfterImport = !!thenPrint;
+            showImportWorking('Importing ' + file.name + '...');
+            postImport(file, false).then(showImportResult).catch(importFailed);
+        };
+
+        window.showImportResult = function (data) {
+            const icon = document.getElementById('importIcon');
+            const body = document.getElementById('importSummary');
+            importedIds = (data && data.created_ids) || [];
+
+            if (!data || !data.success) {
+                icon.className = 'w-9 h-9 rounded-xl flex items-center justify-center text-base flex-shrink-0 bg-rose-500/10 text-rose-400 border border-rose-500/25';
+                icon.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i>';
+                document.getElementById('importTitle').textContent = 'Import failed';
+                body.innerHTML = line('fa-circle-xmark', 'text-rose-400',
+                    esc((data && data.error) || 'Something went wrong.'));
+                // Nothing to confirm: a file the server could not read is not
+                // one that becomes importable by pressing the button again.
+                pendingImportFile = null;
+                printAfterImport = false;
+                showButtons([], 'Close');
+                document.getElementById('importResultModal').classList.remove('hidden');
+                return;
+            }
+
+            icon.className = 'w-9 h-9 rounded-xl flex items-center justify-center text-base flex-shrink-0 bg-emerald-500/10 text-emerald-400 border border-emerald-500/25';
+            icon.innerHTML = '<i class="fa-solid fa-check"></i>';
+            document.getElementById('importTitle').textContent =
+                data.preview ? 'Ready to import' : 'Import finished';
+
+            // The server sends one sentence per outcome; each becomes its own
+            // row so a skip is not buried mid-paragraph where it gets missed.
+            let html = '';
+            if (data.preview) {
+                html += line('fa-circle-info', 'text-cyan-400',
+                    '<span class="text-slate-200 font-semibold">Nothing has been saved yet.</span> '
+                    + 'This is what importing this file would do.');
+            }
+            String(data.message || '').split('. ').forEach(function (part) {
+                const t = part.trim().replace(/\.$/, '');
+                if (!t) return;
+                const bad = /skip|could not/i.test(t);
+                html += line(bad ? 'fa-circle-exclamation' : 'fa-circle-check',
+                             bad ? 'text-amber-400' : 'text-emerald-400', esc(t) + '.');
+            });
+            if (data.matched_columns && data.matched_columns.length) {
+                html += line('fa-table-columns', 'text-slate-500',
+                    'Columns matched: <span class="text-slate-400">'
+                    + esc(data.matched_columns.join(', ')) + '</span>');
+            }
+            if (data.created_truncated) {
+                html += line('fa-scissors', 'text-amber-400',
+                    'Only the first ' + importedIds.length + ' can go on one label sheet.');
+            }
+            body.innerHTML = html;
+
+            if (data.preview) {
+                // Nothing to import means nothing to confirm; the box is then
+                // only explaining why the file would add nothing.
+                showButtons(data.imported
+                    ? ['importConfirmBtn', 'importConfirmLabelsBtn'] : [], 'Cancel');
+                document.getElementById('importResultModal').classList.remove('hidden');
+                return;
+            }
+
+            if (importedIds.length) {
+                document.getElementById('importLabelsText').textContent =
+                    'Print QR Labels (' + importedIds.length + ')';
+                showButtons(['importLabelsBtn'], 'Done');
+            } else {
+                showButtons([], 'Done');
+            }
+
+            // Confirmed with "and print": straight on to the label options,
+            // since the figures were already read at the confirm step. The
+            // summary comes back once the labels have been dealt with.
+            if (printAfterImport && importedIds.length) {
+                printAfterImport = false;
+                importSummaryAfterLabels = data;
+                document.getElementById('importResultModal').classList.add('hidden');
+                window.printLabelsForBooks(importedIds);
+                return;
+            }
+            printAfterImport = false;
+            document.getElementById('importResultModal').classList.remove('hidden');
+        };
+
+        window.closeImportResult = function () {
+            document.getElementById('importResultModal').classList.add('hidden');
+            // A cancelled preview wrote nothing, so there is nothing to reload
+            // for, and reloading would throw away the rest of the page state.
+            if (pendingImportFile) { pendingImportFile = null; return; }
+            // Only now, so the summary is not swept away before it is read.
+            window.location.reload();
+        };
+
+        window.printImportedLabels = function () {
+            document.getElementById('importResultModal').classList.add('hidden');
+            window.printLabelsForBooks(importedIds);
+        };
+    })();
+    </script>
 </body>
 </html>

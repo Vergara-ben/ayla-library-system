@@ -26,6 +26,7 @@
         }
         @media (prefers-reduced-motion: reduce) { .shelf-row { transition: none; } }
     </style>
+    <script src="{% static 'js/ayla-dialog.js' %}"></script>
 </head>
 <body class="flex h-screen overflow-hidden">
 
@@ -68,11 +69,25 @@
                 <div class="p-5 border-b border-slate-800 flex items-center gap-2">
                     <i class="fa-solid fa-boxes-packing text-cyan-600 text-xs"></i>
                     <h4 class="text-sm font-bold text-slate-200 tracking-wide">Waiting to be shelved</h4>
+                    <div class="flex items-center gap-2">
+                        {# The queue arrives sorted by shelf, so a trolley is #}
+                        {# usually a contiguous run of ticks.                 #}
+                        <button type="button" id="shelveSelectedBtn" onclick="shelveSelected()" disabled
+                                class="bg-slate-800/40 text-slate-600 border border-slate-800 text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors cursor-not-allowed">
+                            <i class="fa-solid fa-check-double text-[10px]"></i>
+                            <span id="shelveSelectedLabel">Mark selected shelved</span>
+                        </button>
+                    </div>
                 </div>
                 <div class="overflow-x-auto">
                     <table class="w-full text-left border-collapse">
                         <thead>
                             <tr class="border-b border-slate-800/80 text-[10px] font-bold tracking-wider text-slate-500 uppercase">
+                                <th class="py-3 px-4 w-10 text-center">
+                                    <input type="checkbox" id="selectAllShelve" onchange="toggleAllShelve(this)"
+                                           class="accent-emerald-600 w-3.5 h-3.5 cursor-pointer"
+                                           aria-label="Select every book waiting">
+                                </th>
                                 <th class="py-3 px-6">Book</th>
                                 <th class="py-3 px-6">Author</th>
                                 <th class="py-3 px-6">Goes back to</th>
@@ -82,6 +97,11 @@
                         <tbody id="queueBody" class="divide-y divide-slate-800/40 text-xs text-slate-300">
                             {% for book in books %}
                             <tr class="shelf-row hover:bg-slate-800/10" data-book-id="{{ book.book_id }}">
+                                <td class="py-3.5 px-4 text-center">
+                                    <input type="checkbox" class="shelve-tick accent-emerald-600 w-3.5 h-3.5 cursor-pointer"
+                                           value="{{ book.book_id }}" onchange="onShelveTick()"
+                                           aria-label="Select {{ book.title }}">
+                                </td>
                                 <td class="py-3.5 px-6 font-semibold text-slate-200">{{ book.title }}</td>
                                 <td class="py-3.5 px-6 text-slate-400">{{ book.author }}</td>
                                 <td class="py-3.5 px-6 text-slate-400">
@@ -101,7 +121,7 @@
                             </tr>
                             {% empty %}
                             <tr id="emptyRow">
-                                <td colspan="4" class="py-14 text-center text-slate-500">
+                                <td colspan="5" class="py-14 text-center text-slate-500">
                                     Nothing waiting &mdash; every returned book is back on its shelf.
                                 </td>
                             </tr>
@@ -116,34 +136,104 @@
     <script>
         function toggleSidebar() { document.querySelector('aside').classList.toggle('open'); }
 
-        async function markShelved(btn, bookId) {
-            btn.disabled = true;
-            const res = await fetch("{% url 'reshelving_queue' %}", {
-                method: 'POST',
-                headers: {
-                    'X-CSRFToken': '{{ csrf_token }}',
-                    'X-Requested-With': 'XMLHttpRequest',
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                },
-                body: new URLSearchParams({ book_id: bookId }),
-            });
-            const data = await res.json();
-            if (!data.success) { alert(data.error || 'Could not mark it shelved.'); btn.disabled = false; return; }
+        // One request whether it is one book or thirty. Someone walking a
+        // trolley back from the aisles shelves a run of them at once, and
+        // thirty separate round trips is thirty chances to lose track of which
+        // ones actually went back.
+        async function shelve(ids, buttons) {
+            (buttons || []).forEach(function (b) { b.disabled = true; });
+            const body = new URLSearchParams();
+            ids.forEach(function (id) { body.append('book_id', id); });
 
-            const row = btn.closest('tr');
-            row.classList.add('done');
-            // Removed after the fade rather than immediately, so the row does not
-            // vanish out from under the cursor mid-click.
+            let data;
+            try {
+                const res = await fetch("{% url 'reshelving_queue' %}", {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRFToken': '{{ csrf_token }}',
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: body,
+                });
+                data = await res.json();
+            } catch (e) {
+                alert('Could not reach the server. Nothing was changed.');
+                (buttons || []).forEach(function (b) { b.disabled = false; });
+                return;
+            }
+
+            if (!data.success) {
+                alert(data.error || 'Could not mark them shelved.');
+                (buttons || []).forEach(function (b) { b.disabled = false; });
+                if (typeof data.remaining === 'number') {
+                    document.getElementById('waitingCount').textContent = data.remaining;
+                }
+                return;
+            }
+
+            // Only the rows the server confirmed. A book somebody else shelved
+            // first comes back in skipped_count, and its row is left alone
+            // rather than disappearing as though this action had done it.
+            const done = data.shelved_ids || ids;
+            done.forEach(function (id) {
+                const row = document.querySelector('tr[data-book-id="' + id + '"]');
+                if (row) row.classList.add('done');
+            });
             setTimeout(function () {
-                row.remove();
+                done.forEach(function (id) {
+                    const row = document.querySelector('tr[data-book-id="' + id + '"]');
+                    if (row) row.remove();
+                });
                 document.getElementById('waitingCount').textContent = data.remaining;
+                onShelveTick();
+                if (data.skipped_count) {
+                    alert(data.skipped_count + ' book(s) had already been shelved by '
+                        + 'someone else, so they were left as they are.');
+                }
                 if (data.remaining === 0 && !document.getElementById('emptyRow')) {
                     document.getElementById('queueBody').innerHTML =
-                        '<tr id="emptyRow"><td colspan="4" class="py-14 text-center text-slate-500">'
+                        '<tr id="emptyRow"><td colspan="5" class="py-14 text-center text-slate-500">'
                         + 'Nothing waiting &mdash; every returned book is back on its shelf.</td></tr>';
                 }
             }, 250);
         }
+
+        function markShelved(btn, bookId) { shelve([bookId], [btn]); }
+
+        window.toggleAllShelve = function (master) {
+            document.querySelectorAll('.shelve-tick').forEach(function (cb) {
+                cb.checked = master.checked;
+            });
+            onShelveTick();
+        };
+
+        window.onShelveTick = function () {
+            const ticks = [].slice.call(document.querySelectorAll('.shelve-tick'));
+            const on = ticks.filter(function (cb) { return cb.checked; });
+            const btn = document.getElementById('shelveSelectedBtn');
+            const lab = document.getElementById('shelveSelectedLabel');
+            btn.disabled = on.length === 0;
+            lab.textContent = on.length
+                ? 'Mark ' + on.length + ' shelved'
+                : 'Mark selected shelved';
+            btn.className = on.length
+                ? 'bg-emerald-700/30 text-emerald-400 border border-emerald-800/80 hover:bg-emerald-700/50 text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors'
+                : 'bg-slate-800/40 text-slate-600 border border-slate-800 text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors cursor-not-allowed';
+
+            const master = document.getElementById('selectAllShelve');
+            if (master) {
+                master.checked = ticks.length > 0 && on.length === ticks.length;
+                master.indeterminate = on.length > 0 && on.length < ticks.length;
+            }
+        };
+
+        window.shelveSelected = function () {
+            const ids = [].slice.call(document.querySelectorAll('.shelve-tick:checked'))
+                          .map(function (cb) { return Number(cb.value); });
+            if (!ids.length) return;
+            shelve(ids, [document.getElementById('shelveSelectedBtn')]);
+        };
     </script>
 </body>
 </html>

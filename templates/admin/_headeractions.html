@@ -30,7 +30,9 @@ which is what hides the badge.
     {# the librarian happens to be standing -- not only on the one page it     #}
     {# confines the browser to. #}
     <form method="post" action="{% url 'desk_arm' %}" class="inline-block"
-          onsubmit="return confirm('Hand this computer to the patron?\n\nThis browser stays on Log Management until someone enters their account password.')">
+          data-confirm="Hand this computer to the patron?
+
+This browser stays on Log Management until someone enters their account password.">
         {% csrf_token %}
         <button type="submit" title="Hand this computer to a patron"
                 class="flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-bold tracking-wide transition-colors

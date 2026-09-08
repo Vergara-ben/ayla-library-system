@@ -212,7 +212,7 @@
       <input type="hidden" name="action" value="verify_otp">
       <input type="hidden" name="email" value="{{ otp_email }}">
       <div class="form-group" style="margin-bottom:20px">
-        <label>Verification Code</label>
+        <label for="otpInput">Verification Code</label>
         <input type="text" id="otpInput" name="otp" inputmode="numeric" pattern="[0-9]{6}" maxlength="6"
                placeholder="6-digit code" required
                style="text-align:center;font-size:22px;letter-spacing:8px;font-weight:700;">
@@ -267,27 +267,27 @@
         <div class="section-title">👤 Personal Information</div>
         <div class="form-grid">
           <div class="form-group full">
-            <label>First Name</label>
+            <label for="firstNameField">First Name</label>
             <input type="text" id="firstNameField" name="first_name" placeholder="Maria" required>
           </div>
           <div class="form-group" style="margin-bottom:16px">
-            <label>Middle Name <span style="font-weight:400;color:var(--muted)">(optional)</span></label>
+            <label for="middleNameField">Middle Name <span style="font-weight:400;color:var(--muted)">(optional)</span></label>
             <input type="text" id="middleNameField" name="middle_name" placeholder="Reyes">
           </div>
           <div class="form-group" style="margin-bottom:16px">
-            <label>Surname</label>
+            <label for="lastNameField">Surname</label>
             <input type="text" id="lastNameField" name="last_name" placeholder="Santos" required>
           </div>
           <div class="form-group full">
-            <label>Email Address</label>
+            <label for="email">Email Address</label>
             <input type="email" id="email" name="email" placeholder="maria@school.edu" required>
           </div>
           <div class="form-group full">
-            <label>Contact Number</label>
+            <label for="contactNumber">Contact Number</label>
             <input type="tel" id="contactNumber" name="contact_number" placeholder="+63 9XX XXX XXXX" required>
           </div>
           <div class="form-group full">
-            <label>Address</label>
+            <label for="address">Address</label>
             <textarea id="address" name="address" placeholder="House No., Street, Barangay, City" rows="2" style="resize:none" required></textarea>
           </div>
         </div>
@@ -314,15 +314,15 @@
       <div id="step3" style="display:none">
         <div class="section-title">🔐 Security &amp; Verification</div>
         <div class="form-group" style="margin-bottom:16px">
-          <label>Password</label>
+          <label for="password">Password</label>
           <input type="password" id="password" name="password" placeholder="At least 8 characters" required>
         </div>
         <div class="form-group" style="margin-bottom:16px">
-          <label>Confirm Password</label>
+          <label for="confirmPassword">Confirm Password</label>
           <input type="password" id="confirmPassword" name="confirm_password" placeholder="Repeat password" required>
         </div>
         <div class="form-group" style="margin-bottom:24px">
-          <label>Valid ID <span style="color:#f59e0b">(required)</span></label>
+          <label for="credentialDocument">Valid ID <span style="color:#f59e0b">(required)</span></label>
           <input type="file" id="credentialDocument" name="credential_document" accept=".jpg,.jpeg,.png,.pdf" style="padding:9px 14px;" required>
           <div style="font-size:11px;color:var(--muted);margin-top:6px;">
             JPG, PNG, or PDF &mdash; max 5 MB. Because you are registering online rather than

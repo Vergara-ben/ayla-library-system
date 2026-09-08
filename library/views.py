@@ -1,6 +1,7 @@
 from django.shortcuts import redirect, render, get_object_or_404
 from django.contrib import messages
-from django.db.models import Count, Max, Q
+from django.db.models import (Count, F, IntegerField, Max, OuterRef, Q,
+                              Subquery)
 from django.db import transaction
 from django.utils import timezone
 from django.core.exceptions import SuspiciousFileOperation
@@ -38,8 +39,6 @@ from .auth_utils import (
     staff_only_required,
     module_required,
     admin_or_module_required,
-    MIN_PASSWORD_LENGTH,
-    PASSWORD_RULE_TEXT,
     password_length_error,
 )
 from .modules import STAFF_MODULES, clean_module_keys
@@ -81,9 +80,10 @@ from .emails import (
     registration_approved_email,
     registration_rejected_email,
 )
+from . import labels
 from .reports import (REPORT_TYPES, SNAPSHOT_REPORTS, parse_date_range, build_report,
                       render_report_pdf, render_report_excel)
-from .models import Book, Patron, PatronLog, Transaction, User, ShelfLevel, Donation, Announcement, FloorPlan, Shelf, Room, Door, Waypoint, BLEBeacon, WaypointConnection, SystemLog, BorrowingRule, PasswordResetOTP, InventoryRecord, StockMovement, StockAudit, DueDateExtension, ReactivationRequest
+from .models import Book, Patron, PatronLog, Transaction, User, ShelfLevel, Donation, Announcement, FloorPlan, Shelf, Room, Door, Waypoint, BLEBeacon, WaypointConnection, SystemLog, BorrowingRule, Obstacle, Stairway, PasswordResetOTP, InventoryRecord, StockMovement, StockAudit, DueDateExtension, ReactivationRequest
 
 # Patron views
 def patron_login(request):
@@ -593,10 +593,34 @@ def patron_map(request):
         if book:
             target['book_id'] = book.book_id
             target['book_title'] = book.title
-            shelf = book.shelf_level.shelf if book.shelf_level else None
+            level = book.shelf_level
+            shelf = level.shelf if level else None
             if shelf:
                 target['shelf_id'] = shelf.shelf_id
                 target['shelf_name'] = shelf.name
+                # Which board, and how far along it. Sent as words rather than
+                # as a second set of coordinates: a floor plan is flat, so the
+                # level is height and can only ever be described, while the
+                # slot and column are a real place along the shelf's face.
+                target['level_label'] = level.label
+                target['level_number'] = level.level_number
+                target['column_number'] = level.column_number
+                target['is_top'] = level.is_top
+                target['is_under'] = level.is_under
+                target['shelf_slot'] = book.shelf_slot
+                target['location'] = book_location_words(book)
+                # Everything positional is computed from the copies actually on
+                # the shelf, so a book borrowed an hour ago does not still push
+                # the count -- and the marker -- one space to the right.
+                layout = level_layout(level, book) or {}
+                focus = layout.get('focus') or {}
+                target['position'] = focus.get('position')
+                target['position_of'] = focus.get('of')
+                target['on_shelf'] = focus.get('on_shelf', False)
+                target['copy_status'] = focus.get('status', '')
+                target['before'] = focus.get('before', '')
+                target['after'] = focus.get('after', '')
+                target['layout'] = layout.get('rows', [])
             # The navigation route is recomputed roughly once a second while the
             # map is open, so logging that would produce thousands of rows saying
             # the same thing. This records the patron asking to be taken to a
@@ -1168,8 +1192,14 @@ def _password_reset_view(request, portal):
             return _render('otp', email=email, error='Enter the 6-digit code from your email.')
         if new_password != confirm_password:
             return _render('otp', email=email, error='The two passwords do not match.')
-        if len(new_password) < MIN_PASSWORD_LENGTH:
-            return _render('otp', email=email, error=PASSWORD_RULE_TEXT)
+        # The full policy, not just the length. This path had drifted back to a
+        # bare length check, which meant the one flow an attacker reaches after
+        # compromising an inbox was also the flow with the weakest rules --
+        # "password" and "aaaaaaaa" both passed here while being refused
+        # everywhere else.
+        policy_error = password_length_error(new_password)
+        if policy_error:
+            return _render('otp', email=email, error=policy_error)
 
         reset, error, exhausted = _redeem_reset_code(account_type, email, code)
         if error:
@@ -1413,14 +1443,61 @@ def admin_signin(request):
     return render(request, 'admin/signin.html')
 
 
+# What the Copies dropdown offers. '+' means "or more"; parse_copies_filter
+# reads both forms, so a hand-typed ?copies=7 works as well.
+COPIES_FILTER_CHOICES = [
+    ('1', 'Single copy only'),
+    ('2', 'Exactly 2'),
+    ('3', 'Exactly 3'),
+    ('4', 'Exactly 4'),
+    ('2+', '2 or more (duplicated)'),
+    ('5+', '5 or more'),
+]
+
+
+def _copies_annotation():
+    """How many copies of this book the library holds, per row.
+
+    A copy is its own Book row -- each has its own QR code and its own loan
+    history -- so 'copies' is the number of rows sharing a title and author.
+    The same definition as the book detail panel, deliberately: two places
+    answering 'how many do we have' with different numbers is worse than
+    either answer being arguable.
+    """
+    same_book = (
+        Book.objects
+        .filter(title=OuterRef('title'), author=OuterRef('author'))
+        .order_by().values('title', 'author')
+        .annotate(n=Count('*')).values('n')[:1]
+    )
+    return Subquery(same_book, output_field=IntegerField())
+
+
+def parse_copies_filter(raw):
+    """'3' -> exactly three, '3+' -> three or more, anything else -> no filter."""
+    text = (raw or '').strip()
+    at_least = text.endswith('+')
+    digits = text[:-1] if at_least else text
+    if not digits.isdigit():
+        return None
+    n = int(digits)
+    if n < 1 or n > 99:
+        return None
+    return {'copies__gte': n} if at_least else {'copies': n}
+
+
 def _books_page(request, template):
     from urllib.parse import urlencode
     q = (request.GET.get('q') or '').strip()
     status = (request.GET.get('status') or '').strip()
     genre = (request.GET.get('genre') or '').strip()
     material = (request.GET.get('material') or '').strip()
+    copies = (request.GET.get('copies') or '').strip()
 
-    books_queryset = Book.objects.select_related('shelf_level', 'shelf_level__shelf')
+    books_queryset = (
+        Book.objects.select_related('shelf_level', 'shelf_level__shelf')
+        .annotate(copies=_copies_annotation())
+    )
     if q:
         books_queryset = books_queryset.filter(_book_search_q(q))
     valid_status = [choice[0] for choice in Book.STATUS_CHOICES]
@@ -1434,11 +1511,22 @@ def _books_page(request, template):
     valid_material = [choice[0] for choice in Book.MATERIAL_TYPE_CHOICES]
     if material in valid_material:
         books_queryset = books_queryset.filter(material_type=material)
+    # 'Which titles do we hold four of' is a stock-taking question, and until
+    # now the only way to answer it was to scroll.
+    copies_filter = parse_copies_filter(copies)
+    if copies_filter:
+        books_queryset = books_queryset.filter(**copies_filter)
+    else:
+        copies = ''
     books_queryset = books_queryset.order_by('title')
 
     # Global stats (independent of the filters above).
-    total_books = Book.objects.count()
-    total_copies = total_books
+    total_copies = Book.objects.count()
+    # The card above this one is headed "Unique books", so it has to count
+    # books rather than rows: seven copies of one encyclopaedia are seven
+    # copies, and saying otherwise contradicts the Copies column beneath it.
+    total_books = (Book.objects.order_by()
+                   .values('title', 'author').distinct().count())
     available_count = Book.objects.filter(status='Available').count()
     borrowed_count = Book.objects.filter(status='Borrowed').count()
     shelf_levels = ShelfLevel.objects.select_related('shelf').all()
@@ -1452,7 +1540,8 @@ def _books_page(request, template):
 
 
     params = {}
-    for key, value in (('q', q), ('status', status), ('genre', genre), ('material', material)):
+    for key, value in (('q', q), ('status', status), ('genre', genre),
+                       ('material', material), ('copies', copies)):
         if value:
             params[key] = value
 
@@ -1470,6 +1559,8 @@ def _books_page(request, template):
         'q': q,
         'status': status,
         'genre': genre,
+        'copies': copies,
+        'copies_choices': COPIES_FILTER_CHOICES,
         'querystring': urlencode(params),
         'paginator': paginator,
     }
@@ -1503,6 +1594,11 @@ def admin_add_book(request):
             material_type = 'Book'
         status = request.POST.get('status', 'Available').strip()
         shelf_level_id = request.POST.get('shelf_level', '').strip()
+        shelf_slot = parse_shelf_slot(request.POST.get('shelf_slot'))
+        condition = (request.POST.get('condition') or '').strip().title()
+        if condition not in dict(Book.CONDITION_CHOICES):
+            condition = 'Good'
+        call_number = (request.POST.get('call_number') or '').strip() or None
         publication_year = request.POST.get('publication_year', '').strip()
         cover_img_url = request.POST.get('cover_img_url', '').strip()
 
@@ -1527,6 +1623,9 @@ def admin_add_book(request):
                 material_type=material_type,
                 status=status or 'Available',
                 shelf_level=shelf_level,
+                shelf_slot=shelf_slot,
+                condition=condition,
+                call_number=call_number,
                 publication_year=int(publication_year) if publication_year else None,
                 cover_img_url=cover_img_url if cover_img_url else None,
                 qr_code=qr_code
@@ -1777,42 +1876,60 @@ def respond_to_reactivation(request, request_id):
     """
     if request.method != 'POST':
         return _patron_page_redirect(request)
-    reactivation = ReactivationRequest.objects.select_related('patron').filter(
-        request_id=request_id, status='Pending').first()
-    if reactivation is None:
-        messages.error(request, 'Reactivation request not found, or it was already resolved.')
-        return _patron_page_redirect(request)
-
     action = request.POST.get('action')
     admin = User.objects.filter(admin_id=request.session.get('admin_id')).first()
-    patron = reactivation.patron
 
-    if action == 'approve':
-        patron.account_status = 'Active'
-        patron.save(update_fields=['account_status'])
-        reactivation.status = 'Approved'
-        reactivation.resolved_by = admin
-        reactivation.resolved_at = timezone.now()
-        reactivation.save(update_fields=['status', 'resolved_by', 'resolved_at'])
-        log_admin_action(request, 'Approve', 'ReactivationRequest', reactivation.request_id,
-                         f'Reactivated "{patron.fullname}"')
-        if patron.email:
-            reactivation_approved_email(patron)
-        messages.success(request, f'{patron.fullname} is now Active.')
-    elif action == 'reject':
-        note = (request.POST.get('staff_note') or '').strip()[:255]
-        reactivation.status = 'Rejected'
-        reactivation.resolved_by = admin
-        reactivation.resolved_at = timezone.now()
-        reactivation.staff_note = note or None
-        reactivation.save(update_fields=['status', 'resolved_by', 'resolved_at', 'staff_note'])
-        log_admin_action(request, 'Reject', 'ReactivationRequest', reactivation.request_id,
-                         f'Rejected reactivation for "{patron.fullname}"' + (f' — {note}' if note else ''))
-        if patron.email:
-            reactivation_declined_email(patron, note)
-        messages.success(request, f'Reactivation request for {patron.fullname} rejected.')
-    else:
-        messages.error(request, 'Unknown action.')
+    # Locked for the whole decision, like the extension queue: two
+    # administrators resolving the same request both used to pass the Pending
+    # check, and the patron got two emails about one decision. Emails are sent
+    # after the block so nothing is announced that a rollback would undo.
+    notify = None
+    try:
+        with transaction.atomic():
+            reactivation = (ReactivationRequest.objects.select_for_update()
+                            .select_related('patron')
+                            .filter(request_id=request_id, status='Pending').first())
+            if reactivation is None:
+                raise _AlreadyResolved()
+            patron = reactivation.patron
+
+            if action == 'approve':
+                patron.account_status = 'Active'
+                patron.save(update_fields=['account_status'])
+                reactivation.status = 'Approved'
+                reactivation.resolved_by = admin
+                reactivation.resolved_at = timezone.now()
+                reactivation.save(update_fields=['status', 'resolved_by', 'resolved_at'])
+                log_admin_action(request, 'Approve', 'ReactivationRequest', reactivation.request_id,
+                                 f'Reactivated "{patron.fullname}"')
+                if patron.email:
+                    notify = ('approved', patron, None)
+                messages.success(request, f'{patron.fullname} is now Active.')
+            elif action == 'reject':
+                note = (request.POST.get('staff_note') or '').strip()[:255]
+                reactivation.status = 'Rejected'
+                reactivation.resolved_by = admin
+                reactivation.resolved_at = timezone.now()
+                reactivation.staff_note = note or None
+                reactivation.save(update_fields=['status', 'resolved_by', 'resolved_at', 'staff_note'])
+                log_admin_action(request, 'Reject', 'ReactivationRequest', reactivation.request_id,
+                                 f'Rejected reactivation for "{patron.fullname}"'
+                                 + (f' — {note}' if note else ''))
+                if patron.email:
+                    notify = ('rejected', patron, note)
+                messages.success(request, f'Reactivation request for {patron.fullname} rejected.')
+            else:
+                raise _AlreadyResolved('Unknown action.')
+    except _AlreadyResolved as stop:
+        messages.error(request, str(stop)
+                       or 'Reactivation request not found, or it was already resolved.')
+        return _patron_page_redirect(request)
+
+    # Committed. Safe to tell the patron now.
+    if notify and notify[0] == 'approved':
+        reactivation_approved_email(notify[1])
+    elif notify:
+        reactivation_declined_email(notify[1], notify[2])
     return _patron_page_redirect(request)
 
 
@@ -2072,6 +2189,9 @@ def admin_edit_book(request, book_id):
         'cover_img_url': book.cover_img_url,
         'status': book.status,
         'shelf_level_id': book.shelf_level.shelf_level_id if book.shelf_level else '',
+        'shelf_slot': book.shelf_slot or '',
+        'condition': book.condition or 'Good',
+        'call_number': book.call_number or '',
     }
 
     if request.method == 'POST':
@@ -2099,6 +2219,17 @@ def admin_edit_book(request, book_id):
             book.status = status or book.status
             if shelf_level_id:
                 book.shelf_level = ShelfLevel.objects.filter(shelf_level_id=shelf_level_id).first()
+            # Present-but-blank clears it; absent leaves it alone, so a form
+            # that does not carry the field cannot wipe a recorded position.
+            if 'shelf_slot' in request.POST:
+                book.shelf_slot = parse_shelf_slot(request.POST.get('shelf_slot'))
+            if 'condition' in request.POST:
+                value = (request.POST.get('condition') or '').strip().title()
+                if value in dict(Book.CONDITION_CHOICES):
+                    book.condition = value
+            if 'call_number' in request.POST:
+                # Cleared deliberately means "renumber it": save() fills a blank.
+                book.call_number = (request.POST.get('call_number') or '').strip() or None
             book.save()
             log_admin_action(request, 'Update', 'Book', book.book_id, f'Updated "{book.title}"')
             success = 'Book details updated successfully.'
@@ -2111,6 +2242,7 @@ def admin_edit_book(request, book_id):
                 'cover_img_url': cover_img_url,
                 'status': status,
                 'shelf_level_id': shelf_level_id,
+                'shelf_slot': request.POST.get('shelf_slot', ''),
             })
             if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
                 from django.http import JsonResponse
@@ -2253,48 +2385,79 @@ def respond_to_extension(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
 
-    extension = DueDateExtension.objects.select_related(
-        'transaction', 'transaction__book', 'transaction__patron'
-    ).filter(extension_id=request.POST.get('extension_id'), status='Pending').first()
-    if extension is None:
-        return JsonResponse({'success': False, 'error': 'Request not found, or it was already resolved.'})
-
     action = request.POST.get('action')
     admin = User.objects.filter(admin_id=request.session.get('admin_id')).first()
-    tx = extension.transaction
 
-    if action == 'approve':
-        # tx.return_date could have been set between the request and this
-        # click -- the book already came back, so there is nothing left to
-        # extend. Caught here rather than earlier, since it is only possible
-        # in the gap between listing pending requests and acting on one.
-        if tx.return_date is not None:
-            return JsonResponse({'success': False, 'error': 'This book has already been returned.'})
-        tx.due_date = extension.requested_due_date
-        tx.overdue_flag = bool(tx.due_date and timezone.localdate() > tx.due_date)
-        tx.save(update_fields=['due_date', 'overdue_flag'])
-        extension.status = 'Approved'
-        extension.resolved_by = admin
-        extension.resolved_at = timezone.now()
-        extension.save(update_fields=['status', 'resolved_by', 'resolved_at'])
-        log_admin_action(request, 'Approve', 'DueDateExtension', extension.extension_id,
-                         f'Extended "{tx.book.title}" to {tx.due_date}'
-                         + (f' for {tx.patron.fullname}' if tx.patron else ''))
-        if tx.patron and tx.patron.email and tx.book:
-            extension_approved_email(tx.patron, tx.book, tx.due_date)
-    elif action == 'decline':
-        note = (request.POST.get('staff_note') or '').strip()[:255]
-        extension.status = 'Declined'
-        extension.resolved_by = admin
-        extension.resolved_at = timezone.now()
-        extension.staff_note = note or None
-        extension.save(update_fields=['status', 'resolved_by', 'resolved_at', 'staff_note'])
-        log_admin_action(request, 'Decline', 'DueDateExtension', extension.extension_id,
-                         f'Declined extension for "{tx.book.title}"' + (f' — {note}' if note else ''))
-        if tx.patron and tx.patron.email and tx.book:
-            extension_declined_email(tx.patron, tx.book, note)
-    else:
-        return JsonResponse({'success': False, 'error': 'Unknown action.'})
+    # The row is locked for as long as it takes to read it and resolve it. Two
+    # librarians clicking Approve at the same moment both used to pass the
+    # Pending check, which resolved one request twice -- two audit entries for
+    # one decision, and two emails to the patron about it. The second request
+    # now waits for the first to commit, finds the row no longer Pending, and
+    # says so.
+    #
+    # Emails are sent after the block, never inside it: a message posted from
+    # within a transaction that later rolls back cannot be recalled.
+    notify = None
+    try:
+        with transaction.atomic():
+            # No select_related on the locked query. transaction__book and
+            # transaction__patron are nullable, so joining them makes a LEFT
+            # OUTER JOIN, and "FOR UPDATE cannot be applied to the nullable
+            # side of an outer join" -- Postgres refuses it outright. Lock the
+            # one row that needs locking; the related rows are read afterwards
+            # and are not what two clicks are racing over.
+            extension = (DueDateExtension.objects.select_for_update()
+                         .filter(extension_id=request.POST.get('extension_id'),
+                                 status='Pending').first())
+            if extension is None:
+                raise _AlreadyResolved()
+            tx = (Transaction.objects
+                  .select_related('book', 'patron')
+                  .filter(transaction_id=extension.transaction_id).first())
+            if tx is None:
+                raise _AlreadyResolved('That loan no longer exists.')
+
+            if action == 'approve':
+                # tx.return_date could have been set between the request and
+                # this click -- the book already came back, so there is nothing
+                # left to extend.
+                if tx.return_date is not None:
+                    raise _AlreadyResolved('This book has already been returned.')
+                tx.due_date = extension.requested_due_date
+                tx.overdue_flag = bool(tx.due_date and timezone.localdate() > tx.due_date)
+                tx.save(update_fields=['due_date', 'overdue_flag'])
+                extension.status = 'Approved'
+                extension.resolved_by = admin
+                extension.resolved_at = timezone.now()
+                extension.save(update_fields=['status', 'resolved_by', 'resolved_at'])
+                log_admin_action(request, 'Approve', 'DueDateExtension', extension.extension_id,
+                                 f'Extended "{tx.book.title}" to {tx.due_date}'
+                                 + (f' for {tx.patron.fullname}' if tx.patron else ''))
+                if tx.patron and tx.patron.email and tx.book:
+                    notify = ('approved', tx.patron, tx.book, tx.due_date)
+            elif action == 'decline':
+                note = (request.POST.get('staff_note') or '').strip()[:255]
+                extension.status = 'Declined'
+                extension.resolved_by = admin
+                extension.resolved_at = timezone.now()
+                extension.staff_note = note or None
+                extension.save(update_fields=['status', 'resolved_by', 'resolved_at', 'staff_note'])
+                log_admin_action(request, 'Decline', 'DueDateExtension', extension.extension_id,
+                                 f'Declined extension for "{tx.book.title}"'
+                                 + (f' — {note}' if note else ''))
+                if tx.patron and tx.patron.email and tx.book:
+                    notify = ('declined', tx.patron, tx.book, note)
+            else:
+                raise _AlreadyResolved('Unknown action.')
+    except _AlreadyResolved as stop:
+        reason = str(stop) or 'Request not found, or it was already resolved.'
+        return JsonResponse({'success': False, 'error': reason})
+
+    # Committed. Only now is it safe to tell the patron.
+    if notify and notify[0] == 'approved':
+        extension_approved_email(notify[1], notify[2], notify[3])
+    elif notify:
+        extension_declined_email(notify[1], notify[2], notify[3])
 
     if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
         return JsonResponse({'success': True, 'action': action, 'extension_id': extension.extension_id})
@@ -2503,6 +2666,8 @@ def _indoor_map_page(request, template, is_admin_view=False):
     
     # Fetch related entities with coordinates if floor plan exists
     rooms_data = []
+    obstacles_data = []
+    stairways_data = []
     shelves_data = []
     waypoints_data = []
     beacons_data = []
@@ -2525,6 +2690,32 @@ def _indoor_map_page(request, template, is_admin_view=False):
                     'description': room.description or ''
                 })
         
+        # Furniture and obstacles. Only the active ones: an inactive shape is a
+        # partition that has come down, and drawing it would send a patron
+        # around something that is no longer there.
+        for o in Obstacle.objects.filter(floor_plan=floorplan, is_active=True):
+            if o.geometry:
+                obstacles_data.append({
+                    'id': o.obstacle_id,
+                    'kind': o.kind,
+                    'label': o.label,
+                    'geometry': o.geometry,
+                    'x': o.map_x,
+                    'y': o.map_y,
+                })
+
+        for st in Stairway.objects.select_related('connects_to').filter(
+                floor_plan=floorplan, is_active=True):
+            if st.geometry:
+                stairways_data.append({
+                    'id': st.stairway_id, 'kind': st.kind, 'label': st.label,
+                    'geometry': st.geometry, 'x': st.map_x, 'y': st.map_y,
+                    'bearing': st.bearing or 0, 'direction': st.direction,
+                    'destination': st.destination_label,
+                    'treads': ([] if st.kind == 'Elevator'
+                               else _stair_treads(st.geometry, st.bearing)),
+                })
+
         # Serialize shelves with coordinates (through room relationship)
         shelves = Shelf.objects.filter(room__floor_plan=floorplan, is_active=True).select_related('room')
         for shelf in shelves:
@@ -2537,6 +2728,9 @@ def _indoor_map_page(request, template, is_admin_view=False):
                     'rotation': shelf.rotation or 0,
                     'width': shelf.width or 46,
                     'depth': shelf.depth or 14,
+                    'kind': shelf.kind,
+                    'geometry': shelf.geometry or None,
+                    'footprint': shelf.footprint(),
                     'description': shelf.description or '',
                     'room_id': shelf.room.room_id if shelf.room else None
                 })
@@ -2626,6 +2820,8 @@ def _indoor_map_page(request, template, is_admin_view=False):
         'floorplan': json.dumps(floorplan_data) if floorplan_data else 'null',
         'floorplans': json.dumps(floorplans_list),
         'rooms': json.dumps(rooms_data),
+        'obstacles': json.dumps(obstacles_data),
+        'stairways': json.dumps(stairways_data),
         'shelves': json.dumps(shelves_data),
         'waypoints': json.dumps(waypoints_data),
         'beacons': json.dumps(beacons_data),
@@ -2758,18 +2954,58 @@ def reshelving_queue(request):
     someone has actually taken it there.
     """
     if request.method == 'POST':
-        book = Book.objects.filter(book_id=request.POST.get('book_id')).first()
-        if book is None:
-            return JsonResponse({'success': False, 'error': 'Book not found'})
-        if book.status != 'For Reshelving':
-            return JsonResponse({'success': False,
-                                 'error': f'"{book.title}" is not waiting to be reshelved.'})
-        book.status = 'Available'
-        book.save(update_fields=['status'])
-        log_admin_action(request, 'Update', 'Book', book.book_id,
-                         f'Shelved "{book.title[:60]}" - back on the shelf and borrowable')
+        # One id or many. A trolley coming back from the aisles is thirty books,
+        # and thirty round trips is thirty chances to lose count of which ones
+        # were actually put away.
+        raw_ids = request.POST.getlist('book_id') or request.POST.getlist('book_ids')
+        ids = []
+        for chunk in raw_ids:
+            for part in str(chunk).split(','):
+                part = part.strip()
+                if part.isdigit() and int(part) not in ids:
+                    ids.append(int(part))
+        if not ids:
+            return JsonResponse({'success': False, 'error': 'Nothing selected to shelve.'})
+
+        waiting = {b.book_id: b for b in
+                   Book.objects.filter(book_id__in=ids, status='For Reshelving')}
+        shelved, skipped = [], []
+        for book_id in ids:
+            book = waiting.get(book_id)
+            if book is None:
+                skipped.append(book_id)
+                continue
+            shelved.append(book)
+
+        if shelved:
+            with transaction.atomic():
+                Book.objects.filter(book_id__in=[b.book_id for b in shelved]).update(
+                    status='Available')
+            if len(shelved) == 1:
+                log_admin_action(request, 'Update', 'Book', shelved[0].book_id,
+                                 f'Shelved "{shelved[0].title[:60]}" - back on the '
+                                 'shelf and borrowable')
+            else:
+                # One entry for the trolley rather than thirty near-identical
+                # ones, which is what makes the log readable afterwards.
+                log_admin_action(request, 'Update', 'Book', None,
+                                 f'Shelved {len(shelved)} book(s) from the reshelving '
+                                 f'queue: ' + ', '.join(b.title[:40] for b in shelved[:5])
+                                 + (f' and {len(shelved) - 5} more' if len(shelved) > 5 else ''))
+
         remaining = Book.objects.filter(status='For Reshelving').count()
-        return JsonResponse({'success': True, 'remaining': remaining, 'title': book.title})
+        if not shelved:
+            return JsonResponse({
+                'success': False, 'remaining': remaining,
+                'error': 'Those were already shelved by someone else.'})
+        return JsonResponse({
+            'success': True,
+            'remaining': remaining,
+            'shelved_count': len(shelved),
+            'shelved_ids': [b.book_id for b in shelved],
+            'skipped_count': len(skipped),
+            'title': shelved[0].title if len(shelved) == 1 else None,
+        })
 
     waiting = (Book.objects
                .filter(status='For Reshelving')
@@ -2790,7 +3026,9 @@ def floorplan_print(request):
     than Leaflet: a tiled, scripted map does not survive a print dialog, and
     this has to come out of a printer and go on a wall. Waypoints and beacons
     are left off deliberately -- this is for a patron looking for the Fiction
-    aisle, not for whoever installs the hardware.
+    aisle, not for whoever installs the hardware. Stairs are on, and say where
+    they lead: a printed map is the one a patron reads when the phone is in
+    their pocket, and "2nd floor" is the whole answer for half the shelves.
     """
     floor_plan, live_plans = _floor_for_request(request)
     if floor_plan is None:
@@ -2819,6 +3057,11 @@ def floorplan_print(request):
         cats = [lv.category for lv in sh.shelflevel_set.all() if lv.is_active and lv.category]
         shelves.append({
             'name': sh.name,
+            'kind': sh.kind,
+            # A traced shelf prints as its outline; a rectangular one keeps the
+            # transform, which is what lets its label ride along with it.
+            'points': (' '.join('%s,%s' % (x, y) for x, y in sh.footprint())
+                       if sh.geometry else ''),
             # Rotated rectangles are drawn with a transform rather than four
             # computed corners, so the label can ride along with the shape.
             'x': sh.map_x - w / 2,
@@ -2831,8 +3074,48 @@ def floorplan_print(request):
             'sections': ', '.join(sorted(set(cats))),
         })
 
+    obstacles = [
+        {
+            'label': o.label,
+            'kind': o.kind,
+            'points': ' '.join(f'{x},{y}' for x, y in (o.geometry or [])),
+            'label_x': o.map_x,
+            'label_y': o.map_y,
+            # A pillar is a structural fact worth showing on a wall map; a
+            # named table earns its label, an unnamed one would just be noise.
+            'show_label': bool((o.name or '').strip()),
+        }
+        for o in Obstacle.objects.filter(floor_plan=floor_plan, is_active=True)
+        if o.geometry and len(o.geometry) >= 3
+    ]
+
+    # A wall map without the stairs on it is a map of one floor pretending to
+    # be the whole building, and now that a route can send somebody up them,
+    # the printed copy has to agree with the one on the phone.
+    stairways = [
+        {
+            'label': st.label,
+            'kind': st.kind,
+            'points': ' '.join(f'{x},{y}' for x, y in (st.geometry or [])),
+            'treads': ([] if st.kind == 'Elevator'
+                       else _stair_treads(st.geometry, st.bearing)),
+            'label_x': st.map_x,
+            'label_y': st.map_y,
+            # The offset is computed here, not with |add: -- that filter casts
+            # through int and drops the fraction on the way.
+            'dest_y': st.map_y + 9,
+            'destination': st.destination_label if st.connects_to_id else '',
+        }
+        for st in (Stairway.objects
+                   .select_related('connects_to')
+                   .filter(floor_plan=floor_plan, is_active=True))
+        if st.geometry and len(st.geometry) >= 3
+    ]
+
     return render(request, 'admin/floorplanprint.html', {
         'plan': floor_plan,
+        'obstacles': obstacles,
+        'stairways': stairways,
         'floors': _floor_payload(live_plans, floor_plan),
         'canvas_width': width,
         'canvas_height': height,
@@ -2956,6 +3239,201 @@ def staff_logs(request):
     return _logs_page(request, 'library_staff/logmanagement.html')
 
 
+# How many past loans the details panel carries. Enough to see the pattern
+# of a book's use without turning one modal into the transactions page.
+BOOK_HISTORY_LIMIT = 25
+
+
+# Only a copy marked Available is actually standing on the shelf. Borrowed
+# and Overdue are with a patron, Being Read is on a table somewhere in the
+# building, and For Reshelving is behind the desk waiting to be put back --
+# none of them are a spine the patron can count.
+ON_SHELF_STATUS = 'Available'
+# How wide the strip drawn in the details panel may get before it stops being
+# readable. A level holding more than this is shown around the book instead.
+LAYOUT_WINDOW = 24
+
+
+def level_layout(level, focus_book=None):
+    """Every copy on a level, in shelf order, with what is really there.
+
+    A stored slot says where a book was last shelved. It cannot say what a
+    patron will see, because two things move underneath it: a borrowed book
+    leaves a gap, and a tidy-up pushes the rest together. So the number shown
+    is never the stored one -- it is recomputed here from the copies actually
+    on the shelf, every time anybody asks.
+
+    `shelf_slot` is therefore an ordering key rather than a physical space. It
+    only has to sort; it need not be dense, and renumbering after a reorder
+    costs nothing.
+    """
+    if level is None:
+        return None
+
+    books = list(Book.objects.filter(shelf_level=level)
+                 .order_by(F('shelf_slot').asc(nulls_last=True), 'title', 'book_id'))
+    present = [b for b in books if b.status == ON_SHELF_STATUS]
+
+    rows = []
+    for space, book in enumerate(books, start=1):
+        here = book.status == ON_SHELF_STATUS
+        rows.append({
+            'book_id': book.book_id,
+            'title': book.title,
+            'space': space,
+            'position': (present.index(book) + 1) if here else None,
+            'on_shelf': here,
+            'status': book.status,
+            'is_focus': bool(focus_book and book.book_id == focus_book.book_id),
+        })
+
+    layout = {
+        'rows': rows,
+        'total': len(books),
+        'on_shelf': len(present),
+        'level_label': level.label,
+        'shelf_name': level.shelf.name if level.shelf else '',
+    }
+
+    if focus_book is not None:
+        layout['focus'] = _focus_position(focus_book, books, present)
+    return layout
+
+
+def _focus_position(book, books, present):
+    """Where one copy sits, and what stands either side of it."""
+    if book.status != ON_SHELF_STATUS:
+        return {'on_shelf': False, 'status': book.status,
+                'position': None, 'space': None, 'before': '', 'after': ''}
+    index = present.index(book)
+    return {
+        'on_shelf': True,
+        'status': book.status,
+        # What a patron counting spines will actually arrive at.
+        'position': index + 1,
+        'of': len(present),
+        # And where it sits in the recorded order, gaps included, so the two
+        # numbers disagreeing is visible rather than mysterious.
+        'space': books.index(book) + 1,
+        'spaces': len(books),
+        # Neighbours are how people really find a book: recognising the titles
+        # either side survives a miscount, which a number never does.
+        'before': present[index - 1].title if index > 0 else '',
+        'after': present[index + 1].title if index + 1 < len(present) else '',
+    }
+
+
+def book_location_words(book):
+    """Where this copy is, in the order somebody walks to it.
+
+    Shelf, then which board, then how far along. Each part is dropped when it
+    is not recorded, so a book with only a shelf still reads sensibly instead
+    of claiming a precision nobody entered.
+    """
+    level = book.shelf_level
+    if level is None:
+        return ''
+    parts = []
+    if level.shelf:
+        parts.append(level.shelf.name)
+    parts.append(level.label)          # 'Top', 'Underneath', 'Level 3, Column 2'
+
+    focus = (level_layout(level, book) or {}).get('focus')
+    if focus and focus.get('on_shelf'):
+        # Counted among the copies actually there, not from the stored slot:
+        # with two of its neighbours out on loan, "9th" sends a patron two
+        # books past the one they came for.
+        parts.append('%s book along' % _ordinal(focus['position']))
+    elif focus:
+        parts.append('not on the shelf (%s)' % focus['status'].lower())
+    return ' \u00b7 '.join(p for p in parts if p)
+
+
+# Real sheets do not write "Worn". They write "GOOD CONDITION", "bad",
+# "fair", "needs repair" -- and a value nobody recognises used to become Good,
+# so a shelf of books marked BAD CONDITION imported as though it were fine.
+CONDITION_WORDS = {
+    'good': 'Good', 'goodcondition': 'Good', 'new': 'Good', 'fine': 'Good',
+    'excellent': 'Good', 'ok': 'Good', 'okay': 'Good', 'usable': 'Good',
+    'verygood': 'Good', 'g': 'Good',
+
+    'worn': 'Worn', 'worncondition': 'Worn', 'fair': 'Worn', 'used': 'Worn',
+    'aged': 'Worn', 'faircondition': 'Worn', 'moderate': 'Worn', 'w': 'Worn',
+
+    'bad': 'Damaged', 'badcondition': 'Damaged', 'damaged': 'Damaged',
+    'damagedcondition': 'Damaged', 'poor': 'Damaged', 'poorcondition': 'Damaged',
+    'torn': 'Damaged', 'brokenspine': 'Damaged', 'needsrepair': 'Damaged',
+    'forrepair': 'Damaged', 'unusable': 'Damaged', 'd': 'Damaged',
+}
+
+
+def parse_condition(raw):
+    """The condition a sheet means, or None when it says nothing recognisable.
+
+    None rather than Good, so the caller can tell "the column was blank" from
+    "the column said something I could not read" and report the second.
+    """
+    text = ''.join(ch for ch in str(raw or '').lower() if ch.isalnum())
+    if not text:
+        return None
+    return CONDITION_WORDS.get(text)
+
+
+def parse_shelf_slot(raw):
+    """The slot number as typed, or None.
+
+    Blank means "not recorded", which is different from position 1 and has to
+    stay different: a book nobody has placed yet should not claim the first
+    space on the shelf. Anything that is not a positive whole number is treated
+    as blank rather than rejected, because a slot is a convenience and losing
+    it must never be a reason a book cannot be catalogued.
+    """
+    raw = (raw or '').strip()
+    if not raw:
+        return None
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if 1 <= value <= 9999 else None
+
+
+def _ordinal(n):
+    if 10 <= (n % 100) <= 20:
+        suffix = 'th'
+    else:
+        suffix = {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')
+    return '%d%s' % (n, suffix)
+
+
+def book_history(book, limit=BOOK_HISTORY_LIMIT):
+    """This copy's borrowing history, newest first."""
+    rows = (Transaction.objects
+            .filter(book=book)
+            .select_related('patron', 'processed_by')
+            .order_by('-transaction_date', '-transaction_id')[:limit])
+    out = []
+    for t in rows:
+        if t.return_date:
+            state = 'Returned'
+        elif t.overdue_flag:
+            state = 'Overdue'
+        else:
+            state = 'Out'
+        out.append({
+            'transaction_id': t.transaction_id,
+            'type': t.transaction_type,
+            'patron': t.patron.fullname if t.patron else '\u2014',
+            'borrowed': t.transaction_date.isoformat() if t.transaction_date else '',
+            'due': t.due_date.isoformat() if t.due_date else '',
+            'returned': t.return_date.isoformat() if t.return_date else '',
+            'state': state,
+            'fine': str(t.fine_amount or 0),
+            'staff': t.processed_by.fullname if t.processed_by else '',
+        })
+    return out
+
+
 # Deliberately admin_login_required rather than one module: shared by Manage Books and Shelf Manager,
 # and it only reads data the calling page already gated.
 @admin_login_required
@@ -2979,8 +3457,21 @@ def admin_book_details_ajax(request, book_id):
         'category': book.shelf_level.category if book.shelf_level else 'N/A',
         'shelf': book.shelf_level.shelf.name if (book.shelf_level and book.shelf_level.shelf) else 'N/A',
         'shelf_id': book.shelf_level.shelf.shelf_id if (book.shelf_level and book.shelf_level.shelf) else None,
-        'shelf_level': (f'Level {book.shelf_level.level_number}' if book.shelf_level else 'N/A'),
+        'shelf_level': (book.shelf_level.label if book.shelf_level else 'N/A'),
+        'level_number': (book.shelf_level.level_number if book.shelf_level else None),
+        'column_number': (book.shelf_level.column_number if book.shelf_level else None),
+        'is_top': (book.shelf_level.is_top if book.shelf_level else False),
+        'is_under': (book.shelf_level.is_under if book.shelf_level else False),
+        'shelf_slot': book.shelf_slot,
+        'location': book_location_words(book),
+        # The strip of the level, so the gaps are visible rather than implied.
+        'layout': level_layout(book.shelf_level, book),
         'copies': Book.objects.filter(title=book.title, author=book.author).count(),
+        # Admin and library staff only. The patron endpoint is separate and
+        # deliberately says nothing about who has had a book.
+        'history': book_history(book),
+        'history_limit': BOOK_HISTORY_LIMIT,
+        'history_total': Transaction.objects.filter(book=book).count(),
     }
     return JsonResponse(book_data)
 
@@ -3036,6 +3527,147 @@ def book_qr_png(request, book_id):
     return response
 
 
+@admin_or_module_required('books')
+def book_label_picker_data(request):
+    """Every book, with where it sits, for the QR label picker.
+
+    Sent in one go rather than searched over the wire: the picker filters as you
+    type, and a round trip per keystroke would make choosing forty books out of
+    three hundred feel like work. The whole catalogue at this shape is a few
+    hundred kilobytes, and the cap below keeps that true for a library that
+    grows past what one person would ever select by hand.
+
+    Separate from get_books_for_placement, which caps at 300 and reports a bare
+    level name -- neither is any use for picking labels off a shelf list.
+    """
+    books = (Book.objects
+             .select_related('shelf_level', 'shelf_level__shelf')
+             .order_by('title', 'book_id'))
+    total = books.count()
+
+    data = []
+    for b in books[:MAX_PICKER_BOOKS]:
+        level = b.shelf_level
+        shelf = level.shelf if level and level.shelf_id else None
+        data.append({
+            'book_id': b.book_id,
+            'title': b.title,
+            'author': b.author,
+            'isbn': b.ISBN or '',
+            'status': b.status,
+            'shelf_id': shelf.shelf_id if shelf else None,
+            'shelf_name': shelf.name if shelf else '',
+            'level_id': level.shelf_level_id if level else None,
+            'level_number': level.level_number if level else None,
+            'is_top': bool(level.is_top) if level else False,
+            'level_category': (level.category or '') if level else '',
+            'location': labels.location_of(b),
+        })
+
+    return JsonResponse({
+        'success': True,
+        'books': data,
+        'total': total,
+        'truncated': total > MAX_PICKER_BOOKS,
+        'max_per_sheet': MAX_LABELS_PER_SHEET,
+    })
+
+
+@admin_or_module_required('books')
+def book_qr_labels(request):
+    """A printable sheet of QR labels for the selected books.
+
+    Answers the job that actually has to be done once a delivery is catalogued:
+    print the stickers, cut them, put them on the books. That is a batch
+    operation, so this takes a list of ids rather than one -- downloading
+    eighty PNGs one at a time and pasting them into Word is not a workflow.
+
+    Books are emitted in shelf order, not in the order the ids arrive, so two
+    people printing the same selection get the same sheet and a reprint lines up
+    with the first run. The sheet stays packed edge to edge -- see
+    labels.sort_for_printing for why the groups are not given their own rows.
+    """
+    raw_ids = request.GET.get('ids') or request.POST.get('ids') or ''
+    ids = []
+    for chunk in raw_ids.replace('\n', ',').split(','):
+        chunk = chunk.strip()
+        if chunk.isdigit():
+            ids.append(int(chunk))
+    if not ids:
+        return JsonResponse({'success': False, 'error': 'Select at least one book first.'})
+    if len(ids) > MAX_LABELS_PER_SHEET:
+        return JsonResponse({
+            'success': False,
+            'error': f'That is {len(ids)} labels. Print at most '
+                     f'{MAX_LABELS_PER_SHEET} at a time so the file stays usable.'})
+
+    books = list(Book.objects.filter(book_id__in=ids)
+                 .select_related('shelf_level', 'shelf_level__shelf'))
+    # Shelf order by default, so the cut pile is already in the order you walk
+    # the room. ?sort=id falls back to catalogue order for anyone who wants it.
+    if (request.GET.get('sort') or 'location').lower() == 'location':
+        books = labels.sort_for_printing(books)
+    else:
+        books.sort(key=lambda b: b.book_id)
+    if not books:
+        return JsonResponse({'success': False, 'error': 'None of those books exist.'})
+
+    # A book with no QR cannot be labelled, and the label sheet is exactly when
+    # anyone notices. Minting it here beats sending someone back to fix each
+    # one by hand -- the value is a fresh UUID either way.
+    missing = [b for b in books if not b.qr_code]
+    if missing:
+        with transaction.atomic():
+            for b in missing:
+                b.qr_code = str(uuid4())
+                b.save(update_fields=['qr_code'])
+        log_admin_action(request, 'Update', 'Book', None,
+                         f'Minted QR codes for {len(missing)} book(s) while printing labels')
+
+    def _flag(name, default=False):
+        raw = request.GET.get(name)
+        if raw is None:
+            return default
+        return raw.strip().lower() in ('1', 'true', 'yes', 'on')
+
+    show = {
+        'title': _flag('show_title', True),
+        # On by default, and the id is not: the spine number is what somebody
+        # holding the book reads to put it back, which a database id never was.
+        'call_number': _flag('show_call_number', True),
+        'copy': _flag('show_copy', True),
+        'book_id': _flag('show_id', False),
+        'author': _flag('show_author', False),
+        'location': _flag('show_location', False),
+    }
+    try:
+        qr_mm = float(request.GET.get('qr_mm') or labels.DEFAULT_QR_MM)
+    except (TypeError, ValueError):
+        qr_mm = labels.DEFAULT_QR_MM
+    try:
+        skip = max(0, int(request.GET.get('skip') or 0))
+    except (TypeError, ValueError):
+        skip = 0
+
+    pdf, layout = labels.build_label_sheet(
+        books,
+        page=request.GET.get('page') or labels.DEFAULT_PAGE,
+        qr_mm=qr_mm,
+        show=show,
+        cut_guides=_flag('cut_guides', True),
+        skip=skip,
+    )
+
+    log_admin_action(request, 'Download', 'Book', None,
+                     f'Printed {len(books)} QR label(s) at {layout["qr_mm"]:.0f}mm '
+                     f'({layout["pages"]} page(s))')
+
+    response = HttpResponse(pdf, content_type='application/pdf')
+    response['Content-Disposition'] = (
+        'attachment; filename="AYLA-QR-labels-%d-books.pdf"' % len(books))
+    return response
+
+
 # Deliberately admin_login_required rather than one module: shared by Manage Books and Transactions,
 # and it only reads data the calling page already gated.
 @admin_login_required
@@ -3061,7 +3693,7 @@ def search_book_by_qr(request):
             'cover_img_url': book.cover_img_url,
             'qr_code': book.qr_code,
             'category': book.shelf_level.category if book.shelf_level else 'N/A',
-            'shelf_level': (f'Level {book.shelf_level.level_number}' if book.shelf_level else 'N/A'),
+            'shelf_level': (book.shelf_level.label if book.shelf_level else 'N/A'),
         }
     }
     return JsonResponse(book_data)
@@ -3112,10 +3744,16 @@ def download_book_template(request):
     
     # Matched by name, so order does not matter and extra columns are ignored.
     headers = ['Title', 'Author', 'Publication Year', 'ISBN', 'Genre',
-               'Quantity', 'Storage Area']
+               'Condition', 'Code Label', 'Quantity', 'Location']
     ws.append(headers)
+    # Condition and Code Label may both be left empty: the first defaults to
+    # Good, and the second is worked out from the other columns.
+    # Two rows, showing both ways of writing a location: the long form and
+    # the short one. Either is read back the same.
     ws.append(['Example Book Title', 'Surname, First', 2019, '9780000000000',
-               'Fiction', 2, 'Zone 3'])
+               'Fiction', 'Good', '', 2, 'Shelf A Column 1 Level 2'])
+    ws.append(['Pride and Prejudice', 'Austen, Jane', 1963, '', 'Fiction',
+               'Worn', 'FIC A31p 1963', 1, 'A C1 L2'])
     
     response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     response['Content-Disposition'] = 'attachment; filename=book_import_template.xlsx'
@@ -3129,6 +3767,20 @@ def download_book_template(request):
 # is the oldest denial-of-service in the format. Both are capped before parsing.
 MAX_IMPORT_BYTES = 5 * 1024 * 1024
 MAX_IMPORT_ROWS = 5000
+
+# One sheet of labels is a printing job, not a data export. Past a few hundred
+# the PDF gets slow to build and nobody is cutting that many out in one sitting
+# anyway -- and an unbounded id list is a free way to tie up the server.
+MAX_LABELS_PER_SHEET = 500
+
+# How many books the picker will hold in the browser at once. Far above the
+# print cap on purpose -- you browse the whole catalogue to choose from it, and
+# only the chosen few end up on a sheet.
+MAX_PICKER_BOOKS = 5000
+
+# One sweep of a room. Past this the progress call stops being cheap, and a
+# stock-take that large should be filed in stages anyway.
+MAX_AUDIT_SCANS = 3000
 
 
 def check_import_upload(uploaded):
@@ -3157,6 +3809,106 @@ def check_import_size(worksheet):
     return None
 
 
+# "Shelf A Column 1 Level 2" and "A C1 L2" are the same place said at two
+# lengths, and a sheet will carry whichever the person typing it preferred.
+LOCATION_COLUMN_RE = re.compile(r'\b(?:c|col|column)\s*\.?\s*(\d+)\b', re.I)
+LOCATION_LEVEL_RE = re.compile(r'\b(?:l|lvl|level)\s*\.?\s*(\d+)\b', re.I)
+LOCATION_TOP_RE = re.compile(r'\btop\b', re.I)
+LOCATION_UNDER_RE = re.compile(r'\bunder(?:neath)?\b', re.I)
+
+
+def parse_location(text):
+    """Pull a shelf name, column and board out of a written location.
+
+    Returns (shelf_name, level_number, column_number, is_top, is_under), any of
+    which may be None. Deliberately forgiving: separators vary, people write
+    "L2" or "Level 2", and a sheet that only names the bay is still useful.
+    """
+    raw = (text or '').strip()
+    if not raw:
+        return ('', None, None, False, False)
+
+    # Bullets, commas and dashes are all just "and then" here.
+    cleaned = re.sub(r'[\u00b7,;/|]+', ' ', raw)
+
+    column = LOCATION_COLUMN_RE.search(cleaned)
+    level = LOCATION_LEVEL_RE.search(cleaned)
+    is_top = bool(LOCATION_TOP_RE.search(cleaned))
+    is_under = bool(LOCATION_UNDER_RE.search(cleaned))
+
+    # Whatever is left once the position words are taken out is the bay's name.
+    name = cleaned
+    for pattern in (LOCATION_COLUMN_RE, LOCATION_LEVEL_RE, LOCATION_TOP_RE, LOCATION_UNDER_RE):
+        name = pattern.sub(' ', name)
+    name = ' '.join(name.split()).strip(' -')
+
+    return (name,
+            int(level.group(1)) if level else None,
+            int(column.group(1)) if column else None,
+            is_top, is_under)
+
+
+def _shelf_by_written_name(name):
+    """The bay a sheet means by "Shelf A", "A", or "shelf a"."""
+    name = (name or '').strip()
+    if not name:
+        return None
+    shelf = Shelf.objects.filter(name__iexact=name).first()
+    if shelf is not None:
+        return shelf
+    # "A" for a bay actually called "Shelf A", and the other way round.
+    shelf = Shelf.objects.filter(name__iexact='Shelf ' + name).first()
+    if shelf is not None:
+        return shelf
+    for candidate in Shelf.objects.all():
+        words = (candidate.name or '').split()
+        if words and words[-1].lower() == name.lower():
+            return candidate
+    return None
+
+
+def _resolve_written_location(text):
+    """The exact board a written location names, created if it is missing.
+
+    Returns None when the text says nothing about a position, so the caller can
+    fall back to the older "storage area" matching that treats the whole string
+    as a category name.
+    """
+    name, level_no, column_no, is_top, is_under = parse_location(text)
+    if not (level_no or column_no or is_top or is_under):
+        return None
+
+    shelf = _shelf_by_written_name(name)
+    if shelf is None:
+        return None
+
+    levels = ShelfLevel.objects.filter(shelf=shelf)
+    if is_top:
+        found = levels.filter(is_top=True).first()
+    elif is_under:
+        found = levels.filter(is_under=True).first()
+    else:
+        found = levels.filter(level_number=level_no or 1,
+                              is_top=False, is_under=False).first()
+    if found is not None and column_no:
+        # The board is right but the bay across it may not be.
+        exact = levels.filter(level_number=found.level_number,
+                              column_number=column_no).first()
+        if exact is not None:
+            return exact
+    if found is not None and not column_no:
+        return found
+
+    # Nothing matching: make it, so the location travels with the import
+    # rather than being quietly dropped on the floor.
+    return ShelfLevel.objects.create(
+        shelf=shelf,
+        level_number=level_no or (levels.aggregate(n=Max('level_number'))['n'] or 0) + 1,
+        column_number=column_no,
+        is_top=is_top,
+        is_under=is_under)
+
+
 def _resolve_storage_area(name):
     """Find the shelf level a sheet's "Storage Area" refers to, creating it once.
 
@@ -3168,6 +3920,12 @@ def _resolve_storage_area(name):
     label = (name or '').strip()
     if not label:
         return None
+
+    # A written position wins: "Shelf A Column 1 Level 2" names one board, and
+    # matching it against category names would file it by accident.
+    precise = _resolve_written_location(label)
+    if precise is not None:
+        return precise
 
     level = ShelfLevel.objects.filter(category__iexact=label).first()
     if level is not None:
@@ -3187,8 +3945,37 @@ def _resolve_storage_area(name):
     return ShelfLevel.objects.create(shelf=shelf, level_number=next_level, category=label)
 
 
+class _PreviewOnly(Exception):
+    """Raised to unwind a preview run once its summary has been taken.
+
+    The alternative -- a second code path that predicts what the real one would
+    do -- is a copy that drifts, and a preview that lies about the import is
+    worse than no preview. So the import genuinely runs and is then rolled
+    back, which means what is shown is what happened.
+    """
+
+    def __init__(self, payload):
+        self.payload = payload
+
+
 @granted_module_required('books')
 def import_books(request):
+    """Import a sheet, or say what importing it would do.
+
+    A preview runs the real import inside a transaction and rolls it back, so
+    what the confirmation box reports is what actually happened rather than a
+    second implementation's guess at it.
+    """
+    if request.POST.get('preview') in ('1', 'true', 'True', 'on'):
+        try:
+            with transaction.atomic():
+                raise _PreviewOnly(_import_books_body(request))
+        except _PreviewOnly as done:
+            return done.payload
+    return _import_books_body(request)
+
+
+def _import_books_body(request):
     """Bulk-import books from a spreadsheet.
 
     Columns are matched by *header name*, not position, so a sheet recorded in
@@ -3199,6 +3986,10 @@ def import_books(request):
     Quantity creates that many physical copies — the catalogue stores one row
     per copy — and Storage Area is resolved to a shelf level by name so a sheet
     can carry its own locations.
+
+    The ids of everything created come back in `created_ids`, because the next
+    thing anyone does after importing a delivery is print the QR stickers for
+    it — see book_qr_labels.
     """
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
@@ -3213,6 +4004,10 @@ def import_books(request):
     if upload_error:
         return JsonResponse({'success': False, 'error': upload_error})
 
+    # A preview does the real work and throws it away, so the numbers shown are
+    # measured rather than predicted.
+    preview = request.POST.get('preview') in ('1', 'true', 'True', 'on')
+
     # header text (normalised) -> field. Several spellings map to one field.
     HEADER_ALIASES = {
         'title': 'title', 'booktitle': 'title', 'bookname': 'title', 'name': 'title',
@@ -3226,8 +4021,17 @@ def import_books(request):
         'shelflevelid': 'shelf_level_id', 'shelflevel': 'shelf_level_id',
         'storagearea': 'storage_area', 'storage': 'storage_area',
         'location': 'storage_area', 'shelf': 'storage_area', 'zone': 'storage_area',
+        'shelflocation': 'storage_area', 'position': 'storage_area',
+        'whereitis': 'storage_area',
         'quantity': 'quantity', 'qty': 'quantity', 'copies': 'quantity',
         'numberofcopies': 'quantity',
+        'condition': 'condition', 'bookcondition': 'condition', 'state': 'condition',
+        # The spine number. Left blank it is worked out from the genre, author,
+        # title and year, so a sheet that never had a column for it still comes
+        # out with every book numbered.
+        'codelabel': 'call_number', 'callnumber': 'call_number',
+        'callno': 'call_number', 'spinelabel': 'call_number',
+        'classification': 'call_number',
     }
 
     def norm(text):
@@ -3266,7 +4070,26 @@ def import_books(request):
             return clean(row[idx]) if idx is not None and idx < len(row) else ''
 
         imported = skipped_dup = skipped_blank = copies_created = 0
+        # Collected so the caller can print labels for exactly this delivery.
+        # Filtering the table by hand afterwards to find "the ones I just added"
+        # is guesswork the moment two imports happen on the same day.
+        created_ids = []
         unmatched_areas = set()
+        unreadable_conditions = set()
+        skipped_repeat = 0
+
+        # What was already on the shelves before this file was opened. A row
+        # with no ISBN has nothing else to be recognised by, so re-importing a
+        # sheet used to add every one of its books again -- and most of a real
+        # catalogue has no ISBN at all.
+        #
+        # Snapshotted up front, deliberately: copies created by this very
+        # import must not block each other, or a Quantity of 3 would import one
+        # book and skip two.
+        already_here = set(
+            (str(t or '').strip().lower(), str(a or '').strip().lower(), lvl)
+            for t, a, lvl in Book.objects.values_list('title', 'author', 'shelf_level_id')
+        )
 
         for row in ws.iter_rows(min_row=2, values_only=True):
             title = field(row, 'title')
@@ -3295,6 +4118,17 @@ def import_books(request):
                 except (TypeError, ValueError):
                     publication_year = None
 
+            # Unreadable still becomes Good rather than failing the row -- a
+            # word nobody anticipated is not a reason to refuse a book -- but it
+            # is counted and reported, because silently calling a damaged book
+            # Good is how a shelf of them goes unnoticed.
+            raw_condition = field(row, 'condition')
+            condition = parse_condition(raw_condition)
+            if condition is None:
+                if raw_condition:
+                    unreadable_conditions.add(str(raw_condition).strip()[:40])
+                condition = 'Good'
+
             quantity = 1
             raw_qty = field(row, 'quantity')
             if raw_qty:
@@ -3314,6 +4148,22 @@ def import_books(request):
                     if shelf_level is None:
                         unmatched_areas.add(area)
 
+            # With no ISBN there is nothing else to recognise a row by, so this
+            # is what stops a second run of the same sheet adding every one of
+            # its books again.
+            #
+            # Compared only against the snapshot taken before the import began,
+            # and deliberately not added to as rows are created: two rows for
+            # one book *within a sheet* are two physical copies, and the sheet
+            # listing them separately is how a library says so. It is the same
+            # book turning up in a later import that means nothing new.
+            if not isbn:
+                identity = (title.strip().lower(), author.strip().lower(),
+                            shelf_level.shelf_level_id if shelf_level else None)
+                if identity in already_here:
+                    skipped_repeat += 1
+                    continue
+
             for copy_no in range(quantity):
                 # Only the first copy carries the ISBN: it is unique to the
                 # title, and the duplicate check above relies on that.
@@ -3323,30 +4173,64 @@ def import_books(request):
                     publication_year=publication_year,
                     ISBN=isbn if copy_no == 0 else None,
                     genre=field(row, 'genre') or None,
+                    condition=condition,
+                    # Blank is the normal case: Book.save() derives it.
+                    call_number=field(row, 'call_number') or None,
                     shelf_level=shelf_level,
                     status='Available',
                     qr_code=str(uuid4()),
                 )
                 imported += 1
+                created_ids.append(book.book_id)
                 if copy_no > 0:
                     copies_created += 1
 
-        parts = [f'Imported {imported} book record(s)']
+        # A preview describes what will happen, not what has. A confirmation
+        # box that reads "Imported 46 books" invites the reader to think the
+        # job is already done and close it.
+        if preview:
+            parts = [f'{imported} book record(s) will be imported']
+            skipped_word = 'will skip'
+        else:
+            parts = [f'Imported {imported} book record(s)']
+            skipped_word = 'skipped'
         if copies_created:
             parts.append(f'including {copies_created} extra copy/copies from Quantity')
         if skipped_dup:
-            parts.append(f'skipped {skipped_dup} row(s) whose ISBN already exists')
+            parts.append(f'{skipped_word} {skipped_dup} row(s) whose ISBN already exists')
+        if skipped_repeat:
+            parts.append(f'{skipped_word} {skipped_repeat} row(s) already on the same shelf '
+                         f'(no ISBN to tell copies apart)')
         if skipped_blank:
-            parts.append(f'skipped {skipped_blank} row(s) with no title or author')
+            parts.append(f'{skipped_word} {skipped_blank} row(s) with no title or author')
+        if unreadable_conditions:
+            # Named, not just counted: "BAD CONDITION" filed as Good is the kind
+            # of thing nobody notices until a shelf of damaged books is found.
+            parts.append('could not read the condition "'
+                         + '", "'.join(sorted(unreadable_conditions)[:5])
+                         + '" — filed as Good')
         if unmatched_areas:
             parts.append('could not match storage area: ' + ', '.join(sorted(unmatched_areas)))
 
-        return JsonResponse({
+        payload = {
             'success': True,
             'message': '. '.join(parts) + '.',
             'imported': imported,
             'matched_columns': sorted(columns),
-        })
+            # Capped at the label sheet's own limit: past that the follow-up
+            # offer is not something anyone would accept anyway. Empty for a
+            # preview: those rows are about to be rolled back, and handing out
+            # ids that will not exist a moment later is a trap for whatever
+            # tries to use them.
+            'created_ids': [] if preview else created_ids[:MAX_LABELS_PER_SHEET],
+            'created_truncated': len(created_ids) > MAX_LABELS_PER_SHEET,
+            'preview': preview,
+            'skipped_dup': skipped_dup,
+            'skipped_repeat': skipped_repeat,
+            'skipped_blank': skipped_blank,
+            'copies_created': copies_created,
+        }
+        return JsonResponse(payload)
 
     except Exception as e:
         return JsonResponse({'success': False, 'error': str(e)})
@@ -3634,6 +4518,10 @@ def get_book_by_id(request):
         'status': book.status,
     }
     return JsonResponse(book_data)
+
+
+class _AlreadyResolved(Exception):
+    """Raised inside a lock when another request resolved the row first."""
 
 
 class _BasketAborted(Exception):
@@ -4777,6 +5665,61 @@ def assign_books_to_level(request):
 
 
 @admin_or_module_required('shelf')
+def reorder_books_on_level(request):
+    """Set the order of the books on one level, moving any that arrived.
+
+    Slots are rewritten as 1..N over the order given, which is what makes them
+    an ordering key rather than a claim about physical spaces: a tidy-up is one
+    drag instead of editing every book, and gaps left by the old numbering stop
+    mattering because nothing reads them as spaces.
+
+    Books dragged in from another level are reassigned on the way, so moving a
+    copy and reordering it are one action rather than two.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
+
+    level = ShelfLevel.objects.filter(
+        shelf_level_id=request.POST.get('shelf_level_id')).first()
+    if level is None:
+        return JsonResponse({'success': False, 'error': 'Shelf level not found'})
+
+    raw = request.POST.get('book_ids', '')
+    ids = [int(x) for x in raw.split(',') if x.strip().isdigit()]
+    if not ids:
+        return JsonResponse({'success': False, 'error': 'No books in the new order'})
+
+    # One query, then work in memory: an ordering is only meaningful as a whole,
+    # so a half-applied one is worse than none.
+    books = {b.book_id: b for b in Book.objects.filter(book_id__in=ids)}
+    missing = [i for i in ids if i not in books]
+    if missing:
+        return JsonResponse({'success': False,
+                             'error': 'Some of those books no longer exist'})
+
+    moved = 0
+    with transaction.atomic():
+        for position, book_id in enumerate(ids, start=1):
+            book = books[book_id]
+            changed = []
+            if book.shelf_level_id != level.shelf_level_id:
+                book.shelf_level = level
+                changed.append('shelf_level')
+                moved += 1
+            if book.shelf_slot != position:
+                book.shelf_slot = position
+                changed.append('shelf_slot')
+            if changed:
+                book.save(update_fields=changed)
+
+    detail = f'Reordered {len(ids)} book(s) on {level.shelf.name if level.shelf else "a shelf"} {level.label}'
+    if moved:
+        detail += f'; {moved} moved here from elsewhere'
+    log_admin_action(request, 'Update', 'ShelfLevel', level.shelf_level_id, detail)
+    return JsonResponse({'success': True, 'ordered': len(ids), 'moved': moved})
+
+
+@admin_or_module_required('shelf')
 def get_shelf_tree(request):
     """Returns full nested hierarchy FloorPlan > Room > Shelf > ShelfLevel > Books"""
     # Ordered by storey. More than one floor can be in service now, so the tree
@@ -4829,7 +5772,8 @@ def get_shelf_tree(request):
                 }
                 
                 for shelf_level in shelf.shelflevel_set.all():
-                    books = shelf_level.book_set.all()
+                    books = shelf_level.book_set.order_by(
+                        F('shelf_slot').asc(nulls_last=True), 'title', 'book_id')
                     book_count = books.count()
                     shelf_level_node = {
                         'type': 'shelflevel',
@@ -4978,9 +5922,51 @@ def edit_room(request):
         if description is not None:
             room.description = description
         room.save()
-        return JsonResponse({'success': True, 'geometry': room.geometry})
+        # A door is a hole in a particular wall. Move the wall and the door is
+        # no longer in it -- it sits in mid-air, still drawn, still routable,
+        # simply wrong. Nothing used to correct that: the editor claimed the
+        # doors were "re-snapped server-side on next load", but no code ever
+        # did it, so a reshaped room left its doors behind for good.
+        moved = _resnap_room_doors(room) if geometry else []
+        return JsonResponse({'success': True, 'geometry': room.geometry,
+                             'doors_moved': moved})
     except Room.DoesNotExist:
         return JsonResponse({'success': False, 'error': 'Room not found'})
+
+
+def _resnap_room_doors(room):
+    """Pull every door of `room` back onto its (possibly new) outline.
+
+    Returns the ones that actually moved, so the editor can say so rather than
+    silently rearranging the plan. "Nearest edge" is a guess when a room has
+    been reshaped heavily -- a door can land on a different wall than intended
+    -- which is exactly why it is reported instead of done quietly.
+    """
+    if not room.geometry or len(room.geometry) < 3:
+        return []
+    moved = []
+    for door in Door.objects.filter(room=room):
+        x, y, bearing = _snap_to_polygon_edge(room.geometry, door.map_x, door.map_y)
+        shift = math.hypot(x - door.map_x, y - door.map_y)
+        if shift < 0.5 and abs((bearing - (door.rotation or 0)) % 360) < 0.5:
+            continue
+        door.map_x, door.map_y, door.rotation = x, y, bearing
+        updates = ['map_x', 'map_y', 'rotation']
+        # The far room was true of the old wall. Once the door has moved, that
+        # claim has to be re-earned rather than carried along.
+        unlinked = ''
+        if door.room_b_id:
+            still = _facing_room(room.floor_plan, x, y, room.room_id)
+            if still is None or still.room_id != door.room_b_id:
+                unlinked = door.room_b.name
+                door.room_b = None
+                updates.append('room_b')
+        door.save(update_fields=updates)
+        moved.append({'door_id': door.door_id,
+                      'label': door.label or 'Door',
+                      'moved_by': round(shift, 1),
+                      'unlinked_from': unlinked})
+    return moved
 
 
 # Module-gated to match add_room and the shelf/level operations -- see edit_room.
@@ -4997,6 +5983,246 @@ def delete_room(request):
     if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
         return JsonResponse({'success': True})
     return redirect('floorplan_management')
+
+
+# ─── Stairways / lifts ────────────────────────────────────────────
+# The only objects on a plan that mean something on another floor, so they are
+# also what cross-floor guidance is built on -- see get_navigation_route.
+
+@admin_or_module_required('shelf')
+def add_stairway(request):
+    """Save a drawn staircase, lift or ramp, and what it connects to."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
+
+    floor_plan = FloorPlan.objects.filter(
+        floor_plan_id=request.POST.get('floor_plan_id')).first()
+    if floor_plan is None:
+        return JsonResponse({'success': False, 'error': 'Floor plan not found'})
+
+    geometry, geo_error = _parse_geometry(request.POST.get('geometry'))
+    if geo_error:
+        return JsonResponse({'success': False, 'error': geo_error})
+    if not geometry:
+        return JsonResponse({'success': False, 'error': 'Draw the shape first.'})
+
+    kind = (request.POST.get('kind') or 'Stairs').strip()
+    if kind not in dict(Stairway.KIND_CHOICES):
+        kind = 'Stairs'
+    direction = (request.POST.get('direction') or 'both').strip()
+    if direction not in dict(Stairway.DIRECTION_CHOICES):
+        direction = 'both'
+
+    connects_to = None
+    raw_to = (request.POST.get('connects_to') or '').strip()
+    if raw_to.isdigit():
+        connects_to = FloorPlan.objects.filter(floor_plan_id=int(raw_to)).first()
+        # A stair that arrives back where it started is a drawing mistake, and
+        # would make the cross-floor hint advise walking to the floor you are on.
+        if connects_to and connects_to.floor_plan_id == floor_plan.floor_plan_id:
+            return JsonResponse({'success': False,
+                                 'error': 'A stairway cannot connect a floor to itself.'})
+
+    try:
+        bearing = float(request.POST.get('bearing') or 0) % 360
+    except (TypeError, ValueError):
+        bearing = 0
+
+    map_x, map_y = _polygon_centroid(geometry)
+    stairway = Stairway.objects.create(
+        floor_plan=floor_plan, kind=kind, direction=direction,
+        name=(request.POST.get('name') or '').strip()[:255] or None,
+        geometry=geometry, map_x=map_x, map_y=map_y,
+        bearing=bearing, connects_to=connects_to,
+    )
+    log_admin_action(request, 'Create', 'Stairway', stairway.stairway_id,
+                     f'Added {stairway.label} on {floor_plan.floor_label}'
+                     + (f' to {stairway.destination_label}' if connects_to else ''))
+    return JsonResponse({'success': True, 'stairway': _stairway_payload(stairway)})
+
+
+@admin_or_module_required('shelf')
+def edit_stairway(request):
+    """Rename a stairway, turn it, or change which floor it reaches."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
+
+    st = Stairway.objects.filter(stairway_id=request.POST.get('stairway_id')).first()
+    if st is None:
+        return JsonResponse({'success': False, 'error': 'Stairway not found'})
+
+    fields = []
+    if 'kind' in request.POST and request.POST['kind'] in dict(Stairway.KIND_CHOICES):
+        st.kind = request.POST['kind']; fields.append('kind')
+    if 'direction' in request.POST and request.POST['direction'] in dict(Stairway.DIRECTION_CHOICES):
+        st.direction = request.POST['direction']; fields.append('direction')
+    if 'name' in request.POST:
+        st.name = (request.POST.get('name') or '').strip()[:255] or None
+        fields.append('name')
+    if 'bearing' in request.POST:
+        try:
+            st.bearing = float(request.POST['bearing']) % 360
+            fields.append('bearing')
+        except (TypeError, ValueError):
+            pass
+    if 'connects_to' in request.POST:
+        raw = (request.POST.get('connects_to') or '').strip()
+        if not raw:
+            st.connects_to = None
+        elif raw.isdigit():
+            dest = FloorPlan.objects.filter(floor_plan_id=int(raw)).first()
+            if dest and dest.floor_plan_id == st.floor_plan_id:
+                return JsonResponse({'success': False,
+                                     'error': 'A stairway cannot connect a floor to itself.'})
+            st.connects_to = dest
+        fields.append('connects_to')
+    if 'is_active' in request.POST:
+        st.is_active = request.POST.get('is_active') in ('1', 'true', 'True', 'on')
+        fields.append('is_active')
+
+    if fields:
+        st.save(update_fields=fields)
+        log_admin_action(request, 'Update', 'Stairway', st.stairway_id, f'Edited {st.label}')
+    return JsonResponse({'success': True, 'stairway': _stairway_payload(st)})
+
+
+@admin_or_module_required('shelf')
+def delete_stairway(request):
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
+    st = Stairway.objects.filter(stairway_id=request.POST.get('stairway_id')).first()
+    if st is None:
+        return JsonResponse({'success': False, 'error': 'Stairway not found'})
+    label, sid = st.label, st.stairway_id
+    st.delete()
+    log_admin_action(request, 'Delete', 'Stairway', sid, f'Removed {label}')
+    return JsonResponse({'success': True})
+
+
+# ─── Obstacles / furniture ────────────────────────────────────────
+# Same shape as the room endpoints above, because an obstacle is the same kind
+# of thing to the map: a polygon with a centroid. Gated like the rest of the
+# Shelf Manager family so Library Staff holding 'shelf' can maintain the layout.
+
+@admin_or_module_required('shelf')
+def add_obstacle(request):
+    """Save a shape the Administrator drew for a table, counter, pillar, etc."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
+
+    floor_plan_id = request.POST.get('floor_plan_id')
+    if not floor_plan_id:
+        return JsonResponse({'success': False, 'error': 'floor_plan_id is required'})
+
+    geometry, geo_error = _parse_geometry(request.POST.get('geometry'))
+    if geo_error:
+        return JsonResponse({'success': False, 'error': geo_error})
+    if not geometry:
+        return JsonResponse({'success': False, 'error': 'Draw the shape first.'})
+
+    kind = (request.POST.get('kind') or 'Table').strip()
+    if kind not in dict(Obstacle.KIND_CHOICES):
+        kind = 'Other'
+    name = (request.POST.get('name') or '').strip()[:255]
+
+    floor_plan = FloorPlan.objects.filter(floor_plan_id=floor_plan_id).first()
+    if floor_plan is None:
+        return JsonResponse({'success': False, 'error': 'Floor plan not found'})
+
+    map_x, map_y = _polygon_centroid(geometry)
+
+    # Something books are kept on is not an obstacle, whatever it looks like.
+    # A book points at a ShelfLevel, so anything that holds one has to be a
+    # Shelf -- the alternative, letting a level hang off either parent, would
+    # put every shelf_level.shelf lookup in the codebase at risk of None.
+    # One drawing tool, two destinations, decided by the tick in the dialog.
+    if request.POST.get('holds_books') in ('1', 'true', 'True', 'on'):
+        room = (Room.objects.filter(floor_plan=floor_plan, is_active=True)
+                .order_by('room_id').first())
+        if room is None:
+            return JsonResponse({
+                'success': False,
+                'error': 'Draw a room first — a table that holds books is '
+                         'catalogued inside one, so it can be found.'})
+        shelf = Shelf.objects.create(
+            room=room, name=name or f'{dict(Obstacle.KIND_CHOICES).get(kind, kind)}',
+            kind='Table' if kind in ('Table', 'Counter') else 'Display',
+            geometry=geometry, map_x=map_x, map_y=map_y,
+        )
+        # One level, because a table has exactly one surface. Naming it Top
+        # rather than Level 1 is what a patron sent there will actually see.
+        ShelfLevel.objects.create(shelf=shelf, level_number=1, is_top=True,
+                                  category=(request.POST.get('category') or '').strip() or None)
+        log_admin_action(request, 'Create', 'Shelf', shelf.shelf_id,
+                         f'Added {shelf.label} to {floor_plan.floor_label} '
+                         '(drawn as furniture that holds books)')
+        return JsonResponse({'success': True, 'as_shelf': True,
+                             'shelf_id': shelf.shelf_id, 'name': shelf.name,
+                             'reload': True})
+
+    obstacle = Obstacle.objects.create(
+        floor_plan=floor_plan, kind=kind, name=name or None,
+        geometry=geometry, map_x=map_x, map_y=map_y,
+    )
+    log_admin_action(request, 'Create', 'Obstacle', obstacle.obstacle_id,
+                     f'Added {obstacle.label} to {floor_plan.floor_label}')
+    return JsonResponse({'success': True, 'obstacle': _obstacle_payload(obstacle)})
+
+
+@admin_or_module_required('shelf')
+def edit_obstacle(request):
+    """Rename an obstacle, change what it is, or reshape it."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
+
+    obstacle = Obstacle.objects.filter(
+        obstacle_id=request.POST.get('obstacle_id')).first()
+    if obstacle is None:
+        return JsonResponse({'success': False, 'error': 'Obstacle not found'})
+
+    fields = []
+    if 'kind' in request.POST:
+        kind = (request.POST.get('kind') or '').strip()
+        if kind in dict(Obstacle.KIND_CHOICES):
+            obstacle.kind = kind
+            fields.append('kind')
+    if 'name' in request.POST:
+        obstacle.name = (request.POST.get('name') or '').strip()[:255] or None
+        fields.append('name')
+    if 'geometry' in request.POST:
+        geometry, geo_error = _parse_geometry(request.POST.get('geometry'))
+        if geo_error:
+            return JsonResponse({'success': False, 'error': geo_error})
+        if geometry:
+            obstacle.geometry = geometry
+            obstacle.map_x, obstacle.map_y = _polygon_centroid(geometry)
+            fields += ['geometry', 'map_x', 'map_y']
+    if 'is_active' in request.POST:
+        obstacle.is_active = request.POST.get('is_active') in ('1', 'true', 'True', 'on')
+        fields.append('is_active')
+
+    if fields:
+        obstacle.save(update_fields=fields)
+        log_admin_action(request, 'Update', 'Obstacle', obstacle.obstacle_id,
+                         f'Edited {obstacle.label}')
+    return JsonResponse({'success': True, 'obstacle': _obstacle_payload(obstacle)})
+
+
+@admin_or_module_required('shelf')
+def delete_obstacle(request):
+    """Remove a drawn obstacle. Nothing else references it, so it just goes."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
+
+    obstacle = Obstacle.objects.filter(
+        obstacle_id=request.POST.get('obstacle_id')).first()
+    if obstacle is None:
+        return JsonResponse({'success': False, 'error': 'Obstacle not found'})
+
+    label, oid = obstacle.label, obstacle.obstacle_id
+    obstacle.delete()
+    log_admin_action(request, 'Delete', 'Obstacle', oid, f'Removed {label}')
+    return JsonResponse({'success': True})
 
 
 @admin_or_module_required('shelf')
@@ -5031,6 +6257,28 @@ def add_shelf(request):
         except (TypeError, ValueError):
             return fallback
 
+    kind = (request.POST.get('kind') or 'Shelf').strip()
+    if kind not in dict(Shelf.KIND_CHOICES):
+        kind = 'Shelf'
+
+    mount = (request.POST.get('mount') or 'Floor').strip()
+    if mount not in dict(Shelf.MOUNT_CHOICES):
+        mount = 'Floor'
+    raw_height = (request.POST.get('mount_height_m') or '').strip()
+    try:
+        mount_height_m = float(raw_height) if raw_height else None
+    except (TypeError, ValueError):
+        mount_height_m = None
+    if mount_height_m is not None and not (0 <= mount_height_m <= 10):
+        return JsonResponse({'success': False,
+                             'error': 'Mounting height is in metres above the floor (0-10).'})
+
+    geometry = None
+    if request.POST.get('geometry'):
+        geometry, geo_error = _parse_geometry(request.POST.get('geometry'))
+        if geo_error:
+            return JsonResponse({'success': False, 'error': geo_error})
+
     try:
         room = Room.objects.get(room_id=room_id)
         shelf = Shelf.objects.create(
@@ -5042,10 +6290,143 @@ def add_shelf(request):
             width=_num('width', 46),
             depth=_num('depth', 14),
             rotation=_num('rotation', 0) % 360,
+            kind=kind,
+            geometry=geometry,
+            mount=mount,
+            mount_height_m=mount_height_m,
         )
-        return JsonResponse({'success': True, 'shelf_id': shelf.shelf_id})
+        # A traced shelf is positioned by its own outline, not by where the
+        # click happened to land, or the label and the route target would sit
+        # off the shape.
+        if geometry:
+            shelf.map_x, shelf.map_y = _polygon_centroid(geometry)
+            shelf.save(update_fields=['map_x', 'map_y'])
+
+        # The boards, said once here rather than one dialog at a time in Shelf
+        # Manager. A shelf asked for with no levels gets none, which is what
+        # placing an empty bay to fill in later means.
+        levels, columns = _grid_counts(request)
+        made = _build_shelf_grid(shelf, levels, columns) if levels else 0
+
+        return JsonResponse({'success': True, 'shelf_id': shelf.shelf_id,
+                             'geometry': shelf.geometry,
+                             'footprint': shelf.footprint(),
+                             'levels_created': made})
     except Room.DoesNotExist:
         return JsonResponse({'success': False, 'error': 'Room not found'})
+
+
+# A bay of shelving is a grid: so many boards up, and sometimes divided into
+# bays across. Bounded because these are physical objects -- nobody has a
+# forty-level bookcase, and a typo that made four hundred rows would be a
+# tedious thing to undo one row at a time.
+MAX_SHELF_LEVELS = 20
+MAX_SHELF_COLUMNS = 12
+
+
+def _grid_counts(request):
+    """The levels and columns asked for, clamped to what can physically exist."""
+    def count(field, default, cap, floor):
+        raw = (request.POST.get(field) or '').strip()
+        if not raw:
+            return default
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            return default
+        return max(floor, min(cap, value))
+    # Levels may be zero -- that is how an empty bay is placed, to be filled in
+    # once somebody has counted the boards. Columns cannot: a shelf that is not
+    # divided still has one bay across it.
+    return (count('levels', 1, MAX_SHELF_LEVELS, 0),
+            count('columns', 1, MAX_SHELF_COLUMNS, 1))
+
+
+def _build_shelf_grid(shelf, levels, columns):
+    """Fill in the boards a shelf has, skipping any that already exist.
+
+    Creating them one at a time is the single most tedious part of setting up
+    a real bay -- five levels three bays wide is fifteen dialogs. The grid is
+    the same information said once.
+
+    Column 1 of a single-column shelf is left null rather than stored as 1, so
+    a plain bookcase reads "Level 3" and not "Level 3, Column 1".
+    """
+    existing = set(
+        (lv.level_number, lv.column_number)
+        for lv in ShelfLevel.objects.filter(shelf=shelf)
+    )
+    made = []
+    for level in range(1, levels + 1):
+        for column in range(1, columns + 1):
+            key = (level, None if columns == 1 else column)
+            if key in existing:
+                continue
+            made.append(ShelfLevel(shelf=shelf, level_number=level,
+                                   column_number=key[1]))
+    if made:
+        ShelfLevel.objects.bulk_create(made)
+    return len(made)
+
+
+@admin_or_module_required('shelf')
+def set_shelf_grid(request):
+    """Change how many levels and columns a shelf has, after the fact.
+
+    Only ever adds. Removing a level would take its books with it -- and a
+    board being deleted because somebody mistyped a number is not a mistake
+    worth making easy, so surplus levels are reported and left alone for the
+    Administrator to delete deliberately.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
+
+    shelf = Shelf.objects.filter(shelf_id=request.POST.get('shelf_id')).first()
+    if shelf is None:
+        return JsonResponse({'success': False, 'error': 'Shelf not found'})
+
+    levels, columns = _grid_counts(request)
+    added = _build_shelf_grid(shelf, levels, columns)
+
+    # Plenty of bays have books stacked on the top surface, which is not one of
+    # the numbered boards and is where the overflow ends up. It is a level like
+    # any other so a book can be shelved and found on it -- just one that reads
+    # "Top" rather than "Level 6".
+    top_note = ''
+    if 'has_top' in request.POST:
+        wants_top = request.POST.get('has_top') in ('1', 'true', 'True', 'on')
+        top = ShelfLevel.objects.filter(shelf=shelf, is_top=True).first()
+        if wants_top and top is None:
+            ShelfLevel.objects.create(shelf=shelf, level_number=levels + 1, is_top=True)
+            added += 1
+            top_note = 'The top surface was added.'
+        elif not wants_top and top is not None:
+            # Unticking removes it only while it is empty. A top with books on
+            # it is a board like any other, and the rule everywhere else here is
+            # that a number in a box never deletes books.
+            if top.book_set.exists():
+                top_note = ('The top surface holds %d book(s), so it was kept.'
+                            % top.book_set.count())
+            else:
+                top.delete()
+                top_note = 'The top surface was removed.'
+
+    surplus = [lv for lv in ShelfLevel.objects.filter(shelf=shelf)
+               if not lv.is_top and not lv.is_under
+               and (lv.level_number > levels or (lv.column_number or 1) > columns)]
+    log_admin_action(request, 'Update', 'Shelf', shelf.shelf_id,
+                     f'{shelf.name}: grid set to {levels} level(s) x {columns} column(s), '
+                     f'{added} added')
+    return JsonResponse({
+        'success': True,
+        'added': added,
+        'levels': levels,
+        'columns': columns,
+        'top_note': top_note,
+        'has_top': ShelfLevel.objects.filter(shelf=shelf, is_top=True).exists(),
+        'surplus': [{'shelf_level_id': lv.shelf_level_id, 'label': lv.label,
+                     'books': lv.book_set.count()} for lv in surplus],
+    })
 
 
 @admin_or_module_required('shelf')
@@ -5072,8 +6453,24 @@ def edit_shelf(request):
             shelf.map_y = float(map_y)
         if description is not None:
             shelf.description = description
+
+        # Dragging a corner reshapes the outline, which is the one edit that
+        # cannot be expressed as width and depth. A shelf that was a plain
+        # rectangle becomes a traced one the moment its corners are moved --
+        # that is what dragging a corner means, and the alternative is refusing
+        # the gesture on every shelf that was not drawn by hand.
+        if 'geometry' in request.POST:
+            geometry, geo_error = _parse_geometry(request.POST.get('geometry'))
+            if geo_error:
+                return JsonResponse({'success': False, 'error': geo_error})
+            if geometry:
+                shelf.geometry = geometry
+                shelf.map_x, shelf.map_y = _polygon_centroid(geometry)
+
         shelf.save()
-        return JsonResponse({'success': True})
+        return JsonResponse({'success': True, 'geometry': shelf.geometry,
+                             'map_x': shelf.map_x, 'map_y': shelf.map_y,
+                             'footprint': shelf.footprint()})
     except Shelf.DoesNotExist:
         return JsonResponse({'success': False, 'error': 'Shelf not found'})
 
@@ -5082,6 +6479,23 @@ def edit_shelf(request):
 # One endpoint per Administrator action so each traces to its activity diagram:
 # Place Shelf (Fig. 48), Move Shelf (Fig. 49), Rotate Shelf (Fig. 50) and
 # Unplace Shelf (Fig. 51). Confirmation happens in the UI before these are hit.
+
+def _translate_geometry(geometry, dx, dy):
+    """Slide an outline across the plan without changing its shape."""
+    return [[round(p[0] + dx, 2), round(p[1] + dy, 2)] for p in geometry]
+
+
+def _rotate_geometry(geometry, degrees, cx, cy):
+    """Turn an outline about a point, keeping every edge the length it was."""
+    rad = math.radians(degrees)
+    cos, sin = math.cos(rad), math.sin(rad)
+    out = []
+    for x, y in geometry:
+        ox, oy = x - cx, y - cy
+        out.append([round(cx + ox * cos - oy * sin, 2),
+                    round(cy + ox * sin + oy * cos, 2)])
+    return out
+
 
 def _set_shelf_position(request, action):
     """Shared body for Place Shelf and Move Shelf."""
@@ -5102,11 +6516,23 @@ def _set_shelf_position(request, action):
     if shelf is None:
         return JsonResponse({'success': False, 'error': 'Shelf not found'})
 
+    # A traced shelf -- one set into a corner, drawn corner by corner rather
+    # than sized -- carries an outline in absolute canvas coordinates. Moving
+    # only the anchor left that outline exactly where it was, so the shelf
+    # appeared not to move at all once the page was reloaded. The outline is
+    # carried along by the same offset the anchor travelled.
+    fields = ['map_x', 'map_y']
+    if shelf.geometry and len(shelf.geometry) >= 3 and shelf.map_x is not None:
+        shelf.geometry = _translate_geometry(shelf.geometry,
+                                             map_x - shelf.map_x, map_y - shelf.map_y)
+        fields.append('geometry')
+
     shelf.map_x, shelf.map_y = map_x, map_y
-    shelf.save(update_fields=['map_x', 'map_y'])
+    shelf.save(update_fields=fields)
     log_admin_action(request, action, 'Shelf', shelf.shelf_id,
                      f'{shelf.name} {action.lower()} at ({map_x:.0f}, {map_y:.0f})')
-    return JsonResponse({'success': True, 'map_x': shelf.map_x, 'map_y': shelf.map_y})
+    return JsonResponse({'success': True, 'map_x': shelf.map_x, 'map_y': shelf.map_y,
+                         'geometry': shelf.geometry})
 
 
 @admin_only_required
@@ -5140,14 +6566,139 @@ def rotate_shelf(request):
     if shelf is None:
         return JsonResponse({'success': False, 'error': 'Shelf not found'})
 
+    # For a sized shelf the rotation is enough on its own -- the rectangle is
+    # drawn from it. A traced outline is not derived from anything, so turning
+    # the shelf has to turn the outline, about the anchor the rectangle would
+    # have turned about.
+    fields = ['rotation']
+    turn = (rotation % 360) - (shelf.rotation or 0)
+    if (shelf.geometry and len(shelf.geometry) >= 3
+            and shelf.map_x is not None and abs(turn) > 1e-9):
+        shelf.geometry = _rotate_geometry(shelf.geometry, turn, shelf.map_x, shelf.map_y)
+        fields.append('geometry')
+
     shelf.rotation = rotation % 360        # keep it in 0–359 whatever is sent
-    shelf.save(update_fields=['rotation'])
+    shelf.save(update_fields=fields)
     log_admin_action(request, 'Rotate', 'Shelf', shelf.shelf_id,
                      f'{shelf.name} rotated to {shelf.rotation:.0f}°')
-    return JsonResponse({'success': True, 'rotation': shelf.rotation})
+    return JsonResponse({'success': True, 'rotation': shelf.rotation,
+                         'geometry': shelf.geometry})
 
 
 # ─── DOORS ON ROOM WALLS ──────────────────────────────────────────────
+# Walls, and the one legal way through them.
+#
+# A waypoint connection asserts "a person can walk straight between these two
+# points". Nothing used to check that claim, so two waypoints in neighbouring
+# rooms could be joined through the wall between them and A* would route a
+# patron through masonry -- drawn as a confident line, on a map that looks
+# correct.
+WALL_EPS = 1e-6
+# How far past a door's own half-width a crossing may sit and still count as
+# going through it. Rooms are traced by hand, so the two sides of one doorway
+# rarely line up to the unit.
+DOOR_APERTURE_SLACK = 6.0
+# How far another room's wall may sit from a door and still be the far side of
+# it. Rooms are traced by hand: two that look joined on screen are routinely a
+# fraction of a unit apart, and this deployment's own plan has had pairs
+# 0.11 and 0.50 units from touching. Inferring adjacency with no tolerance
+# would silently miss exactly those.
+ROOM_FACING_TOLERANCE = 2.0
+
+
+def _facing_room(floor_plan, x, y, exclude_room_id):
+    """The other room whose wall passes through (x, y), if there is one.
+
+    A suggestion, never an assertion -- the caller offers it and somebody says
+    yes. Guessing outright would quietly record a connection between two rooms
+    that merely have walls near each other, and a wrong adjacency is worse
+    than a missing one because nothing later questions it.
+    """
+    best, best_gap = None, ROOM_FACING_TOLERANCE
+    for room in Room.objects.filter(floor_plan=floor_plan, is_active=True).exclude(
+            room_id=exclude_room_id):
+        geom = room.geometry or []
+        if len(geom) < 3:
+            continue
+        for i in range(len(geom)):
+            ax, ay = geom[i]
+            bx, by = geom[(i + 1) % len(geom)]
+            gap = _point_to_segment(x, y, ax, ay, bx, by)
+            if gap <= best_gap:
+                best, best_gap = room, gap
+    return best
+
+
+def _orient(a, b, c):
+    return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+
+
+def _proper_crossing(p1, p2, p3, p4):
+    """Where segments p1p2 and p3p4 properly cross, or None.
+
+    "Properly" excludes touching and running along each other: a waypoint
+    sitting exactly on a wall, or a corridor drawn down the line of one, is not
+    passing through it.
+    """
+    d1, d2 = _orient(p3, p4, p1), _orient(p3, p4, p2)
+    d3, d4 = _orient(p1, p2, p3), _orient(p1, p2, p4)
+    if not (((d1 > WALL_EPS and d2 < -WALL_EPS) or (d1 < -WALL_EPS and d2 > WALL_EPS))
+            and ((d3 > WALL_EPS and d4 < -WALL_EPS) or (d3 < -WALL_EPS and d4 > WALL_EPS))):
+        return None
+    denom = ((p1[0] - p2[0]) * (p3[1] - p4[1]) - (p1[1] - p2[1]) * (p3[0] - p4[0]))
+    if abs(denom) < WALL_EPS:
+        return None
+    a = p1[0] * p2[1] - p1[1] * p2[0]
+    b = p3[0] * p4[1] - p3[1] * p4[0]
+    return ((a * (p3[0] - p4[0]) - (p1[0] - p2[0]) * b) / denom,
+            (a * (p3[1] - p4[1]) - (p1[1] - p2[1]) * b) / denom)
+
+
+def _walls_crossed(floor_plan, ax, ay, bx, by):
+    """Rooms whose wall this segment goes through without using a door.
+
+    A door is matched by proximity rather than by which room owns it: in a
+    shared doorway only one of the two rooms holds the Door row, and refusing
+    the crossing from the other side would be wrong.
+    """
+    doors = [(d.map_x, d.map_y, (d.width or DOOR_DEFAULT_WIDTH) / 2.0,
+              {d.room_id, d.room_b_id} if d.room_b_id else None)
+             for d in Door.objects.filter(room__floor_plan=floor_plan, is_active=True)]
+    blocked = []
+    seg = ((ax, ay), (bx, by))
+    for room in Room.objects.filter(floor_plan=floor_plan, is_active=True):
+        geom = room.geometry or []
+        if len(geom) < 3:
+            continue
+        for i in range(len(geom)):
+            p3 = (geom[i][0], geom[i][1])
+            p4 = (geom[(i + 1) % len(geom)][0], geom[(i + 1) % len(geom)][1])
+            hit = _proper_crossing(seg[0], seg[1], p3, p4)
+            if hit is None:
+                continue
+            # A door that names both its rooms only excuses a crossing of one
+            # of those two. One that names a single room is taken at face
+            # value -- it belongs to whatever wall it sits in -- because until
+            # somebody links it we have no better information than the geometry.
+            through_door = any(
+                math.hypot(hit[0] - dx, hit[1] - dy) <= half + DOOR_APERTURE_SLACK
+                and (joins is None or room.room_id in joins)
+                for dx, dy, half, joins in doors)
+            if not through_door:
+                blocked.append(room.name)
+                break
+    return blocked
+
+
+# A door narrower than DOOR_MIN_WIDTH is not a doorway, and one wider than
+# DOOR_MAX_WIDTH is a missing wall rather than an opening. Kept as constants
+# because add_door and edit_door both enforce them and must not drift apart.
+DOOR_MIN_WIDTH = 6
+DOOR_MAX_WIDTH = 400
+DOOR_DEFAULT_WIDTH = 28
+DOOR_WIDTH_ERROR = (f'Door width must be between {DOOR_MIN_WIDTH} and {DOOR_MAX_WIDTH}')
+
+
 def _snap_to_polygon_edge(points, x, y):
     """Project (x, y) onto the nearest edge of a polygon.
 
@@ -5195,11 +6746,11 @@ def add_door(request):
         return JsonResponse({'success': False, 'error': 'map_x and map_y are required'})
 
     try:
-        width = float(request.POST.get('width') or 28)
+        width = float(request.POST.get('width') or DOOR_DEFAULT_WIDTH)
     except (TypeError, ValueError):
-        width = 28.0
-    if not (6 <= width <= 400):
-        return JsonResponse({'success': False, 'error': 'Door width must be between 6 and 400'})
+        width = float(DOOR_DEFAULT_WIDTH)
+    if not (DOOR_MIN_WIDTH <= width <= DOOR_MAX_WIDTH):
+        return JsonResponse({'success': False, 'error': DOOR_WIDTH_ERROR})
 
     room = Room.objects.filter(room_id=room_id).first()
     if room is None:
@@ -5216,7 +6767,15 @@ def add_door(request):
     )
     log_admin_action(request, 'Add', 'Door', door.door_id,
                      f'Door on {room.name} at ({x:.0f}, {y:.0f})')
-    return JsonResponse({'success': True, 'door': _door_payload(door)})
+
+    # Offered, not applied. The editor shows it as a one-click suggestion.
+    facing = _facing_room(room.floor_plan, x, y, room.room_id)
+    return JsonResponse({
+        'success': True,
+        'door': _door_payload(door),
+        'suggested_room_b': ({'room_id': facing.room_id, 'name': facing.name}
+                             if facing else None),
+    })
 
 
 @admin_only_required
@@ -5248,6 +6807,83 @@ def move_door(request):
     door.map_x, door.map_y, door.rotation = x, y, bearing
     door.save(update_fields=['map_x', 'map_y', 'rotation'])
     return JsonResponse({'success': True, 'x': door.map_x, 'y': door.map_y, 'rotation': door.rotation})
+
+
+@admin_only_required
+def edit_door(request):
+    """Resize or rename a door.
+
+    Width is the opening measured along the wall, in canvas units, so it is
+    the one property that cannot be derived: position and angle both follow
+    from the wall the door was snapped to, but how wide the doorway is is a
+    fact about the building. Until this existed every door stayed at the
+    default width for ever, because add_door was the only place it could be
+    set and the editor never sent one.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
+
+    door = Door.objects.filter(door_id=request.POST.get('door_id')).first()
+    if door is None:
+        return JsonResponse({'success': False, 'error': 'Door not found'})
+
+    fields = []
+    if 'width' in request.POST:
+        try:
+            width = float(request.POST['width'])
+        except (TypeError, ValueError):
+            return JsonResponse({'success': False, 'error': DOOR_WIDTH_ERROR})
+        if not (DOOR_MIN_WIDTH <= width <= DOOR_MAX_WIDTH):
+            return JsonResponse({'success': False, 'error': DOOR_WIDTH_ERROR})
+        door.width = width
+        fields.append('width')
+
+    # Dragging one end of a door both widens it and shifts its middle, since
+    # the far end stays put. Accepting the new centre here keeps that a single
+    # request: sending the width and the position separately would leave the
+    # door briefly the wrong size on one and in the wrong place on the other,
+    # and a failure between the two would persist exactly that.
+    if 'map_x' in request.POST and 'map_y' in request.POST:
+        try:
+            cx = float(request.POST['map_x'])
+            cy = float(request.POST['map_y'])
+        except (TypeError, ValueError):
+            return JsonResponse({'success': False, 'error': 'map_x and map_y must be numbers'})
+        room = door.room
+        if not room.geometry or len(room.geometry) < 3:
+            return JsonResponse({'success': False, 'error': 'This room has no shape to snap to'})
+        x, y, bearing = _snap_to_polygon_edge(room.geometry, cx, cy)
+        door.map_x, door.map_y, door.rotation = x, y, bearing
+        fields += ['map_x', 'map_y', 'rotation']
+
+    if 'room_b' in request.POST:
+        raw = (request.POST.get('room_b') or '').strip()
+        if not raw:
+            door.room_b = None
+        else:
+            far = Room.objects.filter(room_id=raw).first()
+            if far is None:
+                return JsonResponse({'success': False, 'error': 'That room does not exist'})
+            if far.room_id == door.room_id:
+                return JsonResponse({'success': False,
+                                     'error': 'A door cannot join a room to itself'})
+            if far.floor_plan_id != door.room.floor_plan_id:
+                return JsonResponse({'success': False,
+                                     'error': 'Both rooms must be on the same floor'})
+            door.room_b = far
+        fields.append('room_b')
+
+    if 'label' in request.POST:
+        door.label = (request.POST.get('label') or '').strip()[:255] or None
+        fields.append('label')
+
+    if not fields:
+        return JsonResponse({'success': False, 'error': 'Nothing to change'})
+
+    door.save(update_fields=fields)
+    log_admin_action(request, 'Edit', 'Door', door.door_id,
+                     f'{", ".join(fields)} changed')
+    return JsonResponse({'success': True, 'door': _door_payload(door)})
 
 
 @admin_only_required
@@ -5375,18 +7011,50 @@ def add_shelf_level(request):
     shelf_id = request.POST.get('shelf_id')
     level_number = request.POST.get('level_number')
     category = request.POST.get('category', '')
+    is_top = request.POST.get('is_top') in ('1', 'true', 'True', 'on')
+    is_under = request.POST.get('is_under') in ('1', 'true', 'True', 'on')
+    raw_column = (request.POST.get('column_number') or '').strip()
+    try:
+        column_number = int(raw_column) if raw_column else None
+    except (TypeError, ValueError):
+        return JsonResponse({'success': False, 'error': 'Column must be a number'})
+    if column_number is not None and column_number < 1:
+        column_number = None
+    # A shelf is either on top of the case or underneath it, never both.
+    if is_top and is_under:
+        return JsonResponse({'success': False,
+                             'error': 'A level is either the top or underneath, not both.'})
 
-    if not shelf_id or not level_number:
+    # Top and underneath have no number to give, so none is asked for.
+    if not shelf_id or (not level_number and not is_top and not is_under):
         return JsonResponse({'success': False, 'error': 'shelf_id and level_number are required'})
 
     try:
         shelf = Shelf.objects.get(shelf_id=shelf_id)
+        if is_top and ShelfLevel.objects.filter(shelf=shelf, is_top=True).exists():
+            return JsonResponse({'success': False,
+                                 'error': f'{shelf.name} already has a top surface.'})
+        if is_under and ShelfLevel.objects.filter(shelf=shelf, is_under=True,
+                                                  column_number=column_number).exists():
+            return JsonResponse({'success': False,
+                                 'error': f'{shelf.name} already has an underneath space.'})
+        if is_top and not level_number:
+            # Sorts above every real level, which is where it physically is.
+            highest = ShelfLevel.objects.filter(shelf=shelf).order_by('-level_number').first()
+            level_number = (highest.level_number + 1) if highest else 1
+        if is_under and not level_number:
+            # Below everything, so it sorts first.
+            level_number = 0
         shelf_level = ShelfLevel.objects.create(
             shelf=shelf,
             level_number=int(level_number),
-            category=category
+            category=category,
+            is_top=is_top,
+            is_under=is_under,
+            column_number=column_number,
         )
-        return JsonResponse({'success': True, 'shelf_level_id': shelf_level.shelf_level_id})
+        return JsonResponse({'success': True, 'shelf_level_id': shelf_level.shelf_level_id,
+                             'label': shelf_level.label})
     except Shelf.DoesNotExist:
         return JsonResponse({'success': False, 'error': 'Shelf not found'})
 
@@ -5409,8 +7077,28 @@ def edit_shelf_level(request):
             shelf_level.level_number = int(level_number)
         if category is not None:
             shelf_level.category = category
+
+        # Whether a board is the top surface or the space underneath could be
+        # set when it was created and never afterwards, so a level recorded
+        # wrongly had to be deleted and made again -- taking its books with it.
+        # Only ever one of the two: a shelf top is not also its underside.
+        if 'is_top' in request.POST or 'is_under' in request.POST:
+            top = request.POST.get('is_top') in ('1', 'true', 'True', 'on')
+            under = request.POST.get('is_under') in ('1', 'true', 'True', 'on')
+            if top and under:
+                return JsonResponse({
+                    'success': False,
+                    'error': 'A board is either the top of the shelf or the space '
+                             'underneath it, not both.'})
+            shelf_level.is_top = top
+            shelf_level.is_under = under
+
+        if 'column_number' in request.POST:
+            raw = (request.POST.get('column_number') or '').strip()
+            shelf_level.column_number = int(raw) if raw.isdigit() and int(raw) > 0 else None
+
         shelf_level.save()
-        return JsonResponse({'success': True})
+        return JsonResponse({'success': True, 'label': shelf_level.label})
     except ShelfLevel.DoesNotExist:
         return JsonResponse({'success': False, 'error': 'Shelf level not found'})
 
@@ -5470,8 +7158,20 @@ def _floorplan_canvas_size(floor_plan):
     return float(floor_plan.canvas_width or 1000), float(floor_plan.canvas_height or 800)
 
 
-def _door_payload(door):
+def _door_payload(door, suggest=False):
+    """`suggest` asks whether another room's wall runs through this doorway.
+
+    Only the editor wants that: it is what turns "this door looks shared" into
+    a button. Computed on demand rather than always, so the patron map does not
+    pay for a question it never asks.
+    """
+    facing = None
+    if suggest and not door.room_b_id and door.room_id:
+        found = _facing_room(door.room.floor_plan, door.map_x, door.map_y, door.room_id)
+        if found is not None:
+            facing = {'room_id': found.room_id, 'name': found.name}
     return {
+        'suggested_room_b': facing,
         'door_id': door.door_id,
         'room_id': door.room_id,
         'x': door.map_x,
@@ -5480,10 +7180,13 @@ def _door_payload(door):
         'rotation': door.rotation or 0,
         'swing': door.swing if door.swing in (1, -1) else 1,
         'label': door.label or '',
+        'room_b': door.room_b_id,
+        'room_name': door.room.name if door.room_id else '',
+        'room_b_name': door.room_b.name if door.room_b_id else '',
     }
 
 
-def _room_payload(room, doors_by_room=None):
+def _room_payload(room, doors_by_room=None, suggest_doors=False):
     """Serialise a room including its drawn polygon (may be None if never drawn)."""
     doors = (doors_by_room or {}).get(room.room_id, [])
     return {
@@ -5492,7 +7195,7 @@ def _room_payload(room, doors_by_room=None):
         'geometry': room.geometry or None,
         'map_x': room.map_x,
         'map_y': room.map_y,
-        'doors': [_door_payload(d) for d in doors],
+        'doors': [_door_payload(d, suggest=suggest_doors) for d in doors],
     }
 
 
@@ -5505,6 +7208,414 @@ def _doors_for_floorplan(floor_plan, active_only=False):
     for door in qs:
         grouped.setdefault(door.room_id, []).append(door)
     return grouped
+
+
+def _point_in_polygon(x, y, poly):
+    """Ray-casting: is (x, y) inside this outline?"""
+    inside = False
+    n = len(poly)
+    for i in range(n):
+        xi, yi = poly[i][0], poly[i][1]
+        xj, yj = poly[i - 1][0], poly[i - 1][1]
+        if (yi > y) != (yj > y) and x < (xj - xi) * (y - yi) / (yj - yi) + xi:
+            inside = not inside
+    return inside
+
+
+def _point_to_segment(px, py, ax, ay, bx, by):
+    dx, dy = bx - ax, by - ay
+    length_sq = dx * dx + dy * dy
+    t = 0.0 if length_sq == 0 else max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / length_sq))
+    return math.hypot(px - (ax + t * dx), py - (ay + t * dy))
+
+
+def _polygon_gap(a, b):
+    """Closest approach between two outlines; 0 when they touch."""
+    best = float('inf')
+    for poly, other in ((a, b), (b, a)):
+        for pt in poly:
+            for i in range(len(other)):
+                ax, ay = other[i]
+                bx, by = other[(i + 1) % len(other)]
+                best = min(best, _point_to_segment(pt[0], pt[1], ax, ay, bx, by))
+    return best
+
+
+# How far into a room a doorway's waypoint stands. Far enough to be clearly
+# inside rather than in the threshold, close enough that the step through the
+# door is a short straight line.
+DOORWAY_STANDOFF = 45.0
+# A shelf is approached from its face, not its middle.
+SHELF_STANDOFF = 55.0
+
+
+def _polygon_bounds(poly):
+    xs = [p[0] for p in poly]
+    ys = [p[1] for p in poly]
+    return min(xs), min(ys), max(xs), max(ys)
+
+
+def _interior_point(poly):
+    """A point comfortably inside a room, even a concave one.
+
+    The centroid of an L-shaped room can land in the notch outside it, so the
+    centroid is only used when it is genuinely inside; otherwise the room is
+    sampled and the point furthest from any wall wins. That point is the middle
+    of the widest open space, which is where somebody would actually stand.
+    """
+    cx, cy = _polygon_centroid(poly)
+    if _point_in_polygon(cx, cy, poly):
+        return cx, cy
+
+    min_x, min_y, max_x, max_y = _polygon_bounds(poly)
+    best, best_clear = None, -1.0
+    steps = 18
+    for i in range(1, steps):
+        for j in range(1, steps):
+            x = min_x + (max_x - min_x) * i / steps
+            y = min_y + (max_y - min_y) * j / steps
+            if not _point_in_polygon(x, y, poly):
+                continue
+            clear = min(_point_to_segment(x, y, poly[k][0], poly[k][1],
+                                          poly[(k + 1) % len(poly)][0],
+                                          poly[(k + 1) % len(poly)][1])
+                        for k in range(len(poly)))
+            if clear > best_clear:
+                best, best_clear = (x, y), clear
+    return best if best else (cx, cy)
+
+
+def _crosses_obstacle(floor_plan, ax, ay, bx, by):
+    """Does this step walk through a table, counter or pillar?
+
+    Walls are refused outright; furniture is merely avoided while generating,
+    because furniture moves and an Administrator may well want to connect
+    across where a trolley happens to be today.
+    """
+    for o in Obstacle.objects.filter(floor_plan=floor_plan, is_active=True):
+        geom = o.geometry or []
+        if len(geom) < 3:
+            continue
+        for i in range(len(geom)):
+            p3 = (geom[i][0], geom[i][1])
+            p4 = (geom[(i + 1) % len(geom)][0], geom[(i + 1) % len(geom)][1])
+            if _proper_crossing((ax, ay), (bx, by), p3, p4) is not None:
+                return True
+    return False
+
+
+@admin_or_module_required('shelf')
+def generate_waypoints(request):
+    """Lay a walkable network over the plan, and say what it could not reach.
+
+    Placing every waypoint and drawing every connection by hand is the most
+    laborious part of preparing a floor, and the part most likely to be left
+    half-finished. What can be derived is derived: a pair of points either side
+    of each doorway, one in the open middle of each room, one in front of each
+    shelf, joined wherever the straight line between them is actually walkable.
+
+    Only generated waypoints are replaced. Anything placed or moved by hand
+    survives, so this is safe to run again after correcting it -- the second
+    press being destructive is what would make it untrustworthy.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
+
+    plan = FloorPlan.objects.filter(floor_plan_id=request.POST.get('floor_plan_id')).first()
+    if plan is None:
+        return JsonResponse({'success': False, 'error': 'Floor plan not found'})
+
+    rooms = [r for r in Room.objects.filter(floor_plan=plan, is_active=True)
+             if r.geometry and len(r.geometry) >= 3]
+    if not rooms:
+        return JsonResponse({'success': False,
+                             'error': 'Draw at least one room before generating a route.'})
+
+    with transaction.atomic():
+        removed = Waypoint.objects.filter(floor_plan=plan, is_generated=True).count()
+        Waypoint.objects.filter(floor_plan=plan, is_generated=True).delete()
+
+        def room_at(x, y):
+            for room in rooms:
+                if _point_in_polygon(x, y, room.geometry):
+                    return room
+            return None
+
+        # room_id -> [Waypoint]
+        by_room = dict((r.room_id, []) for r in rooms)
+        made = []
+
+        def place(x, y, room, label):
+            wp = Waypoint.objects.create(floor_plan=plan, map_x=x, map_y=y,
+                                         label=label, is_generated=True)
+            by_room[room.room_id].append(wp)
+            made.append(wp)
+            return wp
+
+        # ---- one pair per doorway ---------------------------------------
+        door_pairs = []
+        for door in Door.objects.filter(room__floor_plan=plan, is_active=True):
+            rad = math.radians(door.rotation or 0)
+            # Across the wall, not along it.
+            nx, ny = -math.sin(rad), math.cos(rad)
+            sides = []
+            for sign in (1, -1):
+                x = door.map_x + nx * DOORWAY_STANDOFF * sign
+                y = door.map_y + ny * DOORWAY_STANDOFF * sign
+                room = room_at(x, y)
+                if room is not None:
+                    sides.append(place(x, y, room, 'Doorway'))
+            # Both sides indoors means this doorway is a way between two rooms,
+            # and the step through it is the one crossing that is allowed.
+            if len(sides) == 2:
+                door_pairs.append((sides[0], sides[1]))
+
+        # ---- one in the open middle of each room ------------------------
+        for room in rooms:
+            x, y = _interior_point(room.geometry)
+            place(x, y, room, room.name)
+
+        # ---- one in front of each shelf ---------------------------------
+        for shelf in Shelf.objects.filter(room__floor_plan=plan).select_related('room'):
+            if shelf.map_x is None or shelf.map_y is None:
+                continue
+            rad = math.radians(shelf.rotation or 0)
+            placed = False
+            # Try the front first, then the back: one of the two long sides
+            # faces into the room, and which one is not recorded anywhere.
+            for sign in (1, -1):
+                x = shelf.map_x - math.sin(rad) * SHELF_STANDOFF * sign
+                y = shelf.map_y + math.cos(rad) * SHELF_STANDOFF * sign
+                room = room_at(x, y)
+                if room is not None:
+                    place(x, y, room, shelf.name or 'Shelf')
+                    placed = True
+                    break
+            if not placed:
+                continue
+
+        # ---- join what can actually be walked between --------------------
+        links = 0
+        seen = set()
+
+        def join(a, b):
+            nonlocal links
+            key = (min(a.waypoint_id, b.waypoint_id), max(a.waypoint_id, b.waypoint_id))
+            if key in seen:
+                return
+            seen.add(key)
+            WaypointConnection.objects.create(
+                waypoint_from=a, waypoint_to=b,
+                distance=math.hypot(a.map_x - b.map_x, a.map_y - b.map_y))
+            links += 1
+
+        # Through each doorway: the one wall crossing that is legal.
+        for a, b in door_pairs:
+            join(a, b)
+
+        # Within a room, wherever the straight line is clear.
+        for room in rooms:
+            points = by_room[room.room_id]
+            for i in range(len(points)):
+                for j in range(i + 1, len(points)):
+                    a, b = points[i], points[j]
+                    if _walls_crossed(plan, a.map_x, a.map_y, b.map_x, b.map_y):
+                        continue
+                    if _crosses_obstacle(plan, a.map_x, a.map_y, b.map_x, b.map_y):
+                        continue
+                    join(a, b)
+
+        # Hand-placed waypoints are not rewired, but a room with only
+        # hand-placed ones should still count as reached.
+        manual = Waypoint.objects.filter(floor_plan=plan, is_generated=False)
+        unreachable = []
+        for room in rooms:
+            if by_room[room.room_id]:
+                continue
+            if any(_point_in_polygon(w.map_x, w.map_y, room.geometry) for w in manual):
+                continue
+            unreachable.append(room.name)
+
+    log_admin_action(request, 'Create', 'Waypoint', plan.floor_plan_id,
+                     f'Generated {len(made)} waypoints and {links} connections '
+                     f'on {plan.name}')
+    return JsonResponse({
+        'success': True,
+        'placed': len(made),
+        'connections': links,
+        'replaced': removed,
+        'kept_manual': manual.count(),
+        'unreachable': unreachable,
+    })
+
+
+def _room_adjacency(floor_plan):
+    """Which rooms connect to which, according to the doors.
+
+    This is the question the system could not answer at all before doors
+    carried both sides: a floor plan knew its rooms and knew its doors, and
+    nothing joined the two facts together.
+    """
+    pairs = set()
+    for d in Door.objects.filter(room__floor_plan=floor_plan, is_active=True):
+        if d.room_b_id:
+            pairs.add((min(d.room_id, d.room_b_id), max(d.room_id, d.room_b_id)))
+    return pairs
+
+
+@admin_or_module_required('shelf')
+def floor_plan_readiness(request):
+    """What still stops this floor plan working, in one list.
+
+    Everything checked here fails silently otherwise: a plan with no scale
+    draws perfectly and simply never shows a position, a room with no waypoint
+    in it is unreachable without saying so, and two walls a tenth of a unit
+    apart look joined at every zoom level while refusing to connect.
+    """
+    plan = FloorPlan.objects.filter(floor_plan_id=request.GET.get('floor_plan_id')).first()
+    if plan is None:
+        return JsonResponse({'success': False, 'error': 'Floor plan not found'})
+
+    issues = []
+
+    def add(level, text, detail=''):
+        issues.append({'level': level, 'text': text, 'detail': detail})
+
+    rooms = list(Room.objects.filter(floor_plan=plan, is_active=True))
+    waypoints = list(Waypoint.objects.filter(floor_plan=plan))
+    beacons = list(BLEBeacon.objects.filter(floor_plan=plan))
+    doors = Door.objects.filter(room__floor_plan=plan, is_active=True).count()
+
+    # ---- positioning -----------------------------------------------------
+    if not plan.pixels_per_meter:
+        add('blocker', 'No scale set',
+            'Beacon distances are in metres and the plan is drawn in canvas units. '
+            'Without a scale the two cannot be combined, so no position is ever shown.')
+    if len(beacons) < 3:
+        add('blocker', '%d beacon(s) placed' % len(beacons),
+            'Three is the minimum any position can be worked out from.')
+    else:
+        uncalibrated = [b for b in beacons if b.tx_power is None]
+        if uncalibrated:
+            add('warning', '%d beacon(s) not calibrated' % len(uncalibrated),
+                'Without a measured 1 m reading every distance is a guess, and all of '
+                'them being wrong by the same factor moves the whole fix.')
+        unmeasured = [b for b in beacons if b.height is None]
+        if unmeasured:
+            add('warning', '%d beacon(s) have no mounting height' % len(unmeasured),
+                'A beacon 2.4 m up reads as over a metre away from someone standing '
+                'directly underneath it. The height is what takes that back out.')
+
+    # ---- the plan itself -------------------------------------------------
+    if not rooms:
+        add('blocker', 'No rooms drawn', 'There is nothing to navigate around yet.')
+    if not plan.is_active:
+        add('warning', 'This plan is a draft',
+            'Patrons are not shown a floor plan until it is set live.')
+
+    # ---- routing ---------------------------------------------------------
+    if not waypoints:
+        add('blocker', 'No waypoints placed',
+            'Routes are walked along waypoints. Without them the map can show a '
+            'position but can never give directions.')
+    else:
+        wp_ids = set(w.waypoint_id for w in waypoints)
+        links = list(WaypointConnection.objects.filter(
+            waypoint_from_id__in=wp_ids, waypoint_to_id__in=wp_ids))
+
+        parent = dict((i, i) for i in wp_ids)
+
+        def find(i):
+            while parent[i] != i:
+                parent[i] = parent[parent[i]]
+                i = parent[i]
+            return i
+
+        joined = set()
+        for c in links:
+            joined.add(c.waypoint_from_id)
+            joined.add(c.waypoint_to_id)
+            ra, rb = find(c.waypoint_from_id), find(c.waypoint_to_id)
+            if ra != rb:
+                parent[ra] = rb
+
+        orphans = wp_ids - joined
+        if orphans:
+            add('warning', '%d waypoint(s) connected to nothing' % len(orphans),
+                'A waypoint with no connection is never walked through.')
+
+        islands = len(set(find(i) for i in joined))
+        if islands > 1:
+            add('warning', 'The route network is in %d separate pieces' % islands,
+                'A patron cannot get from one piece to another, so some books will '
+                'have no route at all.')
+
+        for room in rooms:
+            geom = room.geometry or []
+            if len(geom) < 3:
+                continue
+            if not any(_point_in_polygon(w.map_x, w.map_y, geom) for w in waypoints):
+                add('warning', 'No waypoint inside "%s"' % room.name,
+                    'Nothing in this room can be routed to.')
+
+    # ---- geometry that looks right and is not ----------------------------
+    if doors == 0 and len(rooms) > 1:
+        add('warning', 'No doors placed',
+            'Doors are what say where people may pass between rooms, and a '
+            'connection through a wall without one is refused.')
+    elif len(rooms) > 1:
+        # Which rooms a door joins is what makes the plan a connected place
+        # rather than a set of unrelated outlines.
+        pairs = _room_adjacency(plan)
+        linked = set()
+        for a, b in pairs:
+            linked.add(a)
+            linked.add(b)
+        stranded = [r.name for r in rooms if r.room_id not in linked]
+        if stranded:
+            add('warning',
+                '%d room(s) not joined to any other by a door' % len(stranded),
+                'No door records a way between %s and anywhere else, so nothing '
+                'can say how a patron gets there.' % ', '.join('"%s"' % n for n in stranded))
+
+        unlinked_doors = [d for d in Door.objects.filter(
+            room__floor_plan=plan, is_active=True, room_b__isnull=True)]
+        shared = []
+        for d in unlinked_doors:
+            facing = _facing_room(plan, d.map_x, d.map_y, d.room_id)
+            if facing is not None:
+                shared.append((d, facing))
+        if shared:
+            add('warning',
+                '%d door(s) look shared but are not linked' % len(shared),
+                'Another room\'s wall runs through %s. Linking them is what lets a '
+                'route pass between the two.'
+                % ', '.join('"%s"/"%s"' % (d.room.name, f.name) for d, f in shared))
+
+    for i in range(len(rooms)):
+        for j in range(i + 1, len(rooms)):
+            ga = rooms[i].geometry or []
+            gb = rooms[j].geometry or []
+            if len(ga) < 3 or len(gb) < 3:
+                continue
+            gap = _polygon_gap(ga, gb)
+            if 0 < gap < 2.0:
+                add('warning',
+                    '"%s" and "%s" almost touch' % (rooms[i].name, rooms[j].name),
+                    'They are %.2f units apart. That is invisible on screen, but they '
+                    'are two separate walls, so passing between them needs a door.' % gap)
+
+    blockers = sum(1 for i in issues if i['level'] == 'blocker')
+    return JsonResponse({
+        'success': True,
+        'plan': plan.name,
+        'ready': blockers == 0,
+        'blockers': blockers,
+        'warnings': len(issues) - blockers,
+        'issues': issues,
+        'counts': {'rooms': len(rooms), 'doors': doors,
+                   'waypoints': len(waypoints), 'beacons': len(beacons)},
+    })
 
 
 def _polygon_centroid(points):
@@ -5617,15 +7728,31 @@ def get_map_data(request):
 
     doors_by_room = _doors_for_floorplan(floor_plan)
     rooms = [
-        _room_payload(r, doors_by_room)
+        _room_payload(r, doors_by_room, suggest_doors=True)
         for r in Room.objects.filter(floor_plan=floor_plan)
+    ]
+
+    obstacles = [
+        _obstacle_payload(o)
+        for o in Obstacle.objects.filter(floor_plan=floor_plan)
+    ]
+
+    stairways = [
+        _stairway_payload(st)
+        for st in Stairway.objects.select_related('connects_to').filter(floor_plan=floor_plan)
     ]
 
     shelves = [
         {
             'shelf_id': s.shelf_id, 'name': s.name,
+            'kind': s.kind, 'label': s.label,
+            'mount': s.mount, 'elevated': s.is_elevated,
             'map_x': s.map_x, 'map_y': s.map_y, 'rotation': s.rotation or 0,
             'width': s.width or 46, 'depth': s.depth or 14,
+            # The outline to draw. Sent already resolved so no map has to know
+            # the difference between a traced shelf and a rectangular one.
+            'geometry': s.geometry or None,
+            'footprint': s.footprint(),
             'placed': s.map_x is not None and s.map_y is not None,
             'room_id': s.room_id,
         }
@@ -5646,8 +7773,102 @@ def get_map_data(request):
         'waypoints': waypoints,
         'connections': connections,
         'rooms': rooms,
+        'obstacles': obstacles,
+        'stairways': stairways,
+        # For the "connects to" picker: every other floor in the building.
+        'other_floors': [
+            {'floor_plan_id': f.floor_plan_id, 'label': f.floor_label, 'name': f.name}
+            for f in FloorPlan.objects.exclude(floor_plan_id=floor_plan.floor_plan_id)
+                                      .order_by('floor_number', 'floor_plan_id')
+        ],
         'shelves': shelves,
     })
+
+
+def _stair_treads(geometry, bearing, count=None):
+    """The tread lines that make a footprint read as steps.
+
+    Computed here, once, rather than in each of the four maps that draw a stair.
+    The footprint is measured along the direction of travel, the treads are laid
+    across it at right angles, and each one is clipped to the shape's bounding
+    box -- enough for the conventional symbol without pulling in a polygon
+    clipping library for a rectangle that is nearly always a rectangle.
+
+    Returns [[[x1, y1], [x2, y2]], ...] in canvas coordinates.
+    """
+    if not geometry or len(geometry) < 3:
+        return []
+
+    xs = [p[0] for p in geometry]
+    ys = [p[1] for p in geometry]
+    cx, cy = (min(xs) + max(xs)) / 2.0, (min(ys) + max(ys)) / 2.0
+    width, height = max(xs) - min(xs), max(ys) - min(ys)
+
+    rad = math.radians(bearing or 0)
+    # Unit vector along travel, and the one across it that the treads follow.
+    ux, uy = math.sin(rad), -math.cos(rad)
+    vx, vy = -uy, ux
+
+    # How far the shape reaches along each axis. A projection of the bounding
+    # box is close enough and cannot fail on a concave shape.
+    along = abs(width * ux) + abs(height * uy)
+    across = abs(width * vx) + abs(height * vy)
+    if along <= 0 or across <= 0:
+        return []
+
+    if count is None:
+        # About one tread every 12 canvas units, kept inside sane bounds so a
+        # long staircase does not turn into a solid block of lines.
+        count = int(max(3, min(14, round(along / 12.0))))
+
+    treads = []
+    for i in range(1, count):
+        t = (i / float(count) - 0.5) * along
+        mx, my = cx + ux * t, cy + uy * t
+        half = across / 2.0
+        treads.append([
+            [round(mx - vx * half, 2), round(my - vy * half, 2)],
+            [round(mx + vx * half, 2), round(my + vy * half, 2)],
+        ])
+    return treads
+
+
+def _stairway_payload(st):
+    """Everything a map needs to draw one stairway and say where it goes."""
+    return {
+        'stairway_id': st.stairway_id,
+        'kind': st.kind,
+        'kind_label': st.get_kind_display(),
+        'name': st.name or '',
+        'label': st.label,
+        'geometry': st.geometry or [],
+        'map_x': st.map_x,
+        'map_y': st.map_y,
+        'bearing': st.bearing or 0,
+        'direction': st.direction,
+        'connects_to': st.connects_to_id,
+        'destination': st.destination_label,
+        'is_active': st.is_active,
+        # A lift has no treads; drawing them on one would be wrong, not merely
+        # decorative.
+        'treads': ([] if st.kind == 'Elevator'
+                   else _stair_treads(st.geometry, st.bearing)),
+    }
+
+
+def _obstacle_payload(o):
+    """Everything a map needs to draw one obstacle."""
+    return {
+        'obstacle_id': o.obstacle_id,
+        'kind': o.kind,
+        'kind_label': o.get_kind_display(),
+        'name': o.name or '',
+        'label': o.label,
+        'geometry': o.geometry or [],
+        'map_x': o.map_x,
+        'map_y': o.map_y,
+        'is_active': o.is_active,
+    }
 
 
 def _beacon_payload(b):
@@ -6016,6 +8237,21 @@ def add_waypoint_connection(request):
     if existing:
         return JsonResponse({'success': False, 'error': 'These waypoints are already connected'})
 
+    if wp_from.floor_plan_id != wp_to.floor_plan_id:
+        return JsonResponse({'success': False,
+                             'error': 'Those waypoints are on different floors. '
+                                      'Floors are joined by stairways, not connections.'})
+
+    blocked = _walls_crossed(wp_from.floor_plan, wp_from.map_x, wp_from.map_y,
+                             wp_to.map_x, wp_to.map_y)
+    if blocked:
+        names = ' and '.join(sorted(set(blocked)))
+        return JsonResponse({
+            'success': False,
+            'error': f'This would walk through the wall of {names}. '
+                     f'Put a door where people actually pass, then connect through it.',
+        })
+
     distance = math.sqrt(
         (wp_from.map_x - wp_to.map_x) ** 2 + (wp_from.map_y - wp_to.map_y) ** 2
     )
@@ -6050,6 +8286,158 @@ def delete_waypoint_connection(request):
 
 
 # ─── PATRON NAVIGATION: A* PATHFINDING OVER THE WAYPOINT GRAPH ────
+# How much a flight of stairs "costs" compared with walking on the flat.
+#
+# A staircase is not free and is not the same as its own footprint: climbing one
+# takes appreciably longer than crossing the same distance on level ground, and
+# a route that ignored that would happily send someone up and down two floors to
+# save a few metres of corridor. Expressed in metres and converted per plan, so
+# a floor drawn at a different scale still gets a sensible penalty.
+STAIR_TRAVERSAL_METRES = 15.0
+STAIR_TRAVERSAL_FALLBACK = 220.0     # canvas units, when a plan has no scale set
+
+# How many waypoints a stairway hooks into on its own floor. One is enough in
+# principle; two means a single badly-placed waypoint cannot strand the stairs.
+STAIR_LINK_NEIGHBOURS = 2
+
+# How far apart the two ends of one staircase may sit in plan before they are
+# taken to be two different staircases. Generous, because two floor plans are
+# separate images and are rarely traced to the same origin -- but far short of
+# the distance between one stairwell and the next.
+PAIR_MAX_OFFSET_METRES = 6.0
+PAIR_MAX_OFFSET_FALLBACK = 90.0      # canvas units, when a plan has no scale set
+
+
+def _stair_node(stairway_id):
+    """Stairways live in the same graph as waypoints, under a string key.
+
+    Keys stay mixed on purpose -- waypoints keep their integer ids so every
+    response field and every client that reads waypoint_id keeps working, and
+    stairways take 'S<id>' so the two can never collide.
+    """
+    return 'S%d' % stairway_id
+
+
+def _pair_stairways(stairways, scale_by_floor=None):
+    """Match each stairway to the one it meets on the floor above or below.
+
+    A staircase is one object seen from two floors, so the pair is found by
+    position: among the stairways on the destination floor, take the nearest in
+    plan. A staircase sits above itself, so that is nearly always exactly right.
+
+    Two stairways that name each other are unambiguous and always win. Failing
+    that, one that names no floor at all will do, provided it is close enough
+    overhead to be the same staircase -- because the common way to get this
+    wrong is to link the flight going up and forget the one coming down, and a
+    building where the stairs work in one direction only is not worth shipping
+    over a checkbox. Anything further apart than PAIR_MAX_OFFSET_METRES is two
+    different staircases and is left alone.
+
+    Returns [(a, b), ...] with each pair listed once.
+    """
+    scale_by_floor = scale_by_floor or {}
+    by_floor = {}
+    for st in stairways:
+        by_floor.setdefault(st.floor_plan_id, []).append(st)
+
+    def offset(a, b):
+        return math.hypot(a.map_x - b.map_x, a.map_y - b.map_y)
+
+    def ceiling(a, b):
+        ppm = scale_by_floor.get(a.floor_plan_id) or scale_by_floor.get(b.floor_plan_id)
+        return (PAIR_MAX_OFFSET_METRES * ppm) if ppm else PAIR_MAX_OFFSET_FALLBACK
+
+    pairs = []
+    seen = set()
+    for st in stairways:
+        if not st.connects_to_id:
+            continue
+        over_there = by_floor.get(st.connects_to_id, [])
+        candidates = [o for o in over_there if o.connects_to_id == st.floor_plan_id]
+        if not candidates:
+            candidates = [o for o in over_there
+                          if not o.connects_to_id and offset(o, st) <= ceiling(o, st)]
+        if not candidates:
+            continue
+        partner = min(candidates, key=lambda o: offset(o, st))
+        key = tuple(sorted((st.stairway_id, partner.stairway_id)))
+        if key in seen:
+            continue
+        seen.add(key)
+        pairs.append((st, partner))
+    return pairs
+
+
+def _build_route_graph(floor_plans, include_stairs=True):
+    """One graph over every floor given, joined wherever stairs pair up.
+
+    Returns (coords, adjacency, node_floor, stair_nodes, edges_by_floor).
+
+    `include_stairs=False` leaves the stairways out entirely, giving exactly the
+    per-floor graph an Administrator drew. Hooking a stairway to the waypoints
+    beside it asserts that the gap between them is walkable, which is true at a
+    staircase and needless everywhere else -- so a route that stays on one floor
+    does not pay for the assumption.
+
+    Horizontal edges come from WaypointConnection exactly as before. The new
+    part is vertical: each stairway becomes a node, hooks into the nearest
+    waypoints on its own floor, and joins its partner on the other floor with a
+    single weighted edge. A* then walks the whole building without knowing that
+    floors exist -- which is the point, because a shortest path that has to be
+    stitched together afterwards is not a shortest path.
+    """
+    floor_ids = [f.floor_plan_id for f in floor_plans]
+    scale_by_floor = {f.floor_plan_id: (f.pixels_per_meter or 0) for f in floor_plans}
+
+    waypoints = list(Waypoint.objects.filter(floor_plan_id__in=floor_ids))
+    coords = {w.waypoint_id: (w.map_x, w.map_y) for w in waypoints}
+    node_floor = {w.waypoint_id: w.floor_plan_id for w in waypoints}
+    adjacency = {w.waypoint_id: [] for w in waypoints}
+    edges_by_floor = {fid: [] for fid in floor_ids}
+
+    wp_ids = set(coords)
+    for c in WaypointConnection.objects.filter(
+        waypoint_from_id__in=wp_ids, waypoint_to_id__in=wp_ids
+    ):
+        a, b = c.waypoint_from_id, c.waypoint_to_id
+        # A connection drawn between two floors would be a data error rather
+        # than a shortcut: the vertical links belong to the stairs.
+        if node_floor.get(a) != node_floor.get(b):
+            continue
+        adjacency[a].append((b, c.distance))
+        adjacency[b].append((a, c.distance))
+        edges_by_floor[node_floor[a]].append((a, b))
+
+    stairways = (list(Stairway.objects.filter(
+        floor_plan_id__in=floor_ids, is_active=True)) if include_stairs else [])
+    stair_nodes = {}
+    for st in stairways:
+        node = _stair_node(st.stairway_id)
+        coords[node] = (st.map_x, st.map_y)
+        node_floor[node] = st.floor_plan_id
+        adjacency.setdefault(node, [])
+        stair_nodes[node] = st
+
+        # Hook it into the floor it stands on.
+        same_floor = [w for w in waypoints if w.floor_plan_id == st.floor_plan_id]
+        same_floor.sort(key=lambda w: math.hypot(w.map_x - st.map_x, w.map_y - st.map_y))
+        for w in same_floor[:STAIR_LINK_NEIGHBOURS]:
+            d = math.hypot(w.map_x - st.map_x, w.map_y - st.map_y)
+            adjacency[node].append((w.waypoint_id, d))
+            adjacency[w.waypoint_id].append((node, d))
+
+    for a, b in _pair_stairways(stairways, scale_by_floor):
+        na, nb = _stair_node(a.stairway_id), _stair_node(b.stairway_id)
+        if na not in adjacency or nb not in adjacency:
+            continue
+        ppm = scale_by_floor.get(a.floor_plan_id) or scale_by_floor.get(b.floor_plan_id)
+        cost = (STAIR_TRAVERSAL_METRES * ppm) if ppm else STAIR_TRAVERSAL_FALLBACK
+        adjacency[na].append((nb, cost))
+        adjacency[nb].append((na, cost))
+
+    return coords, adjacency, node_floor, stair_nodes, edges_by_floor
+
+
 def _astar(start_id, goal_id, coords, adjacency):
     """A* shortest path over the waypoint graph.
 
@@ -6124,11 +8512,17 @@ def get_patron_map_data(request):
     shelves = [
         {
             'shelf_id': s.shelf_id, 'name': s.name,
+            'kind': s.kind, 'label': s.label,
+            'mount': s.mount, 'elevated': s.is_elevated,
             'x': s.map_x, 'y': s.map_y, 'rotation': s.rotation or 0,
             'width': s.width or 46, 'depth': s.depth or 14,
+            'geometry': s.geometry or None,
+            'footprint': s.footprint(),
             # Feeds the "section labels" and "shelf level indicators" layers.
             'levels': [
-                {'level_number': lv.level_number, 'category': lv.category or ''}
+                {'level_number': lv.level_number, 'category': lv.category or '',
+                 'is_top': lv.is_top, 'is_under': lv.is_under,
+                 'column_number': lv.column_number, 'label': lv.label}
                 for lv in s.shelflevel_set.all() if lv.is_active
             ],
         }
@@ -6181,6 +8575,23 @@ def get_patron_map_data(request):
         ),
         'renovation_notice': floor_plan.renovation_notice or '',
         'rooms': rooms,
+        # Tables, counters and pillars. A patron following a route needs to see
+        # what is physically in the way, not an empty room with shelves in it.
+        'obstacles': [
+            {'obstacle_id': o.obstacle_id, 'kind': o.kind, 'label': o.label,
+             'geometry': o.geometry or [], 'map_x': o.map_x, 'map_y': o.map_y}
+            for o in Obstacle.objects.filter(floor_plan=floor_plan, is_active=True)
+            if o.geometry
+        ],
+        # The only objects that mean anything on another floor. Sent even when
+        # the patron is not going anywhere: knowing where the stairs are is
+        # useful on its own.
+        'stairways': [
+            _stairway_payload(st)
+            for st in Stairway.objects.select_related('connects_to').filter(
+                floor_plan=floor_plan, is_active=True)
+            if st.geometry
+        ],
         'shelves': shelves,
         'waypoints': waypoints,
         'beacons': beacons,
@@ -6189,22 +8600,52 @@ def get_patron_map_data(request):
 
 
 def get_navigation_route(request):
-    """Compute the A* route from the patron's current position to a target shelf
-    (or waypoint), over one floor's waypoint graph.
+    """A* from the patron's position to a target shelf (or waypoint).
 
-    The floor is the one the target sits on, not a global "active" plan: asking
-    to be taken to a book decides which floor is being walked. Routes do not
-    cross floors -- Waypoint has no notion of a stair or a lift, and the
-    positioning that would have to follow you up one is single-floor anyway.
-    A cross-floor request is answered with the floor to go to rather than a
-    path that pretends the two are connected.
+    The graph spans the whole building, not one floor. Waypoints carry the
+    corridors an Administrator drew; each stairway is a node in that same graph,
+    hooked into the waypoints beside it and joined to its opposite number on the
+    floor it reaches. A* therefore runs once, over one graph, and the path it
+    returns is genuinely the shortest way to the book -- including which of
+    three staircases to use, which is exactly the question a two-leg route
+    stitched together afterwards cannot answer.
+
+    Floors reappear only when the answer is drawn. A map can only show one, so
+    the path is split at the stairs into `legs`, and `route` stays the leg for
+    the floor the patron is standing on -- the same shape, in the same field,
+    that every existing caller already draws.
+
+    `from_floor` is where the patron is. Without it the target's floor is
+    assumed, which is what a single-floor caller wants and always got.
     """
     target_shelf_id = request.GET.get('target_shelf_id')
     resolving_shelf = (Shelf.objects.filter(shelf_id=target_shelf_id).first()
                        if target_shelf_id else None)
-    floor_plan, _live = _floor_for_request(request, target_shelf=resolving_shelf)
-    if floor_plan is None:
+    target_floor, _live = _floor_for_request(request, target_shelf=resolving_shelf)
+    # Derived from the shelf itself, never from ?floor=. _floor_for_request lets
+    # an explicit ?floor= win -- correct for "which map am I looking at", wrong
+    # for "which floor is the book on", and the patron map always sends one. Read
+    # the other way round, a request from floor 1 for a shelf on floor 2 looked
+    # like a same-floor request and quietly produced no route at all.
+    if resolving_shelf is not None and resolving_shelf.room_id:
+        shelf_floor = FloorPlan.objects.filter(
+            room__shelf=resolving_shelf, is_active=True).first()
+        if shelf_floor is not None:
+            target_floor = shelf_floor
+    if target_floor is None:
         return JsonResponse({'success': False, 'error': 'No floor plan is in service'})
+
+    # Which floor the patron is standing on. Normally the target's; different
+    # only when they say otherwise.
+    floor_plan = target_floor
+    raw_from = (request.GET.get('from_floor') or '').strip()
+    if raw_from.isdigit() and int(raw_from) != target_floor.floor_plan_id:
+        standing_on = FloorPlan.objects.filter(
+            floor_plan_id=int(raw_from), is_active=True).first()
+        if standing_on is not None:
+            floor_plan = standing_on
+    crossing_floors = floor_plan.floor_plan_id != target_floor.floor_plan_id
+    here_id = floor_plan.floor_plan_id
 
     try:
         start_x = float(request.GET.get('start_x'))
@@ -6216,24 +8657,36 @@ def get_navigation_route(request):
     if not target_shelf_id and not target_waypoint_id:
         return JsonResponse({'success': False, 'error': 'A target_shelf_id or target_waypoint_id is required'})
 
-    waypoints = list(Waypoint.objects.filter(floor_plan=floor_plan))
-    if not waypoints:
+    # Only widen the graph when the walk actually leaves this floor. A same-floor
+    # route then traverses precisely the graph it always did -- the stair links
+    # are an assumption about what is walkable near a staircase, and there is no
+    # reason to let that assumption anywhere near a route that does not need it.
+    if crossing_floors:
+        floors = list(FloorPlan.objects.filter(is_active=True))
+        known = {f.floor_plan_id for f in floors}
+        for f in (floor_plan, target_floor):
+            if f.floor_plan_id not in known:
+                floors.append(f)
+                known.add(f.floor_plan_id)
+    else:
+        floors = [floor_plan]
+
+    coords, adjacency, node_floor, stair_nodes, edges_by_floor = _build_route_graph(
+        floors, include_stairs=crossing_floors)
+    edges = edges_by_floor.get(here_id, [])
+    # Waypoints specifically, not nodes: a floor with a staircase drawn on it
+    # but no corridor yet has nowhere for a route to start, and asking A* to
+    # begin at nothing is how this returns a 500 instead of an explanation.
+    if not any(isinstance(n, int) and f == here_id for n, f in node_floor.items()):
         return JsonResponse({'success': False, 'error': 'No waypoints configured for this floor plan'})
 
-    coords = {w.waypoint_id: (w.map_x, w.map_y) for w in waypoints}
-    wp_ids = set(coords)
-    adjacency = {wid: [] for wid in coords}
-    edges = []   # (from_id, to_id) pairs, kept alongside adjacency for edge-snapping below
-    for c in WaypointConnection.objects.filter(
-        waypoint_from_id__in=wp_ids, waypoint_to_id__in=wp_ids
-    ):
-        adjacency[c.waypoint_from_id].append((c.waypoint_to_id, c.distance))
-        adjacency[c.waypoint_to_id].append((c.waypoint_from_id, c.distance))
-        edges.append((c.waypoint_from_id, c.waypoint_to_id))
-
-    def nearest_waypoint(x, y):
+    def nearest_waypoint(x, y, floor_id):
+        """Nearest real waypoint on one floor. Stair nodes and the spliced start
+        node are keyed by string, so the integer keys are exactly the waypoints."""
         best_id, best_d = None, None
         for wid, (wx, wy) in coords.items():
+            if not isinstance(wid, int) or node_floor.get(wid) != floor_id:
+                continue
             d = math.hypot(wx - x, wy - y)
             if best_d is None or d < best_d:
                 best_d, best_id = d, wid
@@ -6244,7 +8697,7 @@ def get_navigation_route(request):
     # one endpoint used to route them there first, and as they kept walking the
     # snap would flip to the other endpoint and the drawn route would visibly
     # jump between two different paths for what was smooth, continuous motion.
-    # Projecting onto the nearest edge fixes both — the route starts from
+    # Projecting onto the nearest edge fixes both -- the route starts from
     # wherever they are actually standing along it.
     START_SENTINEL = '__start__'
     EDGE_SNAP_EPSILON = 1e-6   # a projection this close to an endpoint IS that endpoint
@@ -6267,7 +8720,7 @@ def get_navigation_route(request):
                 best = (d, a, b, px, py, t)
         return best
 
-    start_wp = nearest_waypoint(start_x, start_y)
+    start_wp = nearest_waypoint(start_x, start_y, here_id)
     edge_hit = nearest_point_on_edges(start_x, start_y) if edges else None
     if edge_hit is not None:
         _dist, a, b, px, py, t = edge_hit
@@ -6279,6 +8732,7 @@ def get_navigation_route(request):
             # waypoint is moved afterward -- it can quietly drift from the
             # true geometry, while re-deriving from coords cannot.
             coords[START_SENTINEL] = (px, py)
+            node_floor[START_SENTINEL] = here_id
             ax, ay = coords[a]
             bx, by = coords[b]
             adjacency[START_SENTINEL] = [
@@ -6291,6 +8745,7 @@ def get_navigation_route(request):
         else:
             start_wp = b
 
+    # -- The goal, which now sits on the target floor rather than this one --
     target_shelf = None
     if target_waypoint_id:
         try:
@@ -6304,7 +8759,7 @@ def get_navigation_route(request):
         target_shelf = resolving_shelf
         if target_shelf is None:
             return JsonResponse({'success': False, 'error': 'Target shelf not found'})
-        linked = Waypoint.objects.filter(floor_plan=floor_plan, linked_shelf=target_shelf).first()
+        linked = Waypoint.objects.filter(floor_plan=target_floor, linked_shelf=target_shelf).first()
         if linked is not None:
             goal_wp = linked.waypoint_id
         elif target_shelf.map_x is None or target_shelf.map_y is None:
@@ -6314,24 +8769,104 @@ def get_navigation_route(request):
                          "Please ask library staff for directions.",
             })
         else:
-            goal_wp = nearest_waypoint(target_shelf.map_x, target_shelf.map_y)
+            goal_wp = nearest_waypoint(target_shelf.map_x, target_shelf.map_y,
+                                       target_floor.floor_plan_id)
+        if goal_wp is None:
+            return JsonResponse({
+                'success': False,
+                'error': 'No waypoints have been drawn on the %s yet.' % target_floor.floor_label,
+            })
 
     path, total = _astar(start_wp, goal_wp, coords, adjacency)
+
+    # No continuous path across the floors, so the two are two islands in the
+    # graph. Usually the staircases were drawn but never linked to each other;
+    # sometimes there is simply no corridor drawn upstairs yet. Either way,
+    # walking the patron to real stairs and telling them what to do at the top
+    # beats refusing to help -- the same guidance this endpoint gave before the
+    # graph spanned floors. `stairs_only` says that is what came back.
+    stairs_only = False
+    fallback_stairway = None
+    if path is None and crossing_floors:
+        options = list(Stairway.objects.select_related('connects_to').filter(
+            floor_plan=floor_plan, is_active=True, connects_to=target_floor))
+        if not options:
+            options = list(Stairway.objects.select_related('connects_to').filter(
+                floor_plan=floor_plan, is_active=True))
+        if options:
+            fallback_stairway = min(
+                options, key=lambda st: math.hypot(st.map_x - start_x, st.map_y - start_y))
+            stair_goal = nearest_waypoint(
+                fallback_stairway.map_x, fallback_stairway.map_y, here_id)
+            if stair_goal is not None:
+                path, total = _astar(start_wp, stair_goal, coords, adjacency)
+                if path is not None:
+                    stairs_only = True
+                    goal_wp = stair_goal
+                    target_shelf = None
+        if path is None:
+            return JsonResponse({
+                'success': False,
+                'cross_floor': True,
+                'target_floor': {'floor_plan_id': target_floor.floor_plan_id,
+                                 'label': target_floor.floor_label},
+                'error': 'That shelf is on the %s, and no route reaches it from here. '
+                         'Ask an Administrator to draw a stairway on each floor and '
+                         'link them to one another.' % target_floor.floor_label,
+            })
+
     if path is None:
         return JsonResponse({'success': False, 'error': 'No path found between your position and the target'})
 
-    route = [
-        {'waypoint_id': (None if wid == START_SENTINEL else wid),
-         'x': coords[wid][0], 'y': coords[wid][1]}
-        for wid in path
-    ]
+    def point(node):
+        x, y = coords[node]
+        st = stair_nodes.get(node)
+        return {
+            'waypoint_id': (None if isinstance(node, str) else node),
+            'stairway_id': (st.stairway_id if st is not None else None),
+            'floor_plan_id': node_floor.get(node),
+            'x': x, 'y': y,
+        }
+
+    points = [point(n) for n in path]
+
+    # One map draws one floor, so the path is cut where it changes floor. Both
+    # ends of a stair link survive the cut: the leg below finishes at the foot of
+    # the stairs and the leg above begins at the landing, which is what somebody
+    # reading either map needs to see.
+    label_of = {f.floor_plan_id: f.floor_label for f in floors}
+    legs = []
+    for pt in points:
+        if not legs or legs[-1]['floor_plan_id'] != pt['floor_plan_id']:
+            legs.append({
+                'floor_plan_id': pt['floor_plan_id'],
+                'floor_label': label_of.get(pt['floor_plan_id'], ''),
+                'points': [],
+                'distance': 0.0,
+            })
+        leg = legs[-1]
+        if leg['points']:
+            prev = leg['points'][-1]
+            leg['distance'] += math.hypot(pt['x'] - prev['x'], pt['y'] - prev['y'])
+        leg['points'].append(pt)
+    for leg in legs:
+        leg['distance'] = round(leg['distance'], 2)
+
+    here_leg = next((l for l in legs if l['floor_plan_id'] == here_id), legs[0])
+
     response = {
         'success': True,
-        'route': route,
+        # This floor's leg, under the name every existing caller already draws.
+        'route': here_leg['points'],
+        # `distance` is the whole walk, and carries the stair-climb allowance
+        # that made A* prefer one staircase over another; `leg_distance` is the
+        # part of it drawn on this map.
         'distance': total,
+        'leg_distance': here_leg['distance'],
+        'legs': legs,
         'start_waypoint_id': None if start_wp == START_SENTINEL else start_wp,
         'start_snapped_to_edge': start_wp == START_SENTINEL,
-        'goal_waypoint_id': goal_wp,
+        'goal_waypoint_id': None if isinstance(goal_wp, str) else goal_wp,
     }
     if target_shelf is not None:
         response['target_shelf'] = {
@@ -6340,8 +8875,42 @@ def get_navigation_route(request):
             'x': target_shelf.map_x,
             'y': target_shelf.map_y,
         }
-    return JsonResponse(response)
 
+    if crossing_floors:
+        # The staircase A* chose -- the first one the path meets on this floor.
+        via_stairway = fallback_stairway or next(
+            (stair_nodes[n] for n in path
+             if n in stair_nodes and node_floor.get(n) == here_id), None)
+
+        response['cross_floor'] = True
+        response['floors_crossed'] = len(legs)
+        response['stairs_only'] = stairs_only
+        response['leg'] = 'to_stairs' if stairs_only else 'full'
+        response['target_floor'] = {
+            'floor_plan_id': target_floor.floor_plan_id,
+            'label': target_floor.floor_label,
+        }
+        if via_stairway is not None:
+            response['via_stairway'] = {
+                'stairway_id': via_stairway.stairway_id,
+                'kind': via_stairway.kind,
+                'label': via_stairway.label,
+                'x': via_stairway.map_x,
+                'y': via_stairway.map_y,
+                'linked': via_stairway.connects_to_id == target_floor.floor_plan_id,
+            }
+            verb = 'Take the lift' if via_stairway.kind == 'Elevator' else (
+                'Take the ramp' if via_stairway.kind == 'Ramp' else 'Take the stairs')
+            arrow = {'up': 'up', 'down': 'down', 'both': ''}.get(via_stairway.direction, '')
+            # Only name it when it has been given a name. An unnamed lift produced
+            # "Take the lift at Lift", because label falls back to the kind.
+            where = ' at %s' % via_stairway.label if (via_stairway.name or '').strip() else ''
+            going = ' %s' % arrow if arrow else ''
+            response['instruction'] = (
+                '%s%s%s to the %s, then follow the map from there.'
+                % (verb, where, going, target_floor.floor_label)
+            )
+    return JsonResponse(response)
 
 # ─── ENTRY/EXIT LOGGING & PATRON REGISTRATION (Admin Log Management) ──
 # NOTE: The Patron model stores a single `fullname` (no firstname/lastname
@@ -6717,8 +9286,11 @@ def reset_staff_password(request, user_id):
     if request.method != 'POST':
         return redirect('user_management')
     password = request.POST.get('password') or ''
-    if len(password) < MIN_PASSWORD_LENGTH:
-        messages.error(request, PASSWORD_RULE_TEXT)
+    # Same policy the account holder would face changing it themselves. A
+    # password set for someone else is not a lesser password.
+    policy_error = password_length_error(password, current_hash=user.password_hash)
+    if policy_error:
+        messages.error(request, policy_error)
         return redirect('user_management')
     user.password_hash = hash_password(password)
     user.save(update_fields=['password_hash'])
@@ -7281,6 +9853,101 @@ def _open_loans_by_book(book_ids):
     for row in rows:
         counts[row['book_id']] = row['n']
     return counts
+
+
+@admin_only_required
+def stock_audit_progress(request):
+    """Group a running list of scans by the shelf each copy belongs to.
+
+    The shelf-at-a-time audit asks which shelf you are on before you scan a
+    single book. That is backwards from how a stock-take is actually done --
+    you walk the room with a scanner and the shelves arrive in whatever order
+    the room is laid out. Every label already identifies its own copy, and the
+    copy knows its shelf, so the grouping is derivable rather than something to
+    be asked for.
+
+    Deliberately cheap: no loan reconciliation, no discrepancy report. It runs
+    after every few scans to keep the progress counts live, and the expensive
+    reasoning stays in stock_audit_compare, which is called once per shelf when
+    the count is done.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
+
+    labels = []
+    seen = set()
+    for raw in request.POST.getlist('scanned'):
+        label = (raw or '').strip()
+        if label and label not in seen:
+            seen.add(label)
+            labels.append(label)
+
+    if len(labels) > MAX_AUDIT_SCANS:
+        return JsonResponse({
+            'success': False,
+            'error': f'That is {len(labels)} scans in one sweep. File the shelves '
+                     f'you have counted, then carry on.'})
+
+    records = (InventoryRecord.objects
+               .select_related('book', 'book__shelf_level', 'book__shelf_level__shelf')
+               .filter(qr_label__in=labels))
+    by_label = {r.qr_label: r for r in records}
+
+    # shelf_id -> what has been seen there so far
+    shelves = {}
+    unshelved, unknown = [], []
+    for label in labels:
+        record = by_label.get(label)
+        if record is None:
+            unknown.append(label)
+            continue
+        level = record.book.shelf_level if record.book_id else None
+        shelf = level.shelf if level and level.shelf_id else None
+        if shelf is None:
+            unshelved.append({'qr_label': label, 'title': record.display_title})
+            continue
+        bucket = shelves.setdefault(shelf.shelf_id, {
+            'shelf_id': shelf.shelf_id,
+            'shelf_name': shelf.name,
+            'found': [],
+        })
+        bucket['found'].append(label)
+
+    # Expected totals, counted once per shelf rather than per scan.
+    totals = {}
+    if shelves:
+        for row in (InventoryRecord.objects
+                    .filter(status__in=['In Stock', 'Missing'],
+                            condition__in=['Good', 'Damaged'],
+                            book__shelf_level__shelf__shelf_id__in=list(shelves))
+                    .values('book__shelf_level__shelf__shelf_id')
+                    .annotate(n=Count('inventory_id'))):
+            totals[row['book__shelf_level__shelf__shelf_id']] = row['n']
+
+    groups = []
+    for shelf_id, bucket in shelves.items():
+        expected = totals.get(shelf_id, 0)
+        found = len(bucket['found'])
+        groups.append({
+            'shelf_id': shelf_id,
+            'shelf_name': bucket['shelf_name'],
+            'expected_count': expected,
+            'found_count': found,
+            'scanned': bucket['found'],
+            # A shelf can read over 100% when a book from elsewhere has been
+            # put away here; the count is still the honest one to show.
+            'percent': round(100.0 * found / expected) if expected else None,
+            'complete': bool(expected) and found >= expected,
+        })
+    groups.sort(key=lambda g: g['shelf_name'].lower())
+
+    return JsonResponse({
+        'success': True,
+        'total_scanned': len(labels),
+        'groups': groups,
+        'unshelved': unshelved,
+        'unknown': unknown,
+    })
 
 
 @admin_only_required

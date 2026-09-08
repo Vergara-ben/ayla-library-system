@@ -46,6 +46,20 @@
   #map{flex:1;position:relative;z-index:1;}
   .leaflet-container{background:var(--bg)!important;}
 
+/* The level drawn as the spines a patron will actually see: a solid block
+   for every copy on the shelf, a hollow one for each that is out. Showing the
+   gaps is what makes the count believable -- told only a number, somebody who
+   counts differently has no way to tell which of you is wrong. */
+.shelf-strip { display: flex; gap: 2px; margin-top: 6px; align-items: flex-end; }
+.shelf-strip i {
+  display: block; width: 6px; height: 16px; border-radius: 1px;
+  background: var(--accent); opacity: .55;
+}
+.shelf-strip i.out { background: none; border: 1px dashed var(--text-muted); opacity: .5; }
+.shelf-strip i.here { background: var(--accent2); opacity: 1; height: 22px; }
+.shelf-neighbours { font-size: 11px; color: var(--text-muted); margin-top: 5px; line-height: 1.45; }
+
+  /* INFO PANEL */
   /* INFO PANEL */
   .info-panel{
     flex-shrink:0;background:var(--nav-bg);backdrop-filter:blur(20px);
@@ -146,6 +160,7 @@
     <link rel="stylesheet" href="{% static 'css/patron.css' %}">
     <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
     <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
+    <script src="{% static 'js/ayla-dialog.js' %}"></script>
 </head>
 <body>
 <nav class="navbar">
@@ -173,6 +188,8 @@
     <div class="shelf-details">
       <div class="shelf-name" id="shelfName">{% if target.shelf_name %}Target: {{ target.shelf_name }}{% else %}Browse the map{% endif %}</div>
       <div class="shelf-path" id="shelfPath">{% if target.book_title %}{{ target.book_title }}{% else %}Enable Bluetooth to see your position{% endif %}</div>
+      <div class="shelf-strip hidden" id="shelfStrip"></div>
+      <div class="shelf-neighbours hidden" id="shelfNeighbours"></div>
     </div>
     <div class="nav-status" id="navStatus">
       <div class="status-dot amber" id="statusDot"></div>
@@ -199,7 +216,18 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" integrity="sha384-NElt3Op+9NBMCYaef5HxeJmU4Xeard/Lku8ek6hoPTvYkQPh3zLIrJP7KiRocsxO" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <script>
-const targetData = JSON.parse(document.getElementById('targetData').textContent || '{}');
+// Read defensively: this is the first statement in the file, so anything
+// thrown here takes the entire map with it -- no floor plan, no position, no
+// error the patron could act on. A missing or malformed block just means
+// "browsing, not navigating", which the rest of the page already handles.
+const targetData = (function () {
+  try {
+    const el = document.getElementById('targetData');
+    return el ? (JSON.parse(el.textContent || '{}') || {}) : {};
+  } catch (e) {
+    return {};
+  }
+})();
 
 const map = L.map('map', {
   crs: L.CRS.Simple,
@@ -214,6 +242,23 @@ let mapData = null;
 let patronPos = null;            // {x, y} in floor-plan pixels (top-left origin) -- the latest smoothed estimate
 let displayedPos = null;         // {x, y} of wherever the marker is actually drawn right now
 let lastRoutePoints = null;      // the most recent full route the server returned
+
+// ── Arriving, and when to bother re-routing ──────────────────────────────
+// Close enough that the shelf is in front of you rather than somewhere ahead.
+// Two metres is about the width of an aisle, which is as precise as RSSI
+// trilateration is honest about anyway.
+const ARRIVAL_M = 2.0;
+// Leaving needs more than arriving did, or the panel flickers between
+// "arrived" and "12 m to go" while somebody stands still at the boundary.
+const DEPARTURE_M = 3.2;
+// A fix that lands half a metre from the last one is noise, not a step. The
+// route it would return is the same route, so it is not worth the round trip:
+// re-routing every second per phone is load that buys nothing.
+const RECOMPUTE_M = 0.75;
+
+let targetPoint = null;          // {x, y} of the shelf, from the last route
+let lastRoutedFrom = null;       // where we were standing when we last asked
+let hasArrived = false;
 let routeLine = null, patronMarker = null;
 let routeArrows = [];   // chevron markers drawn along the route, cleared and redrawn with it
 // The six independently toggleable layers the manuscript specifies.
@@ -265,6 +310,71 @@ function shelfCorners(cx, cy, rotationDeg, width, depth) {
   return [[-hw, -hd], [hw, -hd], [hw, hd], [-hw, hd]].map((p) =>
     toLatLng(cx + p[0] * cos - p[1] * sin, cy + p[0] * sin + p[1] * cos));
 }
+
+// Not every shelf is a rectangle: the ones tucked into a corner are traced as
+// a polygon instead. The server resolves both to the same outline, so this
+// only has to prefer it when it is there.
+// Where along a shelf's face the book sits.
+//
+// A floor plan is flat, so the level a book is on is height and can only be
+// described in words. What CAN be shown is how far along the shelf to walk:
+// the slot if one was recorded, otherwise the column, otherwise nothing --
+// and nothing is the honest answer for a shelf whose contents were never
+// positioned, rather than a marker in the middle pretending to know.
+//
+// `fraction` is 0 at the left-hand end of the shelf as drawn.
+function bookSpotOn(shelf, target) {
+  let fraction = null;
+  if (target.position && target.position_of > 0) {
+    // Counted among the copies actually on the shelf. Using the stored slot
+    // would leave the marker one space right for every neighbour out on loan.
+    fraction = (target.position - 0.5) / target.position_of;
+  } else if (target.column_number) {
+    // Columns are numbered from 1 with no recorded total, so the shelf is
+    // divided by the highest column we know about -- the book's own.
+    fraction = (target.column_number - 0.5) / Math.max(target.column_number, 1);
+  }
+  if (fraction === null) return null;
+  fraction = Math.max(0, Math.min(1, fraction));
+
+  const rad = (shelf.rotation || 0) * Math.PI / 180;
+  const ux = Math.cos(rad), uy = Math.sin(rad);
+  const along = (fraction - 0.5) * (shelf.width || 0);
+  return { x: shelf.x + ux * along, y: shelf.y + uy * along };
+}
+
+// Drawn once when the map opens, not only on arrival: knowing there are two
+// gaps before your book is useful while you are still walking to it.
+function renderShelfStrip() {
+  const strip = document.getElementById('shelfStrip');
+  const near = document.getElementById('shelfNeighbours');
+  const rows = targetData.layout || [];
+  if (!strip || !rows.length) return;
+
+  strip.innerHTML = rows.map(function (r) {
+    const cls = r.is_focus ? 'here' : (r.on_shelf ? '' : 'out');
+    const label = r.is_focus ? 'Your book' : (r.on_shelf ? r.title : r.title + ' — ' + r.status);
+    return '<i class="' + cls + '" title="' + String(label).replace(/"/g, '') + '"></i>';
+  }).join('');
+  strip.classList.remove('hidden');
+
+  const bits = [];
+  if (targetData.before) bits.push('after \u201c' + targetData.before + '\u201d');
+  if (targetData.after) bits.push('before \u201c' + targetData.after + '\u201d');
+  if (bits.length) {
+    // Recognising the titles either side survives a miscount, which a number
+    // never does -- so the neighbours are given as well as the position.
+    near.textContent = 'It sits ' + bits.join(', ') + '.';
+    near.classList.remove('hidden');
+  }
+}
+
+function shelfOutline(s) {
+  if (s.footprint && s.footprint.length >= 3) {
+    return s.footprint.map((p) => toLatLng(p[0], p[1]));
+  }
+  return shelfCorners(s.x, s.y, s.rotation, s.width, s.depth);
+}
 let bleInterval = null;
 const rssiBuffers = {};          // beacon_id -> [rssi, ...] (recent-readings window)
 const rssiLastSeen = {};         // beacon_id -> Date.now() of its last matched advertisement
@@ -283,6 +393,7 @@ const MAX_WALK_SPEED_MPS = 2.2;  // brisk walk; an implied jump faster than this
 const TRILATERATE_INTERVAL_MS = 1000;
 const POS_SMOOTHING = 0.5;       // moving-average factor while actually walking
 const BEACON_STALE_MS = 6000;    // a beacon unheard this long stops influencing the fix
+const MAX_BEACONS_USED = 3;      // where the widening loop starts; see trilaterate()
 
 const POS_SMOOTHING_STILL = 0.06;  // near-parked: creeps toward the mean rather than chasing noise
 
@@ -367,6 +478,8 @@ function buildFloorPicker(data) {
 // Which floor the target shelf lives on, for the "it is upstairs" message.
 // The floors payload does not carry shelves, so this asks the server, which
 // already resolves a shelf to its floor for exactly this purpose.
+let shownFloorId = null;          // the floor this map is drawing
+let stairHighlight = null;        // the staircase the current route goes through
 let targetFloorCache = null;
 function findTargetFloor(data) {
   if (targetFloorCache !== null) return targetFloorCache;
@@ -439,8 +552,64 @@ async function initMap() {
     (room.doors || []).forEach(function (d) { addDoorToLayer(d, baseLayer); });
   });
 
-  map.fitBounds(bounds, { padding: [24, 24] });
-  setTimeout(() => map.invalidateSize(), 200);
+  // What is physically in the way. A route that threads between two reading
+  // tables is only followable if the tables are on the map -- otherwise the
+  // line appears to cross open floor that is not open.
+  // Where the stairs are, always -- knowing that is useful even when the book
+  // is on this floor.
+  (data.stairways || []).forEach(function (st) {
+    if (!st.geometry || st.geometry.length < 3) return;
+    L.polygon(st.geometry.map(function (pt) { return toLatLng(pt[0], pt[1]); }), {
+      color: '#be123c', weight: 1.8, fillColor: '#be123c', fillOpacity: 0.14,
+    }).bindTooltip(st.label + (st.destination ? ' → ' + st.destination : ''),
+                   { direction: 'top', sticky: true }).addTo(baseLayer);
+    (st.treads || []).forEach(function (t) {
+      L.polyline([toLatLng(t[0][0], t[0][1]), toLatLng(t[1][0], t[1][1])],
+                 { color: '#be123c', weight: 1, opacity: 0.75, interactive: false })
+       .addTo(baseLayer);
+    });
+  });
+
+  (data.obstacles || []).forEach(function (o) {
+    if (!o.geometry || o.geometry.length < 3) return;
+    var solid = (o.kind === 'Pillar') ? 0.5 : (o.kind === 'Counter' ? 0.3 : 0.2);
+    L.polygon(o.geometry.map(function (pt) { return toLatLng(pt[0], pt[1]); }), {
+      color: '#b45309', weight: 1.4, fillColor: '#b45309', fillOpacity: solid,
+      dashArray: (o.kind === 'Partition' || o.kind === 'Seating') ? '5,4' : null,
+    }).bindTooltip(o.label, { direction: 'top', sticky: true }).addTo(baseLayer);
+  });
+
+  // The shelf strip needs nothing from the map, but it belongs to the same
+  // arrival of data, so it is drawn here rather than left to a second trigger
+  // that could go out of step with it.
+  renderShelfStrip();
+
+  // Measure, then fit -- in that order, and again once the layout has settled.
+  // Leaflet sizes the view against the map pane at the instant fitBounds is
+  // called, and on a phone that instant is usually before 100svh has resolved
+  // and the address bar has finished moving. Fitting against a container that
+  // is still the wrong height is how the plan ends up either microscopic or
+  // parked off the corner of the screen.
+  const fitPlan = function () {
+    map.invalidateSize();
+    map.fitBounds(bounds, { padding: [24, 24] });
+  };
+  fitPlan();
+  setTimeout(fitPlan, 200);
+  // Two fits still assume the container has a size by 200ms, and sometimes it
+  // does not -- a tab restored in the background, a phone still resolving
+  // 100svh. Watching the element instead means the fit lands the moment it has
+  // real dimensions, however late that is, and then stops: after that the view
+  // belongs to whoever is panning it.
+  if (window.ResizeObserver) {
+    const mapEl = document.getElementById('map');
+    const ro = new ResizeObserver(function () {
+      if (!mapEl.clientWidth || !mapEl.clientHeight) return;
+      fitPlan();
+      ro.disconnect();
+    });
+    ro.observe(mapEl);
+  }
 
   // 100svh fixes the info panel being pushed off-screen, but the body still
   // resizes as Android's address bar shows and hides while scrolling or
@@ -457,10 +626,38 @@ async function initMap() {
     const isTarget = targetData.shelf_id && s.shelf_id === targetData.shelf_id;
     const accent = isTarget ? AylaTheme.color('--accent2') : AylaTheme.color('--accent');
 
-    L.polygon(shelfCorners(s.x, s.y, s.rotation, s.width, s.depth), {
+    // A wall or ceiling unit is drawn hollow and dashed: you walk underneath
+    // it, so showing it as solid floor furniture would read as an obstruction
+    // that is not there.
+    L.polygon(shelfOutline(s), {
       color: accent, weight: 2, fillColor: accent,
-      fillOpacity: isTarget ? 0.8 : 0.4,
-    }).bindTooltip((isTarget ? '🎯 ' : '') + s.name, { direction: 'top', sticky: true }).addTo(shelfLayer);
+      fillOpacity: s.elevated ? 0.12 : (isTarget ? 0.8 : 0.4),
+      dashArray: s.elevated ? '6,4' : null,
+    }).bindTooltip((isTarget ? '🎯 ' : '') + (s.label || s.name)
+                   + (s.elevated ? ' — above head height' : ''),
+                   { direction: 'top', sticky: true }).addTo(shelfLayer);
+
+    // The exact spot, on the target shelf only. Drawn after the shelf so it
+    // sits on top of it rather than under the fill.
+    if (isTarget) {
+      const spot = bookSpotOn(s, targetData);
+      if (spot) {
+        const hot = AylaTheme.color('--accent2');
+        L.circleMarker(toLatLng(spot.x, spot.y), {
+          radius: 7, color: hot, weight: 3,
+          fillColor: AylaTheme.color('--bg-card'), fillOpacity: 1,
+        }).bindTooltip(targetData.location || 'Your book is here',
+                       { direction: 'top' }).addTo(shelfLayer);
+        // A short tick across the shelf, so the mark reads as a place on the
+        // shelf rather than a pin floating over it.
+        const rad = ((s.rotation || 0) + 90) * Math.PI / 180;
+        const tx = Math.cos(rad) * ((s.depth || 20) / 2);
+        const ty = Math.sin(rad) * ((s.depth || 20) / 2);
+        L.polyline([toLatLng(spot.x - tx, spot.y - ty), toLatLng(spot.x + tx, spot.y + ty)],
+                   { color: hot, weight: 2, opacity: 0.9, interactive: false })
+         .addTo(shelfLayer);
+      }
+    }
 
     // Labels are drawn for the target shelf only. A category on every shelf
     // meant a wall of overlapping text at any zoom that fits the room on
@@ -510,6 +707,8 @@ async function initMap() {
     'Your position': positionLayer,
   }, { collapsed: true, position: 'topleft' }).addTo(map);
 
+  shownFloorId = data.floor_plan_id || null;
+
   if (targetData.shelf_name) {
     document.getElementById('shelfName').textContent = 'Target: ' + targetData.shelf_name;
     // The patron can page through the other floors while navigating, and the
@@ -525,7 +724,8 @@ async function initMap() {
     } else {
       const home = findTargetFloor(data);
       document.getElementById('shelfPath').textContent = home
-        ? (targetData.shelf_name + ' is on the ' + home.label + '. Switch floors to see the route.')
+        ? (targetData.shelf_name + ' is on the ' + home.label
+           + '. Enable Bluetooth and the route will take you there.')
         : (targetData.shelf_name + ' is not on this floor.');
     }
   } else {
@@ -570,12 +770,76 @@ function applyPositionThreshold(pos) {
 let animFrom = null, animTo = null, animStartTime = null, animRAF = null;
 const ANIM_MS = 900;   // just under the fix interval, so one animation finishes before the next begins
 
+// Metres are what the thresholds are written in; the map is in canvas units.
+// Without a scale the two cannot be converted, and BLE positioning does not run
+// at all in that case -- so this only ever has a real answer to give.
+function metresToUnits(m) {
+  const ppm = mapData && mapData.pixels_per_meter;
+  return (ppm && ppm > 0) ? m * ppm : null;
+}
+
+function distanceTo(pos, point) {
+  return point ? Math.hypot(pos.x - point.x, pos.y - point.y) : null;
+}
+
+// Called on every fix. Decides whether this one is worth acting on at all.
+function onPositionFix(pos) {
+  if (!targetData.shelf_id) return;
+
+  const arriveAt = metresToUnits(ARRIVAL_M);
+  const leaveAt = metresToUnits(DEPARTURE_M);
+  const gap = distanceTo(pos, targetPoint);
+
+  if (gap !== null && arriveAt !== null) {
+    if (!hasArrived && gap <= arriveAt) { showArrived(); return; }
+    // Walking away from it resumes navigation, but only once clearly away.
+    if (hasArrived && gap <= leaveAt) return;
+    if (hasArrived && gap > leaveAt) hasArrived = false;
+  }
+
+  const step = metresToUnits(RECOMPUTE_M);
+  if (step !== null && lastRoutedFrom && lastRoutePoints) {
+    if (distanceTo(pos, lastRoutedFrom) < step) return;   // did not really move
+  }
+  lastRoutedFrom = { x: pos.x, y: pos.y };
+  computeRoute();
+}
+
+// The end of the walk. The line is cleared rather than left as a stub pointing
+// at your own feet, which is what it degenerates into at this range.
+function showArrived() {
+  hasArrived = true;
+  if (routeLine) { routeLayer.removeLayer(routeLine); routeLine = null; }
+  routeArrows.forEach(function (m) { routeLayer.removeLayer(m); });
+  routeArrows = [];
+  if (stairHighlight) { routeLayer.removeLayer(stairHighlight); stairHighlight = null; }
+
+  document.getElementById('shelfName').textContent =
+    '✅ You have arrived at ' + (targetData.shelf_name || 'the shelf');
+  // On arrival the shelf is found and the remaining question is where on it
+  // to look, so the precise position replaces the walking directions.
+  const where = targetData.location || '';
+  document.getElementById('shelfPath').textContent = targetData.book_title
+    ? ('Look for “' + targetData.book_title + '”' + (where ? ' — ' + where : '') + '.')
+    : (where || 'The book should be on this shelf.');
+  const btn = document.getElementById('navBtn');
+  if (btn) btn.textContent = '✅ Arrived';
+
+  // Ring the shelf so the last few steps have something to aim at.
+  if (targetPoint) {
+    stairHighlight = L.circleMarker(toLatLng(targetPoint.x, targetPoint.y), {
+      radius: 20, color: AylaTheme.color('--accent2'), weight: 3,
+      fillColor: AylaTheme.color('--accent2'), fillOpacity: 0.2, interactive: false,
+    }).addTo(routeLayer);
+  }
+}
+
 function setPatronPosition(pos) {
   pos = applyPositionThreshold(pos);     // continuous estimates → stable marker
   patronPos = pos;
   animateTo(pos);
   setStatus('green', 'BLE: Active');
-  if (targetData.shelf_id) computeRoute();
+  onPositionFix(pos);
 }
 
 function animateTo(target) {
@@ -713,11 +977,27 @@ function startHeadingTracking() {
 
 async function computeRoute() {
   if (!patronPos || !targetData.shelf_id) return;
-  const url = NAV_ROUTE_URL + '?start_x=' + patronPos.x + '&start_y=' + patronPos.y + '&target_shelf_id=' + targetData.shelf_id;
+  // from_floor is what makes this a cross-floor question. Without it the server
+  // assumes the patron is already on the book's floor, which is exactly the
+  // case that needs directions.
+  let url = NAV_ROUTE_URL + '?start_x=' + patronPos.x + '&start_y=' + patronPos.y + '&target_shelf_id=' + targetData.shelf_id;
+  if (shownFloorId) url += '&from_floor=' + shownFloorId;
   let r;
   try { r = await fetchJSON(url); } catch (e) { return; }
-  if (!r.success) { document.getElementById('shelfPath').textContent = r.error || 'No route found'; return; }
+  if (!r.success) {
+    document.getElementById('shelfPath').textContent = r.error || 'No route found';
+    showFloorHandover(r);
+    return;
+  }
   lastRoutePoints = r.route;
+  // Remember where the shelf is, so arrival can be judged against the shelf
+  // itself rather than against the last point of a route that stops short of it.
+  if (r.target_shelf && r.target_shelf.x != null) {
+    targetPoint = { x: r.target_shelf.x, y: r.target_shelf.y };
+  } else if (r.route && r.route.length) {
+    const end = r.route[r.route.length - 1];
+    targetPoint = { x: end.x, y: end.y };
+  }
   // Drawn from wherever the marker is actually shown right now, not from
   // patronPos -- the marker may still be mid-animation toward it -- so the
   // line never visibly detaches from the marker for even one frame.
@@ -729,10 +1009,77 @@ async function computeRoute() {
   routeLine = L.polyline(latlngs, { color: AylaTheme.color('--blue'), weight: 4, opacity: 0.9 }).addTo(routeLayer);
   drawRouteArrows(drawPoints);
   document.getElementById('navBtn').textContent = '🧭 Navigating…';
-  const segs = Math.max(r.route.length - 1, 0);
+
   const ppm = mapData && mapData.pixels_per_meter;
-  const dist = ppm ? (Math.round((r.distance / ppm) * 10) / 10) + ' m' : Math.round(r.distance) + ' canvas units';
-  document.getElementById('shelfPath').textContent = 'Distance ≈ ' + dist + ' · ' + segs + ' segment(s)';
+  const asDistance = function (v) {
+    return ppm ? (Math.round((v / ppm) * 10) / 10) + ' m'
+               : Math.round(v) + ' canvas units';
+  };
+
+  if (r.cross_floor) {
+    // The whole walk is longer than the part on this map, and saying only the
+    // total would have the patron looking for a shelf that is a storey away.
+    // Both numbers, and then what to do at the top of the stairs.
+    const here = (typeof r.leg_distance === 'number') ? r.leg_distance : r.distance;
+    document.getElementById('shelfPath').textContent =
+      asDistance(here) + ' to the stairs · ' + asDistance(r.distance) + ' in total';
+  } else {
+    const segs = Math.max(r.route.length - 1, 0);
+    document.getElementById('shelfPath').textContent =
+      'Distance ≈ ' + asDistance(r.distance) + ' · ' + segs + ' segment(s)';
+  }
+  showFloorHandover(r);
+}
+
+// ── The handover at the stairs ────────────────────────────────────────────
+// A map draws one floor, so the moment the route leaves this one the patron
+// has to be told two things: what to do at the stairs, and how to see the rest.
+// The button does the second, because expecting somebody halfway up a
+// staircase to find the floor picker is how a route gets abandoned.
+function showFloorHandover(r) {
+  const row = document.querySelector('.info-panel .btn-row');
+  let btn = document.getElementById('floorHandoverBtn');
+  let note = document.getElementById('floorHandoverNote');
+
+  if (stairHighlight) { routeLayer.removeLayer(stairHighlight); stairHighlight = null; }
+
+  if (!r || !r.cross_floor || !r.target_floor) {
+    if (btn) btn.remove();
+    if (note) note.remove();
+    return;
+  }
+
+  if (r.instruction) {
+    if (!note) {
+      note = document.createElement('div');
+      note.id = 'floorHandoverNote';
+      note.className = 'floor-note';
+      row.parentNode.insertBefore(note, row);
+    }
+    note.textContent = r.instruction;
+  } else if (note) {
+    note.remove();
+  }
+
+  if (!btn && row) {
+    btn = document.createElement('button');
+    btn.id = 'floorHandoverBtn';
+    btn.className = 'btn-nav';
+    row.appendChild(btn);
+  }
+  if (btn) {
+    btn.textContent = '⬆ Continue on the ' + r.target_floor.label;
+    btn.onclick = function () { switchFloor(r.target_floor.floor_plan_id); };
+  }
+
+  // Ring the staircase the route actually uses. There may be three on the
+  // floor, and "take the stairs" is not an instruction until you know which.
+  if (r.via_stairway) {
+    stairHighlight = L.circleMarker(toLatLng(r.via_stairway.x, r.via_stairway.y), {
+      radius: 16, color: AylaTheme.color('--blue'), weight: 3,
+      fillColor: AylaTheme.color('--blue'), fillOpacity: 0.15, interactive: false,
+    }).addTo(routeLayer);
+  }
 }
 
 // A flat polyline reads the same whichever way you look at it, which is the
@@ -808,7 +1155,12 @@ function closeBTModal() { document.getElementById('btModal').classList.remove('s
 // library aisle lined with metal shelving is nearer 2.5–3.5, and getting these
 // wrong scales every distance non-linearly.
 const DEFAULT_TX_POWER = -59;
-const DEFAULT_PATH_LOSS_N = 2.0;
+// 2.5, not the 2.0 of free space. A library is the one environment this system
+// is ever deployed in, and it is full of metal shelving -- so 2.0 is the single
+// value guaranteed to be wrong here, and defaulting to it made every distance
+// read long until somebody thought to change it. The probe tool has always
+// used 2.5; this is the map agreeing with it.
+const DEFAULT_PATH_LOSS_N = 2.5;
 function rssiToDistance(rssi, txPower, n) {
   const p = (txPower == null) ? DEFAULT_TX_POWER : txPower;
   const exp = (n == null || n <= 0) ? DEFAULT_PATH_LOSS_N : n;
@@ -916,31 +1268,56 @@ function parseEddystone(e) {
 
 // Which configured beacon, if any, this advertisement came from. Returns the
 // beacon plus any calibration the packet itself carried.
+// A UUID is the same UUID however it was typed. Vendors print theirs
+// unhyphenated on the sticker, their configuration apps show them hyphenated,
+// and some show them upper case -- so the configured value and the advertised
+// one routinely disagree on punctuation while naming the identical beacon.
+// Comparing the hex digits alone is what lets
+// "FDA50693-A4E2-4FB1-AFCF-C6EB07647825" match
+// "fda50693a4e24fb1afcfc6eb07647825", as it must: a punctuation-sensitive
+// compare rejects every single packet while the configuration looks perfectly
+// correct on screen, and all the map can report is that no beacons were seen.
+function hexOnly(value) {
+  return String(value == null ? '' : value).toLowerCase().replace(/[^0-9a-f]/g, '');
+}
+
+// Bluetooth's short UUID forms are the 128-bit UUID with the rest implied, so
+// 'feaa', '0xFEAA' and '0000feaa-0000-1000-8000-00805f9b34fb' all name one
+// service. The browser always reports the long form; an Administrator will
+// usually have typed a short one.
+const BLUETOOTH_BASE_SUFFIX = '00001000800000805f9b34fb';
+function canonicalServiceUuid(value) {
+  const h = hexOnly(value);
+  if (h.length === 4) return '0000' + h + BLUETOOTH_BASE_SUFFIX;
+  if (h.length === 8) return h + BLUETOOTH_BASE_SUFFIX;
+  return h;
+}
+
 function matchBeacon(e) {
   const ib = parseIBeacon(e);
   const ed = parseEddystone(e);
-  const advUuids = (e.uuids || []).map((u) => String(u).toLowerCase());
+  const advUuids = (e.uuids || []).map(canonicalServiceUuid);
   const name = e.device && e.device.name;
 
   for (const b of mapData.beacons) {
     const type = b.advertisement_type || 'iBeacon';
-    const bu = String(b.beacon_uuid || '').toLowerCase();
+    const bu = hexOnly(b.beacon_uuid);
 
     if (type === 'iBeacon' && ib) {
-      if (ib.uuid !== bu) continue;
+      if (!bu || hexOnly(ib.uuid) !== bu) continue;
       if (b.major != null && b.major !== ib.major) continue;
       if (b.minor != null && b.minor !== ib.minor) continue;
       // iBeacon carries its own 1 m reference; the configured value wins.
       return { beacon: b, advertisedTxPower: ib.measuredPower };
     }
     if (type === 'Eddystone' && ed) {
-      if (b.namespace_id && b.namespace_id !== ed.namespace) continue;
-      if (b.instance_id && b.instance_id !== ed.instance) continue;
+      if (b.namespace_id && hexOnly(b.namespace_id) !== ed.namespace) continue;
+      if (b.instance_id && hexOnly(b.instance_id) !== ed.instance) continue;
       if (!b.namespace_id && !b.instance_id) continue;   // nothing to match on
       // Eddystone reports power at 0 m; ~41 dB is the conventional 1 m offset.
       return { beacon: b, advertisedTxPower: ed.txPower - 41 };
     }
-    if (type === 'ServiceUUID' && advUuids.includes(bu)) {
+    if (type === 'ServiceUUID' && bu && advUuids.includes(canonicalServiceUuid(b.beacon_uuid))) {
       return { beacon: b, advertisedTxPower: null };
     }
     if (type === 'DeviceName' && name && name === b.label) {
@@ -1042,6 +1419,48 @@ function clampToRooms(pos) {
   return { x: best.x, y: best.y };
 }
 
+// Linear least-squares trilateration over one set of beacons, using the last
+// as the reference point. Returns null rather than a position when the layout
+// cannot determine one, which is what lets trilaterate() try a wider set.
+//
+// With exactly three beacons the choice of reference makes no difference: the
+// system is then two equations in two unknowns and the answer is the radical
+// centre of the three circles, which is the same point whichever circle is
+// subtracted. It only starts to matter at four or more.
+function solveFrom(used) {
+  if (!used || used.length < 3) return null;
+  const ref = used[used.length - 1];
+  let Sxx = 0, Sxy = 0, Syy = 0, Sxb = 0, Syb = 0;
+  for (let i = 0; i < used.length - 1; i++) {
+    const p = used[i];
+    const ax = 2 * (p.x - ref.x), ay = 2 * (p.y - ref.y);
+    const bb = p.x * p.x - ref.x * ref.x + p.y * p.y - ref.y * ref.y + ref.d * ref.d - p.d * p.d;
+    Sxx += ax * ax; Sxy += ax * ay; Syy += ay * ay; Sxb += ax * bb; Syb += ay * bb;
+  }
+  // Beacons on, or near, a single straight line leave the position
+  // undetermined along that line. The previous test compared det against 1e-6,
+  // but det scales as the fourth power of the coordinates: this floor plan's
+  // three beacons give 5.9e11, and beacons a single degree off a straight line
+  // still give 9.7e6, so it could only ever catch mathematically exact
+  // collinearity and never the near-degenerate layouts that actually occur.
+  //
+  // The eigenvalue ratio of the same 2x2 matrix is scale-free -- multiplying
+  // every coordinate by k scales both eigenvalues by k^2 and leaves the ratio
+  // alone -- and falls smoothly to zero as the layout collapses onto a line.
+  // This deployment's beacons score 0.31; ten degrees off a line scores 0.03
+  // and five degrees 0.008, so 0.01 rejects the genuinely unusable while
+  // leaving a wide margin over any sane placement.
+  const trace = Sxx + Syy;
+  const disc = Math.sqrt(Math.max((Sxx - Syy) * (Sxx - Syy) + 4 * Sxy * Sxy, 0));
+  const lambdaMax = (trace + disc) / 2, lambdaMin = (trace - disc) / 2;
+  // Written so that a NaN ratio (all beacons at one point) fails the test too.
+  if (!(lambdaMax > 0 && lambdaMin / lambdaMax > MIN_GEOMETRY_QUALITY)) return null;
+  const det = Sxx * Syy - Sxy * Sxy;
+  const x = (Syy * Sxb - Sxy * Syb) / det;
+  const y = (Sxx * Syb - Sxy * Sxb) / det;
+  return (isFinite(x) && isFinite(y)) ? { x: x, y: y } : null;
+}
+
 function trilaterate() {
   if (!mapData) return;
   // Beacon coordinates are canvas units and rssiToDistance() gives metres, so
@@ -1076,43 +1495,53 @@ function trilaterate() {
       + mapData.beacons.length + ' beacons seen — need 3 to fix a position');
     return;
   }
-  // Linear least-squares trilateration using the last beacon as the reference point.
-  const ref = pts[pts.length - 1];
-  let Sxx = 0, Sxy = 0, Syy = 0, Sxb = 0, Syb = 0;
-  for (let i = 0; i < pts.length - 1; i++) {
-    const p = pts[i];
-    const ax = 2 * (p.x - ref.x), ay = 2 * (p.y - ref.y);
-    const bb = p.x * p.x - ref.x * ref.x + p.y * p.y - ref.y * ref.y + ref.d * ref.d - p.d * p.d;
-    Sxx += ax * ax; Sxy += ax * ay; Syy += ay * ay; Sxb += ax * bb; Syb += ay * bb;
-  }
-  const det = Sxx * Syy - Sxy * Sxy;
-  // Beacons on, or near, a single straight line leave the position
-  // undetermined along that line. The previous test compared det against 1e-6,
-  // but det scales as the fourth power of the coordinates: this floor plan's
-  // three beacons give 5.9e11, and beacons a single degree off a straight line
-  // still give 9.7e6, so it could only ever catch mathematically exact
-  // collinearity and never the near-degenerate layouts that actually occur.
+  // Only the nearest few beacons are used, because RSSI ranging error is
+  // proportional to the distance being measured, not fixed. At n = 2.5 a 6 dB
+  // knock -- ordinary indoor multipath -- moves the estimate by a factor of
+  // 1.74, so a beacon 2 m away lands within about 1.5 m while one 10 m away
+  // lands anywhere between 5.7 and 17.4 m. Unweighted least squares believes
+  // both equally, so the distant beacons dominated the answer and the near
+  // ones, which actually knew where the patron was, were outvoted.
   //
-  // The eigenvalue ratio of the same 2x2 matrix is scale-free -- multiplying
-  // every coordinate by k scales both eigenvalues by k^2 and leaves the ratio
-  // alone -- and falls smoothly to zero as the layout collapses onto a line.
-  // This deployment's beacons score 0.31; ten degrees off a line scores 0.03
-  // and five degrees 0.008, so 0.01 rejects the genuinely unusable while
-  // leaving a wide margin over any sane placement.
-  const trace = Sxx + Syy;
-  const disc = Math.sqrt(Math.max((Sxx - Syy) * (Sxx - Syy) + 4 * Sxy * Sxy, 0));
-  const lambdaMax = (trace + disc) / 2, lambdaMin = (trace - disc) / 2;
-  // Written so that a NaN ratio (all beacons at one point) fails the test too.
-  if (!(lambdaMax > 0 && lambdaMin / lambdaMax > MIN_GEOMETRY_QUALITY)) {
+  // Measured over 21,000 simulated fixes at +-6 dB: using all five gave 4.53 m
+  // median error, the nearest four 2.56 m, the nearest three 1.88 m. With the
+  // nine beacons the second floor will carry the gap is wider still -- 6.00 m
+  // against 2.10 m -- since the more beacons there are, the more distant ones
+  // there are to drown out the near ones.
+  //
+  // Three is the classic trilateration minimum and the most accurate of the
+  // three options, so it is where the widening loop below starts.
+  pts.sort((a, b) => a.d - b.d);
+
+  // Widen the set until one of them solves. Three is the most accurate choice
+  // and so it is tried first, but three beacons carry no redundancy: when the
+  // nearest three happen to lie near a straight line, solveFrom() returns
+  // nothing and there is no second opinion to fall back on.
+  //
+  // How often that happens is a property of the LAYOUT, not of the maths, and
+  // it does not show up in a well-spread test room. Nine beacons hung in tidy
+  // rows on a 20 x 12 m floor -- which is how a real floor gets fitted out --
+  // contain 8 collinear triples out of 84, and the nearest three landed on one
+  // of them 23.8% of the time: nearly a quarter of all fixes silently refused,
+  // showing up as a marker that stutters roughly every fourth second. The test
+  // pentagon has no collinear triple at all and never refuses, so this cannot
+  // be caught by testing there.
+  //
+  // Widening to four, then five, costs almost nothing in accuracy (1.88 m
+  // median against 1.85 m on that same grid) and removes the stutter entirely.
+  // Accuracy is only spent on the fixes that would otherwise not exist.
+  let fix = null;
+  for (let n = MAX_BEACONS_USED; n <= pts.length && !fix; n++) {
+    fix = solveFrom(pts.slice(0, n));
+  }
+  if (!fix) {
     setStatus('amber', 'Beacons are too close to a straight line to fix a position');
     return;
   }
-  const x = (Syy * Sxb - Sxy * Syb) / det;
-  const y = (Sxx * Syb - Sxy * Sxb) / det;
   // Clamped before smoothing, not after: applyPositionThreshold() folds each
   // fix into lastSmoothPos, so an unclamped outlier would go on dragging the
   // marker for several seconds after it had been drawn in the right place.
-  if (isFinite(x) && isFinite(y)) setPatronPosition(clampToRooms({ x: x, y: y }));
+  setPatronPosition(clampToRooms(fix));
 }
 
 // Three different things stop Bluetooth working here, and they need three

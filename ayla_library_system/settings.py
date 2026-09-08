@@ -370,7 +370,10 @@ CSP_DIRECTIVES = [
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com "
     "https://cdnjs.cloudflare.com https://unpkg.com",
     "font-src 'self' data: https://fonts.gstatic.com https://cdnjs.cloudflare.com",
-    "img-src 'self' data: blob:",
+    # The CDN entries are for Leaflet's own furniture -- the layer-control and
+    # marker icons its stylesheet references relative to itself. Without them
+    # the map loses its controls to a policy that was never aimed at them.
+    "img-src 'self' data: blob: https://cdnjs.cloudflare.com https://unpkg.com",
     "connect-src 'self'",
     "media-src 'self' blob:",
     "worker-src 'self' blob:",

@@ -32,6 +32,38 @@
 
         /* ── Tree (IDE project explorer) ── */
         .tree { font-size: 13px; }
+        /* Drawn bottom board at the bottom, the way the bay stands. */
+        .elev { display: flex; flex-direction: column-reverse; gap: 3px; }
+        .elev-row { display: flex; gap: 3px; align-items: stretch; }
+        .elev-rownum {
+            width: 46px; flex: none; display: flex; align-items: center;
+            font-size: 9px; font-weight: 700; letter-spacing: .04em;
+            color: var(--text-muted); text-transform: uppercase;
+        }
+        .elev-cell {
+            flex: 1; min-height: 30px; border-radius: 5px; cursor: pointer;
+            border: 1px solid var(--border-color);
+            background: var(--bg-subtle);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 10px; font-weight: 600; color: var(--text-muted);
+            transition: all .12s;
+        }
+        .elev-cell:hover { border-color: var(--text-muted); color: var(--text-primary); }
+        .elev-cell.on {
+            border-color: var(--warning); color: var(--text-primary);
+            background: rgba(245, 158, 11, .16);
+            box-shadow: inset 0 0 0 1px var(--warning);
+        }
+        .elev-cell.empty { opacity: .45; }
+
+        .bookrow { cursor: grab; }
+        .bookrow.dragging { opacity: .4; }
+        /* A line where the book would land, rather than a highlight on what it
+           would land next to: a gap is the thing being chosen. */
+        .bookrow.drop-before { box-shadow: inset 0 2px 0 0 var(--accent-cyan, #0891b2); }
+        .bookrow.drop-after { box-shadow: inset 0 -2px 0 0 var(--accent-cyan, #0891b2); }
+        .levelrow.drop-into { outline: 1px dashed var(--accent-cyan, #0891b2); outline-offset: -2px; }
+
         .trow { display: flex; align-items: center; gap: 8px; padding: 5px 10px; border-radius: 8px; }
         .trow:hover { background: var(--bg-subtle); }
         .chev { width: 14px; flex-shrink: 0; text-align: center; color: var(--text-muted); cursor: pointer; transition: transform .15s; font-size: 10px; }
@@ -61,6 +93,7 @@
     <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
     <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
     <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
+    <script src="{% static 'js/ayla-dialog.js' %}"></script>
 </head>
 <body class="flex h-screen overflow-hidden">
 
@@ -115,6 +148,24 @@
                 <div id="miniMap" style="height:300px;background:var(--bg-main);"></div>
             </div>
 
+            <!-- SHELF ELEVATION -->
+            <!-- A plan view says where a bay stands; it cannot say which board
+                 a book is on, because that is height. This is the bay seen
+                 from the front, which is the view somebody standing at it
+                 actually has. -->
+            <div id="elevationPanel" class="hidden rounded-xl border border-slate-800/80 shadow-2xl mb-4" style="background-color: var(--bg-card);">
+                <div class="p-4 border-b border-slate-800 flex items-center gap-2">
+                    <i class="fa-solid fa-bars-staggered text-cyan-600 text-xs"></i>
+                    <h4 class="text-sm font-bold text-slate-200 tracking-wide">Front view</h4>
+                    <span id="elevationName" class="text-[10px] text-slate-500"></span>
+                    <button type="button" onclick="hideElevation()" class="ml-auto text-[10px] text-slate-400 hover:text-cyan-400 flex items-center gap-1"><i class="fa-solid fa-xmark"></i> Close</button>
+                </div>
+                <div class="p-4">
+                    <div id="elevationBody"></div>
+                    <p id="elevationNote" class="text-[10px] text-slate-500 mt-3"></p>
+                </div>
+            </div>
+
             <!-- TREE VIEW -->
             <div id="treeView" class="rounded-xl border border-slate-800/80 shadow-2xl" style="background-color: var(--bg-card);">
                 <div class="p-4 border-b border-slate-800 flex items-center gap-2">
@@ -164,18 +215,44 @@
             </div>
             <div class="space-y-4 text-xs">
                 <div id="addNameField" class="space-y-1.5">
-                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Name</label>
+                    <label for="addName" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Name</label>
                     <input type="text" id="addName" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
                 </div>
-                <div id="addLevelFields" class="hidden grid grid-cols-2 gap-3">
-                    <div class="space-y-1.5">
-                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Level #</label>
+                <div id="addLevelFields" class="hidden space-y-3">
+                  <label class="flex items-start gap-2.5 cursor-pointer rounded-lg border border-slate-800 px-3 py-2.5" style="background-color: var(--bg-input);">
+                    <input type="checkbox" id="addLevelIsTop" onchange="syncTopLevel()" class="accent-cyan-600 w-3.5 h-3.5 mt-0.5">
+                    <span class="text-[11px] text-slate-300 leading-relaxed">
+                        <strong class="text-slate-200">This is the top of the unit</strong><br>
+                        <span class="text-slate-500">The flat surface above the highest shelf, where
+                        books end up when the case is full. Shows as &ldquo;Top&rdquo; instead of a
+                        level number, so nobody is sent looking inside for it.</span>
+                    </span>
+                  </label>
+                  <label class="flex items-start gap-2.5 cursor-pointer rounded-lg border border-slate-800 px-3 py-2.5" style="background-color: var(--bg-input);">
+                    <input type="checkbox" id="addLevelIsUnder" onchange="syncTopLevel()" class="accent-cyan-600 w-3.5 h-3.5 mt-0.5">
+                    <span class="text-[11px] text-slate-300 leading-relaxed">
+                        <strong class="text-slate-200">This is the space underneath</strong><br>
+                        <span class="text-slate-500">Under a table or the bottom of a case. Shows as
+                        &ldquo;Underneath&rdquo;, and sorts before every numbered shelf.</span>
+                    </span>
+                  </label>
+                  <div class="grid grid-cols-2 gap-3">
+                    <div class="space-y-1.5" id="addLevelNumWrap">
+                        <label for="addLevelNum" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Level #</label>
                         <input type="number" id="addLevelNum" min="1" value="1" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
                     </div>
                     <div class="space-y-1.5">
-                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Category</label>
+                        <label for="addLevelColumn" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Column (optional)</label>
+                        <input type="number" id="addLevelColumn" min="1" placeholder="e.g. 3" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                    </div>
+                    <div class="space-y-1.5">
+                        <label for="addLabel" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Category</label>
                         <input type="text" id="addLabel" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
                     </div>
+                  </div>
+                  <p class="text-[10px] text-slate-500">Leave Column blank for a shelf that runs the
+                     full width. Fill it in for a case divided into bays &mdash; it reads
+                     &ldquo;Level 2, Column 3&rdquo;.</p>
                 </div>
                 <div class="pt-2 flex items-center justify-end gap-3">
                     <button type="button" onclick="closeModal('addModal')" class="px-5 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:bg-slate-800/40 font-semibold min-w-[100px]">Cancel</button>
@@ -194,16 +271,51 @@
             </div>
             <div class="space-y-4 text-xs">
                 <div id="editNameField" class="space-y-1.5">
-                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Name</label>
+                    <label for="editName" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Name</label>
                     <input type="text" id="editName" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                </div>
+                <!-- Shelves only. Boards are otherwise added one dialog at a
+                     time, which for a five-level bay three bays wide is
+                     fifteen dialogs to say one thing. -->
+                <div id="editGridFields" class="hidden space-y-2">
+                    <div class="grid grid-cols-2 gap-3">
+                        <div class="space-y-1.5">
+                            <label for="editGridLevels" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Levels</label>
+                            <input type="number" id="editGridLevels" min="0" max="20" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                        </div>
+                        <div class="space-y-1.5">
+                            <label for="editGridColumns" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Columns</label>
+                            <input type="number" id="editGridColumns" min="1" max="12" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                        </div>
+                    </div>
+                    <label class="flex items-start gap-2 cursor-pointer">
+                        <input type="checkbox" id="editHasTop" class="accent-cyan-600 w-3.5 h-3.5 mt-0.5">
+                        <span class="text-[11px] text-slate-300 leading-snug">Books on top of the shelf
+                            <span class="block text-[10px] text-slate-500">The surface above the highest board,
+                                where the overflow ends up. It is shown as &ldquo;Top&rdquo; rather than a level number.</span></span>
+                    </label>
+                    <p id="editGridNote" class="text-[10px] text-slate-500"></p>
+                </div>
+                <!-- Which kind of board this is could be set when it was made
+                     and never afterwards, so a level recorded wrongly had to be
+                     deleted and remade, taking its books with it. -->
+                <div id="editLevelKind" class="hidden space-y-2">
+                    <label class="flex items-start gap-2 cursor-pointer">
+                        <input type="checkbox" id="editIsTop" onchange="syncEditLevelKind()" class="accent-cyan-600 w-3.5 h-3.5 mt-0.5">
+                        <span class="text-[11px] text-slate-300 leading-snug">This is the top of the shelf</span>
+                    </label>
+                    <label class="flex items-start gap-2 cursor-pointer">
+                        <input type="checkbox" id="editIsUnder" onchange="syncEditLevelKind()" class="accent-cyan-600 w-3.5 h-3.5 mt-0.5">
+                        <span class="text-[11px] text-slate-300 leading-snug">This is the space underneath it</span>
+                    </label>
                 </div>
                 <div id="editLevelFields" class="hidden grid grid-cols-2 gap-3">
                     <div class="space-y-1.5">
-                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Level #</label>
+                        <label for="editLevelNum" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Level #</label>
                         <input type="number" id="editLevelNum" min="1" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
                     </div>
                     <div class="space-y-1.5">
-                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Category</label>
+                        <label for="editLabel" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Category</label>
                         <input type="text" id="editLabel" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
                     </div>
                 </div>
@@ -276,6 +388,8 @@
             bookBase: "/admin-portal/book-details/",
             placementBooks: "{% url 'get_books_for_placement' %}",
             assignBooks: "{% url 'assign_books_to_level' %}",
+            setShelfGrid: "{% url 'set_shelf_grid' %}",
+            reorderBooks: "{% url 'reorder_books_on_level' %}",
         };
         const TYPE = {
             floorplan: { icon: 'fa-layer-group', color: 'text-cyan-400', child: 'room' },
@@ -331,6 +445,7 @@
                 let a = '';
                 if (node.type === 'floorplan') a += '<button class="tbtn view" title="Show this floor on the plan above" onclick="switchMiniFloor(' + node.id + ')"><i class="fa-solid fa-map-location-dot"></i></button>';
                 if (t.child) a += '<button class="tbtn add" title="Add ' + childWord[t.child] + '" onclick="openAdd(\'' + node.type + '\',' + node.id + ')"><i class="fa-solid fa-plus"></i></button>';
+                if (node.type === 'shelflevel') a += '<button class="tbtn view" title="Show on the front view" onclick="showElevation(' + node.id + ')"><i class="fa-solid fa-bars-staggered"></i></button>';
                 if (node.type === 'shelflevel') a += '<button class="tbtn add" title="Add Books" onclick="openPlacement(' + node.id + ', this)"><i class="fa-solid fa-book-medical"></i></button>';
                 if (t.edit) a += '<button class="tbtn edit" title="Rename" onclick="openEdit(\'' + node.type + '\',' + node.id + ',this)"><i class="fa-solid fa-pen"></i></button>';
                 if (t.del) a += '<button class="tbtn del" title="Delete" onclick="delNode(\'' + node.type + '\',' + node.id + ')"><i class="fa-solid fa-trash-can"></i></button>';
@@ -349,7 +464,12 @@
                 + ' data-type="' + node.type + '" data-id="' + node.id + '"';
 
             let html = '<div class="tnode">';
-            html += '<div class="trow' + inactive + '" style="padding-left:' + pad + 'px" ' + data + '>';
+            // Books drag; a level accepts them. Everything else is inert, so a
+            // stray drag cannot rearrange rooms or shelves by accident.
+            const drag = isBook ? ' draggable="true"' : '';
+            html += '<div class="trow' + inactive + (isBook ? ' bookrow' : '')
+                 + (node.type === 'shelflevel' ? ' levelrow' : '')
+                 + '" style="padding-left:' + pad + 'px"' + drag + ' ' + data + '>';
             html += chev;
             html += '<i class="fa-solid ' + (t.icon || 'fa-file') + ' ' + (t.color || 'text-slate-400') + ' text-xs"></i>';
             html += '<span class="tname">' + esc(node.name || '') + '</span>' + meta;
@@ -361,6 +481,192 @@
             }
             html += '</div>';
             return html;
+        }
+
+        // Dragging a book: within its level to reorder it, onto another level
+        // to move it there. The order is sent as a whole list rather than as
+        // "book X now sits at 4", because a position only means anything
+        // relative to the others and two half-applied moves would contradict.
+        let dragBookId = null;
+
+        function levelOf(row) {
+            const node = row.closest('.tnode');
+            const parentKids = node && node.parentElement;
+            const levelNode = parentKids && parentKids.closest('.tnode');
+            const levelRow = levelNode && levelNode.querySelector(':scope > .trow');
+            return (levelRow && levelRow.dataset.type === 'shelflevel') ? levelRow : null;
+        }
+
+        function booksUnder(levelRow) {
+            const node = levelRow.closest('.tnode');
+            const kids = node.querySelector(':scope > .tkids');
+            if (!kids) return [];
+            return Array.prototype.slice.call(kids.children)
+                .map(function (n) { return n.querySelector(':scope > .trow'); })
+                .filter(function (r) { return r && r.dataset.type === 'book'; });
+        }
+
+        function clearDropMarks() {
+            document.querySelectorAll('.drop-before, .drop-after, .drop-into')
+                .forEach(function (el) {
+                    el.classList.remove('drop-before', 'drop-after', 'drop-into');
+                });
+        }
+
+        // The bay drawn from the front. Levels run bottom-up because that is
+        // how the physical thing is numbered and how somebody reads it.
+        let elevationShelfId = null;
+
+        window.hideElevation = function () {
+            elevationShelfId = null;
+            document.getElementById('elevationPanel').classList.add('hidden');
+        };
+
+        function shelfNodeFor(levelId) {
+            const row = document.querySelector('.trow[data-type="shelflevel"][data-id="' + levelId + '"]');
+            if (!row) return null;
+            const kids = row.closest('.tnode').parentElement;
+            const shelfNode = kids && kids.closest('.tnode');
+            const shelfRow = shelfNode && shelfNode.querySelector(':scope > .trow');
+            return (shelfRow && shelfRow.dataset.type === 'shelf') ? shelfNode : null;
+        }
+
+        // Read off the tree rather than fetched: the tree already holds every
+        // level of every shelf, and a second source could disagree with what
+        // is on screen.
+        function levelsOfShelfNode(shelfNode) {
+            const kids = shelfNode.querySelector(':scope > .tkids');
+            if (!kids) return [];
+            return Array.prototype.slice.call(kids.children)
+                .map(function (n) { return n.querySelector(':scope > .trow'); })
+                .filter(function (r) { return r && r.dataset.type === 'shelflevel'; })
+                .map(function (r) {
+                    return {
+                        id: r.dataset.id,
+                        name: r.dataset.name || '',
+                        level: parseInt(r.dataset.level, 10) || 1,
+                        books: (r.textContent.match(/(\d+)\s+books?/) || [0, '0'])[1],
+                        column: (r.dataset.name.match(/Column\s+(\d+)/) || [0, null])[1],
+                    };
+                });
+        }
+
+        window.showElevation = function (levelId) {
+            const shelfNode = shelfNodeFor(levelId);
+            if (!shelfNode) return;
+            const shelfRow = shelfNode.querySelector(':scope > .trow');
+            const levels = levelsOfShelfNode(shelfNode);
+            if (!levels.length) return;
+
+            elevationShelfId = shelfRow.dataset.id;
+            document.getElementById('elevationName').textContent =
+                '\u00b7 ' + (shelfRow.dataset.name || 'shelf');
+
+            // Group by board, then lay the bays out across it.
+            const byLevel = {};
+            let widest = 1;
+            levels.forEach(function (lv) {
+                (byLevel[lv.level] = byLevel[lv.level] || []).push(lv);
+            });
+            Object.keys(byLevel).forEach(function (k) {
+                byLevel[k].sort(function (a, b) { return (a.column || 0) - (b.column || 0); });
+                widest = Math.max(widest, byLevel[k].length);
+            });
+
+            const rows = Object.keys(byLevel).map(Number).sort(function (a, b) { return a - b; });
+            document.getElementById('elevationBody').innerHTML =
+                '<div class="elev">' + rows.map(function (n) {
+                    const cells = byLevel[n].map(function (lv) {
+                        const on = String(lv.id) === String(levelId);
+                        const books = parseInt(lv.books, 10) || 0;
+                        return '<div class="elev-cell' + (on ? ' on' : '')
+                            + (books ? '' : ' empty') + '" onclick="showElevation(' + lv.id + ')"'
+                            + ' title="' + esc(lv.name) + '">'
+                            + (books ? books + ' book' + (books === 1 ? '' : 's') : '\u2014')
+                            + '</div>';
+                    }).join('');
+                    return '<div class="elev-row"><span class="elev-rownum">Level ' + n + '</span>'
+                         + cells + '</div>';
+                }).join('') + '</div>';
+
+            const chosen = levels.filter(function (lv) { return String(lv.id) === String(levelId); })[0];
+            document.getElementById('elevationNote').textContent = chosen
+                ? ('Highlighted: ' + chosen.name + '. Click any board to move the highlight.')
+                : 'Click a board to highlight it.';
+            document.getElementById('elevationPanel').classList.remove('hidden');
+        };
+
+        function wireTreeDragging() {
+            const tree = document.getElementById('treeRoot');
+            if (!tree || tree.dataset.dragWired === '1') return;
+            tree.dataset.dragWired = '1';
+
+            tree.addEventListener('dragstart', function (e) {
+                const row = e.target.closest && e.target.closest('.bookrow');
+                if (!row) return;
+                dragBookId = row.dataset.id;
+                row.classList.add('dragging');
+                e.dataTransfer.effectAllowed = 'move';
+                // Firefox refuses to start a drag with nothing on the transfer.
+                e.dataTransfer.setData('text/plain', dragBookId);
+            });
+
+            tree.addEventListener('dragend', function () {
+                document.querySelectorAll('.dragging')
+                    .forEach(function (el) { el.classList.remove('dragging'); });
+                clearDropMarks();
+                dragBookId = null;
+            });
+
+            tree.addEventListener('dragover', function (e) {
+                if (!dragBookId) return;
+                const book = e.target.closest && e.target.closest('.bookrow');
+                const level = e.target.closest && e.target.closest('.levelrow');
+                if (!book && !level) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                clearDropMarks();
+                if (book) {
+                    if (book.dataset.id === dragBookId) return;
+                    const box = book.getBoundingClientRect();
+                    book.classList.add((e.clientY - box.top) < box.height / 2
+                        ? 'drop-before' : 'drop-after');
+                } else {
+                    level.classList.add('drop-into');
+                }
+            });
+
+            tree.addEventListener('drop', async function (e) {
+                if (!dragBookId) return;
+                e.preventDefault();
+                const book = e.target.closest && e.target.closest('.bookrow');
+                const levelRow = book ? levelOf(book)
+                                      : (e.target.closest && e.target.closest('.levelrow'));
+                clearDropMarks();
+                if (!levelRow) return;
+
+                const order = booksUnder(levelRow)
+                    .map(function (r) { return r.dataset.id; })
+                    .filter(function (id) { return id !== dragBookId; });
+
+                if (book && book.dataset.id !== dragBookId) {
+                    const box = book.getBoundingClientRect();
+                    const before = (e.clientY - box.top) < box.height / 2;
+                    const at = order.indexOf(book.dataset.id);
+                    order.splice(before ? at : at + 1, 0, dragBookId);
+                } else {
+                    // Dropped on the level itself: it goes to the end.
+                    order.push(dragBookId);
+                }
+
+                const r = await post(U.reorderBooks, {
+                    shelf_level_id: levelRow.dataset.id,
+                    book_ids: order.join(','),
+                });
+                if (!r.success) { alert(r.error || 'Could not save the new order'); return; }
+                dragBookId = null;
+                loadTree();
+            });
         }
 
         function tChev(el) {
@@ -462,13 +768,30 @@
                 }).addTo(miniMap).bindTooltip(r.name || 'Room', { direction: 'top', sticky: true });
             });
 
+            (d.obstacles || []).forEach(function (o) {
+                if (!o.geometry || o.geometry.length < 3) return;
+                L.polygon(o.geometry.map(function (pt) { return miniToLatLng(pt[0], pt[1]); }), {
+                    color: '#b45309', weight: 1.2, fillColor: '#b45309', fillOpacity: 0.18,
+                    interactive: false,
+                }).addTo(miniMap).bindTooltip(o.label || 'Furniture',
+                                              { direction: 'top', sticky: true });
+            });
+
             let placed = 0, unplaced = 0;
             (d.shelves || []).forEach(function (sh) {
                 if (!sh.placed) { unplaced += 1; return; }
                 placed += 1;
-                const poly = L.polygon(
-                    miniShelfCorners(sh.map_x, sh.map_y, sh.rotation, sh.width, sh.depth), {
-                        color: '#a855f7', weight: 1.5, fillColor: '#a855f7', fillOpacity: 0.35,
+                // The shape it was drawn as, not a rectangle standing in for it.
+                // A corner unit traced round a wall showed here as a plain box,
+                // so the two views of one library disagreed about its shape.
+                const outline = (sh.footprint && sh.footprint.length >= 3)
+                    ? sh.footprint.map(function (pt) { return miniToLatLng(pt[0], pt[1]); })
+                    : miniShelfCorners(sh.map_x, sh.map_y, sh.rotation, sh.width, sh.depth);
+                // And the same three colours the floor plan uses, so a table
+                // that holds books is not mistaken for a bookcase here either.
+                const tint = (sh.kind && sh.kind !== 'Shelf') ? '#0f766e' : '#a855f7';
+                const poly = L.polygon(outline, {
+                        color: tint, weight: 1.5, fillColor: tint, fillOpacity: 0.35,
                     }).addTo(miniMap);
                 poly.bindTooltip(sh.name || ('Shelf #' + sh.shelf_id),
                                  { direction: 'top', sticky: true });
@@ -581,6 +904,9 @@
             });
             if (!miniFloorId && floorList.length) miniFloorId = floorList[0].id;
             buildMiniFloorPicker();
+            // The listeners live on the container, not the rows, so they are
+            // wired once and survive every re-render of the tree beneath them.
+            wireTreeDragging();
         }
 
         async function tToggle(cb, modelType, id) {
@@ -596,44 +922,184 @@
             const childType = TYPE[parentType].child;
             addTarget = { parentType: parentType, parentId: parentId, childType: childType };
             document.getElementById('addTitle').textContent = 'Add ' + childWord[childType];
-            if (childType === 'shelflevel') { hide('addNameField'); show('addLevelFields'); document.getElementById('addLevelNum').value = '1'; document.getElementById('addLabel').value = ''; }
+            if (childType === 'shelflevel') {
+                hide('addNameField'); show('addLevelFields');
+                document.getElementById('addLevelNum').value = '1';
+                document.getElementById('addLabel').value = '';
+                document.getElementById('addLevelIsTop').checked = false;
+                document.getElementById('addLevelIsUnder').checked = false;
+                document.getElementById('addLevelColumn').value = '';
+                syncTopLevel();
+            }
             else { show('addNameField'); hide('addLevelFields'); document.getElementById('addName').value = ''; }
             openModal('addModal');
         }
+
+        // The top surface has no number to give, so stop asking for one.
+        window.syncTopLevel = function () {
+            const top = document.getElementById('addLevelIsTop');
+            const under = document.getElementById('addLevelIsUnder');
+            // A level is one or the other, never both -- ticking one releases
+            // the other rather than letting an impossible pair be submitted.
+            if (top.checked && under.checked) {
+                (this === under ? top : under).checked = false;
+            }
+            const wrap = document.getElementById('addLevelNumWrap');
+            if (wrap) wrap.classList.toggle('hidden', top.checked || under.checked);
+        };
 
         async function submitAdd() {
             const a = addTarget; if (!a) return;
             let url, data = {};
             if (a.childType === 'room') { url = U.addRoom; data = { floor_plan_id: a.parentId, name: val('addName').trim(), map_x: 0, map_y: 0 }; }
             else if (a.childType === 'shelf') { url = U.addShelf; data = { room_id: a.parentId, name: val('addName').trim(), map_x: 0, map_y: 0 }; }
-            else if (a.childType === 'shelflevel') { url = U.addLevel; data = { shelf_id: a.parentId, level_number: val('addLevelNum'), category: val('addLabel').trim() }; }
+            else if (a.childType === 'shelflevel') {
+                const isTop = document.getElementById('addLevelIsTop').checked;
+                const isUnder = document.getElementById('addLevelIsUnder').checked;
+                url = U.addLevel;
+                data = { shelf_id: a.parentId, category: val('addLabel').trim() };
+                const col = val('addLevelColumn').trim();
+                if (col) data.column_number = col;
+                if (isTop) data.is_top = '1';
+                else if (isUnder) data.is_under = '1';
+                else data.level_number = val('addLevelNum');
+            }
             if (a.childType !== 'shelflevel' && !data.name) { alert('Name is required'); return; }
-            if (a.childType === 'shelflevel' && !data.level_number) { alert('Level number is required'); return; }
+            if (a.childType === 'shelflevel' && !data.is_top && !data.is_under && !data.level_number) {
+                alert('Level number is required'); return;
+            }
             const r = await post(url, data);
             if (r.success !== false) { closeModal('addModal'); loadTree(); } else alert(r.error || 'Failed to add');
+        }
+
+        // What the shelf already has, counted off the tree that is on screen
+        // rather than fetched again: a second source could disagree with what
+        // the Administrator is looking at.
+        // A shelf top is not also its underside, so ticking one clears the
+        // other rather than letting a board claim to be both.
+        window.syncEditLevelKind = function () {
+            const top = document.getElementById('editIsTop');
+            const under = document.getElementById('editIsUnder');
+            if (top.checked && under.checked) {
+                // Whichever was just ticked wins; the other gives way.
+                if (document.activeElement === top) under.checked = false;
+                else top.checked = false;
+            }
+            const num = document.getElementById('editLevelNum');
+            const numbered = !(top.checked || under.checked);
+            num.disabled = !numbered;
+            num.style.opacity = numbered ? '1' : '0.45';
+        };
+
+        function shelfGridOf(shelfRow) {
+            const kids = shelfRow.closest('.tnode').querySelector(':scope > .tkids');
+            const levels = new Set(), columns = new Set();
+            let total = 0, hasTop = false;
+            if (kids) {
+                Array.prototype.slice.call(kids.children).forEach(function (n) {
+                    const r = n.querySelector(':scope > .trow');
+                    if (!r || r.dataset.type !== 'shelflevel') return;
+                    total += 1;
+                    // A top or an underside is not one of the numbered boards,
+                    // so it must not inflate the level count in the box.
+                    const what = r.dataset.name || '';
+                    if (/^Top\b/.test(what)) { hasTop = true; return; }
+                    if (/^Underneath\b/.test(what)) return;
+                    levels.add(parseInt(r.dataset.level, 10) || 1);
+                    const m = (r.dataset.name || '').match(/Column\s+(\d+)/);
+                    columns.add(m ? parseInt(m[1], 10) : 1);
+                });
+            }
+            return { levels: levels.size, columns: Math.max(1, columns.size),
+                     total: total, hasTop: hasTop };
         }
 
         function openEdit(type, id, btn) {
             const row = btn.closest('.trow');
             editTarget = { type: type, id: id };
             document.getElementById('editTitle').textContent = 'Edit ' + TYPE[type].word;
-            if (type === 'shelflevel') { hide('editNameField'); show('editLevelFields'); document.getElementById('editLevelNum').value = row.getAttribute('data-level') || ''; document.getElementById('editLabel').value = row.getAttribute('data-label') || ''; }
-            else { show('editNameField'); hide('editLevelFields'); document.getElementById('editName').value = row.getAttribute('data-name') || ''; }
+            if (type === 'shelflevel') {
+                hide('editNameField'); show('editLevelFields'); hide('editGridFields');
+                show('editLevelKind');
+                document.getElementById('editLevelNum').value = row.getAttribute('data-level') || '';
+                document.getElementById('editLabel').value = row.getAttribute('data-label') || '';
+                // The label is the only place the tree records which kind of
+                // board this is: 'Top', 'Underneath', or a numbered level.
+                const what = (row.getAttribute('data-name') || '');
+                document.getElementById('editIsTop').checked = /^Top\b/.test(what);
+                document.getElementById('editIsUnder').checked = /^Underneath\b/.test(what);
+                syncEditLevelKind();
+            }
+            else { show('editNameField'); hide('editLevelFields'); hide('editLevelKind'); document.getElementById('editName').value = row.getAttribute('data-name') || ''; }
+
+            if (type === 'shelf') {
+                const grid = shelfGridOf(row);
+                editGridWas = grid;
+                document.getElementById('editHasTop').checked = grid.hasTop;
+                document.getElementById('editGridLevels').value = grid.levels;
+                document.getElementById('editGridColumns').value = grid.columns;
+                document.getElementById('editGridNote').textContent = grid.total
+                    ? ('Currently ' + grid.total + ' board' + (grid.total === 1 ? '' : 's') + '. '
+                       + 'Raising these adds the missing ones; lowering them never deletes a '
+                       + 'board, because a board holds books.')
+                    : 'No boards yet. Set how many this bay has and they are all made at once.';
+                show('editGridFields');
+            } else if (type !== 'shelflevel') {
+                hide('editGridFields');
+            }
             openModal('editModal');
         }
+
+        let editGridWas = null;
 
         async function submitEdit() {
             const t = editTarget; if (!t) return;
             const cfg = TYPE[t.type];
             let data = {}; data[cfg.idField] = t.id;
-            if (t.type === 'shelflevel') { data.level_number = val('editLevelNum'); data.category = val('editLabel').trim(); if (!data.level_number) { alert('Level number is required'); return; } }
+            if (t.type === 'shelflevel') {
+                data.level_number = val('editLevelNum');
+                data.category = val('editLabel').trim();
+                data.is_top = document.getElementById('editIsTop').checked ? '1' : '0';
+                data.is_under = document.getElementById('editIsUnder').checked ? '1' : '0';
+                if (!data.level_number) { alert('Level number is required'); return; }
+            }
             else { data.name = val('editName').trim(); if (!data.name) { alert('Name is required'); return; } }
             const r = await post(cfg.edit, data);
-            if (r.success !== false) { closeModal('editModal'); loadTree(); } else alert(r.error || 'Failed to save');
+            if (r.success === false) { alert(r.error || 'Failed to save'); return; }
+
+            // The grid is a second request because it is a different kind of
+            // change: renaming a shelf touches one row, and building its boards
+            // can create dozens. Only sent when the numbers actually moved.
+            let note = '';
+            if (t.type === 'shelf') {
+                const levels = parseInt(val('editGridLevels'), 10);
+                const columns = parseInt(val('editGridColumns'), 10);
+                const was = editGridWas || { levels: -1, columns: -1 };
+                const hasTop = document.getElementById('editHasTop').checked;
+                if (!isNaN(levels) && !isNaN(columns)
+                        && (levels !== was.levels || columns !== was.columns
+                            || hasTop !== was.hasTop)) {
+                    const g = await post(U.setShelfGrid, {
+                        shelf_id: t.id, levels: levels, columns: columns,
+                        has_top: hasTop ? '1' : '0' });
+                    if (g.success === false) { alert(g.error || 'Could not change the levels'); return; }
+                    if (g.added) note = g.added + ' board' + (g.added === 1 ? '' : 's') + ' added.';
+                    if (g.top_note) note += (note ? ' ' : '') + g.top_note;
+                    if (g.surplus && g.surplus.length) {
+                        note += (note ? ' ' : '') + g.surplus.length + ' board(s) sit outside that '
+                              + 'grid and were left alone: ' + g.surplus.map(function (l) {
+                                    return l.label + (l.books ? ' (' + l.books + ' books)' : '');
+                                }).join(', ') + '.';
+                    }
+                }
+            }
+            closeModal('editModal');
+            loadTree();
+            if (note) alert(note);
         }
 
         async function delNode(type, id) {
-            if (!confirm('Delete this ' + TYPE[type].word + ' and everything inside it?')) return;
+            if (!await AylaDialog.confirm('Delete this ' + TYPE[type].word + ' and everything inside it?')) return;
             const cfg = TYPE[type]; let data = {}; data[cfg.idField] = id;
             const r = await post(cfg.del, data);
             if (r.success !== false) { loadTree(); } else alert(r.error || 'Failed to delete');
@@ -698,6 +1164,10 @@
         document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { closeModal('addModal'); closeModal('editModal'); closeModal('bookModal'); closeModal('placementModal'); } });
         ['addModal', 'editModal', 'bookModal', 'placementModal'].forEach(function (id) {
             const el = document.getElementById(id);
+            // Guarded because this runs at the very end of the script: one
+            // absent modal threw here and took every listener registered after
+            // it with it, on a page that otherwise looked fine.
+            if (!el) return;
             el.addEventListener('click', function (e) { if (e.target === el) closeModal(id); });
         });
 

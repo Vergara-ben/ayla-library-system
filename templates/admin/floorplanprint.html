@@ -32,6 +32,13 @@
         svg { width: 100%; height: auto; display: block; }
         .room-shape { fill: #f4f6f9; stroke: #7b8795; stroke-width: 2; }
         .shelf-shape { fill: #dbe3ec; stroke: #46546a; stroke-width: 1.5; }
+        /* Furniture prints lighter than shelving: it orients the reader
+           without competing with what they came to find. */
+        .obstacle-shape { fill: #efe3d2; stroke: #a97b41; stroke-width: 1.2; }
+        .obstacle-label { font-size: 7.5px; fill: #6b4f28; }
+        .stair-shape { fill: #f7dfe3; stroke: #a3364a; stroke-width: 1.4; }
+        .stair-tread { stroke: #a3364a; stroke-width: 0.8; opacity: 0.8; }
+        .stair-label { font-size: 7.5px; font-weight: 600; fill: #7d2436; }
         .room-label { font-size: 15px; font-weight: 700; fill: #33404f; }
         .shelf-label { font-size: 9px; font-weight: 700; fill: #1d2733; }
         .shelf-cat { font-size: 7.5px; fill: #4d5a6b; }
@@ -85,11 +92,27 @@
                 {% endif %}
             {% endfor %}
 
+            {% for st in stairways %}
+            <polygon class="stair-shape" points="{{ st.points }}"></polygon>
+            {% for t in st.treads %}
+            <line class="stair-tread" x1="{{ t.0.0|floatformat:2 }}" y1="{{ t.0.1|floatformat:2 }}" x2="{{ t.1.0|floatformat:2 }}" y2="{{ t.1.1|floatformat:2 }}"></line>
+            {% endfor %}
+            {% endfor %}
+            {% for ob in obstacles %}
+            <polygon class="obstacle-shape" points="{{ ob.points }}"></polygon>
+            {% endfor %}
+
             {% for sh in shelves %}
+            {% if sh.points %}
+            {# Traced: the outline is already in canvas coordinates, so it needs #}
+            {# no rotation transform -- the shape carries its own angle.         #}
+            <polygon class="shelf-shape" points="{{ sh.points }}"></polygon>
+            {% else %}
             <g transform="rotate({{ sh.rotation|floatformat:2 }} {{ sh.cx|floatformat:2 }} {{ sh.cy|floatformat:2 }})">
                 <rect class="shelf-shape" x="{{ sh.x|floatformat:2 }}" y="{{ sh.y|floatformat:2 }}"
                       width="{{ sh.w|floatformat:2 }}" height="{{ sh.h|floatformat:2 }}" rx="2"></rect>
             </g>
+            {% endif %}
             {% endfor %}
 
             {# Labels drawn upright, outside the rotation, so a rotated shelf   #}
@@ -101,6 +124,16 @@
             {% endif %}
             {% endfor %}
 
+            {% for st in stairways %}
+            <text class="stair-label" x="{{ st.label_x|floatformat:2 }}" y="{{ st.label_y|floatformat:2 }}" text-anchor="middle">{{ st.label }}</text>
+            {% if st.destination %}
+            <text class="stair-label" x="{{ st.label_x|floatformat:2 }}" y="{{ st.dest_y|floatformat:2 }}" text-anchor="middle">&#8594; {{ st.destination }}</text>
+            {% endif %}
+            {% endfor %}
+            {% for ob in obstacles %}{% if ob.show_label %}
+            <text class="obstacle-label" x="{{ ob.label_x|floatformat:2 }}" y="{{ ob.label_y|floatformat:2 }}" text-anchor="middle">{{ ob.label }}</text>
+            {% endif %}{% endfor %}
+
             {% for room in rooms %}
             <text class="room-label" x="{{ room.label_x|floatformat:2 }}" y="{{ room.label_y|floatformat:2 }}" text-anchor="middle">{{ room.name }}</text>
             {% endfor %}
@@ -110,6 +143,8 @@
     <div class="legend">
         <span><span class="swatch" style="background:#f4f6f9;border:1px solid #7b8795"></span>Room</span>
         <span><span class="swatch" style="background:#dbe3ec;border:1px solid #46546a"></span>Shelf</span>
+        <span><span class="swatch" style="background:#efe3d2;border:1px solid #a97b41"></span>Table / obstacle</span>
+        <span><span class="swatch" style="background:#f7dfe3;border:1px solid #a3364a"></span>Stairs / lift</span>
     </div>
 
     {% if shelves %}

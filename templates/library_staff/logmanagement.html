@@ -109,6 +109,7 @@
     <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
     <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
     <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
+    <script src="{% static 'js/ayla-dialog.js' %}"></script>
 </head>
 <body class="flex h-screen overflow-hidden">
 
@@ -237,13 +238,13 @@
                         {# mode is what stops them landing in an open staff session. #}
                         {# Closing up: whoever can see the room is empty is the one who #}
                         {# should be able to say so, on the table it corrects. #}
-                        <form method="post" action="{% url 'close_open_visits' %}" class="inline-block" onsubmit="return confirm('Close every visit that is still open? They will be recorded as assumed exits.')">
+                        <form method="post" action="{% url 'close_open_visits' %}" class="inline-block" data-confirm="Close every visit that is still open? They will be recorded as assumed exits.">
                             {% csrf_token %}
                             <button type="submit" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-slate-400 text-[11px] font-semibold px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors">
                                 <i class="fa-solid fa-door-closed"></i> Close Open Visits
                             </button>
                         </form>
-                        <form method="post" action="{% url 'desk_arm' %}" class="inline-block" onsubmit="return confirm('Hand this computer to the patron? This browser stays on Log Management until you enter your account password.')">
+                        <form method="post" action="{% url 'desk_arm' %}" class="inline-block" data-confirm="Hand this computer to the patron? This browser stays on Log Management until you enter your account password.">
                             {% csrf_token %}
                             <button type="submit" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-amber-500/90 text-[11px] font-semibold px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors">
                                 <i class="fa-solid fa-desktop"></i> Desk Mode
@@ -390,7 +391,7 @@
                                                     class="w-7 h-7 rounded border border-slate-800 text-amber-500/70 hover:text-amber-400 hover:bg-amber-950/20 transition-colors" title="Edit Log">
                                                 <i class="fa-solid fa-pen text-[10px]"></i>
                                             </button>
-                                            <form method="post" action="{% url 'delete_patron_log' %}" class="inline" onsubmit="return confirm('Delete this visit log?');">
+                                            <form method="post" action="{% url 'delete_patron_log' %}" class="inline" data-confirm="Delete this visit log?">
                                                 {% csrf_token %}
                                                 <input type="hidden" name="log_id" value="{{ log.log_id }}">
                                                 <button type="submit" class="w-7 h-7 rounded border border-slate-800 text-rose-500/70 hover:text-rose-400 hover:bg-rose-950/20 transition-colors" title="Delete Log">
@@ -455,22 +456,22 @@
             <div id="editLogError" class="hidden rounded-lg border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-rose-100 text-[11px]"></div>
             <div class="space-y-3 text-xs">
                 <div class="space-y-1.5">
-                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">School</label>
+                    <label for="editLogSchool" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">School</label>
                     <input type="text" id="editLogSchool" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);">
                 </div>
                 <div class="space-y-1.5">
-                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Purpose of Visit</label>
+                    <label for="editLogPurpose" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Purpose of Visit</label>
                     <select id="editLogPurpose" onchange="syncPurposeOther('editLogPurpose')" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);">
                         {% for p in purpose_choices %}<option value="{{ p }}">{{ p }}</option>{% endfor %}
                     </select>
                     <input type="text" id="editLogPurposeOther" placeholder="Please say" class="hidden w-full mt-2 rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium placeholder-slate-600" style="background-color: var(--bg-input);">
                 </div>
                 <div class="space-y-1.5">
-                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Entry Time</label>
+                    <label for="editLogEntry" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Entry Time</label>
                     <input type="datetime-local" id="editLogEntry" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);">
                 </div>
                 <div class="space-y-1.5">
-                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Exit Time <span class="text-slate-600 normal-case font-medium">(blank if still inside)</span></label>
+                    <label for="editLogExit" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Exit Time <span class="text-slate-600 normal-case font-medium">(blank if still inside)</span></label>
                     <input type="datetime-local" id="editLogExit" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);">
                 </div>
                 <div class="pt-2 flex items-center justify-end gap-3">
@@ -503,20 +504,20 @@
             <div id="lgActionPanel" class="space-y-3 text-xs">
                 <div id="lgActionError" class="hidden rounded-lg border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-rose-100 text-[11px]"></div>
                 <div class="space-y-1.5">
-                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Patron Name</label>
+                    <label for="lgName" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Patron Name</label>
                     <input type="text" id="lgName" placeholder="e.g., Maria Santos" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium placeholder-slate-600" style="background-color: var(--bg-input);">
                 </div>
                 <div class="space-y-1.5">
-                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Email</label>
+                    <label for="lgEmail" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Email</label>
                     <input type="email" id="lgEmail" placeholder="maria@example.com" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium placeholder-slate-600" style="background-color: var(--bg-input);">
                 </div>
                 <div id="lgEntryFields" class="space-y-3">
                     <div class="space-y-1.5">
-                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">School</label>
+                        <label for="lgSchool" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">School</label>
                         <input type="text" id="lgSchool" placeholder="School / Institution" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium placeholder-slate-600" style="background-color: var(--bg-input);">
                     </div>
                     <div class="space-y-1.5">
-                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Purpose of Visit</label>
+                        <label for="lgPurpose" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Purpose of Visit</label>
                         <select id="lgPurpose" onchange="syncPurposeOther('lgPurpose')" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);">
                             {% for p in purpose_choices %}<option value="{{ p }}">{{ p }}</option>{% endfor %}
                         </select>
@@ -535,32 +536,32 @@
                 <div id="lgRegError" class="hidden rounded-lg border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-rose-100 text-[11px]"></div>
                 <div class="grid grid-cols-2 gap-3">
                     <div class="space-y-1.5">
-                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">First Name</label>
+                        <label for="lgFirstname" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">First Name</label>
                         <input type="text" id="lgFirstname" class="w-full rounded-lg px-3 py-2 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700" style="background-color: var(--bg-input);">
                     </div>
                     <div class="space-y-1.5">
-                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Middle Name</label>
+                        <label for="lgMiddlename" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Middle Name</label>
                         <input type="text" id="lgMiddlename" placeholder="Optional" class="w-full rounded-lg px-3 py-2 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700" style="background-color: var(--bg-input);">
                     </div>
                     <div class="space-y-1.5">
-                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Last Name</label>
+                        <label for="lgLastname" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Last Name</label>
                         <input type="text" id="lgLastname" class="w-full rounded-lg px-3 py-2 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700" style="background-color: var(--bg-input);">
                     </div>
                 </div>
                 <div class="space-y-1.5">
-                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Email</label>
+                    <label for="lgRegEmail" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Email</label>
                     <input type="email" id="lgRegEmail" class="w-full rounded-lg px-3 py-2 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700" style="background-color: var(--bg-input);">
                 </div>
                 <div class="space-y-1.5">
-                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Contact Number</label>
+                    <label for="lgContact" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Contact Number</label>
                     <input type="tel" id="lgContact" class="w-full rounded-lg px-3 py-2 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700" style="background-color: var(--bg-input);">
                 </div>
                 <div class="space-y-1.5">
-                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Address</label>
+                    <label for="lgAddress" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Address</label>
                     <textarea id="lgAddress" rows="2" class="w-full rounded-lg px-3 py-2 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 resize-none" style="background-color: var(--bg-input);"></textarea>
                 </div>
                 <div class="space-y-1.5">
-                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Patron Type</label>
+                    <label for="lgPatronType" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Patron Type</label>
                     <select id="lgPatronType" class="w-full rounded-lg px-3 py-2 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700" style="background-color: var(--bg-input);">
                         <option value="">Select type…</option>
                         {% for pt in patron_types %}<option value="{{ pt }}">{{ pt }}</option>{% endfor %}
@@ -711,7 +712,7 @@
 
         async function deskSignOut(btn) {
             const name = btn.dataset.name || 'this visitor';
-            if (!confirm('Sign out ' + name + '?')) return;
+            if (!await AylaDialog.confirm('Sign out ' + name + '?')) return;
             btn.disabled = true;
             const r = await deskPost(DESK_URLS.signOut, { log_id: btn.dataset.logId });
             deskShowMessage(r.success ? r.message : r.error, r.success ? 'ok' : 'error');

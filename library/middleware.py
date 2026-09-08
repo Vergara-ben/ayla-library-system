@@ -59,6 +59,16 @@ STAFF_IDLE_SECONDS = 15 * 60
 PATRON_IDLE_SECONDS = 60 * 60
 LAST_SEEN_KEY = '_last_seen'
 
+# How stale the stamp must get before it is rewritten.
+#
+# Writing it on every request meant a database write per request for every
+# signed-in user -- and the chat page polls every eight seconds, so an open
+# thread alone wrote the session row roughly seven times a minute while doing
+# nothing. Against a 15-minute idle limit, re-stamping once a minute is
+# indistinguishable: the worst case is a session surviving up to a minute
+# longer than it strictly should.
+SEEN_WRITE_INTERVAL = 60
+
 
 class IdleSessionTimeoutMiddleware:
     """Close a session that has gone quiet; renew one that is being used."""
@@ -84,8 +94,10 @@ class IdleSessionTimeoutMiddleware:
                     log_system_action('Session timeout', 'Auth', session.get('admin_id'),
                                       f'Idle session for {who} was closed')
                 session.flush()
-            else:
-                # Touched on every request, so activity keeps the session alive.
+            elif last is None or (now - last) >= SEEN_WRITE_INTERVAL:
+                # Touched only when the stamp has aged past the write interval.
+                # Activity still keeps the session alive; it just does not pay
+                # for a database write every single time.
                 session[LAST_SEEN_KEY] = now
 
         return self.get_response(request)

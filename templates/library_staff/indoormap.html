@@ -532,6 +532,7 @@
     <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
     <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
     <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
+    <script src="{% static 'js/ayla-dialog.js' %}"></script>
 </head>
 <body>
 
@@ -639,6 +640,8 @@
         // Parse Django context data
         const floorplanData = {{ floorplan|safe }};
         const roomsData = {{ rooms|safe }};
+        const obstaclesData = {{ obstacles|safe }};
+        const stairwaysData = {{ stairways|safe }};
         const shelvesData = {{ shelves|safe }};
         const waypointsData = {{ waypoints|safe }};
         const beaconsData = {{ beacons|safe }};
@@ -728,6 +731,43 @@
 
             addMarkers();
             addRoomShapes(height);
+            addObstacleShapes(height);
+            addStairwayShapes(height);
+        }
+
+        // Stairways, drawn with the conventional symbol: footprint, treads
+        // across the direction of travel, and an arrow for which way is up.
+        function addStairwayShapes(canvasHeight) {
+            const flip = function (p) { return [canvasHeight - p[1], p[0]]; };
+            const rose = '#be123c';
+            (stairwaysData || []).forEach(function (st) {
+                if (!st.geometry || st.geometry.length < 3) return;
+                L.polygon(st.geometry.map(flip), {
+                    color: rose, weight: 1.8, fillColor: rose, fillOpacity: 0.14,
+                }).bindTooltip(st.label + (st.destination ? ' → ' + st.destination : ''),
+                               { direction: 'top', sticky: true }).addTo(map);
+                (st.treads || []).forEach(function (t) {
+                    L.polyline([flip(t[0]), flip(t[1])],
+                               { color: rose, weight: 1, opacity: 0.75, interactive: false }).addTo(map);
+                });
+            });
+        }
+
+        // Tables, counters and pillars. Drawn after the rooms so furniture sits
+        // on the floor rather than under it, and in amber so it reads as
+        // "something in the way" rather than as another room.
+        function addObstacleShapes(canvasHeight) {
+            const flip = function (p) { return [canvasHeight - p[1], p[0]]; };
+            (obstaclesData || []).forEach(function (o) {
+                if (!o.geometry || o.geometry.length < 3) return;
+                const solid = (o.kind === 'Pillar') ? 0.55 : (o.kind === 'Counter' ? 0.32 : 0.22);
+                L.polygon(o.geometry.map(flip), {
+                    color: '#b45309', weight: 1.5, fillColor: '#b45309',
+                    fillOpacity: solid,
+                    dashArray: (o.kind === 'Partition' || o.kind === 'Seating') ? '5,4' : null,
+                    interactive: true,
+                }).bindTooltip(o.label, { direction: 'top', sticky: true }).addTo(map);
+            });
         }
 
         // Rooms are drawn polygons; y is flipped because stored coordinates use
@@ -794,20 +834,28 @@
                 const canvasHeight = floorplanData.canvas_height || 800;
                 shelvesData.filter(s => s.x != null && s.y != null).forEach(shelf => {
                     // Footprint shows the shelf's stored orientation (Fig. 50).
-                    const rad = (shelf.rotation || 0) * Math.PI / 180;
-                    const cos = Math.cos(rad), sin = Math.sin(rad);
-                    const hw = (shelf.width || 46) / 2, hd = (shelf.depth || 14) / 2;
-                    const corners = [[-hw, -hd], [hw, -hd], [hw, hd], [-hw, hd]].map(p => [
-                        canvasHeight - (shelf.y + p[0] * sin + p[1] * cos),
-                        shelf.x + p[0] * cos - p[1] * sin,
-                    ]);
+                    // A shelf traced as a polygon -- the ones set into a corner
+                    // -- carries its own outline instead, already resolved by
+                    // the server so both shapes arrive the same way.
+                    let corners;
+                    if (shelf.footprint && shelf.footprint.length >= 3) {
+                        corners = shelf.footprint.map(p => [canvasHeight - p[1], p[0]]);
+                    } else {
+                        const rad = (shelf.rotation || 0) * Math.PI / 180;
+                        const cos = Math.cos(rad), sin = Math.sin(rad);
+                        const hw = (shelf.width || 46) / 2, hd = (shelf.depth || 14) / 2;
+                        corners = [[-hw, -hd], [hw, -hd], [hw, hd], [-hw, hd]].map(p => [
+                            canvasHeight - (shelf.y + p[0] * sin + p[1] * cos),
+                            shelf.x + p[0] * cos - p[1] * sin,
+                        ]);
+                    }
                     const isTarget = targetShelf && targetShelf.id === shelf.id;
                     const poly = L.polygon(corners, {
                         color: isTarget ? AylaTheme.color('--warning') : AylaTheme.color('--cover-3'),
                         weight: isTarget ? 3 : 2,
                         fillColor: isTarget ? AylaTheme.color('--warning') : AylaTheme.color('--cover-3'),
                         fillOpacity: isTarget ? 0.4 : 0.55,
-                    }).bindTooltip(shelf.name || 'Shelf', { direction: 'top', permanent: isTarget, sticky: true });
+                    }).bindTooltip(shelf.label || shelf.name || 'Shelf', { direction: 'top', permanent: isTarget, sticky: true });
                     poly.addTo(map);
                     shelfMarkers.push(poly);
                     if (isTarget) targetShelfPoly = poly;

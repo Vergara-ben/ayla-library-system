@@ -19,8 +19,7 @@ from django.shortcuts import redirect, render
 from django.utils import timezone
 
 from .audit import log_admin_action
-from .auth_utils import (admin_login_required, granted_module_required,
-                         patron_login_required)
+from .auth_utils import granted_module_required, patron_login_required
 from .emails import librarian_reply_email
 from .models import ChatMessage, Conversation, Patron, User
 
@@ -30,6 +29,21 @@ ACTIVE_WINDOW = timedelta(minutes=2)
 NOTIFY_COOLDOWN = timedelta(minutes=10)
 
 MAX_MESSAGE_LENGTH = 2000
+
+# How fast a patron may send. Length was capped but rate was not, so a signed-in
+# account could post as fast as a script allows and fill the table with 2,000
+# character rows. Two limits rather than one: the interval stops a stuck key or
+# a double-submit, the burst cap stops a determined loop, and neither is tight
+# enough for a person typing real questions to notice.
+MIN_SEND_INTERVAL = timedelta(seconds=3)
+BURST_WINDOW = timedelta(minutes=10)
+BURST_LIMIT = 20
+
+# Presence is written on every poll, and the poll runs every 8 seconds for as
+# long as the page is open -- roughly 7.5 database writes a minute per reader,
+# whether or not anything changed. The freshness that matters is ACTIVE_WINDOW
+# (2 minutes), so re-stamping more often than this buys nothing.
+SEEN_WRITE_INTERVAL = timedelta(seconds=45)
 
 
 def _serialise(message):
@@ -101,6 +115,21 @@ def patron_send_message(request):
         return JsonResponse({'success': False,
                              'error': 'That message is too long — please shorten it.'})
 
+    now = timezone.now()
+    recent = ChatMessage.objects.filter(
+        conversation__patron=patron, sender_type='Patron',
+        sent_at__gte=now - BURST_WINDOW,
+    ).order_by('-sent_at')
+    last = recent.first()
+    if last and (now - last.sent_at) < MIN_SEND_INTERVAL:
+        return JsonResponse({'success': False,
+                             'error': 'One moment — that was very quick. Try again in a second.'})
+    if recent.count() >= BURST_LIMIT:
+        minutes = int(BURST_WINDOW.total_seconds() // 60)
+        return JsonResponse({'success': False,
+                             'error': f'You have sent a lot of messages in the last {minutes} '
+                                      'minutes. Please wait a little before sending more.'})
+
     topic = (request.POST.get('topic') or 'Other').strip()
     if topic not in dict(Conversation.TOPIC_CHOICES):
         topic = 'Other'
@@ -117,7 +146,7 @@ def patron_send_message(request):
     # Anything the patron says puts the thread back in the queue, including a
     # follow-up on something staff thought they had finished.
     conversation.status = 'Open'
-    conversation.last_message_at = timezone.now()
+    conversation.last_message_at = now
     # Deliberately does not touch patron_last_seen_at. Sending a question and
     # closing the tab is the normal thing to do, and treating "just sent" as
     # "still watching" would swallow the email for a reply that arrives a
@@ -148,18 +177,20 @@ def patron_poll_messages(request):
         return JsonResponse({'success': True, 'conversation_id': None, 'messages': []})
 
     now = timezone.now()
-    conversation.patron_last_seen_at = now
-    conversation.save(update_fields=['patron_last_seen_at'])
-    conversation.messages.filter(sender_type='Staff', read_at__isnull=True).update(read_at=now)
+    # Only re-stamp when the existing mark has gone stale. ACTIVE_WINDOW is two
+    # minutes, so a stamp inside the last forty-five seconds already answers
+    # "is the patron watching?" and rewriting it every eight seconds is pure
+    # write amplification -- the kind that quietly eats a hosted CPU quota.
+    seen = conversation.patron_last_seen_at
+    if seen is None or (now - seen) >= SEEN_WRITE_INTERVAL:
+        conversation.patron_last_seen_at = now
+        conversation.save(update_fields=['patron_last_seen_at'])
+    # Skips the UPDATE entirely when nothing is unread, which is the usual case.
+    unread = conversation.messages.filter(sender_type='Staff', read_at__isnull=True)
+    if unread.exists():
+        unread.update(read_at=now)
 
     return JsonResponse(_thread_payload(conversation, for_staff=False))
-
-
-def patron_unread_count(patron_id):
-    return ChatMessage.objects.filter(
-        conversation__patron_id=patron_id,
-        sender_type='Staff',
-        read_at__isnull=True).count()
 
 
 # ─── library side ─────────────────────────────────────────────────────────

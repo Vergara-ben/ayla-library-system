@@ -123,6 +123,7 @@
     <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
     <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
     <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
+    <script src="{% static 'js/ayla-dialog.js' %}"></script>
 </head>
 <body class="flex h-screen overflow-hidden">
 
@@ -239,7 +240,7 @@
                             <div class="text-slate-500 mt-0.5">{{ r.patron.email }} &middot; requested {{ r.requested_at|date:"M j, Y" }}</div>
                         </div>
                         <div class="flex items-center gap-1.5 flex-shrink-0">
-                            <form method="post" action="{% url 'respond_to_reactivation' r.request_id %}" class="inline-block" onsubmit="return confirm('Reactivate {{ r.patron.fullname|escapejs }}?');">
+                            <form method="post" action="{% url 'respond_to_reactivation' r.request_id %}" class="inline-block" data-confirm="Reactivate {{ r.patron.fullname|escapejs }}?">
                                 {% csrf_token %}
                                 <input type="hidden" name="action" value="approve">
                                 <button type="submit" class="rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2.5 py-1.5 text-[10px] font-semibold hover:bg-emerald-500/20 hover:text-emerald-100">Approve</button>
@@ -411,7 +412,7 @@
                                             {% if patron.account_status == 'Visitor' %}
                                             {# A visitor keeps this same row when they join, so the #}
                                             {# visits they already made stay attached to them. #}
-                                            <form method="post" action="{% url 'promote_visitor' patron.patron_id %}" class="inline-block" onsubmit="return confirm('Move {{ patron.fullname|escapejs }} to Pending Registrations? You will check their physical ID before the account is activated.')">
+                                            <form method="post" action="{% url 'promote_visitor' patron.patron_id %}" class="inline-block" data-confirm="Move {{ patron.fullname|escapejs }} to Pending Registrations? You will check their physical ID before the account is activated.">
                                                 {% csrf_token %}
                                                 <button type="submit" class="text-[10px] font-bold px-2.5 py-1.5 rounded-lg bg-cyan-700/25 text-cyan-400 border border-cyan-800/70 hover:bg-cyan-700/45 transition-colors whitespace-nowrap">
                                                     <i class="fa-solid fa-user-plus text-[9px]"></i> Register as member
@@ -535,7 +536,7 @@
                     </div>
 
                     <div class="mt-4 space-y-1.5">
-                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Reason (only if rejecting)</label>
+                        <label for="rvReason" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Reason (only if rejecting)</label>
                         <textarea id="rvReason" rows="2" placeholder="e.g. the ID is unreadable, or the name does not match" class="w-full rounded-lg px-3 py-2 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-rose-800 text-[11px] placeholder-slate-600" style="background-color: var(--bg-input);"></textarea>
                     </div>
 
@@ -586,15 +587,15 @@
                     {# whatever order a patron types it. #}
                     <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
                         <div class="space-y-1.5">
-                            <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">First Name</label>
+                            <label for="firstName" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">First Name</label>
                             <input type="text" id="firstName" name="first_name" placeholder="Juan" value="{{ initial.first_name|default:'' }}" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium placeholder-slate-600 tracking-wide" style="background-color: var(--bg-input);" required>
                         </div>
                         <div class="space-y-1.5">
-                            <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Middle Name</label>
+                            <label for="middleName" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Middle Name</label>
                             <input type="text" id="middleName" name="middle_name" placeholder="Optional" value="{{ initial.middle_name|default:'' }}" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium placeholder-slate-600 tracking-wide" style="background-color: var(--bg-input);">
                         </div>
                         <div class="space-y-1.5">
-                            <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Surname</label>
+                            <label for="lastName" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Surname</label>
                             <input type="text" id="lastName" name="last_name" placeholder="Dela Cruz" value="{{ initial.last_name|default:'' }}" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium placeholder-slate-600 tracking-wide" style="background-color: var(--bg-input);" required>
                         </div>
                     </div>
@@ -602,7 +603,7 @@
 
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div class="space-y-1.5">
-                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Patron Type</label>
+                        <label for="patronType" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Patron Type</label>
                         <div class="relative">
                             <select id="patronType" name="patron_type" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium appearance-none pr-10 cursor-pointer tracking-wide" style="background-color: var(--bg-input);" required>
                                 <option value="">Select type...</option>
@@ -615,7 +616,7 @@
                         </div>
                     </div>
                     <div class="space-y-1.5">
-                        <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Account Status</label>
+                        <label for="accountStatus" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Account Status</label>
                         <div class="relative">
                             <select id="accountStatus" name="account_status" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium appearance-none pr-10 cursor-pointer tracking-wide" style="background-color: var(--bg-input);">
                                 <option value="Pending" {% if initial.account_status == 'Pending' %}selected{% endif %}>Pending</option>
@@ -629,22 +630,22 @@
                 </div>
 
                 <div class="space-y-1.5">
-                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Email Address</label>
+                    <label for="email" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Email Address</label>
                     <input type="email" id="email" name="email" placeholder="patron@school.edu" value="{{ initial.email|default:'' }}" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium placeholder-slate-600 tracking-wide" style="background-color: var(--bg-input);" required>
                 </div>
 
                 <div class="space-y-1.5">
-                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Contact Number</label>
+                    <label for="contactNumber" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Contact Number</label>
                     <input type="text" id="contactNumber" name="contact_number" placeholder="Phone or mobile" value="{{ initial.contact_number|default:'' }}" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium placeholder-slate-600 tracking-wide" style="background-color: var(--bg-input);">
                 </div>
 
                 <div class="space-y-1.5">
-                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Address</label>
+                    <label for="address" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Address</label>
                     <textarea id="address" name="address" placeholder="Street address, city, etc." rows="2" value="{{ initial.address|default:'' }}" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium placeholder-slate-600 tracking-wide resize-none" style="background-color: var(--bg-input);">{{ initial.address|default:'' }}</textarea>
                 </div>
 
                 <div class="space-y-1.5">
-                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Password</label>
+                    <label for="password" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Password</label>
                     <input type="password" id="password" name="password" placeholder="Required for new patrons" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium placeholder-slate-600 tracking-wide" style="background-color: var(--bg-input);">
                 </div>
 
@@ -738,11 +739,22 @@
         // rather than one click on a row.
         let rvPatron = null;
 
-        function fillRejectNote(form) {
-            if (!confirm('Reject this reactivation request?')) return false;
-            const note = prompt('Reason for rejecting (optional, shown to the patron):', '') || '';
+        // Asks, then collects the reason, then submits. It used to return
+        // false to block the submit; a modal cannot answer in time for that,
+        // so the submit is prevented up front and re-fired once the answer is
+        // in. `data-ayla-confirmed` is what stops the second pass re-asking.
+        async function fillRejectNote(form) {
+            if (form.dataset.aylaConfirmed === '1') return true;
+            if (!await AylaDialog.confirm('Reject this reactivation request?',
+                    { title: 'Reject reactivation', confirmLabel: 'Reject' })) return false;
+            const note = await AylaDialog.prompt(
+                'Reason for rejecting — optional, and shown to the patron.', '',
+                { title: 'Reason', multiline: true, confirmLabel: 'Reject request' });
+            if (note === null) return false;
             form.querySelector('[name=staff_note]').value = note;
-            return true;
+            form.dataset.aylaConfirmed = '1';
+            form.requestSubmit ? form.requestSubmit() : form.submit();
+            return false;
         }
 
         function openReview(btn) {
@@ -810,11 +822,11 @@
             rvPatron = null;
         }
 
-        function submitReview(action) {
+        async function submitReview(action) {
             if (!rvPatron) return;
             const form = document.getElementById('reviewForm');
             if (action === 'reject') {
-                if (!confirm('Reject the registration of ' + rvPatron.name + '? Their application and uploaded ID will be deleted.')) return;
+                if (!await AylaDialog.confirm('Reject the registration of ' + rvPatron.name + '? Their application and uploaded ID will be deleted.')) return;
                 document.getElementById('rvReasonField').value = document.getElementById('rvReason').value.trim();
                 form.action = rvPatron.rejectUrl;
             } else {
