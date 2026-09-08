@@ -112,6 +112,7 @@
     <script src="{% static 'js/ayla-dialog.js' %}"></script>
 </head>
 <body class="flex h-screen overflow-hidden">
+<a href="#main-content" class="skip-link">Skip to main content</a>
 
     {% if not desk_mode %}{% include 'library_staff/_sidebar.html' with active='logs' %}{% endif %}
 
@@ -129,7 +130,7 @@
                      data-logo-dark="{% static 'images/ayla-logo-dark.png' %}"
                      alt="AYLA Public Library" class="ayla-logo h-10 mr-3">
                 {% else %}
-                <button class="mobile-menu-btn" onclick="toggleSidebar()">
+                <button class="mobile-menu-btn" onclick="toggleSidebar()" aria-label="Toggle navigation menu">
                     <i class="fa-solid fa-bars"></i>
                 </button>
                 {% endif %}
@@ -140,7 +141,7 @@
             </div>
         </header>
 
-        <main class="flex-1 overflow-y-auto p-8 space-y-6">
+        <main id="main-content" tabindex="-1" class="flex-1 overflow-y-auto p-8 space-y-6">
             
             {% if desk_mode %}
                 {# Desk mode: this browser is confined to this page until a librarian #}
@@ -448,7 +449,7 @@
         <div class="w-full max-w-md rounded-2xl border p-6 flex flex-col gap-5 shadow-2xl relative my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color);">
             <div class="flex items-center justify-between">
                 <h3 class="text-base font-bold text-slate-200 tracking-wide">Edit Visit Log</h3>
-                <button type="button" onclick="closeEditLog()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40 transition-colors">
+                <button type="button" onclick="closeEditLog()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40 transition-colors" aria-label="Close">
                     <i class="fa-solid fa-xmark text-sm"></i>
                 </button>
             </div>
@@ -489,7 +490,7 @@
         <div class="w-full max-w-md rounded-2xl border p-6 flex flex-col gap-5 shadow-2xl relative my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color);">
             <div class="flex items-center justify-between">
                 <h3 class="text-base font-bold text-slate-200 tracking-wide">New Entry / Exit Log</h3>
-                <button type="button" onclick="closeNewLogModal()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40 transition-colors">
+                <button type="button" onclick="closeNewLogModal()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40 transition-colors" aria-label="Close">
                     <i class="fa-solid fa-xmark text-sm"></i>
                 </button>
             </div>

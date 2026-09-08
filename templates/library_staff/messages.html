@@ -39,15 +39,17 @@
     <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
     <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
     <script src="{% static 'js/ayla-dialog.js' %}"></script>
+    <script src="{% static 'js/poll-scheduler.js' %}"></script>
 </head>
 <body class="flex h-screen overflow-hidden">
+<a href="#main-content" class="skip-link">Skip to main content</a>
 
     {% include 'library_staff/_sidebar.html' with active='chat' %}
 
     <div class="flex-1 flex flex-col overflow-hidden">
         <header class="h-16 flex-shrink-0 flex items-center justify-between px-8" style="background-color: var(--bg-main);">
             <div class="flex items-center">
-                <button class="mobile-menu-btn" onclick="toggleSidebar()"><i class="fa-solid fa-bars"></i></button>
+                <button class="mobile-menu-btn" onclick="toggleSidebar()" aria-label="Toggle navigation menu"><i class="fa-solid fa-bars"></i></button>
                 <h2 class="logo-text text-lg tracking-wider text-slate-200 uppercase">Messages</h2>
                 {% if open_count %}<span class="ml-3 bg-amber-500/15 text-amber-400 text-[11px] px-2.5 py-1 rounded font-bold border border-amber-600/40">{{ open_count }} waiting</span>{% endif %}
             </div>
@@ -56,7 +58,7 @@
             </div>
         </header>
 
-        <main class="flex-1 overflow-hidden p-6">
+        <main id="main-content" tabindex="-1" class="flex-1 overflow-hidden p-6">
             <div class="h-full grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-4">
 
                 {# One list of everybody, because writing to a patron who has never #}
@@ -239,6 +241,10 @@
                 CHAT.id = data.conversation_id;
                 field.value = '';
                 renderThread(data.messages);
+                // Replying is activity, and on a brand new thread it is also
+                // the first moment there is anything to poll for.
+                threadCount = data.messages ? data.messages.length : threadCount;
+                poller.bump();
                 // Whether the email actually went is worth saying: silence here
                 // is how a librarian assumes a patron was told when they were not.
                 hint.textContent = data.emailed
@@ -259,16 +265,30 @@
             });
         }
 
+        let threadCount = 0;
+
         async function poll() {
-            if (!CHAT.id) return;
-            try {
-                const r = await fetch(CHAT.poll + '?conversation_id=' + CHAT.id,
-                                      { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
-                const data = await r.json();
-                if (data.messages) renderThread(data.messages);
-            } catch (e) { /* offline; the next tick will catch up */ }
+            const r = await fetch(CHAT.poll + '?conversation_id=' + CHAT.id,
+                                  { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+            const data = await r.json();
+            if (!data.messages) return false;
+            renderThread(data.messages);
+            const changed = data.messages.length !== threadCount;
+            threadCount = data.messages.length;
+            return changed;
         }
-        setInterval(poll, 6000);
+
+        // A librarian mid-conversation gets the same 6s as before. A thread
+        // that has gone quiet steps down, and one abandoned for a quarter of an
+        // hour stops -- a desk PC left signed in overnight should not spend the
+        // night asking about a conversation that ended at four.
+        const poller = AylaPoll({
+            poll: poll,
+            tiers: [[0, 6000], [2 * 60 * 1000, 15000], [5 * 60 * 1000, 30000]],
+            stopAfter: 15 * 60 * 1000,
+            enabled: () => Boolean(CHAT.id),
+        });
+        if (CHAT.id) poller.start();
 
         const box = document.getElementById('thread');
         if (box) box.scrollTop = box.scrollHeight;

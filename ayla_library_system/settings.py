@@ -77,6 +77,8 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    # First, so the timing covers everything else in the stack.
+    'library.middleware.SlowRequestLoggingMiddleware',
     'django.middleware.security.SecurityMiddleware',
     # Serves collected static files from the app itself. PythonAnywhere serves
     # /static/ from its own nginx config, so this is redundant there and harmless

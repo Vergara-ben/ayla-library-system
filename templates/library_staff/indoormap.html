@@ -535,6 +535,7 @@
     <script src="{% static 'js/ayla-dialog.js' %}"></script>
 </head>
 <body>
+<a href="#main-content" class="skip-link">Skip to main content</a>
 
     {% include 'library_staff/_sidebar.html' with active='indoor_map' %}
 
@@ -546,7 +547,7 @@
             </div>
         </header>
 
-        <main class="workspace-view">
+        <main id="main-content" tabindex="-1" class="workspace-view">
 
             <div class="map-container">
                 {% if no_floorplans %}

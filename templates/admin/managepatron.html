@@ -126,6 +126,7 @@
     <script src="{% static 'js/ayla-dialog.js' %}"></script>
 </head>
 <body class="flex h-screen overflow-hidden">
+<a href="#main-content" class="skip-link">Skip to main content</a>
 
     {% include 'admin/_sidebar.html' with active='patrons' %}
 
@@ -133,7 +134,7 @@
         
         <header class="h-16 flex-shrink-0 flex items-center justify-between px-8" style="background-color: var(--bg-main);">
             <div class="flex items-center">
-                <button class="mobile-menu-btn" onclick="toggleSidebar()">
+                <button class="mobile-menu-btn" onclick="toggleSidebar()" aria-label="Toggle navigation menu">
                     <i class="fa-solid fa-bars"></i>
                 </button>
                 <h2 class="logo-text text-lg tracking-wider text-slate-200 uppercase">Manage Patrons</h2>
@@ -143,7 +144,7 @@
             </div>
         </header>
 
-        <main class="flex-1 overflow-y-auto p-8 space-y-6">
+        <main id="main-content" tabindex="-1" class="flex-1 overflow-y-auto p-8 space-y-6">
 
             {% if messages %}
                 {% for message in messages %}
@@ -424,10 +425,10 @@
                                                     data-first="{{ patron.first_name }}"
                                                     data-middle="{{ patron.middle_name }}"
                                                     data-last="{{ patron.last_name }}"
-                                                    class="w-7 h-7 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 transition-colors flex items-center justify-center"><i class="fa-solid fa-pencil text-[10px]"></i></button>
+                                                    class="w-7 h-7 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 transition-colors flex items-center justify-center" aria-label="Edit"><i class="fa-solid fa-pencil text-[10px]"></i></button>
                                             <form method="post" action="{% url 'admin_delete_patron' patron.patron_id %}" class="inline-block">
                                                 {% csrf_token %}
-                                                <button type="submit" class="w-7 h-7 rounded border border-slate-800 text-rose-500/70 hover:text-rose-400 hover:bg-rose-950/20 transition-colors flex items-center justify-center"><i class="fa-solid fa-trash-can text-[10px]"></i></button>
+                                                <button type="submit" class="w-7 h-7 rounded border border-slate-800 text-rose-500/70 hover:text-rose-400 hover:bg-rose-950/20 transition-colors flex items-center justify-center" aria-label="Delete"><i class="fa-solid fa-trash-can text-[10px]"></i></button>
                                             </form>
                                             {% endif %}
                                         </div>
@@ -565,7 +566,7 @@
 
             <div class="flex items-center justify-between">
                 <h3 id="modalTitle" class="text-base font-bold text-slate-200 tracking-wide">Add New Patron</h3>
-                <button type="button" onclick="closeModal()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40 transition-colors">
+                <button type="button" onclick="closeModal()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40 transition-colors" aria-label="Close">
                     <i class="fa-solid fa-xmark text-sm"></i>
                 </button>
             </div>

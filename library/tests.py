@@ -13,6 +13,7 @@ Run before every deployment:
 
 from datetime import timedelta
 import json
+from unittest import mock
 from uuid import uuid4
 
 from django.test import TestCase, Client
@@ -25,6 +26,19 @@ from .models import (
     Waypoint,
     WaypointConnection,
 )
+
+
+class _FakeRequest:
+    """Just enough request for a middleware or an audit helper to work on.
+
+    RequestFactory would do, but these tests are about what the helper writes,
+    not about routing -- and a plain object makes what they depend on obvious.
+    """
+
+    def __init__(self, path='/probe/', method='GET', session=None):
+        self.path = path
+        self.method = method
+        self.session = {} if session is None else session
 
 
 def _admin(email='smoke-admin@example.invalid', modules=''):
@@ -3113,3 +3127,109 @@ class ParseCopiesFilterTests(TestCase):
     def test_every_dropdown_option_parses(self):
         for value, label in self.choices:
             self.assertIsNotNone(self.parse(value), value)
+
+
+class SlowRequestLoggingTests(TestCase):
+    """A slow page leaves a line behind; a normal one costs nothing."""
+
+    def _run(self, seconds):
+        import logging
+        from library.middleware import SlowRequestLoggingMiddleware
+
+        class FakeResponse:
+            status_code = 200
+
+        def get_response(request):
+            # No sleeping: the middleware measures with time.monotonic, so the
+            # clock is what gets faked, not the test's patience.
+            return FakeResponse()
+
+        mw = SlowRequestLoggingMiddleware(get_response)
+        ticks = iter([0.0, seconds])
+        with mock.patch('library.middleware.time.monotonic',
+                        side_effect=lambda: next(ticks)):
+            with self.assertLogs('library.middleware', level='WARNING') as caught:
+                logging.getLogger('library.middleware').warning('probe')
+                mw(_FakeRequest())
+        return caught.output
+
+    def test_a_slow_request_is_logged_with_its_path_and_duration(self):
+        lines = self._run(3.0)
+        slow = [l for l in lines if 'Slow request' in l]
+        self.assertEqual(len(slow), 1, lines)
+        self.assertIn('/probe/', slow[0])
+        self.assertIn('3.00s', slow[0])
+
+    def test_a_normal_request_logs_nothing(self):
+        lines = self._run(0.2)
+        self.assertEqual([l for l in lines if 'Slow request' in l], [])
+
+    def test_the_threshold_is_inclusive(self):
+        from library.middleware import SLOW_REQUEST_SECONDS
+        lines = self._run(SLOW_REQUEST_SECONDS)
+        self.assertTrue(any('Slow request' in l for l in lines))
+
+    def test_it_is_registered_first_so_it_times_the_whole_stack(self):
+        from django.conf import settings
+        self.assertEqual(settings.MIDDLEWARE[0],
+                         'library.middleware.SlowRequestLoggingMiddleware')
+
+
+class ImportFailureTests(TestCase):
+    """An unexpected fault is logged in full and reported without its guts."""
+
+    def test_the_browser_is_given_a_reference_not_the_exception(self):
+        from library.views import import_failed
+        secret = 'relation "library_book" does not exist at /srv/ayla/db.sock'
+        with self.assertLogs('library.views', level='ERROR'):
+            response = import_failed('Book import', RuntimeError(secret))
+        body = json.loads(response.content)
+        self.assertFalse(body['success'])
+        self.assertNotIn(secret, body['error'])
+        self.assertNotIn('library_book', body['error'])
+        self.assertNotIn('/srv/', body['error'])
+
+    def test_the_reference_in_the_message_is_the_one_in_the_log(self):
+        from library.views import import_failed
+        with self.assertLogs('library.views', level='ERROR') as caught:
+            response = import_failed('Patron import', ValueError('boom'))
+        reference = json.loads(response.content)['error'].split()[-1].rstrip('.')
+        self.assertEqual(len(reference), 8)
+        self.assertTrue(any(reference in line for line in caught.output),
+                        'the reference shown to the user is not in the log')
+
+    def test_the_log_keeps_what_the_browser_does_not(self):
+        from library.views import import_failed
+        with self.assertLogs('library.views', level='ERROR') as caught:
+            import_failed('Log import', RuntimeError('the real cause'))
+        joined = '\n'.join(caught.output)
+        self.assertIn('the real cause', joined)
+        self.assertIn('Log import', joined)
+
+    def test_every_import_view_routes_faults_through_it(self):
+        """No import endpoint may go back to returning str(e)."""
+        import inspect
+        from library import views
+        source = inspect.getsource(views)
+        self.assertNotIn("'error': str(e)", source,
+                         'an import view is leaking exception text again')
+
+
+class AuditFailuresAreLoggedTests(TestCase):
+    """Auditing still never breaks the operation -- but no longer vanishes."""
+
+    def test_a_failing_audit_write_is_recorded_somewhere(self):
+        from library import audit
+        with mock.patch.object(audit.SystemLog.objects, 'create',
+                               side_effect=RuntimeError('table is gone')):
+            with self.assertLogs('library.audit', level='ERROR') as caught:
+                audit.log_admin_action(_FakeRequest(), 'Something', 'detail')
+        self.assertIn('audit record', '\n'.join(caught.output))
+
+    def test_the_operation_still_survives_a_failing_audit(self):
+        from library import audit
+        with mock.patch.object(audit.SystemLog.objects, 'create',
+                               side_effect=RuntimeError('table is gone')):
+            with self.assertLogs('library.audit', level='ERROR'):
+                audit.log_admin_action(_FakeRequest(), 'Something', 'detail')
+        # Reaching here at all is the assertion: no exception escaped.

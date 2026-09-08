@@ -600,6 +600,7 @@
     <script src="{% static 'js/ayla-dialog.js' %}"></script>
 </head>
 <body>
+<a href="#main-content" class="skip-link">Skip to main content</a>
 
     {% include 'library_staff/_sidebar.html' with active='dashboard' %}
 
@@ -613,7 +614,7 @@
             </div>
         </header>
 
-        <main class="dashboard-view">
+        <main id="main-content" tabindex="-1" class="dashboard-view">
 
             <section class="hero-banner">
                 <div>

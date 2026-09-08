@@ -16,6 +16,7 @@ import json
 from uuid import uuid4
 import openpyxl
 from openpyxl import Workbook
+import logging
 import qrcode
 import os
 import math
@@ -3783,6 +3784,37 @@ MAX_PICKER_BOOKS = 5000
 MAX_AUDIT_SCANS = 3000
 
 
+logger = logging.getLogger(__name__)
+
+
+def import_failed(what, exc):
+    """Log a genuine fault, and answer with a reference instead of its guts.
+
+    Every error these import views mean to show a person is returned explicitly
+    as JSON on the way through, so anything reaching their `except` is a fault
+    nobody anticipated -- a driver error, a corrupt workbook, a bug. str(exc) on
+    one of those is a stack of internals: table names, absolute paths, driver
+    text. Returning it put that on a librarian's screen, where it tells them
+    nothing they can act on, and tells anyone else rather more about the system
+    than they ought to know.
+
+    The log keeps the whole traceback. The browser gets a short reference, so
+    the two can be tied back together when somebody reports it.
+    """
+    reference = uuid4().hex[:8]
+    # exc is passed explicitly rather than left to logger.exception's ambient
+    # sys.exc_info(): that only carries a traceback while an except block is
+    # actually running, so a caller one refactor away from calling this outside
+    # one would silently log the reference and nothing else.
+    logger.exception('[%s] %s failed: %r', reference, what, exc)
+    return JsonResponse({
+        'success': False,
+        # The reference goes last, where it is easy to find and copy.
+        'error': 'Something went wrong at our end and nothing was saved. '
+                 'Quote this reference when reporting it: %s' % reference,
+    })
+
+
 def check_import_upload(uploaded):
     """Return an error string for a workbook we should not parse, or None."""
     if uploaded is None:
@@ -4232,8 +4264,8 @@ def _import_books_body(request):
         }
         return JsonResponse(payload)
 
-    except Exception as e:
-        return JsonResponse({'success': False, 'error': str(e)})
+    except Exception as exc:
+        return import_failed('Book import', exc)
 
 
 @admin_module_required('patrons')
@@ -4323,8 +4355,8 @@ def import_patrons(request):
             'message': f'Successfully imported {imported_count} patrons. Skipped {skipped_count} duplicates.'
         })
         
-    except Exception as e:
-        return JsonResponse({'success': False, 'error': str(e)})
+    except Exception as exc:
+        return import_failed('Patron import', exc)
 
 
 @admin_module_required('inventory')
@@ -4425,8 +4457,8 @@ def import_donations(request):
             'message': f'Successfully imported {imported_count} donations.'
         })
         
-    except Exception as e:
-        return JsonResponse({'success': False, 'error': str(e)})
+    except Exception as exc:
+        return import_failed('Donation import', exc)
 
 
 @admin_only_required
@@ -4489,8 +4521,8 @@ def import_announcements(request):
             'message': f'Successfully imported {imported_count} announcements.'
         })
         
-    except Exception as e:
-        return JsonResponse({'success': False, 'error': str(e)})
+    except Exception as exc:
+        return import_failed('Announcement import', exc)
 
 
 # Deliberately admin_login_required rather than one module: shared by Manage Books and Transactions,
@@ -5345,8 +5377,8 @@ def import_transactions(request):
             'message': f'Successfully imported {imported_count} transactions. Skipped {skipped_count} invalid entries.'
         })
         
-    except Exception as e:
-        return JsonResponse({'success': False, 'error': str(e)})
+    except Exception as exc:
+        return import_failed('Transaction import', exc)
 
 
 # Log Import/Export
@@ -5429,8 +5461,8 @@ def import_logs(request):
             'message': f'Successfully imported {imported_count} logs. Skipped {skipped_count} invalid entries.'
         })
         
-    except Exception as e:
-        return JsonResponse({'success': False, 'error': str(e)})
+    except Exception as exc:
+        return import_failed('Log import', exc)
 
 
 # ─── REPORTS VIEWS ───────────────────────────────────────────────

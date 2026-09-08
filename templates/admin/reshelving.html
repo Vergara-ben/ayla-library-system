@@ -29,13 +29,14 @@
     <script src="{% static 'js/ayla-dialog.js' %}"></script>
 </head>
 <body class="flex h-screen overflow-hidden">
+<a href="#main-content" class="skip-link">Skip to main content</a>
 
     {% include 'admin/_sidebar.html' with active='reshelving' %}
 
     <div class="flex-1 flex flex-col overflow-hidden">
         <header class="h-16 flex-shrink-0 flex items-center justify-between px-8" style="background-color: var(--bg-main);">
             <div class="flex items-center">
-                <button class="mobile-menu-btn" onclick="toggleSidebar()"><i class="fa-solid fa-bars"></i></button>
+                <button class="mobile-menu-btn" onclick="toggleSidebar()" aria-label="Toggle navigation menu"><i class="fa-solid fa-bars"></i></button>
                 <h2 class="logo-text text-lg tracking-wider text-slate-200 uppercase">Reshelving</h2>
             </div>
             <div class="flex items-center gap-3">
@@ -43,7 +44,7 @@
             </div>
         </header>
 
-        <main class="flex-1 overflow-y-auto p-8 space-y-6">
+        <main id="main-content" tabindex="-1" class="flex-1 overflow-y-auto p-8 space-y-6">
 
             <div class="rounded-xl border border-slate-800/80 p-4" style="background-color: var(--bg-card);">
                 <div class="flex items-start gap-3">

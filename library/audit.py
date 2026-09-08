@@ -11,7 +11,11 @@ trade-off is deliberate and worth naming -- a lost log line is preferable to a
 broken transaction, so this is not a security-grade tamper-proof trail.
 """
 
+import logging
+
 from .models import SystemLog, User, Patron
+
+logger = logging.getLogger(__name__)
 
 
 def _write(actor_role, admin=None, patron=None, name=None,
@@ -28,8 +32,10 @@ def _write(actor_role, admin=None, patron=None, name=None,
             detail=(detail or '')[:500],
         )
     except Exception:
-        # Auditing must never interfere with the primary operation.
-        pass
+        # Auditing must never interfere with the primary operation -- but an
+        # audit trail that has quietly stopped recording is exactly the thing
+        # somebody needs to know about, so it goes somewhere else instead.
+        logger.exception('Could not write the audit record')
 
 
 def log_admin_action(request, action, entity_type, entity_id=None, detail='', patron=None):
@@ -59,7 +65,7 @@ def log_admin_action(request, action, entity_type, entity_id=None, detail='', pa
             action=action, entity_type=entity_type, entity_id=entity_id, detail=detail,
         )
     except Exception:
-        pass
+        logger.exception('Could not write the audit record')
 
 
 def log_patron_action(request, action, entity_type, entity_id=None, detail='', patron=None):
@@ -86,7 +92,7 @@ def log_patron_action(request, action, entity_type, entity_id=None, detail='', p
             action=action, entity_type=entity_type, entity_id=entity_id, detail=detail,
         )
     except Exception:
-        pass
+        logger.exception('Could not write the audit record')
 
 
 def log_system_action(action, entity_type, entity_id=None, detail=''):

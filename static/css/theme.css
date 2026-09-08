@@ -701,7 +701,46 @@ textarea:focus-visible {
 [data-theme="dark"] .theme-toggle .label-light { display: inline; }
 
 /* =====================================================================
-   7. REDUCED MOTION
+   7. SKIP LINK
+
+   Every page puts a sidebar of roughly fifteen links ahead of its content.
+   Without this, reaching the page itself by keyboard means tabbing past all
+   of them, on every single navigation. Off-screen until focused, so it costs
+   the visual design nothing and appears exactly when it is useful.
+   ===================================================================== */
+.skip-link {
+    position: fixed;
+    top: 8px;
+    left: 8px;
+    z-index: 1000;
+    padding: 9px 15px;
+    border-radius: 8px;
+    background: var(--accent);
+    color: var(--on-accent);
+    font: 600 13px/1 'Inter', system-ui, sans-serif;
+    text-decoration: none;
+    /* Moved out of view rather than positioned off-screen: transform is
+       cheaper to animate than top, and leaves the box where it will land so
+       nothing shifts when it arrives. */
+    transform: translateY(-160%);
+    transition: transform .15s ease;
+}
+
+.skip-link:focus,
+.skip-link:focus-visible {
+    transform: translateY(0);
+    outline: 2px solid var(--on-accent);
+    outline-offset: 2px;
+}
+
+/* main takes focus so the skip actually lands there rather than only
+   scrolling, but it is a landing place, not a control -- so no focus ring. */
+#main-content:focus {
+    outline: none;
+}
+
+/* =====================================================================
+   8. REDUCED MOTION
    ===================================================================== */
 @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after {

@@ -15,6 +15,7 @@ turning that into a membership needs a librarian to check a physical ID, and
 nobody can attest to their own.
 """
 
+import logging
 from datetime import datetime, time, timedelta
 
 from django.contrib import messages
@@ -32,6 +33,8 @@ from .auth_utils import (
 from .audit import log_system_action
 from .models import Patron, PatronLog, User
 from .names import name_matches, parse_name, tokenise
+
+logger = logging.getLogger(__name__)
 
 
 DESK_SESSION_KEY = 'desk_mode'
@@ -363,7 +366,10 @@ def remember_desk_viewer(request, patron):
         request.session[DESK_VIEWER_KEY] = patron.patron_id
         request.session[DESK_VIEWER_AT] = timezone.now().isoformat()
     except Exception:
-        pass
+        # Not worth failing the sign-in over: the desk simply shows the
+        # unfiltered table. Worth recording, because that unfiltered table is
+        # every other patron's name in front of whoever is standing there.
+        logger.exception('Could not record the desk viewer')
 
 
 def forget_desk_viewer(request):
@@ -371,7 +377,7 @@ def forget_desk_viewer(request):
         try:
             request.session.pop(key, None)
         except Exception:
-            pass
+            logger.exception('Could not clear desk viewer key %r', key)
 
 
 def desk_viewer_id(request):

@@ -37,24 +37,9 @@ summary:focus-visible,
 }
 
 /* 3. Skip-to-content link (injected by admin-enhance.js). Hidden until focused. */
-.skip-link {
-    position: fixed;
-    top: 8px; left: 8px;
-    z-index: 1000;
-    background: var(--accent);
-    color: var(--on-accent);
-    padding: 8px 14px;
-    border-radius: 8px;
-    font: 600 13px/1 'Inter', system-ui, sans-serif;
-    text-decoration: none;
-    transform: translateY(-160%);
-    transition: transform .15s ease;
-}
-.skip-link:focus {
-    transform: translateY(0);
-    outline: 2px solid #fff;
-    outline-offset: 2px;
-}
+/* The skip link lives in theme.css, which every page loads -- this sheet does
+   not reach four of the pages that have one, and an unstyled skip link is a
+   permanently visible one. */
 
 /* 4. Larger, easier hit targets for small icon buttons (touch + motor accessibility),
    without changing their visual size. */

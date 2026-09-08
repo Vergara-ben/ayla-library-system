@@ -314,6 +314,7 @@
     <script src="{% static 'js/ayla-dialog.js' %}"></script>
 </head>
 <body class="flex h-screen overflow-hidden">
+<a href="#main-content" class="skip-link">Skip to main content</a>
 
     {% include 'admin/_sidebar.html' with active='floorplans' %}
 
@@ -321,7 +322,7 @@
         
         <header class="h-16 flex-shrink-0 flex items-center justify-between px-8" style="background-color: var(--bg-main);">
             <div class="flex items-center">
-                <button class="mobile-menu-btn" onclick="toggleSidebar()">
+                <button class="mobile-menu-btn" onclick="toggleSidebar()" aria-label="Toggle navigation menu">
                     <i class="fa-solid fa-bars"></i>
                 </button>
                 <h2 class="logo-text text-lg tracking-wider text-slate-200 uppercase">Floor Plan Management</h2>
@@ -334,7 +335,7 @@
             </div>
         </header>
 
-        <main class="flex-1 overflow-y-auto p-8 space-y-6">
+        <main id="main-content" tabindex="-1" class="flex-1 overflow-y-auto p-8 space-y-6">
             
             {% if error %}
                 <div class="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">{{ error }}</div>
@@ -636,7 +637,7 @@
                                 <form method="post" action="{% url 'delete_room' %}" class="inline" data-confirm="Delete this room and all its shelves?">
                                     {% csrf_token %}
                                     <input type="hidden" name="room_id" value="{{ room.room_id }}">
-                                    <button type="submit" class="text-rose-500/70 hover:text-rose-400 text-xs">
+                                    <button type="submit" class="text-rose-500/70 hover:text-rose-400 text-xs" aria-label="Delete">
                                         <i class="fa-solid fa-trash-can"></i>
                                     </button>
                                 </form>
@@ -667,7 +668,7 @@
                                 <form method="post" action="{% url 'delete_shelf' %}" class="inline" data-confirm="Delete this shelf and all its shelf levels?">
                                     {% csrf_token %}
                                     <input type="hidden" name="shelf_id" value="{{ shelf.shelf_id }}">
-                                    <button type="submit" class="text-rose-500/70 hover:text-rose-400 text-xs">
+                                    <button type="submit" class="text-rose-500/70 hover:text-rose-400 text-xs" aria-label="Delete">
                                         <i class="fa-solid fa-trash-can"></i>
                                     </button>
                                 </form>
@@ -697,7 +698,7 @@
                                     <form method="post" action="{% url 'delete_shelf_level' %}" class="inline" data-confirm="Delete this shelf level?">
                                         {% csrf_token %}
                                         <input type="hidden" name="shelf_level_id" value="{{ level.shelf_level_id }}">
-                                        <button type="submit" class="text-rose-500/70 hover:text-rose-400 text-xs">
+                                        <button type="submit" class="text-rose-500/70 hover:text-rose-400 text-xs" aria-label="Delete">
                                             <i class="fa-solid fa-trash-can"></i>
                                         </button>
                                     </form>
@@ -720,7 +721,7 @@
         <div class="w-full max-w-lg rounded-2xl border p-6 flex flex-col gap-5 shadow-2xl relative my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color);">
             <div class="flex items-center justify-between">
                 <h3 class="text-base font-bold text-slate-200 tracking-wide">Add New Floor Plan</h3>
-                <button type="button" onclick="closeAddModal()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40 transition-colors">
+                <button type="button" onclick="closeAddModal()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40 transition-colors" aria-label="Close">
                     <i class="fa-solid fa-xmark text-sm"></i>
                 </button>
             </div>
@@ -770,7 +771,7 @@
         <div class="w-full max-w-lg rounded-2xl border p-6 flex flex-col gap-5 shadow-2xl relative my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color);">
             <div class="flex items-center justify-between">
                 <h3 class="text-base font-bold text-slate-200 tracking-wide">Edit Room</h3>
-                <button type="button" onclick="closeEditRoomModal()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40 transition-colors">
+                <button type="button" onclick="closeEditRoomModal()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40 transition-colors" aria-label="Close">
                     <i class="fa-solid fa-xmark text-sm"></i>
                 </button>
             </div>
@@ -812,7 +813,7 @@
         <div class="w-full max-w-lg rounded-2xl border p-6 flex flex-col gap-5 shadow-2xl relative my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color);">
             <div class="flex items-center justify-between">
                 <h3 class="text-base font-bold text-slate-200 tracking-wide">Renovation Notice</h3>
-                <button type="button" onclick="closeRenovationModal()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40 transition-colors">
+                <button type="button" onclick="closeRenovationModal()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40 transition-colors" aria-label="Close">
                     <i class="fa-solid fa-xmark text-sm"></i>
                 </button>
             </div>
@@ -844,7 +845,7 @@
         <div class="w-full max-w-md rounded-2xl border p-6 flex flex-col gap-5 shadow-2xl relative my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color);">
             <div class="flex items-center justify-between">
                 <h3 id="beaconModalTitle" class="text-base font-bold text-slate-200 tracking-wide">Place Beacon</h3>
-                <button type="button" onclick="closeBeaconModal()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40 transition-colors">
+                <button type="button" onclick="closeBeaconModal()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40 transition-colors" aria-label="Close">
                     <i class="fa-solid fa-xmark text-sm"></i>
                 </button>
             </div>
@@ -937,7 +938,7 @@
         <div class="w-full max-w-md rounded-2xl border p-6 flex flex-col gap-5 shadow-2xl relative my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color);">
             <div class="flex items-center justify-between">
                 <h3 class="text-base font-bold text-slate-200 tracking-wide">Place Waypoint</h3>
-                <button type="button" onclick="closeWaypointModal()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40 transition-colors">
+                <button type="button" onclick="closeWaypointModal()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40 transition-colors" aria-label="Close">
                     <i class="fa-solid fa-xmark text-sm"></i>
                 </button>
             </div>
@@ -1085,7 +1086,7 @@
         <div class="w-full max-w-md rounded-2xl border p-6 flex flex-col gap-5 shadow-2xl relative my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color);">
             <div class="flex items-center justify-between">
                 <h3 class="text-base font-bold text-slate-200 tracking-wide">Place Room</h3>
-                <button type="button" onclick="closeRoomPlaceModal()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40 transition-colors"><i class="fa-solid fa-xmark text-sm"></i></button>
+                <button type="button" onclick="closeRoomPlaceModal()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40 transition-colors" aria-label="Close"><i class="fa-solid fa-xmark text-sm"></i></button>
             </div>
             <div class="space-y-4 text-xs">
                 <div class="space-y-1.5">
@@ -1109,7 +1110,7 @@
         <div class="w-full max-w-md rounded-2xl border p-6 flex flex-col gap-5 shadow-2xl relative my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color);">
             <div class="flex items-center justify-between">
                 <h3 class="text-base font-bold text-slate-200 tracking-wide">Add Stairway</h3>
-                <button type="button" onclick="closeStairsPlaceModal()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40 transition-colors"><i class="fa-solid fa-xmark text-sm"></i></button>
+                <button type="button" onclick="closeStairsPlaceModal()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40 transition-colors" aria-label="Close"><i class="fa-solid fa-xmark text-sm"></i></button>
             </div>
             <div class="space-y-4 text-xs">
                 <div class="grid grid-cols-2 gap-3">
@@ -1157,7 +1158,7 @@
         <div class="w-full max-w-md rounded-2xl border p-6 flex flex-col gap-5 shadow-2xl relative my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color);">
             <div class="flex items-center justify-between">
                 <h3 class="text-base font-bold text-slate-200 tracking-wide">Add Obstacle</h3>
-                <button type="button" onclick="closeObstaclePlaceModal()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40 transition-colors"><i class="fa-solid fa-xmark text-sm"></i></button>
+                <button type="button" onclick="closeObstaclePlaceModal()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40 transition-colors" aria-label="Close"><i class="fa-solid fa-xmark text-sm"></i></button>
             </div>
             <div class="space-y-4 text-xs">
                 <div class="space-y-1.5">
@@ -1200,7 +1201,7 @@
         <div class="w-full max-w-sm rounded-2xl border p-6 flex flex-col gap-5 shadow-2xl relative my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color);">
             <div class="flex items-center justify-between">
                 <h3 class="text-base font-bold text-slate-200 tracking-wide">Exact size &amp; angle — <span id="resizeShelfTitle"></span></h3>
-                <button type="button" onclick="closeResizeShelfModal()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40 transition-colors">
+                <button type="button" onclick="closeResizeShelfModal()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40 transition-colors" aria-label="Close">
                     <i class="fa-solid fa-xmark text-sm"></i>
                 </button>
             </div>
@@ -1233,7 +1234,7 @@
         <div class="w-full max-w-md rounded-2xl border p-6 flex flex-col gap-5 shadow-2xl relative my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color);">
             <div class="flex items-center justify-between">
                 <h3 class="text-base font-bold text-slate-200 tracking-wide">Place Shelf</h3>
-                <button type="button" onclick="closeShelfPlaceModal()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40 transition-colors"><i class="fa-solid fa-xmark text-sm"></i></button>
+                <button type="button" onclick="closeShelfPlaceModal()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40 transition-colors" aria-label="Close"><i class="fa-solid fa-xmark text-sm"></i></button>
             </div>
             <div class="space-y-4 text-xs">
                 <div id="placeShelfKindRow" class="space-y-1.5 hidden">

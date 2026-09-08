@@ -7,6 +7,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>AYLA Library — Ask a Librarian</title>
 <script src="{% static 'js/theme.js' %}"></script>
+<script src="{% static 'js/poll-scheduler.js' %}"></script>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="{% static 'css/theme.css' %}">
 <style>
@@ -175,6 +176,11 @@ async function sendMessage() {
     if (!data.success) { document.getElementById('hint').textContent = data.error; return; }
     field.value = '';
     renderThread(data.messages);
+    // Sending is the clearest possible signal that someone is here: fastest
+    // tier, and running again if the thread had gone quiet enough to stop.
+    threadCount = data.messages ? data.messages.length : threadCount;
+    hasConversation = true;
+    poller.bump();
     document.getElementById('hint').textContent =
       'Sent. A librarian will reply, and we will email you when they do.';
     if (topic) topic.closest('.field').remove();
@@ -185,15 +191,40 @@ async function sendMessage() {
 }
 
 // Polled rather than pushed: the deployment has no websockets, and a question
-// answered in hours does not need a socket held open for them.
+// answered in hours does not need a socket held open for them. It also does not
+// need asking about at three in the morning -- see poll-scheduler.js.
+let threadCount = 0;
+let hasConversation = false;
+
 async function poll() {
-  try {
-    const r = await fetch(URLS.poll, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
-    const data = await r.json();
-    if (data.success && data.messages) renderThread(data.messages);
-  } catch (e) { /* offline; the next tick will catch up */ }
+  const r = await fetch(URLS.poll, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+  const data = await r.json();
+  if (!data.success) return false;
+  hasConversation = Boolean(data.conversation_id);
+  if (!data.messages) return false;
+  renderThread(data.messages);
+  // A changed count is a reply arriving, which is exactly when the patron is
+  // most likely to answer back -- so it counts as activity.
+  const changed = data.messages.length !== threadCount;
+  threadCount = data.messages.length;
+  return changed;
 }
-setInterval(poll, 8000);
+
+// 8s while the conversation is live, 20s once it has been quiet for two
+// minutes -- the same two minutes the server uses to decide whether the patron
+// is still watching (ACTIVE_WINDOW in library/chat.py) -- and nothing at all
+// after ten. A patron waiting on an answer also gets an email, so a stopped
+// poller costs them nothing.
+const poller = AylaPoll({
+  poll: poll,
+  tiers: [[0, 8000], [2 * 60 * 1000, 20000]],
+  stopAfter: 10 * 60 * 1000,
+  enabled: () => hasConversation,
+});
+
+// One poll on load settles whether there is a thread at all; a patron who has
+// never asked a question has nothing to poll for until they send one.
+poller.now().then(() => { if (hasConversation) poller.start(); });
 </script>
 </body>
 </html>

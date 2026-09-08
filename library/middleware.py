@@ -1,11 +1,45 @@
 """Request-level guards."""
 
+import logging
+import time
+
 from django.conf import settings
 from django.shortcuts import redirect
 from django.utils import timezone
 
 from .audit import log_system_action
 from .desk import DESK_SESSION_KEY, desk_log_path
+
+
+logger = logging.getLogger(__name__)
+
+# Every page in this app answers well under a second on a laptop. A request
+# slower than this is either doing something pathological or the host is
+# throttling us, and both are things somebody will otherwise only ever be able
+# to describe as "it felt slow yesterday".
+SLOW_REQUEST_SECONDS = 1.5
+
+
+class SlowRequestLoggingMiddleware:
+    """Write a line for any request that took unreasonably long.
+
+    Only the slow ones. Logging every request costs time on every request,
+    which is precisely the wrong trade for a middleware whose whole job is
+    noticing when time is short.
+    """
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        started = time.monotonic()
+        response = self.get_response(request)
+        elapsed = time.monotonic() - started
+        if elapsed >= SLOW_REQUEST_SECONDS:
+            logger.warning('Slow request: %s %s took %.2fs (status %s)',
+                           request.method, request.path, elapsed,
+                           response.status_code)
+        return response
 
 
 class DeskModeMiddleware:

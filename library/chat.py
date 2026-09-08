@@ -402,7 +402,12 @@ def staff_poll_messages(request):
     if raw_id.isdigit():
         conversation = Conversation.objects.filter(conversation_id=int(raw_id)).first()
         if conversation is not None:
-            conversation.messages.filter(sender_type='Patron', read_at__isnull=True).update(
-                read_at=timezone.now())
+            # Checked before written, the same way patron_poll_messages does it.
+            # A thread sitting open with nothing new is the usual case, and it
+            # used to cost an UPDATE every few seconds for no change at all.
+            unread = conversation.messages.filter(sender_type='Patron',
+                                                  read_at__isnull=True)
+            if unread.exists():
+                unread.update(read_at=timezone.now())
             payload.update(_thread_payload(conversation, for_staff=True))
     return JsonResponse(payload)

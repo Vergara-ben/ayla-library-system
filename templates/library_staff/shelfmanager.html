@@ -94,13 +94,14 @@
     <script src="{% static 'js/ayla-dialog.js' %}"></script>
 </head>
 <body class="flex h-screen overflow-hidden">
+<a href="#main-content" class="skip-link">Skip to main content</a>
 
     {% include 'library_staff/_sidebar.html' with active='shelf' %}
 
     <div class="flex-1 flex flex-col overflow-hidden">
         <header class="h-16 flex-shrink-0 flex items-center justify-between px-8" style="background-color: var(--bg-main);">
             <div class="flex items-center">
-                <button class="mobile-menu-btn" onclick="document.querySelector('aside').classList.toggle('open')"><i class="fa-solid fa-bars"></i></button>
+                <button class="mobile-menu-btn" onclick="document.querySelector('aside').classList.toggle('open')" aria-label="Toggle navigation menu"><i class="fa-solid fa-bars"></i></button>
                 <h2 class="logo-text text-lg tracking-wider text-slate-200 uppercase">Shelf Manager</h2>
             </div>
             <div class="flex items-center gap-3">
@@ -108,7 +109,7 @@
             </div>
         </header>
 
-        <main class="flex-1 overflow-y-auto p-8 space-y-6">
+        <main id="main-content" tabindex="-1" class="flex-1 overflow-y-auto p-8 space-y-6">
 
             <!-- View toggle -->
             <div class="flex items-center justify-between gap-4 flex-wrap">
@@ -182,7 +183,7 @@
         <div class="w-full max-w-md rounded-2xl border p-6 flex flex-col gap-5 shadow-2xl my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color);">
             <div class="flex items-center justify-between">
                 <h3 id="addTitle" class="text-base font-bold text-slate-200 tracking-wide">Add</h3>
-                <button type="button" onclick="closeModal('addModal')" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40"><i class="fa-solid fa-xmark text-sm"></i></button>
+                <button type="button" onclick="closeModal('addModal')" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40" aria-label="Close"><i class="fa-solid fa-xmark text-sm"></i></button>
             </div>
             <div class="space-y-4 text-xs">
                 <div id="addNameField" class="space-y-1.5">
@@ -212,7 +213,7 @@
         <div class="w-full max-w-md rounded-2xl border p-6 flex flex-col gap-5 shadow-2xl my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color);">
             <div class="flex items-center justify-between">
                 <h3 id="editTitle" class="text-base font-bold text-slate-200 tracking-wide">Rename</h3>
-                <button type="button" onclick="closeModal('editModal')" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40"><i class="fa-solid fa-xmark text-sm"></i></button>
+                <button type="button" onclick="closeModal('editModal')" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40" aria-label="Close"><i class="fa-solid fa-xmark text-sm"></i></button>
             </div>
             <div class="space-y-4 text-xs">
                 <div id="editNameField" class="space-y-1.5">
@@ -277,7 +278,7 @@
         <div class="w-full max-w-sm rounded-2xl border p-6 flex flex-col gap-4 shadow-2xl my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color);">
             <div class="flex items-center justify-between">
                 <h3 class="text-base font-bold text-slate-200 tracking-wide">Book Details</h3>
-                <button type="button" onclick="closeModal('bookModal')" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40"><i class="fa-solid fa-xmark text-sm"></i></button>
+                <button type="button" onclick="closeModal('bookModal')" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40" aria-label="Close"><i class="fa-solid fa-xmark text-sm"></i></button>
             </div>
             <div id="bookBody" class="text-xs text-slate-300 space-y-2"></div>
         </div>
@@ -288,7 +289,7 @@
         <div class="w-full max-w-3xl rounded-2xl border p-6 flex flex-col gap-4 shadow-2xl my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color); max-height: 88vh;">
             <div class="flex items-center justify-between">
                 <h3 class="text-base font-bold text-slate-200 tracking-wide">Add Books to <span id="placeLevelName" class="text-violet-400">Level</span></h3>
-                <button type="button" onclick="closePlacement()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40"><i class="fa-solid fa-xmark text-sm"></i></button>
+                <button type="button" onclick="closePlacement()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40" aria-label="Close"><i class="fa-solid fa-xmark text-sm"></i></button>
             </div>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4 min-h-0">
                 <!-- LEFT: cart -->
