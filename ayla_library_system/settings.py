@@ -32,6 +32,13 @@ if not ALLOWED_HOSTS:
 # HTTPS origins trusted for CSRF (needed once served over a real domain), e.g.
 CSRF_TRUSTED_ORIGINS = [o.strip() for o in os.environ.get('CSRF_TRUSTED_ORIGINS', '').split(',') if o.strip()]
 
+# Render sets this to the service's own address (e.g. ayla-library.onrender.com).
+RENDER_HOST = os.environ.get('RENDER_EXTERNAL_HOSTNAME', '').strip()
+if RENDER_HOST:
+    if RENDER_HOST not in ALLOWED_HOSTS:
+        ALLOWED_HOSTS.append(RENDER_HOST)
+    CSRF_TRUSTED_ORIGINS.append(f'https://{RENDER_HOST}')
+
 # Trust tunnel origins for phone testing (DEBUG only).
 if DEBUG:
     CSRF_TRUSTED_ORIGINS += [
@@ -121,8 +128,15 @@ DATABASES = {
         'PORT': os.environ.get('DATABASE_PORT'),
         # Reuse database connections.
         'CONN_MAX_AGE': int(os.environ.get('DB_CONN_MAX_AGE', '60')),
+        # Reopen a connection the pooler has already closed.
+        'CONN_HEALTH_CHECKS': True,
     }
 }
+
+# Supabase and most hosted PostgreSQL need an encrypted connection (require).
+DATABASE_SSLMODE = os.environ.get('DATABASE_SSLMODE', '').strip()
+if DATABASE_SSLMODE and DATABASE_ENGINE == 'postgresql':
+    DATABASES['default']['OPTIONS'] = {'sslmode': DATABASE_SSLMODE}
 
 
 # Password validation.
@@ -161,8 +175,7 @@ STATIC_URL = '/static/'
 # Media files
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
-# Create media folders if missing.
-(MEDIA_ROOT / 'credentials').mkdir(parents=True, exist_ok=True)
+# Create media folders if missing. Uploaded IDs are stored in the database.
 (MEDIA_ROOT / 'qrcodes').mkdir(parents=True, exist_ok=True)
 
 SESSION_ENGINE = 'django.contrib.sessions.backends.db'
@@ -170,6 +183,9 @@ SESSION_ENGINE = 'django.contrib.sessions.backends.db'
 SESSION_COOKIE_AGE = 14 * 24 * 3600
 SESSION_EXPIRE_AT_BROWSER_CLOSE = True
 LOGIN_URL = '/patron/login/'
+
+# Secret for the daily task link called by an outside scheduler (e.g. cron-job.org).
+DAILY_TASK_TOKEN = os.environ.get('DAILY_TASK_TOKEN', '').strip()
 ADMIN_LOGIN_URL = '/admin-portal/login/'
 
 STATICFILES_DIRS = [
@@ -301,9 +317,11 @@ X_FRAME_OPTIONS = 'DENY'
 
 # HTTPS-only settings for production.
 if not DEBUG:
-    # PythonAnywhere (and most PaaS) terminate TLS at a proxy.
+    # Render (and most hosts) handle HTTPS at a proxy in front of the app.
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
     SECURE_SSL_REDIRECT = os.environ.get('SECURE_SSL_REDIRECT', 'True').lower() in ('1', 'true', 'yes')
+    # The host's internal health check calls over plain HTTP.
+    SECURE_REDIRECT_EXEMPT = [r'^healthz/$']
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
     SECURE_HSTS_SECONDS = int(os.environ.get('SECURE_HSTS_SECONDS', '31536000'))

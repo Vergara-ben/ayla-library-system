@@ -6,6 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% if many %}Library Maps — all floors{% else %}{{ plan.name }} — Library Map{% endif %}</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="{% static 'js/printname.js' %}"></script>
     <style>
         /* Print styles. */
         * { box-sizing: border-box; }
@@ -26,6 +27,8 @@
             border: 1px solid #c7ccd4; background: #fff; color: #111; text-decoration: none;
         }
         .btn-primary { background: #0e7490; border-color: #0e7490; color: #fff; }
+        .filename { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: #666; }
+        .filename input { font: inherit; font-size: 13px; text-transform: none; letter-spacing: normal; color: #111; padding: 7px 10px; border: 1px solid #c7ccd4; border-radius: 8px; width: 220px; max-width: 100%; }
         .map-wrap { border: 1px solid #d5d9df; border-radius: 8px; padding: 12px; }
         svg { width: 100%; height: auto; display: block; }
         .room-shape { fill: #f4f6f9; stroke: #7b8795; stroke-width: 2; }
@@ -73,7 +76,10 @@
 
     {# Which floors to print, rather than which one to look at. #}
     <div class="toolbar no-print">
-        <button type="button" class="btn btn-primary" onclick="window.print()">Print</button>
+        <label class="filename">File name
+            <input type="text" id="printFileName" maxlength="100" value="{% if many %}Library Maps - all floors{% else %}{{ plan.name }} - Library Map{% endif %}">
+        </label>
+        <button type="button" class="btn btn-primary" onclick="printWithName('printFileName')">Print</button>
         <a class="btn" href="{% url 'admin_indoor_map' %}">Back to Indoor Map</a>
         {% if floors|length > 1 %}
         <form method="get" class="floorpick">

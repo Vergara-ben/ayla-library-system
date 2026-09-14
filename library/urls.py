@@ -2,8 +2,13 @@ from django.urls import path, re_path
 from . import views
 from . import desk
 from . import chat
+from . import tasks
 
 urlpatterns = [
+    # Hosting: uptime pings and the daily task trigger.
+    path('healthz/', tasks.healthz, name='healthz'),
+    path('tasks/daily/', tasks.run_daily_task, name='run_daily_task'),
+
     path('patron/login/', views.patron_login, name='patron_login'),
     path('patron/logout/', views.patron_logout, name='patron_logout'),
     path('patron/register/', views.patron_register, name='patron_register'),

@@ -307,10 +307,16 @@ _CREDENTIAL_MAGIC = {
 }
 
 
-def _save_credential_document(uploaded, patron_email):
-    """Store an uploaded ID / proof-of-residency file under media/credentials/."""
-    if not uploaded:
-        return None
+_CREDENTIAL_TYPES = {
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.png': 'image/png',
+    '.pdf': 'application/pdf',
+}
+
+
+def _read_credential_document(uploaded):
+    """Check an uploaded ID file. Returns (filename, content_type, data)."""
     ext = os.path.splitext(uploaded.name)[1].lower()
     if ext not in _CREDENTIAL_MAGIC:
         raise ValueError('Credential must be a JPG, PNG, or PDF file.')
@@ -318,17 +324,12 @@ def _save_credential_document(uploaded, patron_email):
         raise ValueError('Credential file must be 5 MB or smaller.')
 
     head = uploaded.read(8)
-    uploaded.seek(0)      # the writer below re-reads from the start
+    uploaded.seek(0)
     if not any(head.startswith(sig) for sig in _CREDENTIAL_MAGIC[ext]):
         raise ValueError('That file does not look like a real JPG, PNG, or PDF. '
                          'Please upload a photo or scan of your ID.')
-    cred_dir = os.path.join(settings.MEDIA_ROOT, 'credentials')
-    os.makedirs(cred_dir, exist_ok=True)
-    filename = f'credential_{uuid4().hex}{ext}'
-    with open(os.path.join(cred_dir, filename), 'wb') as fh:
-        for chunk in uploaded.chunks():
-            fh.write(chunk)
-    return f'credentials/{filename}'
+    data = b''.join(uploaded.chunks())
+    return f'credential_{uuid4().hex}{ext}', _CREDENTIAL_TYPES[ext], data
 
 
 def patron_register(request):
@@ -434,29 +435,35 @@ def patron_register(request):
         return _form_error('Please attach a photo or scan of your valid ID. '
                            'The library reviews it before activating your account.')
     try:
-        credential_path = _save_credential_document(uploaded_id, email)
+        credential_name, credential_type, credential_data = _read_credential_document(uploaded_id)
     except ValueError as exc:
         return _form_error(str(exc))
 
-    patron = Patron.objects.create(
-        fullname=fullname,
-        first_name=first_name,
-        middle_name=middle_name,
-        last_name=last_name,
-        email=email,
-        password_hash=hash_password(password),
-        patron_type=patron_type,
-        school=school or None,
-        contact_number=contact_number,
-        address=address,
-        account_status='Pending',
-        registration_channel='Online',
-        credential_document=credential_path,
-        otp_code=_new_otp(),
-        otp_expires_at=timezone.now() + timedelta(minutes=10),
-        otp_last_sent_at=timezone.now(),
-        otp_verified=False,
-    )
+    # The ID is kept in the database, so it survives a host that wipes its disk.
+    from django.db import transaction as db_transaction
+    from .models import PatronCredential
+    with db_transaction.atomic():
+        patron = Patron.objects.create(
+            fullname=fullname,
+            first_name=first_name,
+            middle_name=middle_name,
+            last_name=last_name,
+            email=email,
+            password_hash=hash_password(password),
+            patron_type=patron_type,
+            school=school or None,
+            contact_number=contact_number,
+            address=address,
+            account_status='Pending',
+            registration_channel='Online',
+            credential_document=f'credentials/{credential_name}',
+            otp_code=_new_otp(),
+            otp_expires_at=timezone.now() + timedelta(minutes=10),
+            otp_last_sent_at=timezone.now(),
+            otp_verified=False,
+        )
+        PatronCredential.objects.create(patron=patron, name=credential_name,
+                                        content_type=credential_type, data=credential_data)
     if not otp_email(patron.email, patron.fullname, patron.otp_code):
         # The code email failed to send.
         return render(request, 'patron/patronregister.html',
@@ -1571,6 +1578,10 @@ def _books_page(request, template):
         copies = ''
     books_queryset = books_queryset.order_by('title')
 
+    # Every matching id, for "select all matching books".
+    if request.GET.get('ids') == 'all':
+        return JsonResponse({'ids': list(books_queryset.values_list('book_id', flat=True))})
+
     # Global stats (independent of the filters above).
     total_copies = Book.objects.count()
     # Count unique titles, not copies.
@@ -1893,12 +1904,7 @@ def reject_patron(request, patron_id):
     fullname, email = patron.fullname, patron.email
     log_admin_action(request, 'Delete', 'Patron', patron.patron_id,
                      f'Rejected registration of "{fullname}"' + (f' — {reason}' if reason else ''))
-    # Remove the uploaded credential file along with the application.
-    if patron.credential_document:
-        try:
-            os.remove(os.path.join(settings.MEDIA_ROOT, patron.credential_document))
-        except OSError:
-            pass
+    # Deleting the patron also deletes the uploaded ID.
     patron.delete()
     registration_rejected_email(email, fullname, reason)
     messages.success(request, f'Registration of {fullname} rejected.')
@@ -3576,8 +3582,8 @@ def book_qr_labels(request):
                      f'({layout["pages"]} page(s))')
 
     response = HttpResponse(pdf, content_type='application/pdf')
-    response['Content-Disposition'] = (
-        'attachment; filename="AYLA-QR-labels-%d-books.pdf"' % len(books))
+    response['Content-Disposition'] = 'attachment; filename="%s"' % download_name(
+        request, 'AYLA-QR-labels-%d-books' % len(books), '.pdf')
     return response
 
 
@@ -5660,6 +5666,16 @@ def admin_reports(request):
     return render(request, 'admin/reports.html', context)
 
 
+def download_name(request, default, ext):
+    """File name for a download, taken from the optional filename field."""
+    import re
+    name = (request.GET.get('filename') or '').strip()
+    if name.lower().endswith(ext):
+        name = name[:-len(ext)]
+    name = re.sub(r'[^A-Za-z0-9 ._()-]+', '', name).strip(' .')[:100]
+    return (name or default) + ext
+
+
 @admin_only_required
 def admin_report_pdf(request):
     """Download the selected report as a PDF."""
@@ -5674,8 +5690,8 @@ def admin_report_pdf(request):
                      detail=f"{report['title']} PDF ({report['period_label']})")
 
     response = HttpResponse(buf, content_type='application/pdf')
-    filename = f"{report_type}_report_{start}_{end}.pdf"
-    response['Content-Disposition'] = f'attachment; filename={filename}'
+    filename = download_name(request, f"{report_type}_report_{start}_{end}", '.pdf')
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
     return response
 
 
@@ -5696,8 +5712,8 @@ def admin_report_excel(request):
         buf,
         content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     )
-    filename = f"{report_type}_report_{start}_{end}.xlsx"
-    response['Content-Disposition'] = f'attachment; filename={filename}'
+    filename = download_name(request, f"{report_type}_report_{start}_{end}", '.xlsx')
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
     return response
 
 
@@ -10508,21 +10524,18 @@ def _library_card_context(patron):
 @granted_module_required('patrons')
 def serve_patron_credential(request, path):
     """A patron's uploaded ID, served only to staff who hold the patrons module."""
-    from django.utils._os import safe_join
-    from django.views.static import serve as static_serve
+    from .models import PatronCredential
 
-    base = os.path.join(settings.MEDIA_ROOT, 'credentials')
-    name = os.path.basename(path or '')
-    if not name:
-        raise Http404('No such document.')
-    try:
-        # safe_join blocks paths outside the folder.
-        safe_join(base, name)
-    except (ValueError, SuspiciousFileOperation):
+    name = os.path.basename((path or '').replace('\\', '/'))
+    doc = PatronCredential.objects.filter(name=name).first() if name else None
+    if doc is None:
         raise Http404('No such document.')
 
     log_admin_action(request, 'View', 'Patron credential', detail=f'Opened ID document {name}')
-    return static_serve(request, name, document_root=base)
+    response = HttpResponse(bytes(doc.data), content_type=doc.content_type)
+    response['Content-Disposition'] = f'inline; filename="{doc.name}"'
+    response['Cache-Control'] = 'private, no-store'
+    return response
 
 
 @granted_module_required('patrons')

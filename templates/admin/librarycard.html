@@ -6,6 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Library Card — {{ patron.fullname }}</title>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+<script src="{% static 'js/printname.js' %}"></script>
 <style>
   /* Card sized in millimetres, fixed colours. */
   :root {
@@ -42,6 +43,12 @@
     text-decoration: none; display: inline-flex; align-items: center; gap: 7px;
   }
   .btn.secondary { background: #fff; color: var(--ink); border-color: var(--line); }
+  .filename { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 600; color: var(--muted); }
+  .filename input {
+    font-family: inherit; font-size: 13px; color: var(--ink);
+    padding: 9px 12px; border: 1px solid var(--line); border-radius: 10px; background: #fff;
+    width: 220px; max-width: 100%;
+  }
   .hint { font-size: 12px; color: var(--muted); text-align: center; max-width: 560px; line-height: 1.6; }
 
   /* The card */
@@ -224,7 +231,10 @@
 <body>
 
   <div class="toolbar">
-    <button type="button" class="btn" onclick="window.print()">🖨 Print card</button>
+    <label class="filename">File name
+      <input type="text" id="printFileName" maxlength="100" value="Library Card - {{ patron.fullname }}">
+    </label>
+    <button type="button" class="btn" onclick="printWithName('printFileName')">🖨 Print card</button>
     <select id="sideSelect" class="btn secondary" onchange="pickSide(this.value)" aria-label="Which side to print">
       <option value="both">Both sides</option>
       <option value="front">Front only</option>

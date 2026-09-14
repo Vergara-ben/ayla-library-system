@@ -114,6 +114,10 @@
                             <input id="f_end" type="date" name="end" value="{{ end_date }}" {% if is_snapshot %}disabled{% endif %} class="rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
                         </div>
                     </div>
+                    <div class="space-y-1.5">
+                        <label for="f_filename" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">File name</label>
+                        <input id="f_filename" type="text" name="filename" maxlength="100" value="{{ request.GET.filename|default:'' }}" placeholder="{{ selected_type }}_report" title="Used for Export Excel and Download PDF. Leave blank for the default name." class="rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                    </div>
                     <div class="flex items-center gap-2">
                         {# Tells the view this was an explicit request, so a bare visit to the page builds nothing. #}
                         <input type="hidden" name="generate" value="1">

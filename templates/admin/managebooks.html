@@ -263,6 +263,11 @@
                         </div>
                     </div>
 
+                    <div id="selectMatchingBar" class="hidden px-5 py-2.5 border-b border-slate-800/60 bg-cyan-500/[0.06] flex flex-wrap items-center justify-center gap-2 text-[11px] text-slate-300">
+                        <span id="selectMatchingText"></span>
+                        <button type="button" id="selectMatchingBtn" class="font-bold text-cyan-400 hover:text-cyan-300 underline underline-offset-2 disabled:opacity-50"></button>
+                    </div>
+
                     <div class="overflow-x-auto">
                     <table class="w-full text-left border-collapse">
                         <thead>
@@ -620,7 +625,6 @@
                 <button type="button" id="importCloseBtn" onclick="closeImportResult()" class="w-full sm:w-auto justify-center px-4 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:text-slate-100 hover:bg-slate-800/40 font-semibold text-[11px] min-w-[92px]">Done</button>
                 <button type="button" id="importConfirmBtn" onclick="confirmImport(false)" class="hidden w-full sm:w-auto justify-center bg-emerald-700 hover:bg-emerald-600 text-white font-bold px-4 py-2.5 rounded-lg items-center gap-2 text-[11px]"><i class="fa-solid fa-check text-xs"></i> Confirm import</button>
                 <button type="button" id="importConfirmLabelsBtn" onclick="confirmImport(true)" class="hidden w-full sm:w-auto justify-center bg-amber-700 hover:bg-amber-600 text-white font-bold px-4 py-2.5 rounded-lg items-center gap-2 text-[11px]"><i class="fa-solid fa-print text-xs"></i> Confirm and print labels</button>
-                <button type="button" id="importLabelsBtn" onclick="printImportedLabels()" class="hidden w-full sm:w-auto justify-center bg-amber-700 hover:bg-amber-600 text-white font-bold px-4 py-2.5 rounded-lg items-center gap-2 text-[11px]"><i class="fa-solid fa-print text-xs"></i> <span id="importLabelsText">Print QR Labels</span></button>
             </div>
         </div>
     </div>
@@ -714,6 +718,13 @@
                     <input type="number" id="labelSkip" value="0" min="0" step="1"
                            class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
                     <p class="text-[10px] text-slate-500">For feeding a part-used sheet back through the printer.</p>
+                </div>
+
+                <div class="space-y-1.5">
+                    <label for="labelFileName" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">File name</label>
+                    <input type="text" id="labelFileName" maxlength="100" placeholder="AYLA-QR-labels"
+                           class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                    <p class="text-[10px] text-slate-500">Leave blank for the default name. .pdf is added for you.</p>
                 </div>
 
                 <div class="rounded-lg border border-amber-900/50 bg-amber-950/20 px-3 py-2.5">
@@ -1333,18 +1344,67 @@
             catch (e) { /* site data refused: the selection still works here, it just will not survive changing page. */ }
         }
 
+        // Selecting every book that matches the filters, not just this page.
+        const MATCH_COUNT = {{ paginator.count|default:0 }};
+        const MATCH_QS = "{{ querystring|escapejs }}";
+        const MATCH_KEY = 'ayla.labelSelection.matching';
+
+        function matchedAll() {
+            try { return sessionStorage.getItem(MATCH_KEY) === MATCH_QS; } catch (e) { return false; }
+        }
+        function setMatchedAll(on) {
+            try {
+                if (on) sessionStorage.setItem(MATCH_KEY, MATCH_QS);
+                else sessionStorage.removeItem(MATCH_KEY);
+            } catch (e) { /* storage refused */ }
+        }
+
         window.onBookTick = function () {
             const set = chosen();
+            let anyOff = false;
             document.querySelectorAll('.book-tick').forEach(function (cb) {
-                if (cb.checked) set.add(Number(cb.value)); else set.delete(Number(cb.value));
+                if (cb.checked) set.add(Number(cb.value));
+                else { set.delete(Number(cb.value)); anyOff = true; }
             });
+            if (anyOff) setMatchedAll(false);
             remember(set);
             paintSelection(set);
         };
 
         window.toggleAllBooks = function (master) {
+            if (!master.checked && matchedAll()) { window.clearBookSelection(); return; }
             document.querySelectorAll('.book-tick').forEach(function (cb) { cb.checked = master.checked; });
             window.onBookTick();
+        };
+
+        window.selectAllMatching = async function () {
+            const btn = document.getElementById('selectMatchingBtn');
+            if (btn) { btn.disabled = true; btn.textContent = 'Selecting...'; }
+            try {
+                const p = new URLSearchParams(MATCH_QS);
+                p.set('ids', 'all');
+                const res = await fetch(location.pathname + '?' + p.toString(),
+                                        { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                const data = await res.json();
+                const set = chosen();
+                (data.ids || []).forEach(function (id) { set.add(Number(id)); });
+                remember(set);
+                setMatchedAll(true);
+                document.querySelectorAll('.book-tick').forEach(function (cb) { cb.checked = true; });
+                paintSelection(set);
+            } catch (e) {
+                paintSelection(chosen());
+                if (window.AylaDialog) AylaDialog.toast('Could not select all matching books. Please try again.', 'error');
+                else alert('Could not select all matching books. Please try again.');
+            }
+        };
+
+        window.clearBookSelection = function () {
+            remember(new Set());
+            setMatchedAll(false);
+            document.querySelectorAll('.book-tick').forEach(function (cb) { cb.checked = false; });
+            paintSelection(chosen());
         };
 
         function paintSelection(set) {
@@ -1359,11 +1419,32 @@
             if (delLab) delLab.textContent = n ? ('Delete (' + n + ')') : 'Delete';
 
             const ticks = [...document.querySelectorAll('.book-tick')];
+            const on = ticks.filter(function (cb) { return cb.checked; }).length;
+            const allOnPage = ticks.length > 0 && on === ticks.length;
             const master = document.getElementById('selectAllBooks');
             if (master) {
-                const on = ticks.filter(function (cb) { return cb.checked; }).length;
-                master.checked = ticks.length > 0 && on === ticks.length;
+                master.checked = allOnPage;
                 master.indeterminate = on > 0 && on < ticks.length;
+            }
+
+            // Offer the rest of the matching books once the whole page is ticked.
+            const bar = document.getElementById('selectMatchingBar');
+            const text = document.getElementById('selectMatchingText');
+            const btn = document.getElementById('selectMatchingBtn');
+            if (bar && text && btn) {
+                const everything = allOnPage && matchedAll() && n >= MATCH_COUNT;
+                const offer = allOnPage && MATCH_COUNT > ticks.length;
+                bar.classList.toggle('hidden', !(everything || offer));
+                btn.disabled = false;
+                if (everything) {
+                    text.textContent = 'All ' + MATCH_COUNT + ' matching books are selected.';
+                    btn.textContent = 'Clear selection';
+                    btn.onclick = window.clearBookSelection;
+                } else {
+                    text.textContent = 'All ' + ticks.length + ' books on this page are selected.';
+                    btn.textContent = 'Select all ' + MATCH_COUNT + ' matching books';
+                    btn.onclick = window.selectAllMatching;
+                }
             }
         }
 
@@ -1545,6 +1626,7 @@
                 show_author: document.getElementById('labelShowAuthor').checked ? '1' : '0',
                 show_location: document.getElementById('labelShowLocation').checked ? '1' : '0',
                 cut_guides: document.getElementById('labelCutGuides').checked ? '1' : '0',
+                filename: (document.getElementById('labelFileName') || {}).value || '',
             });
             // Fetched, then handed to the browser as a file, not navigated to.
             const btn = document.getElementById('labelDownloadBtn');
@@ -1820,11 +1902,9 @@
         let printAfterImport = false;
         // Import summary to show after the label sheet.
         let importSummaryAfterLabels = null;
-        // Last import result.
-        let lastImportData = null;
 
         function showButtons(ids, closeText) {
-            ['importConfirmBtn', 'importConfirmLabelsBtn', 'importLabelsBtn'].forEach(
+            ['importConfirmBtn', 'importConfirmLabelsBtn'].forEach(
                 function (id) {
                     const b = document.getElementById(id);
                     if (ids.indexOf(id) >= 0) {
@@ -1982,16 +2062,7 @@
                 return;
             }
 
-            if (importedIds.length) {
-                document.getElementById('importLabelsText').textContent =
-                    'Print QR Labels (' + importedIds.length + ')';
-                showButtons(['importLabelsBtn'], 'Done');
-            } else {
-                showButtons([], 'Done');
-            }
-
-            // Keep the result for later.
-            lastImportData = data;
+            showButtons([], 'Done');
 
             // Go straight to the label sheet.
             if (printAfterImport && importedIds.length) {
@@ -2020,13 +2091,6 @@
             if (pendingImportFile) { pendingImportFile = null; return; }
             // Only now, so the summary is not swept away before it is read.
             window.location.reload();
-        };
-
-        window.printImportedLabels = function () {
-            // Closing the label sheet finishes the import.
-            importSummaryAfterLabels = lastImportData;
-            document.getElementById('importResultModal').classList.add('hidden');
-            window.printLabelsForBooks(importedIds);
         };
     })();
     </script>

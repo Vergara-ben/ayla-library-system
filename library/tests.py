@@ -118,6 +118,68 @@ class AuthGuardTests(TestCase):
                 self.assertEqual(client.get('/patron-id/' + probe).status_code, 404)
 
 
+class PatronCredentialStorageTests(TestCase):
+    """Uploaded IDs are kept in the database, not on the disk."""
+
+    PNG = bytes([137, 80, 78, 71, 13, 10, 26, 10]) + b'0' * 80
+    EMAIL = 'id.check@example.invalid'
+
+    def _register(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        Client().post('/patron/register/', {
+            'action': 'register', 'first_name': 'Ana', 'last_name': 'Cruz',
+            'email': self.EMAIL, 'password': 'SmokeTest123',
+            'confirm_password': 'SmokeTest123', 'patron_type': 'Parent',
+            'contact_number': '09171234567', 'address': 'Sala, Cabuyao',
+            'credential_document': SimpleUploadedFile('id.png', self.PNG, content_type='image/png'),
+        })
+        return Patron.objects.get(email=self.EMAIL)
+
+    def test_registration_saves_the_id_in_the_database(self):
+        p = self._register()
+        self.assertEqual(bytes(p.credential_file.data), self.PNG)
+        self.assertEqual(p.credential_filename, p.credential_file.name)
+
+    def test_staff_can_open_it(self):
+        p = self._register()
+        r = _signed_in(_admin(modules='patrons')).get('/patron-id/' + p.credential_filename)
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r['Content-Type'], 'image/png')
+        self.assertEqual(r.content, self.PNG)
+
+    def test_rejecting_the_application_removes_it(self):
+        from .models import PatronCredential
+        p = self._register()
+        _signed_in(_admin(modules='patrons')).post('/admin-portal/reject-patron/%d/' % p.patron_id)
+        self.assertFalse(Patron.objects.filter(email=self.EMAIL).exists())
+        self.assertFalse(PatronCredential.objects.exists())
+
+
+class HostingEndpointTests(TestCase):
+    """The health check and the daily task link used on Render."""
+
+    def test_health_check(self):
+        r = Client().get('/healthz/')
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.content, b'ok')
+
+    def test_daily_task_refuses_a_missing_or_wrong_token(self):
+        with self.settings(DAILY_TASK_TOKEN='s3cret-token'):
+            self.assertEqual(Client().get('/tasks/daily/').status_code, 403)
+            self.assertEqual(Client().get('/tasks/daily/', {'token': 'wrong'}).status_code, 403)
+
+    def test_daily_task_is_off_when_no_token_is_set(self):
+        with self.settings(DAILY_TASK_TOKEN=''):
+            self.assertEqual(Client().get('/tasks/daily/', {'token': ''}).status_code, 403)
+
+    def test_daily_task_runs_with_the_token(self):
+        with self.settings(DAILY_TASK_TOKEN='s3cret-token'):
+            r = Client().post('/tasks/daily/', HTTP_X_TASK_TOKEN='s3cret-token')
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.json()['ok'])
+        self.assertIn('Daily maintenance complete', r.json()['output'])
+
+
 class LoginSecurityTests(TestCase):
     """Throttling, session rotation, and the absence of an enumeration oracle."""
 
@@ -572,6 +634,53 @@ class CrossFloorRoutingTests(TestCase):
         self.assertTrue(data['instruction'].startswith('Take the lift at West Lift'))
 
 
+class DownloadFileNameTests(TestCase):
+    """Every print or download lets the user name the file."""
+
+    def setUp(self):
+        self.client = _signed_in(_admin(modules='books'))
+
+    def test_report_pdf_and_excel_use_the_typed_name(self):
+        base = {'type': 'transactions', 'start': '2026-09-01', 'end': '2026-09-14'}
+        r = self.client.get('/admin-portal/reports/pdf/', dict(base, filename='September loans'))
+        self.assertEqual(r['Content-Disposition'], 'attachment; filename="September loans.pdf"')
+        r = self.client.get('/admin-portal/reports/excel/', dict(base, filename='September loans.xlsx'))
+        self.assertEqual(r['Content-Disposition'], 'attachment; filename="September loans.xlsx"')
+
+    def test_report_without_a_name_keeps_the_default(self):
+        r = self.client.get('/admin-portal/reports/pdf/',
+                            {'type': 'transactions', 'start': '2026-09-01', 'end': '2026-09-14'})
+        self.assertEqual(r['Content-Disposition'],
+                         'attachment; filename="transactions_report_2026-09-01_2026-09-14.pdf"')
+
+    def test_pages_show_the_file_name_field(self):
+        self.assertContains(self.client.get('/admin-portal/reports/'), 'name="filename"')
+        self.assertContains(self.client.get('/admin-portal/management/'), 'id="labelFileName"')
+
+
+class SelectAllMatchingBooksTests(TestCase):
+    """Select all reaches every book that matches the filters, not one page."""
+
+    def setUp(self):
+        self.client = _signed_in(_admin(modules='books'))
+        self.fiction = [
+            Book.objects.create(title='Fiction %02d' % i, author='A. Writer', genre='Fiction',
+                                qr_code=str(uuid4()), status='Available')
+            for i in range(20)
+        ]
+        Book.objects.create(title='History', author='B. Writer', genre='History',
+                            qr_code=str(uuid4()), status='Available')
+
+    def test_returns_every_matching_id_across_pages(self):
+        r = self.client.get('/admin-portal/management/', {'genre': 'Fiction', 'ids': 'all'})
+        self.assertEqual(sorted(r.json()['ids']), sorted(b.book_id for b in self.fiction))
+
+    def test_page_offers_select_all_matching(self):
+        r = self.client.get('/admin-portal/management/', {'genre': 'Fiction'})
+        self.assertContains(r, 'id="selectMatchingBar"')
+        self.assertContains(r, 'const MATCH_COUNT = 20;')
+
+
 class QRLabelSheetTests(TestCase):
     """The printable QR label sheet."""
 
@@ -597,6 +706,18 @@ class QRLabelSheetTests(TestCase):
         self.assertEqual(r['Content-Type'], 'application/pdf')
         self.assertIn('attachment', r['Content-Disposition'])
         self.assertTrue(r.content.startswith(b'%PDF'))
+
+    def test_sheet_uses_the_typed_file_name(self):
+        r = self._sheet([b.book_id for b in self.copies], filename='Shelf A labels')
+        self.assertEqual(r['Content-Disposition'], 'attachment; filename="Shelf A labels.pdf"')
+
+    def test_blank_file_name_keeps_the_default(self):
+        r = self._sheet([b.book_id for b in self.copies], filename='  ')
+        self.assertEqual(r['Content-Disposition'], 'attachment; filename="AYLA-QR-labels-3-books.pdf"')
+
+    def test_file_name_is_cleaned(self):
+        r = self._sheet([b.book_id for b in self.copies], filename='../bad"name<>.pdf')
+        self.assertEqual(r['Content-Disposition'], 'attachment; filename="badname.pdf"')
 
     def test_every_copy_gets_its_own_code(self):
         """Three copies of one title are three different stickers."""
@@ -4544,7 +4665,7 @@ class ExportLibraryTests(TestCase):
         output = self._export()
         self.assertIn('Book', output)
         self.assertIn('Not included', output)
-        self.assertIn('media/credentials', output)
+        self.assertIn('uploaded IDs', output)
 
     def test_it_refuses_a_directory_that_does_not_exist(self):
         from django.core.management import call_command

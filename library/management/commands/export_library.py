@@ -77,6 +77,5 @@ class Command(BaseCommand):
         self.stdout.write('  python manage.py loaddata %s' % os.path.basename(path))
         self.stdout.write('')
         self.stdout.write(self.style.WARNING(
-            'Patron ID photographs are NOT in this file. They live in '
-            'media/credentials/ and must travel separately -- never through '
-            'the repository.'))
+            'This file holds patron details and uploaded IDs. '
+            'Keep it private and never commit it.'))

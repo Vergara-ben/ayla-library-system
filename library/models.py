@@ -864,6 +864,22 @@ class Patron(models.Model):
         return self.fullname
 
 
+# Patron ID uploads, stored in the database so they survive a host that wipes its disk.
+class PatronCredential(models.Model):
+    patron = models.OneToOneField(Patron, on_delete=models.CASCADE, related_name='credential_file')
+    # Same name as the end of Patron.credential_document.
+    name = models.CharField(max_length=255, unique=True)
+    content_type = models.CharField(max_length=100)
+    data = models.BinaryField()
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'PatronCredential'
+
+    def __str__(self):
+        return self.name
+
+
 # Transactions
 class Transaction(models.Model):
 
