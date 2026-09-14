@@ -28,7 +28,7 @@
             main { padding: 1rem; }
         }
 
-        /* ── Tree (IDE project explorer) ── */
+        /* Tree */
         .tree { font-size: 13px; }
         /* Drawn bottom board at the bottom, the way the bay stands. */
         .elev { display: flex; flex-direction: column-reverse; gap: 3px; }
@@ -46,7 +46,11 @@
             font-size: 10px; font-weight: 600; color: var(--text-muted);
             transition: all .12s;
         }
-        .elev-cell:hover { border-color: var(--text-muted); color: var(--text-primary); }
+        .elev-cell:hover {
+            border-color: var(--accent);
+            background: var(--tint-accent);
+            color: var(--text-primary);
+        }
         .elev-cell.on {
             border-color: var(--warning); color: var(--text-primary);
             background: rgba(245, 158, 11, .16);
@@ -56,14 +60,18 @@
 
         .bookrow { cursor: grab; }
         .bookrow.dragging { opacity: .4; }
-        /* A line where the book would land, rather than a highlight on what it
-           would land next to: a gap is the thing being chosen. */
+        /* Drop position line. */
         .bookrow.drop-before { box-shadow: inset 0 2px 0 0 var(--accent-cyan, #0891b2); }
         .bookrow.drop-after { box-shadow: inset 0 -2px 0 0 var(--accent-cyan, #0891b2); }
         .levelrow.drop-into { outline: 1px dashed var(--accent-cyan, #0891b2); outline-offset: -2px; }
 
         .trow { display: flex; align-items: center; gap: 8px; padding: 5px 10px; border-radius: 8px; }
-        .trow:hover { background: var(--bg-subtle); }
+        /* Hovered tree row, stronger than --bg-subtle. */
+        .trow { box-shadow: inset 0 0 0 0 transparent; transition: background-color .12s ease, box-shadow .12s ease; }
+        .trow:hover {
+            background: var(--tint-accent);
+            box-shadow: inset 3px 0 0 0 var(--accent);
+        }
         .chev { width: 14px; flex-shrink: 0; text-align: center; color: var(--text-muted); cursor: pointer; transition: transform .15s; font-size: 10px; }
         .chev.open { transform: rotate(90deg); }
         .chev.leaf { visibility: hidden; cursor: default; }
@@ -121,10 +129,7 @@
             </div>
 
             <!-- SHELF ELEVATION -->
-            <!-- A plan view says where a bay stands; it cannot say which board
-                 a book is on, because that is height. This is the bay seen
-                 from the front, which is the view somebody standing at it
-                 actually has. -->
+            <!-- Front view of the bay. -->
             <div id="elevationPanel" class="hidden rounded-xl border border-slate-800/80 shadow-2xl mb-4" style="background-color: var(--bg-card);">
                 <div class="p-4 border-b border-slate-800 flex items-center gap-2">
                     <i class="fa-solid fa-bars-staggered text-violet-600 text-xs"></i>
@@ -220,9 +225,7 @@
                     <label for="editName" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Name</label>
                     <input type="text" id="editName" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);">
                 </div>
-                <!-- Shelves only. Boards are otherwise added one dialog at a
-                     time, which for a five-level bay three bays wide is
-                     fifteen dialogs to say one thing. -->
+                <!-- Shelves only. -->
                 <div id="editGridFields" class="hidden space-y-2">
                     <div class="grid grid-cols-2 gap-3">
                         <div class="space-y-1.5">
@@ -242,9 +245,7 @@
                     </label>
                     <p id="editGridNote" class="text-[10px] text-slate-500"></p>
                 </div>
-                <!-- Which kind of board this is could be set when it was made
-                     and never afterwards, so a level recorded wrongly had to be
-                     deleted and remade, taking its books with it. -->
+                <!-- Level type. -->
                 <div id="editLevelKind" class="hidden space-y-2">
                     <label class="flex items-start gap-2 cursor-pointer">
                         <input type="checkbox" id="editIsTop" onchange="syncEditLevelKind()" class="accent-violet-600 w-3.5 h-3.5 mt-0.5">
@@ -373,7 +374,7 @@
             return '<span class="border px-2 py-0.5 rounded text-[10px] font-bold ' + (map[s] || map['Lost']) + '">' + esc(s) + '</span>';
         }
 
-        // ── Tree ──
+        // Tree
         function renderNode(node, depth) {
             const t = TYPE[node.type] || {};
             const isBook = node.type === 'book';
@@ -407,8 +408,7 @@
             const data = 'data-name="' + esc(node.name || '') + '" data-label="' + esc(node.category || '') + '" data-level="' + (node.level_number || '') + '"';
 
             let html = '<div class="tnode">';
-            // Books drag; a level accepts them. Everything else is inert, so a
-            // stray drag cannot rearrange rooms or shelves by accident.
+            // Books drag; a level accepts them.
             const drag = isBook ? ' draggable="true"' : '';
             html += '<div class="trow' + inactive + (isBook ? ' bookrow' : '')
                  + (node.type === 'shelflevel' ? ' levelrow' : '')
@@ -426,10 +426,7 @@
             return html;
         }
 
-        // Dragging a book: within its level to reorder it, onto another level
-        // to move it there. The order is sent as a whole list rather than as
-        // "book X now sits at 4", because a position only means anything
-        // relative to the others and two half-applied moves would contradict.
+        // Dragging a book: within its level to reorder it, onto another level to move it there.
         let dragBookId = null;
 
         function levelOf(row) {
@@ -456,8 +453,7 @@
                 });
         }
 
-        // The bay drawn from the front. Levels run bottom-up because that is
-        // how the physical thing is numbered and how somebody reads it.
+        // The bay drawn from the front.
         let elevationShelfId = null;
 
         window.hideElevation = function () {
@@ -474,9 +470,7 @@
             return (shelfRow && shelfRow.dataset.type === 'shelf') ? shelfNode : null;
         }
 
-        // Read off the tree rather than fetched: the tree already holds every
-        // level of every shelf, and a second source could disagree with what
-        // is on screen.
+        // Read levels from the tree.
         function levelsOfShelfNode(shelfNode) {
             const kids = shelfNode.querySelector(':scope > .tkids');
             if (!kids) return [];
@@ -493,6 +487,19 @@
                     };
                 });
         }
+
+        // Clicking a shelf shows the whole unit.
+        window.showElevationForShelf = function (shelfId) {
+            const row = document.querySelector(
+                '.trow[data-type="shelf"][data-id="' + shelfId + '"]');
+            const node = row && row.closest('.tnode');
+            const levels = node ? levelsOfShelfNode(node) : [];
+            if (!levels.length) { hideElevation(); return; }
+            const busiest = levels.slice().sort(function (a, b) {
+                return (parseInt(b.books, 10) || 0) - (parseInt(a.books, 10) || 0);
+            })[0];
+            showElevation(busiest.id);
+        };
 
         window.showElevation = function (levelId) {
             const shelfNode = shelfNodeFor(levelId);
@@ -528,7 +535,11 @@
                             + (books ? books + ' book' + (books === 1 ? '' : 's') : '\u2014')
                             + '</div>';
                     }).join('');
-                    return '<div class="elev-row"><span class="elev-rownum">Level ' + n + '</span>'
+                    // Board name without the bay.
+                    const boardName = (byLevel[n][0].name || ('Level ' + n))
+                        .replace(/,\s*Column\s*\d+$/i, '');
+                    return '<div class="elev-row"><span class="elev-rownum">'
+                         + esc(boardName) + '</span>'
                          + cells + '</div>';
                 }).join('') + '</div>';
 
@@ -538,6 +549,18 @@
                 : 'Click a board to highlight it.';
             document.getElementById('elevationPanel').classList.remove('hidden');
         };
+
+        // Delegated click handler.
+        function wireShelfClicks() {
+            const host = document.getElementById('treeBody') || document.getElementById('treeView');
+            if (!host || host.dataset.shelfClicks) return;
+            host.dataset.shelfClicks = '1';
+            host.addEventListener('click', function (e) {
+                if (e.target.closest('.chev, .tbtn, .sw, button, input, a')) return;
+                const row = e.target.closest('.trow[data-type="shelf"]');
+                if (row) showElevationForShelf(row.dataset.id);
+            });
+        }
 
         function wireTreeDragging() {
             const tree = document.getElementById('treeRoot');
@@ -630,9 +653,9 @@
             let html = '';
             d.tree.forEach(function (n) { html += renderNode(n, 0); });
             root.innerHTML = html;
-            // The listeners live on the container, not the rows, so they are
-            // wired once and survive every re-render of the tree beneath them.
+            // Listeners on the container.
             wireTreeDragging();
+            wireShelfClicks();
         }
 
         async function tToggle(cb, modelType, id) {
@@ -665,11 +688,7 @@
             if (r.success !== false) { closeModal('addModal'); loadTree(); } else alert(r.error || 'Failed to add');
         }
 
-        // What the shelf already has, counted off the tree that is on screen
-        // rather than fetched again: a second source could disagree with what
-        // the Administrator is looking at.
-        // A shelf top is not also its underside, so ticking one clears the
-        // other rather than letting a board claim to be both.
+        // Existing top and underneath levels.
         window.syncEditLevelKind = function () {
             const top = document.getElementById('editIsTop');
             const under = document.getElementById('editIsUnder');
@@ -693,8 +712,7 @@
                     const r = n.querySelector(':scope > .trow');
                     if (!r || r.dataset.type !== 'shelflevel') return;
                     total += 1;
-                    // A top or an underside is not one of the numbered boards,
-                    // so it must not inflate the level count in the box.
+                    // Don't count top or underneath as levels.
                     const what = r.dataset.name || '';
                     if (/^Top\b/.test(what)) { hasTop = true; return; }
                     if (/^Underneath\b/.test(what)) return;
@@ -716,8 +734,7 @@
                 show('editLevelKind');
                 document.getElementById('editLevelNum').value = row.getAttribute('data-level') || '';
                 document.getElementById('editLabel').value = row.getAttribute('data-label') || '';
-                // The label is the only place the tree records which kind of
-                // board this is: 'Top', 'Underneath', or a numbered level.
+                // Level type from its label.
                 const what = (row.getAttribute('data-name') || '');
                 document.getElementById('editIsTop').checked = /^Top\b/.test(what);
                 document.getElementById('editIsUnder').checked = /^Underneath\b/.test(what);
@@ -760,9 +777,7 @@
             const r = await post(cfg.edit, data);
             if (r.success === false) { alert(r.error || 'Failed to save'); return; }
 
-            // The grid is a second request because it is a different kind of
-            // change: renaming a shelf touches one row, and building its boards
-            // can create dozens. Only sent when the numbers actually moved.
+            // Save the grid only if it changed.
             let note = '';
             if (t.type === 'shelf') {
                 const levels = parseInt(val('editGridLevels'), 10);
@@ -791,8 +806,30 @@
             if (note) alert(note);
         }
 
+        // How many books sit under a node.
+        function countBooksUnder(type, id) {
+            const row = document.querySelector(
+                '.trow[data-type="' + type + '"][data-id="' + id + '"]');
+            const node = row && row.closest('.tnode');
+            return node ? node.querySelectorAll('.trow[data-type="book"]').length : 0;
+        }
+
         async function delNode(type, id) {
-            if (!await AylaDialog.confirm('Delete this ' + TYPE[type].word + ' and everything inside it?')) return;
+            const books = countBooksUnder(type, id);
+            const word = TYPE[type].word;
+
+            // "and everything inside it" was not true.
+            let question = 'Delete this ' + word + '?';
+            if (books) {
+                question += '\n\n' + books + ' book' + (books === 1 ? '' : 's')
+                    + ' will stay in the catalogue but lose their place on the '
+                    + 'shelf. You will find them under "Not shelved" in Manage '
+                    + 'Books, and they will have to be put somewhere again.';
+            } else {
+                question += ' It holds no books.';
+            }
+            if (!await AylaDialog.confirm(question)) return;
+
             const cfg = TYPE[type]; let data = {}; data[cfg.idField] = id;
             const r = await post(cfg.del, data);
             if (r.success !== false) { loadTree(); } else alert(r.error || 'Failed to delete');
@@ -812,7 +849,7 @@
                 + row('Year', d.publication_year) + row('Copies', d.copies);
         }
 
-        // ── Table ──
+        // Table
         async function loadFlat() {
             const d = await getJSON(U.flat);
             flatData = d.shelf_levels || [];
@@ -854,14 +891,12 @@
         document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { closeModal('addModal'); closeModal('editModal'); closeModal('bookModal'); closeModal('placementModal'); } });
         ['addModal', 'editModal', 'bookModal', 'placementModal'].forEach(function (id) {
             const el = document.getElementById(id);
-            // Guarded because this runs at the very end of the script: one
-            // absent modal threw here and took every listener registered after
-            // it with it, on a page that otherwise looked fine.
+            // Guard against a missing modal.
             if (!el) return;
             el.addEventListener('click', function (e) { if (e.target === el) closeModal(id); });
         });
 
-        // ── Add Books to a shelf level (cart-style picker) ──
+        // Add books to a shelf level
         var placeLevelId = null;
         var placeBooks = [];      // all fetched books
         var placeCartIds = [];    // selected book ids, in click order

@@ -1,0 +1,181 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en" data-module="patron">
+<head>
+<meta charset="UTF-8">
+<meta name="theme-color" content="#ffffff">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Live Position Setup — AYLA Library</title>
+<script src="{% static 'js/theme.js' %}"></script>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{% static 'css/theme.css' %}">
+{# Chrome blocks web pages from opening chrome:// addresses, so the flag is copied and pasted. #}
+<style>
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;padding-bottom:48px;}
+
+  .navbar{position:sticky;top:0;z-index:100;background:var(--nav-bg);backdrop-filter:blur(20px);border-bottom:1px solid var(--border);padding:14px 20px;display:flex;align-items:center;gap:12px;}
+  .back-btn{width:36px;height:36px;border-radius:10px;border:1px solid var(--border);background:var(--surface2);display:flex;align-items:center;justify-content:center;text-decoration:none;color:var(--text);}
+  .back-btn svg{width:16px;height:16px;}
+  .nav-title{font-family:'Syne',sans-serif;font-size:17px;font-weight:700;flex:1;}
+
+  .wrap{max-width:560px;margin:0 auto;padding:28px 20px 0;}
+  h1{font-family:'Syne',sans-serif;font-size:22px;font-weight:700;line-height:1.25;}
+  .lead{font-size:14px;color:var(--muted);line-height:1.6;margin-top:6px;}
+
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:12px;margin-top:20px;overflow:hidden;}
+  .card-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 18px;border-bottom:1px solid var(--border);}
+  .card-title{font-size:13px;font-weight:700;letter-spacing:.02em;}
+  .card-body{padding:6px 18px 14px;}
+
+  .badge{font-size:11px;font-weight:700;padding:4px 10px;border-radius:999px;white-space:nowrap;}
+  .badge.ok{background:var(--tint-success);color:var(--success);}
+  .badge.warn{background:var(--tint-warning);color:var(--warning);}
+  .badge.bad{background:var(--tint-danger);color:var(--danger);}
+
+  .check{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;font-size:14px;}
+  .check + .check{border-top:1px solid var(--border);}
+  .state{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:600;color:var(--muted);}
+  .state svg{width:16px;height:16px;}
+  .state.ok{color:var(--success);}
+  .state.bad{color:var(--danger);}
+
+  ol.steps{list-style:none;counter-reset:step;padding:8px 0 0;}
+  ol.steps li{counter-increment:step;position:relative;padding:6px 0 14px 36px;font-size:14px;line-height:1.55;}
+  ol.steps li::before{
+    content:counter(step);position:absolute;left:0;top:4px;width:24px;height:24px;border-radius:50%;
+    border:1px solid var(--border);color:var(--text);font-size:12px;font-weight:700;
+    display:flex;align-items:center;justify-content:center;
+  }
+  ol.steps li:last-child{padding-bottom:4px;}
+  .copy-row{display:flex;gap:8px;margin-top:8px;}
+  .flag-url{
+    flex:1;min-width:0;padding:9px 12px;border-radius:8px;background:var(--surface2);border:1px solid var(--border);
+    font-family:ui-monospace,Consolas,monospace;font-size:12px;line-height:1.5;word-break:break-all;
+  }
+  .copy-status{font-size:12px;color:var(--success);}
+  .copy-status:not(:empty){margin-top:6px;}
+  .note{font-size:13px;color:var(--muted);line-height:1.55;margin-top:14px;padding-top:12px;border-top:1px solid var(--border);}
+
+  .btn{
+    display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:40px;padding:0 16px;
+    border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);
+    font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;text-decoration:none;white-space:nowrap;
+  }
+  .btn:hover{border-color:var(--accent);color:var(--accent);}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent);}
+  .btn.primary:hover{background:var(--accent-strong);color:var(--on-accent);}
+  .actions{display:flex;gap:10px;margin-top:22px;}
+  .actions .btn{flex:1;}
+
+  @media (max-width:480px){
+    .wrap{padding-top:22px;}
+    h1{font-size:20px;}
+    .copy-row{flex-direction:column;}
+  }
+</style>
+<link rel="stylesheet" href="{% static 'css/patron.css' %}">
+<link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
+</head>
+<body>
+<nav class="navbar">
+  <a href="{% url 'patron_map' %}" class="back-btn" aria-label="Back to map">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+  </a>
+  <div class="nav-title">Live Position Setup</div>
+  <button type="button" class="theme-toggle" data-theme-toggle></button>
+</nav>
+
+<main class="wrap">
+  <h1>Enable live position</h1>
+  <p class="lead">Show your location on the library map. Available in Chrome on Android phones and computers.</p>
+
+  <section class="card" aria-labelledby="statusTitle">
+    <div class="card-head">
+      <span class="card-title" id="statusTitle">Browser status</span>
+      <span class="badge warn" id="statusBadge">Checking</span>
+    </div>
+    <div class="card-body">
+      <div class="check"><span>Secure connection</span><span class="state" id="chk-secure">—</span></div>
+      <div class="check"><span>Bluetooth support</span><span class="state" id="chk-bluetooth">—</span></div>
+      <div class="check"><span>Beacon scanning</span><span class="state" id="chk-scan">—</span></div>
+    </div>
+  </section>
+
+  <section class="card" aria-labelledby="stepsTitle">
+    <div class="card-head">
+      <span class="card-title" id="stepsTitle">Setup in Chrome</span>
+    </div>
+    <div class="card-body">
+      <ol class="steps">
+        <li>
+          Copy this address.
+          <div class="copy-row">
+            <div class="flag-url" id="flagUrl">{{ flag_url }}</div>
+            <button type="button" class="btn" onclick="copyFlag()">Copy</button>
+          </div>
+          <div class="copy-status" id="copyStatus" aria-live="polite"></div>
+        </li>
+        <li>Paste it into the Chrome address bar in a new tab.</li>
+        <li>Set <strong>Experimental Web Platform features</strong> to <strong>Enabled</strong>.</li>
+        <li>Tap <strong>Relaunch</strong>, then return to this page.</li>
+      </ol>
+      <p class="note">On Android, keep Bluetooth and Location on, and allow Chrome to find nearby devices. Live position is not available on iPhone or iPad.</p>
+    </div>
+  </section>
+
+  <div class="actions">
+    <button type="button" class="btn" onclick="runChecks()">Check again</button>
+    <a class="btn primary" href="{% url 'patron_map' %}">Open map</a>
+  </div>
+</main>
+
+<script>
+  const ICON_OK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>';
+  const ICON_BAD = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>';
+
+  function setState(id, ok, okText, badText) {
+    const el = document.getElementById(id);
+    el.className = 'state ' + (ok ? 'ok' : 'bad');
+    el.innerHTML = (ok ? ICON_OK : ICON_BAD) + (ok ? okText : badText);
+  }
+
+  function runChecks() {
+    const secure = !!window.isSecureContext;
+    const bluetooth = secure && 'bluetooth' in navigator;
+    const scan = bluetooth && !!navigator.bluetooth.requestLEScan;
+
+    setState('chk-secure', secure, 'Yes', 'No');
+    setState('chk-bluetooth', bluetooth, 'Supported', 'Not supported');
+    setState('chk-scan', scan, 'Enabled', 'Off');
+
+    const badge = document.getElementById('statusBadge');
+    if (scan) {
+      badge.className = 'badge ok'; badge.textContent = 'Ready';
+    } else if (secure && bluetooth) {
+      badge.className = 'badge warn'; badge.textContent = 'Setup required';
+    } else {
+      badge.className = 'badge bad'; badge.textContent = 'Not supported';
+    }
+  }
+
+  async function copyFlag() {
+    const text = document.getElementById('flagUrl').textContent.trim();
+    const status = document.getElementById('copyStatus');
+    try {
+      await navigator.clipboard.writeText(text);
+      status.textContent = 'Copied';
+    } catch (e) {
+      const range = document.createRange();
+      range.selectNodeContents(document.getElementById('flagUrl'));
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+      status.textContent = 'Selected — copy it manually';
+    }
+  }
+
+  runChecks();
+</script>
+</body>
+</html>

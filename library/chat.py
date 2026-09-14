@@ -1,15 +1,4 @@
-"""Ask a Librarian — the enquiry desk between patrons and library staff.
-
-Not instant messaging. Ayla has one computer and one librarian, who cannot sit
-in a live chat while also working the front desk, so this is shaped like a help
-desk: a patron asks a question, gets on with their day, and is emailed when
-somebody answers. The librarian works a queue of threads still waiting for a
-reply rather than watching for a notification.
-
-Both sides poll rather than hold a socket open — the deployment target has no
-WebSocket support, and a page that refreshes every few seconds is enough for a
-conversation measured in hours.
-"""
+"""Ask a Librarian messages between patrons and staff."""
 
 from datetime import timedelta
 
@@ -23,26 +12,18 @@ from .auth_utils import granted_module_required, patron_login_required
 from .emails import librarian_reply_email
 from .models import ChatMessage, Conversation, Patron, User
 
-# A patron reading the thread right now does not need an email about it, and a
-# librarian typing three short answers in a row should not send three.
+# Don't email a patron who is reading, or send repeats.
 ACTIVE_WINDOW = timedelta(minutes=2)
 NOTIFY_COOLDOWN = timedelta(minutes=10)
 
 MAX_MESSAGE_LENGTH = 2000
 
-# How fast a patron may send. Length was capped but rate was not, so a signed-in
-# account could post as fast as a script allows and fill the table with 2,000
-# character rows. Two limits rather than one: the interval stops a stuck key or
-# a double-submit, the burst cap stops a determined loop, and neither is tight
-# enough for a person typing real questions to notice.
+# How fast a patron may send.
 MIN_SEND_INTERVAL = timedelta(seconds=3)
 BURST_WINDOW = timedelta(minutes=10)
 BURST_LIMIT = 20
 
-# Presence is written on every poll, and the poll runs every 8 seconds for as
-# long as the page is open -- roughly 7.5 database writes a minute per reader,
-# whether or not anything changed. The freshness that matters is ACTIVE_WINDOW
-# (2 minutes), so re-stamping more often than this buys nothing.
+# Limit how often presence is saved.
 SEEN_WRITE_INTERVAL = timedelta(seconds=45)
 
 
@@ -70,7 +51,7 @@ def _thread_payload(conversation, for_staff):
     }
 
 
-# ─── patron side ──────────────────────────────────────────────────────────
+# Patron side
 
 @patron_login_required
 def patron_messages(request):
@@ -143,15 +124,10 @@ def patron_send_message(request):
         conversation = Conversation.objects.create(patron=patron, topic=topic)
 
     ChatMessage.objects.create(conversation=conversation, sender_type='Patron', body=body)
-    # Anything the patron says puts the thread back in the queue, including a
-    # follow-up on something staff thought they had finished.
+    # A patron message reopens the thread.
     conversation.status = 'Open'
     conversation.last_message_at = now
-    # Deliberately does not touch patron_last_seen_at. Sending a question and
-    # closing the tab is the normal thing to do, and treating "just sent" as
-    # "still watching" would swallow the email for a reply that arrives a
-    # minute later — the exact case the email exists for. Presence comes from
-    # the poll, which only runs while the page is genuinely open.
+    # Deliberately does not touch patron_last_seen_at.
     conversation.save(update_fields=['status', 'last_message_at'])
 
     return JsonResponse(_thread_payload(conversation, for_staff=False))
@@ -159,11 +135,7 @@ def patron_send_message(request):
 
 @patron_login_required
 def patron_poll_messages(request):
-    """Refresh the thread, and note that the patron is looking at it.
-
-    That last part is what stops a reply typed while they are reading from
-    also arriving as an email a second later.
-    """
+    """Refresh the thread, and note that the patron is looking at it."""
     patron = Patron.objects.filter(patron_id=request.session.get('patron_id')).first()
     if patron is None:
         return JsonResponse({'success': False, 'error': 'Please sign in again.'})
@@ -177,10 +149,7 @@ def patron_poll_messages(request):
         return JsonResponse({'success': True, 'conversation_id': None, 'messages': []})
 
     now = timezone.now()
-    # Only re-stamp when the existing mark has gone stale. ACTIVE_WINDOW is two
-    # minutes, so a stamp inside the last forty-five seconds already answers
-    # "is the patron watching?" and rewriting it every eight seconds is pure
-    # write amplification -- the kind that quietly eats a hosted CPU quota.
+    # Only re-stamp when the existing mark has gone stale.
     seen = conversation.patron_last_seen_at
     if seen is None or (now - seen) >= SEEN_WRITE_INTERVAL:
         conversation.patron_last_seen_at = now
@@ -193,19 +162,10 @@ def patron_poll_messages(request):
     return JsonResponse(_thread_payload(conversation, for_staff=False))
 
 
-# ─── library side ─────────────────────────────────────────────────────────
+# Library side
 
 def _patron_directory(query):
-    """Every patron the library can write to, with their thread state attached.
-
-    The list is of *people*, not of conversations, because the librarian also
-    needs to start one — telling somebody their reserved book has arrived is
-    the same job as answering a question, and a list of existing threads has
-    nowhere to do it from.
-
-    Counts are gathered separately rather than annotated across two joins,
-    where an unread tally and a conversation count inflate each other.
-    """
+    """Every patron the library can write to, with their thread state attached."""
     patrons = Patron.objects.exclude(account_status='Visitor')
     if query:
         patrons = patrons.filter(Q(fullname__icontains=query) | Q(email__icontains=query))
@@ -244,8 +204,7 @@ def _patron_directory(query):
         sender, body = latest_body.get(patron.patron_id, (None, ''))
         patron.preview = (('You: ' if sender == 'Staff' else '') + body) if body else ''
 
-    # Unanswered questions first, then whoever spoke most recently, then the
-    # rest of the directory — so the queue stays on top without a tab to find it.
+    # Unanswered first, then most recent.
     patrons.sort(key=lambda p: (
         0 if p.waiting else 1,
         0 if p.unread else 1,
@@ -319,8 +278,7 @@ def staff_reply(request):
                     .filter(conversation_id=raw_id).first() if raw_id.isdigit() else None)
 
     if conversation is None or conversation.status == 'Closed':
-        # Writing to somebody who has never asked anything — a held book, an
-        # overdue notice — opens the thread rather than refusing.
+        # Staff can start a new thread.
         raw_patron = (request.POST.get('patron_id') or '').strip()
         patron = (Patron.objects.filter(patron_id=int(raw_patron)).first()
                   if raw_patron.isdigit() else None)
@@ -336,8 +294,7 @@ def staff_reply(request):
                                staff=staff, body=body)
 
     now = timezone.now()
-    # Nothing is waiting on the library once it has spoken, whether that was an
-    # answer or the first word.
+    # Nothing pending after a staff reply.
     conversation.status = 'Answered'
     conversation.last_message_at = now
     conversation.save(update_fields=['status', 'last_message_at'])
@@ -347,12 +304,7 @@ def staff_reply(request):
 
 
 def _notify_patron(conversation, body, now):
-    """Email the patron that a reply is waiting, when that is actually useful.
-
-    Skipped while they have the thread open, since the reply is already on
-    their screen, and rate-limited so a librarian answering in three short
-    messages does not send three emails a minute apart.
-    """
+    """Email the patron that a reply is waiting, when that is actually useful."""
     patron = conversation.patron
     if not patron.email:
         return False
@@ -403,8 +355,6 @@ def staff_poll_messages(request):
         conversation = Conversation.objects.filter(conversation_id=int(raw_id)).first()
         if conversation is not None:
             # Checked before written, the same way patron_poll_messages does it.
-            # A thread sitting open with nothing new is the usual case, and it
-            # used to cost an UPDATE every few seconds for no change at all.
             unread = conversation.messages.filter(sender_type='Patron',
                                                   read_at__isnull=True)
             if unread.exists():

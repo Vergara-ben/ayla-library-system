@@ -7,207 +7,249 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>AYLA Library — Book Catalog</title>
 <script src="{% static 'js/theme.js' %}"></script>
-<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="{% static 'css/theme.css' %}">
+{# The patron catalogue. #}
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
-  body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;padding-bottom:80px;}
-  
+  body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;padding-bottom:90px;}
+
   .navbar{position:sticky;top:0;z-index:100;background:var(--nav-bg);backdrop-filter:blur(20px);border-bottom:1px solid var(--border);padding:14px 20px;display:flex;align-items:center;gap:12px;}
-  .back-btn{width:36px;height:36px;border-radius:10px;border:1px solid var(--border);background:var(--surface2);display:flex;align-items:center;justify-content:center;cursor:pointer;text-decoration:none;color:var(--text);font-size:16px;}
+  .back-btn{width:36px;height:36px;border-radius:10px;border:1px solid var(--border);background:var(--surface2);display:flex;align-items:center;justify-content:center;text-decoration:none;color:var(--text);font-size:16px;}
   .nav-title{font-family:'Syne',sans-serif;font-size:18px;font-weight:800;flex:1;}
 
-  .search-section{padding:20px 20px 0;max-width:900px;margin:0 auto;}
-  .search-wrap{position:relative;margin-bottom:16px;}
+  .wrap{max-width:900px;margin:0 auto;padding:20px 20px 0;}
+
+  /* Search */
+  .search-row{display:flex;gap:8px;}
+  .search-box{position:relative;flex:1;}
   .search-input{
-    width:100%;background:var(--surface);border:1px solid var(--border);
-    border-radius:14px;padding:15px 50px 15px 50px;
-    color:var(--text);font-family:'DM Sans',sans-serif;font-size:15px;
-    outline:none;transition:border-color 0.2s,box-shadow 0.2s;
+    width:100%;background:var(--surface);border:1px solid var(--border);border-radius:14px;
+    padding:14px 16px 14px 46px;color:var(--text);font-family:inherit;font-size:15px;outline:none;
+    transition:border-color .2s,box-shadow .2s;
   }
   .search-input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--tint-accent);}
-  .search-icon{position:absolute;left:16px;top:50%;transform:translateY(-50%);font-size:18px;color:var(--muted);}
-  .search-clear{position:absolute;right:16px;top:50%;transform:translateY(-50%);font-size:18px;color:var(--muted);cursor:pointer;display:none;}
-
-  .filters{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;margin-bottom:16px;scrollbar-width:none;}
-  .filters::-webkit-scrollbar{display:none;}
-  .chip{
-    flex-shrink:0;padding:7px 16px;border-radius:14px;
-    border:1px solid var(--border);background:var(--surface);
-    color:var(--muted);font-size:12px;font-weight:500;
-    cursor:pointer;transition:all 0.2s;white-space:nowrap;
+  .search-icon{position:absolute;left:16px;top:50%;transform:translateY(-50%);font-size:17px;color:var(--muted);pointer-events:none;}
+  .btn{
+    border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:14px;
+    padding:0 16px;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;
+    display:inline-flex;align-items:center;gap:8px;white-space:nowrap;text-decoration:none;
   }
-  .chip:hover,.chip.active{border-color:var(--accent);color:var(--accent);background:var(--tint-accent);}
+  .btn:hover{border-color:var(--accent);color:var(--accent);}
+  .btn-primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent);}
+  .btn-primary:hover{background:var(--accent-strong);color:var(--on-accent);}
+  .filter-count{
+    min-width:18px;height:18px;border-radius:9px;background:var(--accent);color:var(--on-accent);
+    font-size:10px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;padding:0 5px;
+  }
 
-  .results-header{display:flex;align-items:center;justify-content:space-between;padding:0 20px;max-width:900px;margin:0 auto 12px;}
+  /* Filters */
+  /* Filters: a row on desktop, a panel on phones. */
+  .filter-panel{
+    display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:12px;
+  }
+  .field label{display:block;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:5px;}
+  .field select{
+    width:100%;background:var(--surface);border:1px solid var(--border);border-radius:10px;
+    padding:10px 12px;color:var(--text);font-family:inherit;font-size:13px;outline:none;cursor:pointer;
+  }
+  .field select:focus{border-color:var(--accent);}
+  .filter-toggle{display:none;}
+
+  .active-row{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px;align-items:center;}
+  .active-chip{
+    display:inline-flex;align-items:center;gap:6px;padding:5px 6px 5px 11px;border-radius:12px;
+    background:var(--tint-accent);border:1px solid var(--accent-border, var(--accent));color:var(--accent);
+    font-size:12px;font-weight:600;text-decoration:none;
+  }
+  .active-chip span{width:18px;height:18px;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;font-size:11px;}
+  .active-chip:hover span{background:var(--accent);color:var(--on-accent);}
+  .clear-all{font-size:12px;color:var(--muted);text-decoration:underline;margin-left:4px;}
+
+  /* Results */
+  .results-header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:18px 0 12px;}
   .results-count{font-size:12px;color:var(--muted);}
-  .sort-wrap{position:relative;}
-  .sort-btn{font-size:12px;color:var(--muted);cursor:pointer;display:flex;align-items:center;gap:4px;}
-  .sort-btn:hover{color:var(--accent);}
-  .sort-menu{
-    display:none;position:absolute;right:0;top:calc(100% + 6px);z-index:50;
-    background:var(--surface);border:1px solid var(--border);border-radius:10px;
-    padding:6px;min-width:140px;box-shadow:0 8px 24px rgba(0,0,0,0.15);
-  }
-  .sort-menu.open{display:block;}
-  .sort-option{padding:8px 10px;border-radius:7px;font-size:12px;color:var(--text);cursor:pointer;white-space:nowrap;}
-  .sort-option:hover{background:var(--tint-accent);color:var(--accent);}
+  .sort-field{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);}
+  .sort-field select{background:transparent;border:none;color:var(--text);font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;outline:none;}
 
-  .book-list{max-width:900px;margin:0 auto;padding:0 20px;}
   .book-card{
-    background:var(--surface);border:1px solid var(--border);
-    border-radius:14px;padding:16px;
-    display:flex;gap:14px;cursor:pointer;
-    transition:all 0.2s;margin-bottom:10px;
-    text-decoration:none;color:var(--text);
-    animation:fadeUp 0.4s ease both;
+    background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:16px;
+    display:flex;gap:14px;margin-bottom:10px;text-decoration:none;color:var(--text);
+    transition:border-color .2s,transform .2s;
   }
-  .book-card:hover{border-color:var(--accent-border);transform:translateX(3px);}
-  .book-card:nth-child(1){animation-delay:0s;}
-  .book-card:nth-child(2){animation-delay:0.05s;}
-  .book-card:nth-child(3){animation-delay:0.1s;}
-  .book-card:nth-child(4){animation-delay:0.15s;}
-  .book-card:nth-child(5){animation-delay:0.2s;}
-
+  .book-card:hover{border-color:var(--accent-border, var(--accent));transform:translateX(3px);}
   .book-cover{
-    width:56px;height:74px;border-radius:8px;flex-shrink:0;
-    background:var(--cover-1);
-    display:flex;align-items:center;justify-content:center;
-    font-size:10px;font-weight:700;color:white;text-align:center;
-    line-height:1.3;padding:4px;font-family:'Syne',sans-serif;
-    border:none;
+    width:56px;height:74px;border-radius:8px;flex-shrink:0;display:flex;align-items:center;justify-content:center;
+    font-size:10px;font-weight:700;color:white;text-align:center;line-height:1.3;padding:4px;font-family:'Syne',sans-serif;
   }
-  .cover-a{background:var(--cover-1);}
-  .cover-b{background:var(--cover-2);}
-  .cover-c{background:var(--cover-3);}
-  .cover-d{background:var(--cover-4);}
-  .cover-e{background:var(--cover-5);}
-  .cover-f{background:var(--cover-6);}
-
-  .book-info{flex:1;}
-  .book-title-row{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:3px;}
+  .cover-a{background:var(--cover-1);} .cover-b{background:var(--cover-2);} .cover-c{background:var(--cover-3);}
+  .cover-d{background:var(--cover-4);} .cover-e{background:var(--cover-5);} .cover-f{background:var(--cover-6);}
+  .book-info{flex:1;min-width:0;}
+  .book-title-row{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:3px;}
   .book-title{font-family:'Syne',sans-serif;font-size:14px;font-weight:700;line-height:1.3;}
-  .avail-badge{flex-shrink:0;padding:3px 8px;border-radius:5px;font-size:10px;font-weight:700;}
-  .avail-green{background:var(--tint-accent);color:var(--accent);}
-  .avail-red{background:var(--tint-danger);color:var(--danger);}
-  .avail-gray{background:var(--surface2);color:var(--muted);}
-  .book-author{font-size:12px;color:var(--muted);margin-bottom:6px;}
-  .book-meta{display:flex;gap:10px;flex-wrap:wrap;}
-  .meta-tag{font-size:10px;padding:3px 8px;border-radius:5px;background:var(--surface2);border:1px solid var(--border);color:var(--muted);}
+  .avail{flex-shrink:0;padding:3px 8px;border-radius:6px;font-size:10px;font-weight:700;white-space:nowrap;}
+  .avail-in{background:var(--tint-success);color:var(--success);}
+  .avail-out{background:var(--tint-warning);color:var(--warning);}
+  .book-author{font-size:12px;color:var(--muted);margin-bottom:7px;}
+  .book-meta{display:flex;gap:6px;flex-wrap:wrap;}
+  .meta-tag{font-size:10px;padding:3px 8px;border-radius:6px;background:var(--surface2);border:1px solid var(--border);color:var(--muted);}
+  .meta-desk{background:var(--tint-info);border-color:transparent;color:var(--info);}
 
-  .empty{text-align:center;padding:60px 20px;color:var(--muted);}
-  .empty-icon{font-size:48px;margin-bottom:12px;}
+  .empty{text-align:center;padding:56px 20px;color:var(--muted);}
+  .empty-icon{font-size:44px;margin-bottom:10px;}
+  .empty p{margin-bottom:14px;}
 
   .bottom-nav{position:fixed;bottom:0;left:0;right:0;z-index:100;background:var(--nav-bg);backdrop-filter:blur(20px);border-top:1px solid var(--border);display:flex;padding:10px 0 calc(10px + env(safe-area-inset-bottom));}
-  .nav-item{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;cursor:pointer;transition:color 0.2s;color:var(--muted);text-decoration:none;}
-  .nav-item.active{color:var(--accent);}
-  .nav-item:hover{color:var(--accent);}
-  .nav-icon{font-size:20px;}.nav-label{font-size:10px;font-weight:500;}
+  .nav-item{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;color:var(--muted);text-decoration:none;}
+  .nav-item.active,.nav-item:hover{color:var(--accent);}
+  .nav-icon{font-size:20px;} .nav-label{font-size:10px;font-weight:500;}
 
-  @keyframes fadeUp{from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:translateY(0);}}
-
-  /* Mobile Responsive */
-  @media (max-width: 640px){
-    .search-section{padding:16px 16px 0;}
-    .search-input{padding:12px 44px 12px 44px;font-size:14px;}
-    .search-icon{left:14px;font-size:16px;}
-    .search-clear{right:14px;font-size:16px;}
-    .chip{padding:6px 14px;font-size:11px;}
-    .results-header{padding:0 16px;}
-    .book-list{padding:0 16px;}
-    .book-card{padding:14px;gap:12px;}
-    .book-cover{width:50px;height:66px;font-size:9px;padding:3px;}
-    .book-title{font-size:13px;}
-    .book-author{font-size:11px;}
-    .meta-tag{font-size:9px;padding:2px 6px;}
+  @media (max-width: 720px){
+    .filter-toggle{display:inline-flex;}
+    .filter-panel{grid-template-columns:1fr 1fr;display:none;padding:14px;border:1px solid var(--border);border-radius:14px;background:var(--surface);}
+    .filter-panel.open{display:grid;}
+    .filter-apply{grid-column:1 / -1;}
   }
-
+  @media (min-width: 721px){ .filter-apply{display:none;} }
   @media (max-width: 480px){
-    .navbar{padding:10px 14px;}
-    .nav-title{font-size:16px;}
-    .search-section{padding:14px 14px 0;}
-    .search-input{padding:11px 40px 11px 40px;font-size:13px;}
-    .book-card{padding:12px;}
+    .wrap{padding:14px 14px 0;}
+    .filter-panel{grid-template-columns:1fr;}
+    .book-card{padding:12px;gap:12px;}
     .book-cover{width:48px;height:64px;}
-    .book-title{font-size:12px;}
-    .book-author{font-size:10px;}
+    .book-title{font-size:13px;}
+    .search-input{font-size:14px;padding:12px 14px 12px 42px;}
   }
 </style>
-    <link rel="stylesheet" href="{% static 'css/patron.css' %}">
-    <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
-    <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
+<link rel="stylesheet" href="{% static 'css/patron.css' %}">
+<link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
+<link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
 </head>
 <body>
 <nav class="navbar">
-  {# A guest has no Home to go back to -- Home redirects here -- so the arrow #}
-  {# would be a loop. Shown only when there is somewhere to return to. #}
+  {# A guest has no Home to go back to, Home redirects here, so the arrow would be a loop. #}
   {% if patron_signed_in %}<a href="{% url 'patron_dashboard' %}" class="back-btn">←</a>{% endif %}
   <div class="nav-title">Book Catalog</div>
   <button type="button" class="theme-toggle" data-theme-toggle></button>
 </nav>
 
-<div class="search-section">
-  <form class="search-wrap" method="get" action="{% url 'patron_catalog' %}">
-    <span class="search-icon">🔍</span>
-    <input class="search-input" type="search" name="search" value="{{ search_query }}" placeholder="Search by title, author, ISBN..." id="searchInput" oninput="filterBooks(this.value)">
-    <span class="search-clear" id="clearBtn" onclick="clearSearch()">✕</span>
+<div class="wrap">
+  {# One form for search, filters and sort. #}
+  <form method="get" action="{% url 'patron_catalog' %}" id="catalogForm">
+    <div class="search-row">
+      <div class="search-box">
+        <span class="search-icon">🔍</span>
+        <input class="search-input" type="search" name="search" value="{{ search_query }}"
+               placeholder="Search title, author, ISBN or subject" aria-label="Search the catalogue">
+      </div>
+      <button type="button" class="btn filter-toggle" onclick="toggleFilters()" aria-controls="filterPanel">
+        Filters{% if filter_count %} <span class="filter-count">{{ filter_count }}</span>{% endif %}
+      </button>
+    </div>
+
+    <div class="filter-panel" id="filterPanel">
+      <div class="field">
+        <label for="f-genre">Subject</label>
+        <select id="f-genre" name="genre" data-autosubmit>
+          <option value="">All subjects</option>
+          {% for g in genres %}<option value="{{ g }}"{% if g == genre %} selected{% endif %}>{{ g }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label for="f-availability">Availability</label>
+        <select id="f-availability" name="availability" data-autosubmit>
+          <option value="">Any</option>
+          {% for value, label in availability_choices %}<option value="{{ value }}"{% if value == availability %} selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label for="f-shelf">Location</label>
+        <select id="f-shelf" name="shelf" data-autosubmit>
+          <option value="">Anywhere in the library</option>
+          {% for shelf_id, name in shelves %}<option value="{{ shelf_id }}"{% if shelf_id|stringformat:"s" == shelf %} selected{% endif %}>{{ name }}</option>{% endfor %}
+          {% if has_unshelved or shelf == 'none' %}<option value="none"{% if shelf == 'none' %} selected{% endif %}>Not yet shelved</option>{% endif %}
+        </select>
+      </div>
+      {% if materials %}
+      <div class="field">
+        <label for="f-material">Material</label>
+        <select id="f-material" name="material" data-autosubmit>
+          <option value="">All materials</option>
+          {% for value, label in materials %}<option value="{{ value }}"{% if value == material %} selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select>
+      </div>
+      {% endif %}
+      <input type="hidden" name="sort" value="{{ sort }}" id="f-sort-hidden">
+      <button type="submit" class="btn btn-primary filter-apply" style="justify-content:center;height:42px;">Show results</button>
+    </div>
   </form>
-  <div class="filters">
-    <div class="chip active" onclick="filterCat(this,'all')">All</div>
-    <div class="chip" onclick="filterCat(this,'cs')">Computer Science</div>
-    <div class="chip" onclick="filterCat(this,'math')">Mathematics</div>
-    <div class="chip" onclick="filterCat(this,'fiction')">Fiction</div>
-    <div class="chip" onclick="filterCat(this,'science')">Science</div>
-    <div class="chip" onclick="filterCat(this,'history')">History</div>
-    <div class="chip" onclick="filterCat(this,'available')">✅ Available</div>
+
+  {% if active_filters %}
+  <div class="active-row">
+    {% for f in active_filters %}
+      <a class="active-chip" href="{% url 'patron_catalog' %}{{ f.remove }}" title="Remove this filter">{{ f.label }} <span aria-hidden="true">✕</span></a>
+    {% endfor %}
+    <a class="clear-all" href="{% url 'patron_catalog' %}">Clear all</a>
+  </div>
+  {% endif %}
+
+  <div class="results-header">
+    <div class="results-count">
+      {% if paginator.count %}
+        Showing {{ page.start_index }}–{{ page.end_index }} of {{ paginator.count }} title{{ paginator.count|pluralize }}
+      {% else %}No titles{% endif %}
+    </div>
+    <label class="sort-field">Sort
+      <select id="f-sort" onchange="applySort(this.value)" aria-label="Sort results">
+        {% for value, label in sort_choices %}<option value="{{ value }}"{% if value == sort %} selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+    </label>
+  </div>
+
+  <div class="book-list">
+    {% for row in page %}
+    {% with book=row.book %}
+    {% if book %}
+    <a href="{% url 'patron_book_details' book.book_id %}" class="book-card">
+      <div class="book-cover {% cycle 'cover-a' 'cover-b' 'cover-c' 'cover-d' 'cover-e' 'cover-f' %}">{{ row.title|truncatechars:14 }}</div>
+      <div class="book-info">
+        <div class="book-title-row">
+          <div class="book-title">{{ row.title }}</div>
+          {# Show copies available. #}
+          {% if row.available %}
+            <div class="avail avail-in">{% if row.copies > 1 %}{{ row.available }} of {{ row.copies }} available{% else %}Available{% endif %}</div>
+          {% else %}
+            <div class="avail avail-out">{% if row.copies > 1 %}All {{ row.copies }} out{% else %}{{ book.get_status_display }}{% endif %}</div>
+          {% endif %}
+        </div>
+        <div class="book-author">{{ row.author|default:"Unknown author" }}{% if row.year %} · {{ row.year }}{% endif %}</div>
+        <div class="book-meta">
+          {% if row.genre_name %}<span class="meta-tag">{{ row.genre_name }}</span>{% endif %}
+          {% if book.shelf_level %}
+            <span class="meta-tag">📍 {% if book.shelf_level.shelf %}{{ book.shelf_level.shelf.name }} · {% endif %}{{ book.shelf_level.label }}</span>
+          {% else %}
+            {# Shown, not hidden. It is in the building; the desk can fetch it. #}
+            <span class="meta-tag meta-desk">Not yet shelved · ask at the desk</span>
+          {% endif %}
+        </div>
+      </div>
+    </a>
+    {% endif %}
+    {% endwith %}
+    {% empty %}
+    <div class="empty">
+      <div class="empty-icon">📚</div>
+      {% if active_filters %}
+        <p>No titles match {% if active_filters|length == 1 %}that filter{% else %}those filters{% endif %}.</p>
+        <a class="btn" style="height:40px;" href="{% url 'patron_catalog' %}">Clear filters</a>
+      {% else %}
+        <p>The catalogue is empty.</p>
+      {% endif %}
+    </div>
+    {% endfor %}
   </div>
 </div>
 
-<div class="results-header">
-  <div class="results-count" id="resCount">Showing {{ books|length }} book{{ books|length|pluralize }}</div>
-  <div class="sort-wrap">
-    <div class="sort-btn" id="sortBtn" onclick="toggleSortMenu()">Sort: <span id="sortLabel">Relevance</span> ▾</div>
-    <div class="sort-menu" id="sortMenu">
-      <div class="sort-option" onclick="applySort('relevance','Relevance')">Relevance</div>
-      <div class="sort-option" onclick="applySort('title','Title A–Z')">Title A–Z</div>
-      <div class="sort-option" onclick="applySort('author','Author A–Z')">Author A–Z</div>
-      <div class="sort-option" onclick="applySort('year','Newest First')">Newest First</div>
-    </div>
-  </div>
-</div>
-
-<div class="book-list" id="bookList">
-  {% for book in books %}
-  <a href="{% url 'patron_book_details' book.book_id %}" class="book-card"
-     data-orig-index="{{ forloop.counter0 }}" data-title="{{ book.title|default:'' }}"
-     data-author="{{ book.author|default:'' }}" data-year="{{ book.publication_year|default:0 }}"
-     data-genre="{{ book.genre|default:'' }}" data-status="{{ book.status }}">
-    <div class="book-cover {% cycle 'cover-a' 'cover-b' 'cover-c' 'cover-d' 'cover-e' 'cover-f' %}">{{ book.title|truncatechars:14 }}</div>
-    <div class="book-info">
-      <div class="book-title-row">
-        <div class="book-title">{{ book.title }}</div>
-        {% if book.status == 'Available' %}
-        <div class="avail-badge avail-green">Available</div>
-        {% elif book.status == 'Borrowed' or book.status == 'Overdue' or book.status == 'Lost' %}
-        <div class="avail-badge avail-red">{{ book.status }}</div>
-        {% else %}
-        <div class="avail-badge avail-gray">{{ book.status }}</div>
-        {% endif %}
-      </div>
-      <div class="book-author">{{ book.author }}{% if book.publication_year %} · {{ book.publication_year }}{% endif %}</div>
-      <div class="book-meta">
-        {% if book.genre %}<span class="meta-tag">{{ book.genre }}</span>{% endif %}
-        {% if book.shelf_level %}<span class="meta-tag">📍 {% if book.shelf_level.shelf %}{{ book.shelf_level.shelf.name }} · {% endif %}{{ book.shelf_level.category|default:book.shelf_level.level_number }}</span>{% endif %}
-      </div>
-    </div>
-  </a>
-  {% empty %}
-  <div class="empty">
-    <div class="empty-icon">📚</div>
-    <div>No books found.</div>
-  </div>
-  {% endfor %}
-</div>
+{% include 'patron/_pager.html' with page=page qs=querystring %}
 
 <nav class="bottom-nav">
   <a href="{% url 'patron_dashboard' %}" class="nav-item"><div class="nav-icon">🏠</div><div class="nav-label">Home</div></a>
@@ -222,61 +264,22 @@
 </nav>
 
 <script>
-let currentCategory='all';
-const CATEGORY_KEYWORDS={cs:'computer',math:'math',fiction:'fiction',science:'science',history:'history'};
+  const form = document.getElementById('catalogForm');
+  const wide = window.matchMedia('(min-width: 721px)');
 
-// Search text and category chip both narrow the same list, so both must be
-// checked together — applying one used to silently wipe out the other.
-function applyFilters(){
-  const q=(document.getElementById('searchInput').value||'').toLowerCase();
-  const cards=document.querySelectorAll('.book-card');
-  let count=0;
-  cards.forEach(c=>{
-    const matchesSearch=!q||c.textContent.toLowerCase().includes(q);
-    const genre=(c.dataset.genre||'').toLowerCase();
-    const status=c.dataset.status||'';
-    let matchesCat=true;
-    if(currentCategory==='available') matchesCat=status==='Available';
-    else if(currentCategory!=='all') matchesCat=genre.includes(CATEGORY_KEYWORDS[currentCategory]||currentCategory);
-    const show=matchesSearch&&matchesCat;
-    c.style.display=show?'flex':'none';
-    if(show)count++;
+  // A select changing is the whole request on a wide screen.
+  form.querySelectorAll('[data-autosubmit]').forEach(function (el) {
+    el.addEventListener('change', function () { if (wide.matches) form.submit(); });
   });
-  document.getElementById('resCount').textContent=`Showing ${count} book${count===1?'':'s'}`;
-  document.getElementById('clearBtn').style.display=q?'block':'none';
-}
-function filterBooks(q){
-  applyFilters();
-}
-function clearSearch(){
-  document.getElementById('searchInput').value='';
-  applyFilters();
-}
-function filterCat(el,cat){
-  document.querySelectorAll('.chip').forEach(c=>c.classList.remove('active'));
-  el.classList.add('active');
-  currentCategory=cat;
-  applyFilters();
-}
 
-function toggleSortMenu(){
-  document.getElementById('sortMenu').classList.toggle('open');
-}
-document.addEventListener('click',function(e){
-  const wrap=document.querySelector('.sort-wrap');
-  if(wrap&&!wrap.contains(e.target)) document.getElementById('sortMenu').classList.remove('open');
-});
-function applySort(key,label){
-  document.getElementById('sortLabel').textContent=label;
-  document.getElementById('sortMenu').classList.remove('open');
-  const list=document.getElementById('bookList');
-  const cards=Array.from(list.querySelectorAll('.book-card'));
-  if(key==='title') cards.sort((a,b)=>a.dataset.title.localeCompare(b.dataset.title));
-  else if(key==='author') cards.sort((a,b)=>a.dataset.author.localeCompare(b.dataset.author));
-  else if(key==='year') cards.sort((a,b)=>(parseInt(b.dataset.year)||0)-(parseInt(a.dataset.year)||0));
-  else cards.sort((a,b)=>(parseInt(a.dataset.origIndex)||0)-(parseInt(b.dataset.origIndex)||0));
-  cards.forEach(c=>list.appendChild(c));
-}
+  function applySort(value) {
+    document.getElementById('f-sort-hidden').value = value;
+    form.submit();
+  }
+
+  function toggleFilters() {
+    document.getElementById('filterPanel').classList.toggle('open');
+  }
 </script>
 {% if not patron_signed_in %}{% include 'patron/_guestprompt.html' %}{% endif %}
 </body>

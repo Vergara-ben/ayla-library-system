@@ -1,0 +1,371 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en" data-module="admin">
+<head>
+    <meta charset="UTF-8">
+    <meta name="theme-color" content="#ffffff">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ayla Admin Panel - Analytics</title>
+    <script src="{% static 'js/theme.js' %}"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="{% static 'js/tailwind-theme.js' %}"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha384-iw3OoTErCYJJB9mCa8LNS2hbsQ7M3C0EpIsO/H5+EGAkPGc6rk+V8i04oW/K5xq0" crossorigin="anonymous" referrerpolicy="no-referrer">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'css/theme.css' %}">
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: var(--bg-main); color: var(--text-primary); }
+        .logo-text { font-family: 'Rowdies', sans-serif; }
+        .mobile-menu-btn { display: none; align-items: center; justify-content: center; width: 2.5rem; height: 2.5rem; border-radius: 0.5rem; background: var(--bg-card); border: 1px solid var(--border-color); color: var(--text-primary); cursor: pointer; margin-right: 0.75rem; }
+        @media (max-width: 1024px) {
+            aside { position: fixed; left: -100%; top: 0; bottom: 0; z-index: 60; transition: left .2s; }
+            aside.open { left: 0; }
+            .mobile-menu-btn { display: flex; }
+        }
+        /* Two charts abreast on a wide screen, one below 1280px. */
+        .chart-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1.5rem; }
+        @media (min-width: 1280px) {
+            .chart-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        }
+        .figures { max-height: 190px; overflow-y: auto; }
+        .figures td { padding: 3px 0; }
+
+        /* Headline figures. */
+        .headline { display: grid; gap: 1rem; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        @media (min-width: 768px)  { .headline { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+        @media (min-width: 1280px) { .headline { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
+        .figure-tile {
+            padding: 1rem 1.1rem; border-radius: .75rem;
+            border: 1px solid rgb(30 41 59 / .8); background-color: var(--bg-card);
+        }
+        .figure-value { font-size: 1.5rem; line-height: 1.15; font-weight: 700; margin-top: .4rem; }
+        .figure-value.neutral { color: var(--text-primary); }
+        .figure-value.good    { color: #34d399; }
+        .figure-value.warn    { color: #fbbf24; }
+        .figure-value.bad     { color: #fb7185; }
+        /* Which period a figure belongs to, said on the figure. */
+        .figure-scope {
+            font-size: 9px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+            border-radius: 999px; padding: 1px 6px; border: 1px solid rgb(71 85 105 / .5);
+            color: var(--text-muted);
+        }
+
+        /* Tabs. */
+        .tabs { display: flex; gap: .25rem; padding: .3rem; border-radius: .75rem;
+                border: 1px solid rgb(30 41 59 / .8); background-color: var(--bg-card); }
+        .tab {
+            flex: 1 1 0; display: flex; align-items: center; justify-content: center; gap: .5rem;
+            padding: .6rem .9rem; border-radius: .5rem; cursor: pointer;
+            font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+            color: var(--text-muted); background: transparent; border: 0;
+            transition: background-color .15s, color .15s;
+        }
+        .tab:hover { color: var(--text-primary); background-color: rgb(51 65 85 / .35); }
+        .tab[aria-selected="true"] { color: #fff; background-color: #0e7490; }
+        .panel { display: none; }
+        .panel.on { display: block; }
+
+        /* The period form greys out on the tab it does not govern rather than disappearing. */
+        .period-form.inert { opacity: .45; }
+        .period-note { display: none; }
+        .period-form.inert .period-note { display: block; }
+        .period-form.inert .period-controls { pointer-events: none; }
+    </style>
+    <link rel="stylesheet" href="{% static 'css/admin-enhance.css' %}">
+    <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
+    <script src="{% static 'js/ayla-dialog.js' %}"></script>
+</head>
+<body class="flex h-screen overflow-hidden">
+<a href="#main-content" class="skip-link">Skip to main content</a>
+    {% include 'admin/_sidebar.html' with active='analytics' %}
+    <div class="flex-1 flex flex-col overflow-hidden">
+        <header class="h-16 flex-shrink-0 flex items-center justify-between px-8" style="background-color: var(--bg-main);">
+            <div class="flex items-center">
+                <button class="mobile-menu-btn" onclick="document.querySelector('aside').classList.toggle('open')" aria-label="Toggle navigation menu">
+                    <i class="fa-solid fa-bars"></i>
+                </button>
+                <h2 class="logo-text text-lg tracking-wider text-slate-200 uppercase">Analytics</h2>
+            </div>
+            <div class="flex items-center gap-3">
+                {% include 'admin/_headeractions.html' with accent='cyan' %}
+            </div>
+        </header>
+
+        <main id="main-content" tabindex="-1" class="flex-1 overflow-y-auto p-8 space-y-6">
+
+            {# The answer before the evidence. #}
+            <div class="headline">
+                {% for f in headline %}
+                <div class="figure-tile">
+                    <div class="flex items-start justify-between gap-2">
+                        <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">{{ f.label }}</p>
+                        <span class="figure-scope" title="{% if f.scope == 'period' %}Counted over the dates chosen below{% else %}True as of now, whatever dates are chosen{% endif %}">{% if f.scope == 'period' %}period{% else %}now{% endif %}</span>
+                    </div>
+                    <p class="figure-value {{ f.tone }}">{{ f.value }}</p>
+                    <p class="text-[10px] text-slate-500 mt-1 leading-snug">{{ f.caption }}</p>
+                </div>
+                {% endfor %}
+            </div>
+
+            {# One section at a time. #}
+            <div class="tabs" role="tablist" aria-label="Analytics sections">
+                <button type="button" class="tab" role="tab" id="tab-visits" data-view="visits"
+                        aria-controls="panel-visits" aria-selected="false">
+                    <i class="fa-solid fa-door-open text-[11px]"></i> Visits
+                </button>
+                <button type="button" class="tab" role="tab" id="tab-collection" data-view="collection"
+                        aria-controls="panel-collection" aria-selected="false">
+                    <i class="fa-solid fa-book text-[11px]"></i> The collection
+                </button>
+                <button type="button" class="tab" role="tab" id="tab-borrowing" data-view="borrowing"
+                        aria-controls="panel-borrowing" aria-selected="false">
+                    <i class="fa-solid fa-right-left text-[11px]"></i> Borrowing
+                </button>
+            </div>
+
+            <form method="get" id="periodForm" class="period-form rounded-xl border border-slate-800/80 p-5" style="background-color: var(--bg-card);">
+                {# Carried so the range survives its own submit. #}
+                <input type="hidden" name="view" id="viewField" value="{{ view }}">
+                <div class="period-controls flex flex-wrap items-end gap-4">
+                    <div class="space-y-1.5">
+                        <label for="start" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">From</label>
+                        <input type="date" id="start" name="start" value="{{ start_date }}"
+                               class="rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium text-xs" style="background-color: var(--bg-input);">
+                    </div>
+                    <div class="space-y-1.5">
+                        <label for="end" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">To</label>
+                        <input type="date" id="end" name="end" value="{{ end_date }}"
+                               class="rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium text-xs" style="background-color: var(--bg-input);">
+                    </div>
+                    <div class="space-y-1.5">
+                        <label for="period" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Fines grouped by</label>
+                        <select id="period" name="period"
+                                class="rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium text-xs" style="background-color: var(--bg-input);">
+                            <option value="day" {% if period == 'day' %}selected{% endif %}>Day</option>
+                            <option value="week" {% if period == 'week' %}selected{% endif %}>Week</option>
+                            <option value="month" {% if period == 'month' %}selected{% endif %}>Month</option>
+                        </select>
+                    </div>
+                    <button type="submit" class="bg-cyan-700 hover:bg-cyan-600 text-white font-bold px-5 py-2.5 rounded-lg inline-flex items-center gap-2 text-xs">
+                        <i class="fa-solid fa-arrows-rotate text-[11px]"></i> Update
+                    </button>
+                    <p class="text-[11px] text-slate-500 ml-auto">{{ period_label }}</p>
+                </div>
+                <p class="period-note text-[11px] text-slate-500 mt-3">
+                    <i class="fa-solid fa-circle-info text-[10px]"></i>
+                    These dates do not apply here. A shelf is as full as it is today, and
+                    &ldquo;how full was it in July&rdquo; is not a question anybody asks.
+                </p>
+            </form>
+
+            {# Visits #}
+            <section class="panel space-y-6" id="panel-visits" role="tabpanel" aria-labelledby="tab-visits">
+
+                {# Arrivals chart. #}
+                {% include 'admin/_chart.html' with chart=arrivals.chart %}
+                <div class="rounded-xl border border-slate-800/80 px-4 py-3" style="background-color: var(--bg-card);">
+                    <p class="text-[11px] text-slate-400">
+                        Busiest arrival hour: <span class="text-cyan-400 font-bold">{{ arrivals.peak }}</span>
+                        ({{ arrivals.peak_count }} of {{ arrivals.total }} arrivals).
+                    </p>
+                </div>
+
+                {# Occupancy sits directly under arrivals rather than beside it. #}
+                <div class="chart-grid">
+                    <div class="space-y-3">
+                        {% include 'admin/_chart.html' with chart=occupancy.chart %}
+                        <div class="rounded-xl border border-slate-800/80 px-4 py-3" style="background-color: var(--bg-card);">
+                            <p class="text-[11px] text-slate-400">
+                                Fullest hour: <span class="text-cyan-400 font-bold">{{ occupancy.busiest }}</span>,
+                                averaged over {{ occupancy.days_measured }} day{{ occupancy.days_measured|pluralize }}.
+                            </p>
+                            {% if occupancy.excluded_visits %}
+                            <p class="text-[10px] text-amber-500/90 mt-1.5">
+                                {{ occupancy.excluded_visits }} visit{{ occupancy.excluded_visits|pluralize }} left out:
+                                nobody signed them out, so the exit time was guessed at closing and
+                                counting them would invent occupancy that was never observed.
+                            </p>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% include 'admin/_chart.html' with chart=weekday.chart %}
+                </div>
+
+                <div class="chart-grid">
+                    {% include 'admin/_chart.html' with chart=purpose.chart %}
+                    {% include 'admin/_chart.html' with chart=schools.chart %}
+                </div>
+
+                {# Four categories, so shares rather than bars. #}
+                {% include 'admin/_proportions.html' with chart=visitor_type.chart %}
+            </section>
+
+            {# The collection #}
+            <section class="panel space-y-6" id="panel-collection" role="tabpanel" aria-labelledby="tab-collection">
+
+                {# Shelf occupancy chart. #}
+                {% include 'admin/_chart.html' with chart=shelves.chart %}
+                <div class="rounded-xl border border-slate-800/80 px-4 py-3" style="background-color: var(--bg-card);">
+                    <p class="text-[11px] text-slate-400">
+                        {{ unshelved.shelved }} of {{ unshelved.total }} copies are on a shelf.
+                        {% if unshelved.count %}
+                        <span class="text-amber-500/90">{{ unshelved.count }} ({{ unshelved.share }}%) are not, so nobody can be sent to them.</span>
+                        {% endif %}
+                    </p>
+                    {% if shelves.empty_shelves %}
+                    <p class="text-[11px] text-slate-400 mt-1.5">
+                        {{ shelves.empty_shelves }} shelf{{ shelves.empty_shelves|pluralize:"es" }} hold nothing at all.
+                    </p>
+                    {% endif %}
+                </div>
+
+                <div class="chart-grid">
+                    {% include 'admin/_chart.html' with chart=genres.chart %}
+                    <div class="rounded-xl border border-slate-800/80 overflow-hidden shadow-2xl" style="background-color: var(--bg-card);">
+                        <div class="p-5 border-b border-slate-800 flex items-center gap-2">
+                            <i class="fa-solid fa-box-open text-cyan-600 text-xs"></i>
+                            <h4 class="text-sm font-bold text-slate-200 tracking-wide">Never borrowed</h4>
+                            <span class="text-[10px] text-slate-500 ml-auto">{{ idle_stock.count }} of {{ idle_stock.total }} ({{ idle_stock.share }}%)</span>
+                        </div>
+                        <div class="p-5">
+                            {% if idle_stock.rows %}
+                            <table class="w-full text-left text-[11px] figures">
+                                <tbody class="text-slate-400">
+                                {% for title, genre, where in idle_stock.rows %}
+                                    <tr class="border-b border-slate-800/40">
+                                        <td class="text-slate-300 pr-3">{{ title|truncatechars:40 }}</td>
+                                        <td class="pr-3">{{ genre|truncatechars:18 }}</td>
+                                        <td class="text-right whitespace-nowrap">{{ where }}</td>
+                                    </tr>
+                                {% endfor %}
+                                </tbody>
+                            </table>
+                            <p class="text-[10px] text-slate-500 mt-3">
+                                A sample. Stock that has never left the building is the
+                                argument for weeding a shelf or moving it somewhere people look.
+                            </p>
+                            {% else %}
+                            <p class="py-8 text-center text-slate-500 text-xs">Every copy has been borrowed at least once.</p>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+
+                {% include 'admin/_proportions.html' with chart=conditions.chart %}
+                {% if conditions.damaged %}
+                <div class="rounded-xl border border-slate-800/80 px-4 py-3" style="background-color: var(--bg-card);">
+                    <p class="text-[11px] text-slate-400">
+                        <span class="text-rose-400 font-bold">{{ conditions.damaged }}</span> damaged,
+                        {{ conditions.damaged_share }}% of every copy held.
+                    </p>
+                </div>
+                {% endif %}
+            </section>
+
+            {# Borrowing and fines #}
+            <section class="panel space-y-6" id="panel-borrowing" role="tabpanel" aria-labelledby="tab-borrowing">
+
+                {% if not borrowed_books.total %}
+                <div class="rounded-xl border border-amber-800/50 px-4 py-3" style="background-color: var(--bg-card);">
+                    <p class="text-[11px] text-amber-500/90">
+                        <i class="fa-solid fa-circle-info"></i>
+                        No loans recorded in this period, so these charts have nothing to draw.
+                        They fill in as soon as books start being borrowed at the desk.
+                    </p>
+                </div>
+                {% endif %}
+
+                {# Money leads. #}
+                {% include 'admin/_chart.html' with chart=penalties.chart %}
+                <div class="rounded-xl border border-slate-800/80 px-4 py-3" style="background-color: var(--bg-card);">
+                    <p class="text-[11px] text-slate-400">
+                        Total charged: <span class="text-cyan-400 font-bold">{{ penalties.total }}</span>
+                        across {{ penalties.periods_with_fines }} {{ period }}{{ penalties.periods_with_fines|pluralize }}
+                        with fines &mdash; averaging {{ penalties.average }} per {{ period }} charged.
+                    </p>
+                </div>
+
+                <div class="chart-grid">
+                    {% include 'admin/_chart.html' with chart=borrowed_books.chart %}
+                    <div class="rounded-xl border border-slate-800/80 overflow-hidden shadow-2xl" style="background-color: var(--bg-card);">
+                        <div class="p-5 border-b border-slate-800 flex items-center gap-2">
+                            <i class="fa-solid fa-list-ol text-cyan-600 text-xs"></i>
+                            <h4 class="text-sm font-bold text-slate-200 tracking-wide">Most borrowed titles</h4>
+                        </div>
+                        <div class="p-5">
+                            {% if borrowed_books.rows %}
+                            <table class="w-full text-left text-[11px] figures">
+                                <tbody class="text-slate-400">
+                                {% for title, author, times in borrowed_books.rows %}
+                                    <tr class="border-b border-slate-800/40">
+                                        <td class="text-slate-300 pr-3">{{ title|truncatechars:38 }}</td>
+                                        <td class="pr-3">{{ author|truncatechars:20 }}</td>
+                                        <td class="text-right text-cyan-400 font-bold">{{ times }}</td>
+                                    </tr>
+                                {% endfor %}
+                                </tbody>
+                            </table>
+                            {% else %}
+                            <p class="py-8 text-center text-slate-500 text-xs">Nothing has been borrowed in this period.</p>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+
+                {% include 'admin/_chart.html' with chart=borrowed_genres.chart %}
+            </section>
+
+        </main>
+    </div>
+
+    <script>
+    (function () {
+        // Which tabs the date range actually governs.
+        var DATED = { visits: true, borrowing: true, collection: false };
+        var VIEWS = ['visits', 'collection', 'borrowing'];
+
+        var tabs = Array.prototype.slice.call(document.querySelectorAll('.tab'));
+        var form = document.getElementById('periodForm');
+        var viewField = document.getElementById('viewField');
+
+        function show(view, push) {
+            if (VIEWS.indexOf(view) === -1) view = 'visits';
+            tabs.forEach(function (t) {
+                var on = t.dataset.view === view;
+                t.setAttribute('aria-selected', on ? 'true' : 'false');
+            });
+            VIEWS.forEach(function (v) {
+                var panel = document.getElementById('panel-' + v);
+                if (panel) panel.classList.toggle('on', v === view);
+            });
+            form.classList.toggle('inert', !DATED[view]);
+            // Keep the current tab.
+            viewField.value = view;
+            if (push) {
+                // Update the URL without adding history.
+                var url = new URL(window.location.href);
+                url.searchParams.set('view', view);
+                window.history.replaceState({}, '', url);
+            }
+        }
+
+        tabs.forEach(function (t) {
+            t.addEventListener('click', function () { show(t.dataset.view, true); });
+        });
+
+        // Arrow keys move between tabs.
+        document.querySelector('.tabs').addEventListener('keydown', function (e) {
+            if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+            var i = tabs.findIndex(function (t) { return t.getAttribute('aria-selected') === 'true'; });
+            var next = (i + (e.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+            tabs[next].focus();
+            show(tabs[next].dataset.view, true);
+        });
+
+        show(viewField.value || 'visits', false);
+    })();
+    </script>
+    <script src="{% static 'js/admin-enhance.js' %}" defer></script>
+</body>
+</html>

@@ -133,7 +133,8 @@
       <div class="profile-name">{{ patron.fullname }}</div>
       <div class="profile-type">🎓 {{ patron.patron_type }} Patron</div>
       <div class="profile-email">{{ patron.email }}</div>
-      <div class="patron-id">Patron ID: <span>{{ patron.patron_id }}</span></div>
+      {# The number printed on their card, which is what the front desk asks for. #}
+      <div class="patron-id">{% if patron.card_number %}Card No.: <span>AYLA-{{ patron.card_display }}</span>{% else %}Patron ID: <span>{{ patron.patron_id }}</span>{% endif %}</div>
     </div>
   </div>
 
@@ -333,8 +334,7 @@ function requestExtension(btn){
   postForm('{% url 'patron_request_extension' %}', { transaction_id: txId })
     .then(res => {
       if (res.success) {
-        // Swapped in place rather than reloading the page, so the rest of
-        // the loan list -- and wherever the patron was scrolled to -- stays put.
+        // Update in place without reloading.
         const status = document.createElement('div');
         status.className = 'ext-status';
         status.style.cssText = 'font-size:11px;color:var(--muted);margin-top:4px;';
@@ -381,8 +381,7 @@ function saveChanges(){
   }).catch(()=>toast('⚠️ Could not save changes.', false));
 }
 
-// Both passwords are re-sent with the code: the server revalidates them at
-// the verify step rather than trusting the request that asked for the code.
+// Send both passwords with the code.
 function passwordFields(){
   return {
     current_password: document.getElementById('currentPassword').value,

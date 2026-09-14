@@ -1,28 +1,8 @@
-"""Reading a name someone typed, in whatever order they typed it.
-
-The library asks for a first name, an optional middle name and a surname when
-someone registers. At the front desk it asks for none of that — a patron types
-their name however they think of it and the system has to recognise them:
-
-    Juan A. Delacruz        Delacruz, Juan      juan dela cruz
-    Juan Perez Dela Cruz    Dela Cruz, Juan P.  JUAN  DELACRUZ
-
-Storing the parts separately is what makes this possible. "Juan Perez Dela
-Cruz" in a single box gives no way to tell whether `Dela` belongs to the middle
-name or to the surname; `last_name = "Dela Cruz"` simply says so.
-
-Matching is deliberately strict: tokens must match in full, or as an initial.
-Nothing here guesses at typos or nicknames. At a supervised desk a name that
-fails to match costs five seconds of the librarian's time, while a name that
-matches the wrong person files a visit under a stranger and nobody ever finds
-out.
-"""
+"""Reading a name someone typed, in whatever order they typed it."""
 
 import re
 
-# Surname particles are part of the surname, not a middle name. Without this,
-# "Juan Dela Cruz" is filed under the surname "Cruz" with "Dela" as a middle
-# name, and half of Cabuyao is misfiled.
+# Surname particles are part of the surname, not a middle name.
 PARTICLES = {
     'de', 'dela', 'del', 'delos', 'delas', 'della', 'di', 'da', 'das', 'dos',
     'la', 'las', 'los', 'san', 'santa', 'santo', 'sta', 'sto', 'van', 'von',
@@ -42,18 +22,12 @@ def tokenise(value):
 
 
 def parse_name(raw):
-    """Best-effort split of a free-typed name into (first, middle, last).
-
-    Used when a walk-in is logged as a visitor from the one name box, and when
-    an existing single-string name is migrated. It is a guess, and a librarian
-    can correct it later — the structured fields are what the system trusts
-    from then on.
-    """
+    """Best-effort split of a free-typed name into (first, middle, last)."""
     raw = ' '.join((raw or '').split())
     if not raw:
         return '', '', ''
 
-    # "Dela Cruz, Juan Perez" — the comma already told us where the surname ends.
+    # "Dela Cruz, Juan Perez": the comma marks where the surname ends.
     if ',' in raw:
         surname, _, given = raw.partition(',')
         given_parts = given.split()
@@ -67,8 +41,7 @@ def parse_name(raw):
     if len(parts) == 2:
         return parts[0], '', parts[1]
 
-    # Walk back from the end while the word before is a particle, so "Dela Cruz"
-    # and "delos Reyes" stay whole.
+    # Include surname particles like Dela and delos.
     cut = len(parts) - 1
     while cut > 1 and parts[cut - 1].lower().strip('.') in PARTICLES:
         cut -= 1
@@ -97,19 +70,13 @@ def _matches_token(typed, stored):
 
 
 def _take_surname(typed_tokens, last_tokens):
-    """Remove the surname from what was typed, however it was spelled.
-
-    A surname written as two words on one visit and joined on the next is the
-    same surname: "Dela Cruz" and "Delacruz" both have to land on the same
-    person, so runs of adjacent words are joined and compared as well.
-    """
+    """Remove the surname from the typed name."""
     if not last_tokens:
         return typed_tokens, True
 
     acceptable = set(last_tokens) | {''.join(last_tokens)}
     count = len(typed_tokens)
-    # Longest run first, so "dela cruz" is taken as one surname rather than
-    # "dela" alone leaving "cruz" stranded.
+    # Match the longest surname first.
     for size in range(min(count, 4), 0, -1):
         for start in range(count - size + 1):
             run = typed_tokens[start:start + size]
@@ -119,11 +86,7 @@ def _take_surname(typed_tokens, last_tokens):
 
 
 def name_matches(typed, first, middle, last):
-    """Is what they typed a way of writing this person's name?
-
-    Every word typed has to be accounted for, and both ends of the name have to
-    appear: "Juan" alone or "Cruz" alone is not enough to sign anybody in.
-    """
+    """Is what they typed a way of writing this person's name?"""
     typed_tokens = tokenise(typed)
     if not typed_tokens:
         return False

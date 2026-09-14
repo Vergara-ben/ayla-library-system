@@ -66,8 +66,7 @@
 
 <div class="page">
 
-  {# The library is one person at a desk, not a call centre. Saying so up front #}
-  {# is what stops a patron waiting at the screen for an instant answer. #}
+  {# The library is one person at a desk, not a call centre. #}
   <div class="intro">
     <h2>Ask the library a question</h2>
     <p>Send your question here and a librarian will answer it. We are not always at the
@@ -176,8 +175,7 @@ async function sendMessage() {
     if (!data.success) { document.getElementById('hint').textContent = data.error; return; }
     field.value = '';
     renderThread(data.messages);
-    // Sending is the clearest possible signal that someone is here: fastest
-    // tier, and running again if the thread had gone quiet enough to stop.
+    // Poll faster after sending.
     threadCount = data.messages ? data.messages.length : threadCount;
     hasConversation = true;
     poller.bump();
@@ -190,9 +188,7 @@ async function sendMessage() {
   }
 }
 
-// Polled rather than pushed: the deployment has no websockets, and a question
-// answered in hours does not need a socket held open for them. It also does not
-// need asking about at three in the morning -- see poll-scheduler.js.
+// Polling, see poll-scheduler.js.
 let threadCount = 0;
 let hasConversation = false;
 
@@ -203,18 +199,13 @@ async function poll() {
   hasConversation = Boolean(data.conversation_id);
   if (!data.messages) return false;
   renderThread(data.messages);
-  // A changed count is a reply arriving, which is exactly when the patron is
-  // most likely to answer back -- so it counts as activity.
+  // A new reply counts as activity.
   const changed = data.messages.length !== threadCount;
   threadCount = data.messages.length;
   return changed;
 }
 
-// 8s while the conversation is live, 20s once it has been quiet for two
-// minutes -- the same two minutes the server uses to decide whether the patron
-// is still watching (ACTIVE_WINDOW in library/chat.py) -- and nothing at all
-// after ten. A patron waiting on an answer also gets an email, so a stopped
-// poller costs them nothing.
+// Poll every 8s, then 20s, then stop after ten minutes.
 const poller = AylaPoll({
   poll: poll,
   tiers: [[0, 8000], [2 * 60 * 1000, 20000]],
@@ -222,8 +213,7 @@ const poller = AylaPoll({
   enabled: () => hasConversation,
 });
 
-// One poll on load settles whether there is a thread at all; a patron who has
-// never asked a question has nothing to poll for until they send one.
+// Check once on load.
 poller.now().then(() => { if (hasConversation) poller.start(); });
 </script>
 </body>

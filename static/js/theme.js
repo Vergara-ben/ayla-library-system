@@ -1,14 +1,4 @@
-/* =====================================================================
-   theme.js — light/dark switching for AYLA.
-
-   Load this as the FIRST script in <head>, before any stylesheet, so the
-   theme attribute is on <html> before the first paint (no dark flash).
-
-   Rules:
-   - Light is the default. The operating system preference is deliberately
-     ignored: a user whose phone is in dark mode still lands on light.
-   - The choice is remembered per browser in localStorage.
-   ===================================================================== */
+/* theme.js: light and dark theme switching. */
 (function () {
     'use strict';
 
@@ -30,11 +20,7 @@
         } catch (e) { /* ignore — the theme still applies for this page */ }
     }
 
-    /* The AYLA logo's wordmark is black ink, so the dark themes need the
-       variant that has a light one. This swaps the <img> source rather than
-       hiding a second copy or painting it as a CSS background: the image is
-       a plain <img> with a real src, so it stays visible even if this script
-       or the stylesheet never loads. Worst case it shows the light logo. */
+    /* Swap the logo for dark mode. */
     function applyLogos(theme) {
         var logos = document.querySelectorAll('img[data-logo-dark]');
         for (var i = 0; i < logos.length; i++) {
@@ -60,8 +46,7 @@
     /* Run immediately, before the body exists. */
     apply(read() || 'light');
 
-    /* The images do not exist yet on that first pass, so set them again once
-       the document is parsed. */
+    /* Run again after the page loads. */
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', function () {
             applyLogos(root.getAttribute('data-theme') || 'light');
@@ -83,10 +68,7 @@
         toggle: function () {
             AylaTheme.set(AylaTheme.get() === 'dark' ? 'light' : 'dark');
         },
-        /* Resolve a token to a real colour string.
-           Needed wherever a colour is written as an SVG attribute rather than
-           a CSS property — Leaflet markers, for one — because SVG presentation
-           attributes do not understand var(). */
+        /* Resolve a token to a real colour string. */
         color: function (token) {
             var value = getComputedStyle(root).getPropertyValue(token);
             return (value || '').trim() || '#888888';
@@ -94,10 +76,7 @@
     };
     window.AylaTheme = AylaTheme;
 
-    /* ---- Toggle buttons ---------------------------------------------
-       Any element marked [data-theme-toggle] becomes a switch. Pages with
-       no natural home for one (the sign-in screens) get a small floating
-       button instead. */
+    /* Theme toggle buttons. */
     function buttonMarkup(wide) {
         return '<span class="icon-dark" aria-hidden="true">\u{1F319}</span>' +
                '<span class="icon-light" aria-hidden="true">☀️</span>' +
@@ -130,8 +109,7 @@
     function mount() {
         var toggles = document.querySelectorAll('[data-theme-toggle]');
 
-        /* Pages with no chrome to hang a button on (the sign-in screens)
-           opt in with <html data-theme-floating>. */
+        /* Floating toggle for pages without a header. */
         if (!toggles.length && root.hasAttribute('data-theme-floating')) {
             var floating = document.createElement('button');
             floating.type = 'button';

@@ -313,15 +313,15 @@
             gap: 6px;
         }
 
-        .filter-item label span.emoji {
-            font-size: 16px;
+        /* Layer icons. */
+        .filter-item label i {
+            font-size: 12px;
+            width: 15px;
+            text-align: center;
+            color: var(--text-muted);
         }
 
-        /* Floor switcher — a lift panel, docked on the map itself.
-           A dropdown in the side panel reading "Floor Plan 16" said neither
-           which storey you were on nor which ones existed. Buttons in storey
-           order answer both without being read, which is why every indoor map
-           uses them. */
+        /* Floor switcher on the map. */
         .floor-switch {
             display: flex;
             flex-direction: column;
@@ -364,9 +364,7 @@
             color: #fff;
         }
 
-        /* Not in service: still viewable, because a layout has to be checked
-           before it goes live — but the button says draft rather than pretending
-           the floor is open. */
+        /* Draft floor button. */
         .floor-switch button.is-draft {
             opacity: .5;
             border-style: dashed;
@@ -543,11 +541,15 @@
         <header class="top-navbar">
             <h2 class="page-title">Indoor Map & Navigation</h2>
             <div class="navbar-actions">
-                {# A wall map has to come off a printer, so it gets its own #}
-                {# plain-SVG page rather than trying to print Leaflet tiles. #}
-                <a href="{% url 'floorplan_print' %}" class="text-xs text-slate-400 hover:text-cyan-400 flex items-center gap-1.5" style="margin-right:12px">
-                    <i class="fa-solid fa-print"></i> Print map
+                {# Print links. #}
+                <a href="{% url 'floorplan_print' %}?floor={{ current_floor_id }}" class="text-xs text-slate-400 hover:text-cyan-400 flex items-center gap-1.5" style="margin-right:12px">
+                    <i class="fa-solid fa-print"></i> Print this floor
                 </a>
+                {% if floor_count > 1 %}
+                <a href="{% url 'floorplan_print' %}?floor=all" class="text-xs text-slate-400 hover:text-cyan-400 flex items-center gap-1.5" style="margin-right:12px">
+                    <i class="fa-solid fa-layer-group"></i> Print all floors
+                </a>
+                {% endif %}
                 {% include 'admin/_headeractions.html' with accent='cyan' %}
             </div>
         </header>
@@ -571,30 +573,29 @@
                 {% if not no_floorplans %}
                 <section class="panel">
                     <div class="panel-meta">
-                        <span>🗺️</span> Floor Plan
+                        <i class="fa-solid fa-map"></i> Floor Plan
                     </div>
 
-                    {# Which floor is on screen, in words. The switcher itself #}
-                    {# lives on the map, where the map is. #}
+                    {# Which floor is on screen, in words. #}
                     <div class="current-floor"><i class="fa-solid fa-layer-group"></i> <span id="currentFloorLabel">—</span></div>
 
                     <div class="filter-controls">
                         <div class="filter-item">
                             <input type="checkbox" id="show-rooms" checked>
                             <label for="show-rooms">
-                                <span class="emoji">🏠</span> Rooms
+                                <i class="fa-solid fa-door-open"></i> Rooms
                             </label>
                         </div>
                         <div class="filter-item">
                             <input type="checkbox" id="show-shelves" checked>
                             <label for="show-shelves">
-                                <span class="emoji">📚</span> Shelves
+                                <i class="fa-solid fa-book"></i> Shelves
                             </label>
                         </div>
                         <div class="filter-item">
                             <input type="checkbox" id="show-waypoints" checked>
                             <label for="show-waypoints">
-                                <span class="emoji">📍</span> Waypoints
+                                <i class="fa-solid fa-location-dot"></i> Waypoints
                             </label>
                         </div>
                         {% if show_beacons %}
@@ -602,7 +603,7 @@
                         <div class="filter-item">
                             <input type="checkbox" id="show-beacons" checked>
                             <label for="show-beacons">
-                                <span class="emoji">📡</span> BLE Beacons
+                                <i class="fa-solid fa-tower-broadcast"></i> BLE Beacons
                             </label>
                         </div>
                         {% endif %}
@@ -612,19 +613,17 @@
 
                 <section class="panel" id="navigatingToPanel" style="display:none;">
                     <div class="panel-meta">
-                        <span>🧭</span> Locating
+                        <i class="fa-solid fa-compass"></i> Locating
                     </div>
                     <h3 class="panel-heading-serif" id="navTargetShelf">Shelf</h3>
                     <p class="panel-sub-label" id="navTargetBook"></p>
-                    <p class="step-text">📍 In <strong class="shelf-highlight" id="navTargetRoom">this room</strong> — highlighted on the map.</p>
+                    <p class="step-text"><i class="fa-solid fa-location-dot"></i> In <strong class="shelf-highlight" id="navTargetRoom">this room</strong> — highlighted on the map.</p>
                 </section>
 
-                {# Asked for a shelf that is on another storey. Saying which one, #}
-                {# with a way to get there, beats the "nothing selected" panel, #}
-                {# which reads as the request having been dropped. #}
+                {# Asked for a shelf that is on another storey. #}
                 <section class="panel" id="otherFloorPanel" style="display:none;">
                     <div class="panel-meta">
-                        <span>🧭</span> Locating
+                        <i class="fa-solid fa-compass"></i> Locating
                     </div>
                     <h3 class="panel-heading-serif" id="awayShelfName">Shelf</h3>
                     <p class="panel-sub-label" id="awayBookName"></p>
@@ -634,10 +633,60 @@
 
                 <section class="panel" id="noTargetPanel">
                     <div class="panel-meta">
-                        <span>🧭</span> Locating
+                        <i class="fa-solid fa-compass"></i> Locating
                     </div>
-                    <p class="panel-sub-label" style="margin-bottom:0;">Open a book's details from Manage Books and choose "Locate on Map" to highlight its shelf here.</p>
+                    <p class="panel-sub-label" style="margin-bottom:0;">Search for a book below, or choose "Locate on Map" from a book's details in Manage Books.</p>
                 </section>
+
+                {# Find a book, on the map itself. #}
+                <section class="panel" id="findPanel">
+                    <div class="panel-meta">
+                        <i class="fa-solid fa-magnifying-glass"></i> Find a book
+                    </div>
+                    <input id="mapFindInput" type="search" class="mf-input" autocomplete="off"
+                           placeholder="Title, author, ISBN or subject" aria-label="Search for a book">
+                    <div class="mf-filters">
+                        <select id="mapFindGenre" class="mf-select" aria-label="Subject"><option value="">All subjects</option></select>
+                        <select id="mapFindAvailability" class="mf-select" aria-label="Availability"><option value="">Any availability</option></select>
+                        <select id="mapFindShelf" class="mf-select" aria-label="Location"><option value="">Anywhere</option></select>
+                    </div>
+                    <div class="mf-count" id="mapFindCount" aria-live="polite"></div>
+                    <div class="mf-results" id="mapFindResults"></div>
+                    <button type="button" class="mf-more" id="mapFindMore" hidden>Show more</button>
+                </section>
+                <style>
+                    .mf-input, .mf-select {
+                        width: 100%; background: var(--bg-input); color: var(--text-primary);
+                        border: 1px solid var(--border-color); border-radius: 8px;
+                        font-family: inherit; outline: none;
+                    }
+                    .mf-input { padding: 9px 11px; font-size: 13px; margin-top: 4px; }
+                    .mf-input:focus, .mf-select:focus { border-color: var(--accent); }
+                    .mf-filters { display: grid; grid-template-columns: 1fr; gap: 6px; margin-top: 6px; }
+                    .mf-select { padding: 7px 9px; font-size: 12px; }
+                    .mf-count { font-size: 11px; color: var(--text-muted); margin: 8px 2px 4px; min-height: 14px; }
+                    .mf-results { display: flex; flex-direction: column; gap: 6px; max-height: 360px; overflow-y: auto; }
+                    .mf-item {
+                        display: block; text-align: left; text-decoration: none; color: var(--text-primary);
+                        padding: 9px 10px; border: 1px solid var(--border-color); border-radius: 8px;
+                        background: var(--bg-card);
+                    }
+                    a.mf-item:hover { border-color: var(--accent); }
+                    .mf-top { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; }
+                    .mf-title { font-size: 12px; font-weight: 700; line-height: 1.3; }
+                    .mf-sub { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+                    .mf-where { font-size: 11px; margin-top: 5px; color: var(--text-muted); }
+                    .mf-where.go { color: var(--accent); font-weight: 600; }
+                    .mf-badge { flex-shrink: 0; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 5px; white-space: nowrap; }
+                    .mf-badge.in { background: var(--tint-success); color: var(--success); }
+                    .mf-badge.out { background: var(--tint-warning); color: var(--warning); }
+                    .mf-more {
+                        width: 100%; margin-top: 6px; padding: 8px; border-radius: 8px; cursor: pointer;
+                        border: 1px solid var(--border-color); background: var(--bg-subtle);
+                        color: var(--text-primary); font-size: 12px; font-weight: 600;
+                    }
+                    .mf-empty { font-size: 12px; color: var(--text-muted); text-align: center; padding: 14px 6px; }
+                </style>
 
             </div>
         </main>
@@ -678,9 +727,103 @@
             showTargetShelf();
         });
 
-        // "Locate on Map" arrives here as ?shelf=<id>&book=<title> — highlight
-        // that shelf's footprint and pan to it instead of the fake demo text
-        // this panel used to always show regardless of context.
+        // Find a book.
+        (function () {
+            const FIND_URL = "{% url 'patron_catalog_search' %}";
+            const input = document.getElementById('mapFindInput');
+            if (!input) return;
+            const genre = document.getElementById('mapFindGenre');
+            const availability = document.getElementById('mapFindAvailability');
+            const shelf = document.getElementById('mapFindShelf');
+            const list = document.getElementById('mapFindResults');
+            const count = document.getElementById('mapFindCount');
+            const more = document.getElementById('mapFindMore');
+            let page = 0, seq = 0, timer = null, optionsLoaded = false;
+
+            function esc(v) {
+                return String(v == null ? '' : v).replace(/[&<>"]/g, function (c) {
+                    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+                });
+            }
+            function fill(sel, items, blank) {
+                sel.innerHTML = '<option value="">' + esc(blank) + '</option>' + items.map(function (it) {
+                    return '<option value="' + esc(it.value) + '">' + esc(it.label) + '</option>';
+                }).join('');
+            }
+
+            async function run(reset) {
+                // Ignore outdated responses.
+                const mine = ++seq;
+                page = reset ? 1 : page + 1;
+                const q = new URLSearchParams();
+                if (input.value.trim()) q.set('search', input.value.trim());
+                if (genre.value) q.set('genre', genre.value);
+                if (availability.value) q.set('availability', availability.value);
+                if (shelf.value) q.set('shelf', shelf.value);
+                q.set('page', page);
+                if (!optionsLoaded) q.set('options', '1');
+                if (reset) count.textContent = 'Searching\u2026';
+
+                let data;
+                try {
+                    const res = await fetch(FIND_URL + '?' + q.toString(),
+                                            { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+                    data = await res.json();
+                } catch (e) {
+                    if (mine === seq) count.textContent = 'Could not reach the catalogue.';
+                    return;
+                }
+                if (mine !== seq) return;
+
+                if (data.options && !optionsLoaded) {
+                    optionsLoaded = true;
+                    fill(genre, data.options.genres.map(function (g) { return { value: g, label: g }; }), 'All subjects');
+                    fill(availability, data.options.availability, 'Any availability');
+                    const shelves = data.options.shelves.map(function (s) { return { value: s.id, label: s.name }; });
+                    if (data.options.has_unshelved) shelves.push({ value: 'none', label: 'Not yet shelved' });
+                    fill(shelf, shelves, 'Anywhere');
+                }
+
+                const html = (data.results || []).map(function (r) {
+                    const badge = r.available
+                        ? '<span class="mf-badge in">' + (r.copies > 1 ? r.available + '/' + r.copies + ' in' : 'In') + '</span>'
+                        : '<span class="mf-badge out">' + (r.copies > 1 ? 'All out' : esc(r.status)) + '</span>';
+                    const sub = esc(r.author || 'Unknown author') + (r.year ? ' \u00b7 ' + r.year : '');
+                    const head = '<div class="mf-top"><div class="mf-title">' + esc(r.title) + '</div>' + badge + '</div>'
+                               + '<div class="mf-sub">' + sub + '</div>';
+                    // Show why a book cannot be highlighted.
+                    if (r.shelf_id && r.navigable) {
+                        const href = '?shelf=' + r.shelf_id + '&book=' + encodeURIComponent(r.title);
+                        return '<a class="mf-item" href="' + href + '">' + head
+                             + '<div class="mf-where go">📍 ' + esc(r.location) + '</div></a>';
+                    }
+                    const why = r.shelved ? 'Shelf not placed on the floor plan' : 'Not yet shelved';
+                    return '<div class="mf-item">' + head + '<div class="mf-where">' + why + '</div></div>';
+                }).join('');
+
+                if (reset) list.innerHTML = html; else list.insertAdjacentHTML('beforeend', html);
+                if (!data.count) list.innerHTML = '<div class="mf-empty">No books match.</div>';
+                count.textContent = data.count ? data.count + ' title' + (data.count === 1 ? '' : 's') : '';
+                more.hidden = !data.has_next;
+            }
+
+            input.addEventListener('input', function () {
+                clearTimeout(timer);
+                timer = setTimeout(function () { run(true); }, 280);
+            });
+            [genre, availability, shelf].forEach(function (sel) {
+                sel.addEventListener('change', function () { run(true); });
+            });
+            more.addEventListener('click', function () { run(false); });
+
+            // Load options on first use.
+            input.addEventListener('focus', function () { if (!optionsLoaded) run(true); }, { once: true });
+            [genre, availability, shelf].forEach(function (sel) {
+                sel.addEventListener('focus', function () { if (!optionsLoaded) run(true); }, { once: true });
+            });
+        })();
+
+        // Highlight the shelf from ?shelf= and ?book=.
         function showTargetShelf() {
             const panel = document.getElementById('navigatingToPanel');
             const empty = document.getElementById('noTargetPanel');
@@ -717,8 +860,7 @@
             const mapContainer = document.getElementById('floorplan-map');
             if (!mapContainer) return;
 
-            // The floor plan is a vector canvas drawn by the Administrator —
-            // its size comes from the record, not from an image.
+            // Canvas size from the floor plan record.
             const width = floorplanData.canvas_width || 1000;
             const height = floorplanData.canvas_height || 800;
 
@@ -742,8 +884,7 @@
             addStairwayShapes(height);
         }
 
-        // Stairways, drawn with the conventional symbol: footprint, treads
-        // across the direction of travel, and an arrow for which way is up.
+        // Stairways.
         function addStairwayShapes(canvasHeight) {
             const flip = function (p) { return [canvasHeight - p[1], p[0]]; };
             const rose = '#be123c';
@@ -760,9 +901,7 @@
             });
         }
 
-        // Tables, counters and pillars. Drawn after the rooms so furniture sits
-        // on the floor rather than under it, and in amber so it reads as
-        // "something in the way" rather than as another room.
+        // Tables, counters and pillars.
         function addObstacleShapes(canvasHeight) {
             const flip = function (p) { return [canvasHeight - p[1], p[0]]; };
             (obstaclesData || []).forEach(function (o) {
@@ -777,9 +916,7 @@
             });
         }
 
-        // Rooms are drawn polygons; y is flipped because stored coordinates use
-        // a top-left origin while Leaflet's CRS.Simple counts from the bottom.
-        // Doors: break the wall, mark the opening, show the swing arc.
+        // Rooms and doors (y is flipped for Leaflet).
         function addDoorLayers(d, canvasHeight) {
             const rad = (d.rotation || 0) * Math.PI / 180;
             const ux = Math.cos(rad), uy = Math.sin(rad);
@@ -810,10 +947,15 @@
             (roomsData || []).forEach(function (room) {
                 if (!room.geometry || room.geometry.length < 3) return;
                 const latlngs = room.geometry.map(function (p) { return [canvasHeight - p[1], p[0]]; });
+                // Dashed and grey where patrons may not go.
+                const closed = room.patron_access === false;
                 const poly = L.polygon(latlngs, {
-                    color: AylaTheme.color('--accent-strong'), weight: 2,
-                    fillColor: AylaTheme.color('--accent'), fillOpacity: 0.15,
-                }).bindTooltip(room.name || 'Room', { direction: 'top', sticky: true });
+                    color: AylaTheme.color(closed ? '--text-muted' : '--accent-strong'), weight: 2,
+                    dashArray: closed ? '6,4' : null,
+                    fillColor: AylaTheme.color(closed ? '--text-muted' : '--accent'),
+                    fillOpacity: closed ? 0.08 : 0.15,
+                }).bindTooltip((room.name || 'Room') + (closed ? ' · staff only' : ''),
+                               { direction: 'top', sticky: true });
                 poly.addTo(map);
                 // Same layer as the room label, so the Rooms filter hides both.
                 roomMarkers.push(poly);
@@ -830,7 +972,7 @@
             // Add room markers
             if (roomsData && roomsData.length > 0) {
                 roomsData.forEach(room => {
-                    const marker = createEmojiMarker(room.x, room.y, '🏠', room.name, room.description, 'var(--accent)');
+                    const marker = createMapMarker(room.x, room.y, 'fa-door-open', room.name, room.description, 'var(--accent)');
                     roomMarkers.push(marker);
                     marker.addTo(map);
                 });
@@ -840,10 +982,7 @@
             if (shelvesData && shelvesData.length > 0) {
                 const canvasHeight = floorplanData.canvas_height || 800;
                 shelvesData.filter(s => s.x != null && s.y != null).forEach(shelf => {
-                    // Footprint shows the shelf's stored orientation (Fig. 50).
-                    // A shelf traced as a polygon -- the ones set into a corner
-                    // -- carries its own outline instead, already resolved by
-                    // the server so both shapes arrive the same way.
+                    // Footprint shows the shelf's stored orientation (Fig.
                     let corners;
                     if (shelf.footprint && shelf.footprint.length >= 3) {
                         corners = shelf.footprint.map(p => [canvasHeight - p[1], p[0]]);
@@ -872,18 +1011,17 @@
             // Add waypoint markers
             if (waypointsData && waypointsData.length > 0) {
                 waypointsData.forEach(waypoint => {
-                    const marker = createEmojiMarker(waypoint.x, waypoint.y, '📍', waypoint.label || 'Waypoint', '', 'var(--warning)');
+                    const marker = createMapMarker(waypoint.x, waypoint.y, 'fa-location-dot', waypoint.label || 'Waypoint', '', 'var(--warning)');
                     waypointMarkers.push(marker);
                     marker.addTo(map);
                 });
             }
 
-            // BLE beacons — Administrator view only; the server sends an empty
-            // list to the staff map and nothing at all to patrons.
+            // BLE beacons (admin only).
             if (beaconsData && beaconsData.length > 0) {
                 beaconsData.forEach(beacon => {
-                    const marker = createEmojiMarker(
-                        beacon.x, beacon.y, '📡',
+                    const marker = createMapMarker(
+                        beacon.x, beacon.y, 'fa-tower-broadcast',
                         beacon.label || 'BLE Beacon',
                         beacon.uuid ? 'UUID: ' + beacon.uuid : '',
                         'var(--accent-blue)');
@@ -893,22 +1031,24 @@
             }
         }
 
-        // Stored coordinates use a top-left origin; Leaflet's CRS.Simple counts
-        // from the bottom. Every layer on this map must go through this, or it
-        // lands mirrored against the ones that do (rooms, shelves, doors).
+        // Stored coordinates use a top-left origin; Leaflet's CRS.Simple counts from the bottom.
         function toLatLng(x, y) {
             const canvasHeight = (floorplanData && floorplanData.canvas_height) || 800;
             return [canvasHeight - y, x];
         }
 
-        function createEmojiMarker(x, y, emoji, title, description, color) {
+        // Icons rather than emoji.
+        function createMapMarker(x, y, iconName, title, description, color) {
             const icon = L.divIcon({
-                className: 'emoji-marker',
+                className: 'map-marker',
                 html: `<div style="
-                    font-size: 24px;
-                    text-shadow: 0 2px 4px var(--scrim);
+                    font-size: 17px;
+                    line-height: 30px;
+                    text-align: center;
+                    color: ${color || 'var(--accent)'};
+                    text-shadow: 0 1px 3px var(--scrim);
                     cursor: pointer;
-                ">${emoji}</div>`,
+                "><i class="fa-solid ${iconName}"></i></div>`,
                 iconSize: [30, 30],
                 iconAnchor: [15, 15]
             });
@@ -947,9 +1087,7 @@
         }
 
         function floorText(fp) {
-            // "2nd floor — Reference Section". The plan's own name is only added
-            // when it says something the storey label does not, so a plan named
-            // "2nd floor" does not come out as "2nd floor — 2nd floor".
+            // For example: 2nd floor, Reference Section.
             let text = fp.label || ('Floor ' + fp.floor_number);
             if (fp.name && fp.name.trim().toLowerCase() !== String(fp.label).toLowerCase()) {
                 text += ' — ' + fp.name;
@@ -957,10 +1095,7 @@
             return text;
         }
 
-        // -- Floor switcher ------------------------------------------------
-        // One button per storey, highest at the top, because that is where it is
-        // in the building. Hidden entirely in a single-storey library: a control
-        // with one option is furniture.
+        // Floor switcher.
         function addFloorSwitcher() {
             if (!map || !floorplansList || floorplansList.length < 2) return;
 
@@ -988,8 +1123,7 @@
                     b.onclick = function () { goToFloor(fp.id); };
                 });
 
-                // Without this, pressing a button also drags and zooms the map
-                // underneath it.
+                // Without this, pressing a button also drags and zooms the map underneath it.
                 L.DomEvent.disableClickPropagation(box);
                 L.DomEvent.disableScrollPropagation(box);
                 return box;
@@ -997,11 +1131,7 @@
             control.addTo(map);
         }
 
-        // A reload rather than a layer swap: rooms, shelves, waypoints and beacons
-        // are all rendered from server-side context for one plan, and half a floor
-        // swap is exactly how a marker ends up drawn against another floor's walls.
-        // Other parameters are kept, so ?shelf= survives the trip and the target is
-        // still highlighted once the right floor comes up.
+        // Reload to switch floors, keeping other parameters.
         function goToFloor(floorPlanId) {
             if (!floorPlanId || floorPlanId === floorplanData.id) return;
             const params = new URLSearchParams(window.location.search);

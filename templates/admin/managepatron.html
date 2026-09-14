@@ -206,6 +206,7 @@
                                             data-patron-id="{{ p.patron_id }}"
                                             data-name="{{ p.fullname }}"
                                             data-type="{{ p.patron_type }}"
+                                            data-school="{{ p.school|default:'' }}"
                                             data-email="{{ p.email }}"
                                             data-contact="{{ p.contact_number|default:'' }}"
                                             data-address="{{ p.address|default:'' }}"
@@ -290,9 +291,7 @@
                         <h4 class="text-sm font-bold text-slate-200 tracking-wide">Patron Directory</h4>
                     </div>
                     <div class="flex items-center gap-1 bg-slate-900/50 rounded-lg p-1 border border-slate-800 self-start">
-                            {# Visitors used the library without joining it, so they are counted #}
-                            {# apart — folding them into the directory makes every membership #}
-                            {# figure quietly wrong. #}
+                            {# Visitors are counted separately. #}
                             <a href="{% url 'admin_manage_patron' %}" class="px-3 py-1.5 rounded-md text-[11px] font-bold transition-colors {% if not show_visitors %}bg-cyan-700/30 text-cyan-400 border border-cyan-800/50{% else %}text-slate-400 hover:text-slate-200{% endif %}">Members</a>
                             <a href="{% url 'admin_manage_patron' %}?view=visitors" class="px-3 py-1.5 rounded-md text-[11px] font-bold transition-colors {% if show_visitors %}bg-cyan-700/30 text-cyan-400 border border-cyan-800/50{% else %}text-slate-400 hover:text-slate-200{% endif %}">Visitors{% if visitor_count %} ({{ visitor_count }}){% endif %}</a>
                         </div>
@@ -372,7 +371,11 @@
                                             </div>
                                         </div>
                                     </td>
-                                    <td class="py-4 px-6 font-mono text-slate-400">{{ patron.patron_id }}</td>
+                                    {# The number on their card, with the row id under it. #}
+                                    <td class="py-4 px-6 font-mono text-slate-400 whitespace-nowrap">
+                                        {% if patron.card_number %}<span class="text-slate-300">{{ patron.card_display }}</span>{% else %}<span class="text-slate-600">no card</span>{% endif %}
+                                        <span class="block text-[10px] text-slate-600">#{{ patron.patron_id }}</span>
+                                    </td>
                                     <td class="py-4 px-6">
                                         <span class="bg-blue-950/50 text-blue-400 border border-blue-900/40 px-2 py-0.5 rounded text-[10px] font-bold tracking-wide">{{ patron.patron_type|capfirst }}</span>
                                     </td>
@@ -411,8 +414,7 @@
                                     <td class="py-4 px-6 text-center">
                                         <div class="flex items-center justify-center gap-1.5">
                                             {% if patron.account_status == 'Visitor' %}
-                                            {# A visitor keeps this same row when they join, so the #}
-                                            {# visits they already made stay attached to them. #}
+                                            {# Visitors keep their visit history when they join. #}
                                             <form method="post" action="{% url 'promote_visitor' patron.patron_id %}" class="inline-block" data-confirm="Move {{ patron.fullname|escapejs }} to Pending Registrations? You will check their physical ID before the account is activated.">
                                                 {% csrf_token %}
                                                 <button type="submit" class="text-[10px] font-bold px-2.5 py-1.5 rounded-lg bg-cyan-700/25 text-cyan-400 border border-cyan-800/70 hover:bg-cyan-700/45 transition-colors whitespace-nowrap">
@@ -446,27 +448,7 @@
                 <div class="px-5 py-4 border-t border-slate-800/60 flex items-center justify-between text-xs text-slate-500 bg-slate-900/5">
                     <span class="font-medium">Showing <span class="text-slate-400">{{ patrons|length }}</span> of <span class="text-slate-400">{{ total_patrons }}</span> patrons</span>
                     
-                    <div class="flex items-center gap-1">
-                        {% if patrons.has_previous %}
-                            <a href="?page={{ patrons.previous_page_number }}{% if querystring %}&{{ querystring }}{% endif %}" class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors">&larr; Prev</a>
-                        {% else %}
-                            <button class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors cursor-not-allowed" disabled>&larr; Prev</button>
-                        {% endif %}
-
-                        {% for page_num in paginator.page_range %}
-                            {% if page_num == patrons.number %}
-                                <button class="px-3 py-1.5 rounded bg-cyan-700/30 text-cyan-400 font-bold border border-cyan-800/50">{{ page_num }}</button>
-                            {% else %}
-                                <a href="?page={{ page_num }}{% if querystring %}&{{ querystring }}{% endif %}" class="px-3 py-1.5 rounded border border-slate-800 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors">{{ page_num }}</a>
-                            {% endif %}
-                        {% endfor %}
-
-                        {% if patrons.has_next %}
-                            <a href="?page={{ patrons.next_page_number }}{% if querystring %}&{{ querystring }}{% endif %}" class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors">Next &rarr;</a>
-                        {% else %}
-                            <button class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors cursor-not-allowed" disabled>Next &rarr;</button>
-                        {% endif %}
-                    </div>
+                    {% include 'admin/_pagination.html' with page=patrons accent='cyan' qs=querystring %}
                 </div>
 
             </div>
@@ -476,8 +458,7 @@
 
     <!-- Modal Overlay -->
 
-    {# Reviewing an online application means looking at the ID that was uploaded, #}
-    {# so the document is shown here beside the details it is supposed to match. #}
+    {# Uploaded ID for review. #}
     <div id="reviewOverlay" class="modal-overlay fixed inset-0 bg-black/70 z-50 items-center justify-center p-4 overflow-y-auto">
         <div class="rounded-2xl border border-slate-700/60 shadow-2xl w-full max-w-4xl my-8" style="background-color: var(--bg-card);">
             <div class="p-5 border-b border-slate-800 flex items-center gap-2.5">
@@ -486,8 +467,7 @@
                 <button type="button" onclick="closeReview()" class="ml-auto text-slate-500 hover:text-slate-300 text-lg leading-none px-1">&times;</button>
             </div>
 
-            {# Document and details sit side by side wherever there is room: comparing #}
-            {# the two is the whole job, and scrolling between them invites skimming. #}
+            {# Document and details side by side. #}
             <div class="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
                     <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500 mb-3">Uploaded ID</p>
@@ -502,8 +482,7 @@
                             <i class="fa-solid fa-triangle-exclamation text-amber-500 text-3xl mb-3"></i>
                             <p class="text-xs text-slate-400">No ID was uploaded with this application, so it cannot be approved.</p>
                         </div>
-                        {# Someone handed over by the sign-in screen is standing at the desk, #}
-                        {# so there is no upload to open — you check the ID in their hand. #}
+                        {# Desk registration, ID checked in person. #}
                         <div id="rvDocDesk" class="hidden p-8 text-center">
                             <i class="fa-solid fa-id-card text-cyan-400 text-3xl mb-3"></i>
                             <p class="text-xs text-slate-300 font-bold mb-1">Signed up at the front desk</p>
@@ -584,8 +563,7 @@
                 {% endif %}
 
                 <div class="space-y-1.5">
-                                        {# Kept in parts so the front desk can read the name back in #}
-                    {# whatever order a patron types it. #}
+                                        {# Name in parts. #}
                     <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
                         <div class="space-y-1.5">
                             <label for="firstName" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">First Name</label>
@@ -606,7 +584,7 @@
                     <div class="space-y-1.5">
                         <label for="patronType" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Patron Type</label>
                         <div class="relative">
-                            <select id="patronType" name="patron_type" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium appearance-none pr-10 cursor-pointer tracking-wide" style="background-color: var(--bg-input);" required>
+                            <select id="patronType" name="patron_type" onchange="syncSchoolField()" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium appearance-none pr-10 cursor-pointer tracking-wide" style="background-color: var(--bg-input);" required>
                                 <option value="">Select type...</option>
                                 <option value="Student" {% if initial.patron_type == 'Student' %}selected{% endif %}>Student</option>
                                 <option value="Teacher" {% if initial.patron_type == 'Teacher' %}selected{% endif %}>Teacher</option>
@@ -640,6 +618,16 @@
                     <input type="text" id="contactNumber" name="contact_number" placeholder="Phone or mobile" value="{{ initial.contact_number|default:'' }}" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium placeholder-slate-600 tracking-wide" style="background-color: var(--bg-input);">
                 </div>
 
+                {# School, shown for the patron types that have one. #}
+                <div class="space-y-1.5 hidden" id="schoolField">
+                    <label for="school" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">School <span class="text-slate-600 font-normal normal-case tracking-normal">— optional</span></label>
+                    <input type="text" id="school" name="school" placeholder="Full school name, e.g. San Juan National High School" value="{{ initial.school|default:'' }}" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium placeholder-slate-600 tracking-wide" style="background-color: var(--bg-input);" list="knownSchools">
+                    <datalist id="knownSchools">
+                        {% for s in known_schools %}<option value="{{ s }}"></option>{% endfor %}
+                    </datalist>
+                    <p class="text-[10px] text-slate-500">Write it out in full. Picking from the list keeps the spelling the same as everyone else's, which is what the visitor figures are grouped by.</p>
+                </div>
+
                 <div class="space-y-1.5">
                     <label for="address" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Address</label>
                     <textarea id="address" name="address" placeholder="Street address, city, etc." rows="2" value="{{ initial.address|default:'' }}" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium placeholder-slate-600 tracking-wide resize-none" style="background-color: var(--bg-input);">{{ initial.address|default:'' }}</textarea>
@@ -650,7 +638,7 @@
                     <input type="password" id="password" name="password" placeholder="Required for new patrons" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium placeholder-slate-600 tracking-wide" style="background-color: var(--bg-input);">
                 </div>
 
-                {# On-site identity validation — Ch.1 ¶242: the patron "presents a physical ID" and it is verified on the spot. #}
+                {# Staff check the physical ID on the spot. #}
                 <div id="identityBlock" class="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4 space-y-3">
                     <p class="text-[10px] uppercase font-bold tracking-wider text-amber-500">
                         <i class="fa-solid fa-id-card text-[10px]"></i> Identity Validation
@@ -734,16 +722,10 @@
             modal.classList.remove('active');
         }
 
-        // ── Reviewing a pending online registration ──────────────────────
-        // Approve stays disabled until the reviewer ticks that they opened the
-        // uploaded ID, so activating an account is always a deliberate act
-        // rather than one click on a row.
+        // Review a pending online registration.
         let rvPatron = null;
 
-        // Asks, then collects the reason, then submits. It used to return
-        // false to block the submit; a modal cannot answer in time for that,
-        // so the submit is prevented up front and re-fired once the answer is
-        // in. `data-ayla-confirmed` is what stops the second pass re-asking.
+        // Asks, then collects the reason, then submits.
         async function fillRejectNote(form) {
             if (form.dataset.aylaConfirmed === '1') return true;
             if (!await AylaDialog.confirm('Reject this reactivation request?',
@@ -805,8 +787,7 @@
 
             const cb = document.getElementById('rvConfirm');
             cb.checked = false;
-            // An online applicant without an upload cannot be verified at all;
-            // a desk applicant is standing right there, so there is nothing to wait for.
+            // Enable approve when there is no upload to review.
             cb.disabled = !(rvPatron.doc || atDesk);
             syncReviewButton();
             document.getElementById('reviewOverlay').classList.add('active');
@@ -836,6 +817,18 @@
             form.submit();
         }
 
+        // A school belongs to the patron types that have one.
+        const TYPES_WITH_A_SCHOOL = ['Student', 'Teacher'];
+
+        function syncSchoolField() {
+            const type = document.getElementById('patronType').value;
+            const box = document.getElementById('school');
+            const wrap = document.getElementById('schoolField');
+            if (!box || !wrap) return;
+            const show = TYPES_WITH_A_SCHOOL.indexOf(type) >= 0 || !!box.value.trim();
+            wrap.classList.toggle('hidden', !show);
+        }
+
         function loadPatronData(patronId) {
             // Find patron data from the table rows
             const rows = document.querySelectorAll('tbody tr');
@@ -850,7 +843,9 @@
                     document.getElementById('email').value = cells[4].textContent;
                     document.getElementById('address').value = cells[3].textContent;
                     document.getElementById('contactNumber').value = '';
+                    document.getElementById('school').value = editBtn.dataset.school || '';
                     document.getElementById('accountStatus').value = cells[6].querySelector('span').textContent;
+                    syncSchoolField();
                     break;
                 }
             }
@@ -887,8 +882,7 @@
             }
         }
 
-        // Check if we should open modal on page load (for edit mode from URL)
-        // eslint-disable-next-line
+        // Open the edit modal if the URL asks for it.
         {% if edit_mode %}
             document.addEventListener('DOMContentLoaded', function() {
                 openModal('edit', '{{ patron.patron_id }}');
@@ -900,7 +894,9 @@
                 document.getElementById('email').value = '{{ initial.email|default:''|escapejs }}';
                 document.getElementById('contactNumber').value = '{{ initial.contact_number|default:''|escapejs }}';
                 document.getElementById('address').value = '{{ initial.address|default:''|escapejs }}';
+                document.getElementById('school').value = '{{ initial.school|default:''|escapejs }}';
                 document.getElementById('accountStatus').value = '{{ initial.account_status|default:'Active'|escapejs }}';
+                syncSchoolField();
             });
         {% endif %}
     </script>

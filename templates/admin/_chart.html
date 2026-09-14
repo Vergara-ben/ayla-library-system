@@ -1,0 +1,91 @@
+{# One chart, drawn as inline SVG from geometry computed in Python. #}
+        <div class="rounded-xl border border-slate-800/80 overflow-hidden shadow-2xl" style="background-color: var(--bg-card);">
+            <div class="p-5 border-b border-slate-800 flex items-center gap-2 flex-wrap">
+                <i class="fa-solid fa-chart-simple text-cyan-600 text-xs"></i>
+                <h4 class="text-sm font-bold text-slate-200 tracking-wide">{{ chart.title }}</h4>
+                {% if chart.peak_mark %}
+                <span class="text-[10px] font-bold text-cyan-400 border border-cyan-800/60 rounded-full px-2 py-0.5">
+                    {{ chart.peak_mark.label }} &middot; {{ chart.peak_mark.value }}
+                </span>
+                {% endif %}
+                <span class="text-[10px] text-slate-500 ml-auto">{{ chart.note }}</span>
+            </div>
+
+            <div class="p-5">
+                {% if chart.has_data %}
+                <svg viewBox="0 0 {{ chart.width }} {{ chart.height }}"
+                     width="100%" height="auto" preserveAspectRatio="xMidYMid meet"
+                     style="display:block; max-height:290px; overflow:visible;"
+                     role="img"
+                     aria-label="{{ chart.title }}. {{ chart.axis_note }}. Exact figures are listed in the tables below.">
+
+                    {% for g in chart.gridlines %}
+                    <line x1="{{ chart.plot_left }}" y1="{{ g.y }}"
+                          x2="{{ chart.plot_right }}" y2="{{ g.y }}"
+                          stroke="currentColor" stroke-width="1"
+                          class="text-slate-500" opacity="0.18"></line>
+                    <text x="{{ chart.axis_label_x }}" y="{{ g.label_y }}"
+                          text-anchor="end" font-size="9" fill="currentColor"
+                          class="text-slate-500" opacity="0.85">{{ g.label }}</text>
+                    {% endfor %}
+
+                    {% if chart.kind == 'line' %}
+                    <path d="{{ chart.area }}" fill="var(--accent, #0e7490)" opacity="0.12"></path>
+                    <polyline points="{{ chart.line }}" fill="none"
+                              stroke="var(--accent, #0e7490)" stroke-width="2.5"
+                              stroke-linejoin="round" stroke-linecap="round"></polyline>
+                    {% for p in chart.points %}
+                    {% if p.is_peak %}
+                    <line x1="{{ p.x }}" y1="{{ p.y }}" x2="{{ p.x }}" y2="{{ chart.baseline_y }}"
+                          stroke="var(--accent, #0e7490)" stroke-width="1"
+                          stroke-dasharray="3 3" opacity="0.55"></line>
+                    <circle cx="{{ p.x }}" cy="{{ p.y }}" r="7" fill="var(--accent, #0e7490)" opacity="0.22"></circle>
+                    <circle cx="{{ p.x }}" cy="{{ p.y }}" r="4.5" fill="var(--accent, #0e7490)"
+                            stroke="var(--bg-card, #fff)" stroke-width="2"></circle>
+                    <text x="{{ p.x }}" y="{{ p.value_y }}" text-anchor="middle"
+                          font-size="11" font-weight="700"
+                          fill="var(--accent, #0e7490)">{{ p.value }}</text>
+                    {% else %}
+                    <circle cx="{{ p.x }}" cy="{{ p.y }}" r="3"
+                            fill="var(--accent, #0e7490)" opacity="0.75"></circle>
+                    {% endif %}
+                    <title>{{ p.label }} — {{ p.value }} ({{ p.share }}%)</title>
+                    {% endfor %}
+
+                    {% else %}
+                    {% for b in chart.bars %}
+                    <rect x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h }}" rx="2"
+                          fill="var(--accent, #0e7490)"
+                          opacity="{% if b.is_peak %}1{% else %}0.45{% endif %}">
+                        <title>{{ b.label }} — {{ b.value }} ({{ b.share }}%)</title>
+                    </rect>
+                    {% if b.value %}
+                    <text x="{{ b.cx }}" y="{{ b.value_y }}" text-anchor="middle"
+                          font-size="10" font-weight="700"
+                          fill="var(--accent, #0e7490)"
+                          opacity="{% if b.is_peak %}1{% else %}0.75{% endif %}">{{ b.value }}</text>
+                    {% endif %}
+                    {% endfor %}
+                    {% endif %}
+
+                    <line x1="{{ chart.plot_left }}" y1="{{ chart.baseline_y }}"
+                          x2="{{ chart.plot_right }}" y2="{{ chart.baseline_y }}"
+                          stroke="currentColor" stroke-width="1" class="text-slate-500" opacity="0.35"></line>
+                    {% for m in chart.marks %}
+                    {% if m.show_label %}
+                    <text x="{% if chart.kind == 'line' %}{{ m.x }}{% else %}{{ m.cx }}{% endif %}"
+                          y="{{ chart.tick_label_y }}" text-anchor="middle"
+                          font-size="9.5" fill="currentColor"
+                          class="{% if m.is_peak %}text-cyan-500{% else %}text-slate-500{% endif %}"
+                          {% if m.is_peak %}font-weight="700"{% endif %}>{{ m.axis_label }}</text>
+                    {% endif %}
+                    {% endfor %}
+                </svg>
+                <p class="text-[10px] text-slate-500 text-center mt-3">
+                    {{ chart.axis_note }} &middot; exact figures in the tables below
+                </p>
+                {% else %}
+                <p class="py-8 text-center text-slate-500 text-xs">{{ chart.note }}</p>
+                {% endif %}
+            </div>
+        </div>

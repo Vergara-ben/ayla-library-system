@@ -121,10 +121,7 @@
         <header class="h-16 flex-shrink-0 flex items-center justify-between px-8" style="background-color: var(--bg-main);">
             <div class="flex items-center">
                 {% if desk_mode %}
-                {# The sidebar carries the logo everywhere else, and desk mode hides #}
-                {# the sidebar -- leaving the one screen a patron actually stands in #}
-                {# front of as the only unbranded page in the system. The hamburger  #}
-                {# goes with it: there is no sidebar left for it to open.            #}
+                {# Logo in desk mode. #}
                 <img src="{% static 'images/ayla-logo.png' %}"
                      data-logo-light="{% static 'images/ayla-logo.png' %}"
                      data-logo-dark="{% static 'images/ayla-logo-dark.png' %}"
@@ -144,8 +141,7 @@
         <main id="main-content" tabindex="-1" class="flex-1 overflow-y-auto p-8 space-y-6">
             
             {% if desk_mode %}
-                {# Desk mode: this browser is confined to this page until a librarian #}
-                {# enters their account password. #}
+                {# Desk mode banner. #}
                 <div class="rounded-xl border border-amber-700/50 bg-amber-500/10 px-5 py-4 flex items-center gap-4">
                     <i class="fa-solid fa-book-open-reader text-amber-400 text-2xl"></i>
                     <div class="flex-1">
@@ -172,12 +168,10 @@
                 <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
                     <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Signed In, Not Out</p>
                     <p class="text-3xl font-bold text-amber-500 mt-2">{{ currently_inside }}</p>
-                    {# Not the same as occupancy: people leave without signing out, so this #}
-                    {# is an upper bound on who is here, and saying so keeps it honest. #}
+                    {# Signed in but not signed out. #}
                     <p class="text-[10px] text-slate-500 mt-1" title="People often leave without signing out, so this counts everyone who signed in and has not signed out — an upper bound on how many are actually in the room.">Not the same as occupancy</p>
                 </div>
-                {# "How many members used the library" and "how many people came in" #}
-                {# are different questions; one must not stand in for the other. #}
+                {# Members and visitors. #}
                 <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
                     <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Members / Visitors</p>
                     <p class="text-3xl font-bold text-slate-200 mt-2">{{ todays_member_visits }} <span class="text-slate-600 text-xl">/</span> <span class="text-amber-500">{{ todays_visitor_visits }}</span></p>
@@ -185,8 +179,12 @@
                 </div>
             </div>
 
-            {# The scanner is a keyboard. It only listens once Scan Card is pressed, so #}
-                {# a stray barcode cannot sign someone in while staff are typing. #}
+            {# Peak hours, beside the log the figures come from. #}
+            {% if not desk_mode and hours_chart %}
+            {% include 'admin/_chart.html' with chart=hours_chart %}
+            {% endif %}
+
+            {# The scanner is a keyboard. #}
                 <div id="deskScanBar" class="hidden rounded-xl border border-cyan-800/60 bg-cyan-500/[0.06] px-5 py-4">
                     <div class="flex items-center gap-4">
                         <i class="fa-solid fa-qrcode text-cyan-400 text-2xl"></i>
@@ -196,18 +194,14 @@
                         </div>
                         <input type="text" id="deskScanField" autocomplete="off"
                                class="w-px h-px opacity-0 border-0 p-0 absolute" aria-label="Scanner input">
-                        {# A desk with no handheld scanner still has a webcam, and it #}
-                        {# reads the same QR. Both stay live while the bar is open, so #}
-                        {# neither has to be chosen up front. #}
+                        {# A desk with no handheld scanner still has a webcam, and it reads the same QR. #}
                         <button type="button" id="deskCamBtn" onclick="deskToggleCamera()" class="text-cyan-400 hover:bg-cyan-700/30 text-[11px] font-semibold px-3 py-1.5 rounded-lg border border-cyan-800/80 flex items-center gap-1.5">
                             <i class="fa-solid fa-camera text-[10px]"></i> Use camera
                         </button>
                         <button type="button" onclick="deskCloseScan()" class="text-slate-400 hover:text-slate-200 text-[11px] font-semibold px-3 py-1.5 rounded-lg border border-slate-700">Cancel</button>
                     </div>
 
-                    {# Deliberately small: jsQR reads the whole camera frame regardless #}
-                    {# of how large the preview is, so a big viewfinder buys nothing and #}
-                    {# pushes the log table off the screen. #}
+                    {# Small camera preview. #}
                     <div id="deskCamWrap" class="hidden mt-4">
                         <div class="relative aspect-video w-full max-w-[260px] mx-auto bg-slate-900 rounded-lg overflow-hidden">
                             <video id="deskCamVideo" class="w-full h-full object-contain" autoplay playsinline muted></video>
@@ -235,10 +229,7 @@
                         <button onclick="openNewLogModal()" class="bg-cyan-700/30 text-cyan-400 border border-cyan-800/80 hover:bg-cyan-700/50 text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
                             <i class="fa-solid fa-plus text-[10px]"></i> New Log
                         </button>
-                        {# Patrons sign themselves in on this same computer; arming desk #}
-                        {# mode is what stops them landing in an open staff session. #}
-                        {# Closing up: whoever can see the room is empty is the one who #}
-                        {# should be able to say so, on the table it corrects. #}
+                        {# Desk mode and close visits. #}
                         <form method="post" action="{% url 'close_open_visits' %}" class="inline-block" data-confirm="Close every visit that is still open? They will be recorded as assumed exits.">
                             {% csrf_token %}
                             <button type="submit" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-slate-400 text-[11px] font-semibold px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors">
@@ -299,8 +290,7 @@
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-slate-800/40 text-xs text-slate-300">
-                            {# The patron types straight into the table: an always-present first row #}
-                            {# rather than a button that opens a form. Card holders click Scan. #}
+                            {# Entry row. #}
                             <tr id="deskEntryRow" class="bg-cyan-500/[0.04] border-b-2 border-cyan-800/40">
                                 <td class="py-3 px-6">
                                     <span class="inline-block bg-cyan-500/15 text-cyan-400 border border-cyan-500/30 px-2 py-0.5 rounded text-[9px] font-bold tracking-widest">NEW</span>
@@ -365,8 +355,7 @@
                                     </td>
                                     <td class="py-4 px-6 text-center">
                                         {% if desk_mode %}{% if not log.exit_time %}
-                                        {# Leaving should not mean identifying yourself a second #}
-                                        {# time: your name is already on this row. #}
+                                        {# Sign out button. #}
                                         <button type="button" onclick="deskSignOut(this)"
                                                 data-log-id="{{ log.log_id }}"
                                                 data-name="{{ log.patron.fullname }}"
@@ -415,27 +404,7 @@
                 <div class="px-5 py-4 border-t border-slate-800/60 flex items-center justify-between text-xs text-slate-500 bg-slate-900/5">
                     <span class="font-medium">Showing <span class="text-slate-400">{{ logs|length }}</span> of <span class="text-slate-400">{{ log_count }}</span> logs for {{ sel_date|date:"M j, Y" }}</span>
 
-                    {% if paginator.num_pages > 1 %}
-                    <div class="flex items-center gap-1">
-                        {% if logs.has_previous %}
-                            <a href="?page={{ logs.previous_page_number }}{% if querystring %}&{{ querystring }}{% endif %}" class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors">&larr; Prev</a>
-                        {% else %}
-                            <button class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors cursor-not-allowed" disabled>&larr; Prev</button>
-                        {% endif %}
-                        {% for page_num in paginator.page_range %}
-                            {% if page_num == logs.number %}
-                                <button class="px-3 py-1.5 rounded bg-cyan-700/30 text-cyan-400 font-bold border border-cyan-800/50">{{ page_num }}</button>
-                            {% else %}
-                                <a href="?page={{ page_num }}{% if querystring %}&{{ querystring }}{% endif %}" class="px-3 py-1.5 rounded border border-slate-800 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors">{{ page_num }}</a>
-                            {% endif %}
-                        {% endfor %}
-                        {% if logs.has_next %}
-                            <a href="?page={{ logs.next_page_number }}{% if querystring %}&{{ querystring }}{% endif %}" class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors">Next &rarr;</a>
-                        {% else %}
-                            <button class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors cursor-not-allowed" disabled>Next &rarr;</button>
-                        {% endif %}
-                    </div>
-                    {% endif %}
+                    {% include 'admin/_pagination.html' with page=logs accent='cyan' qs=querystring %}
                 </div>
 
             </div>
@@ -458,7 +427,7 @@
             <div class="space-y-3 text-xs">
                 <div class="space-y-1.5">
                     <label for="editLogSchool" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">School</label>
-                    <input type="text" id="editLogSchool" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                    <input list="knownSchools" type="text" id="editLogSchool" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
                 </div>
                 <div class="space-y-1.5">
                     <label for="editLogPurpose" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Purpose of Visit</label>
@@ -515,7 +484,7 @@
                 <div id="lgEntryFields" class="space-y-3">
                     <div class="space-y-1.5">
                         <label for="lgSchool" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">School</label>
-                        <input type="text" id="lgSchool" placeholder="School / Institution" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium placeholder-slate-600" style="background-color: var(--bg-input);">
+                        <input type="text" id="lgSchool" list="knownSchools" placeholder="Leave blank to use the patron's own" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium placeholder-slate-600" style="background-color: var(--bg-input);">
                     </div>
                     <div class="space-y-1.5">
                         <label for="lgPurpose" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Purpose of Visit</label>
@@ -568,7 +537,7 @@
                         {% for pt in patron_types %}<option value="{{ pt }}">{{ pt }}</option>{% endfor %}
                     </select>
                 </div>
-                {# On-site identity validation — Ch.1 ¶242: the walk-in patron presents a physical ID and the desk verifies it on the spot. #}
+                {# Staff check the walk-in's physical ID on the spot. #}
                 <div class="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 space-y-2.5">
                     <p class="text-[10px] uppercase font-bold tracking-wider text-amber-500">
                         <i class="fa-solid fa-id-card text-[10px]"></i> Identity Validation
@@ -611,8 +580,7 @@
     <script>
 
 
-        // A short list is countable; free text is not. "Other" keeps the escape
-        // hatch without turning the column back into prose.
+        // A short list is countable; free text is not.
         function syncPurposeOther(selectId) {
             const other = document.getElementById(selectId + 'Other');
             if (!other) return;
@@ -641,9 +609,7 @@
             if (!value) { sel.selectedIndex = 0; if (other) other.classList.add('hidden'); }
         }
 
-        // ── Signing in from the table itself ─────────────────────────────
-        // The first row of the table is the form. Nothing to open, nothing to
-        // close: a patron walks up, types, and presses Enter.
+        // Sign in from the table.
         const DESK_URLS = { sign: "{% url 'desk_sign' %}", scan: "{% url 'desk_scan' %}",
                             unlock: "{% url 'desk_unlock' %}",
                             signOut: "{% url 'desk_sign_out' %}" };
@@ -721,10 +687,7 @@
             else { btn.disabled = false; }
         }
 
-        // ── Scanning a card ─────────────────────────────────────────────
-        // Two ways in, both ending at the same endpoint: the desk's handheld
-        // scanner, which types the code and presses Enter, and the webcam, for a
-        // desk that has none attached. Both stay live while the bar is open.
+        // Card scanning.
         function deskOpenScan() {
             document.getElementById('deskScanBar').classList.remove('hidden');
             deskScanBusy = false;
@@ -739,9 +702,7 @@
 
         let deskScanBusy = false;
         async function deskSubmitCode(code) {
-            // The camera reads the same card ten times a second; without this the
-            // first frame signs the patron in and the second signs them straight
-            // back out.
+            // Ignore repeat reads.
             if (!code || deskScanBusy) return;
             deskScanBusy = true;
             try {
@@ -751,8 +712,7 @@
                 });
                 deskCloseScan();
                 deskShowMessage(r.success ? r.message : r.error, r.success ? 'ok' : 'error');
-                // On success the page reloads, so the lock stays on. A rejected
-                // card has to be presentable again.
+                // On success the page reloads, so the lock stays on.
                 if (r.success) setTimeout(function () { window.location.reload(); }, 1600);
                 else deskScanBusy = false;
             } catch (err) {
@@ -761,7 +721,7 @@
             }
         }
 
-        // ── The webcam as a scanner ──────────────────────────────────────
+        // Webcam scanner
         let deskCamStream = null, deskCamTimer = null;
 
         function deskToggleCamera() {
@@ -792,10 +752,7 @@
                 };
                 btn.innerHTML = '<i class="fa-solid fa-camera-rotate text-[10px]"></i> Stop camera';
             } catch (err) {
-                // No camera, permission refused, or the page is being served over
-                // plain http from something other than localhost -- getUserMedia
-                // is refused outright there. Say so: the handheld scanner still
-                // works, and a dead black box would look like a broken feature.
+                // Camera unavailable.
                 deskCamStream = null;
                 loading.innerHTML = '<i class="fa-solid fa-triangle-exclamation mr-2"></i> Camera unavailable';
                 status.textContent = 'Allow camera access, or use the desk scanner instead.';
@@ -809,8 +766,7 @@
             const ctx = canvas.getContext('2d', { willReadFrequently: true });
             deskCamTimer = setInterval(function () {
                 if (!video || video.readyState !== video.HAVE_ENOUGH_DATA) return;
-                // The full frame is scanned, not the preview: the box on screen is
-                // only how much of it the patron gets to see.
+                // Scan the full frame.
                 canvas.width = video.videoWidth;
                 canvas.height = video.videoHeight;
                 ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
@@ -823,8 +779,7 @@
         function deskStopCamera() {
             if (deskCamTimer) { clearInterval(deskCamTimer); deskCamTimer = null; }
             if (deskCamStream) {
-                // Release the device, or the camera light stays on after the bar
-                // closes and the next page cannot open it.
+                // Release the camera.
                 deskCamStream.getTracks().forEach(function (t) { t.stop(); });
                 deskCamStream = null;
             }
@@ -857,7 +812,7 @@
             });
         }
 
-        // ── Leaving desk mode ───────────────────────────────────────────
+        // Leaving desk mode
         function deskOpenUnlock() {
             const o = document.getElementById('deskUnlockOverlay');
             o.classList.remove('hidden');
@@ -950,7 +905,7 @@
             }
         }
 
-        // ── New Log (Entry/Exit visit session) modal ───────────────
+        // New log modal
         const LG_URLS = {
             entry: "{% url 'entry_log_start' %}",
             exit: "{% url 'entry_log_exit' %}",
@@ -1104,8 +1059,7 @@
                 ? ('Entry: ' + r.log.entry_time)
                 : ('Exit: ' + r.log.exit_time + (r.log.duration ? ' · Duration ' + r.log.duration : ''));
             lgShowPanel('lgConfirmPanel');
-            // The receipt is the point of this panel, but it should not sit there
-            // waiting for a click — show it briefly, then close and refresh.
+            // Close and refresh after a moment.
             clearTimeout(lgConfirmTimer);
             lgConfirmTimer = setTimeout(lgDone, 2000);
         }
@@ -1120,11 +1074,7 @@
             });
         }
 
-        // Both visit-log modals are staff-only and are not rendered in desk mode,
-        // where the browser is handed to a patron. The listeners have to check
-        // for that: wiring a click handler onto a null threw on every desk-mode
-        // load, and the Escape handler below calls the close functions
-        // unconditionally, so those are guarded at source too.
+        // These modals are not rendered in desk mode.
         const newLogModalEl = document.getElementById('newLogModal');
         if (newLogModalEl) {
             newLogModalEl.addEventListener('click', function (e) {
@@ -1132,7 +1082,7 @@
             });
         }
 
-        // ── Edit visit log ─────────────────────────────────────────
+        // Edit visit log
         let editLogBusy = false;
         function openEditLog(btn) {
             document.getElementById('editLogId').value = btn.getAttribute('data-log-id');
@@ -1186,7 +1136,7 @@
             if (e.key === 'Escape') { closeNewLogModal(); closeEditLog(); }
         });
 
-        // ── Log Management filters (search / status / date) ──
+        // Filters
         var __logStatus = "{{ status }}";
         function applyLogFilters() {
             var q = (document.getElementById('logSearch').value || '').trim();
@@ -1202,8 +1152,7 @@
     </script>
     <script src="{% static 'js/admin-enhance.js' %}" defer></script>
 
-    {# Taking the computer back. The account password, not a separate PIN that #}
-    {# would end up on a sticky note beside the monitor. #}
+    {# Taking the computer back. #}
     <div id="deskUnlockOverlay" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/70 p-4">
         <div class="rounded-2xl border border-slate-700/60 shadow-2xl w-full max-w-sm" style="background-color: var(--bg-card);">
             <div class="p-5 border-b border-slate-800 flex items-center gap-2.5">
@@ -1222,5 +1171,9 @@
             </div>
         </div>
     </div>
+    {# Schools already recorded, offered beside every free-text school box. #}
+    <datalist id="knownSchools">
+        {% for s in known_schools %}<option value="{{ s }}"></option>{% endfor %}
+    </datalist>
 </body>
 </html>

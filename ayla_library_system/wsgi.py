@@ -1,11 +1,4 @@
-"""
-WSGI config for ayla_library_system project.
-
-It exposes the WSGI callable as a module-level variable named ``application``.
-
-For more information on this file, see
-https://docs.djangoproject.com/en/6.0/howto/deployment/wsgi/
-"""
+"""WSGI config for ayla_library_system project."""
 
 import os
 

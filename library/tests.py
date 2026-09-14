@@ -1,18 +1,10 @@
-"""Smoke tests.
+"""Smoke tests."""
 
-Not a full suite -- this is the thin layer that catches the class of breakage
-that actually happens while a system this size is being changed: a page that
-stopped rendering, a decorator that slid onto the wrong function, a helper whose
-signature drifted, a guard that quietly stopped guarding.
-
-Every test here runs in a second and needs no fixtures beyond what it creates.
-Run before every deployment:
-
-    python manage.py test library
-"""
-
-from datetime import timedelta
+from datetime import date, datetime, timedelta
+import io
 import json
+import os
+from io import StringIO
 from unittest import mock
 from uuid import uuid4
 
@@ -22,18 +14,15 @@ from django.utils import timezone
 from .auth_utils import hash_password, password_length_error
 from .models import (
     BLEBeacon, Book, BorrowingRule, Door, FloorPlan, LoginAttempt, Obstacle, Patron, Room,
-    InventoryRecord, Obstacle, Shelf, ShelfLevel, Stairway, Transaction, User,
+    InventoryRecord, Obstacle, PatronLog, Shelf, ShelfLevel, Stairway, SystemLog,
+    Transaction, User,
     Waypoint,
     WaypointConnection,
 )
 
 
 class _FakeRequest:
-    """Just enough request for a middleware or an audit helper to work on.
-
-    RequestFactory would do, but these tests are about what the helper writes,
-    not about routing -- and a plain object makes what they depend on obvious.
-    """
+    """Just enough request for a middleware or an audit helper to work on."""
 
     def __init__(self, path='/probe/', method='GET', session=None):
         self.path = path
@@ -60,12 +49,7 @@ def _signed_in(user):
 
 
 class PagesRenderTests(TestCase):
-    """Every admin page answers 200 for someone allowed to see it.
-
-    The cheapest possible regression net: a template that stops compiling, a
-    context variable that stops existing, or a view that starts raising all show
-    up here as a 500 instead of being found by hand.
-    """
+    """Every admin page answers 200 for someone allowed to see it."""
 
     def setUp(self):
         self.user = _admin(modules='transactions,books,logs,patrons,shelf,'
@@ -272,19 +256,27 @@ class DeskModeTests(TestCase):
         self.assertIn('log-management', response['Location'])
 
 
-class IdleTimeoutTests(TestCase):
-    def test_an_idle_session_is_closed(self):
-        from .middleware import LAST_SEEN_KEY, STAFF_IDLE_SECONDS
-        user = _admin()
-        client = _signed_in(user)
-        self.assertEqual(client.get('/admin-portal/dashboard/').status_code, 200)
+class NoIdleSignOutTests(TestCase):
+    """A signed-in session is not closed for sitting quiet."""
 
+    def test_the_idle_middleware_is_not_installed(self):
+        from django.conf import settings
+        self.assertNotIn('library.middleware.IdleSessionTimeoutMiddleware',
+                         settings.MIDDLEWARE)
+
+    def test_a_session_quiet_for_hours_stays_signed_in(self):
+        client = _signed_in(_admin())
         session = client.session
-        session[LAST_SEEN_KEY] = timezone.now().timestamp() - (STAFF_IDLE_SECONDS + 60)
+        # Leftover timestamp from older sessions.
+        session['_last_seen'] = timezone.now().timestamp() - 6 * 3600
         session.save()
+        self.assertEqual(client.get('/admin-portal/dashboard/').status_code, 200)
+        self.assertIn('admin_id', client.session)
 
-        self.assertEqual(client.get('/admin-portal/dashboard/').status_code, 302)
-        self.assertNotIn('admin_id', client.session)
+    def test_the_session_age_is_not_a_hidden_one_hour_sign_out(self):
+        """Nothing re-saves a session during use, so a short age is a timer."""
+        from django.conf import settings
+        self.assertGreaterEqual(settings.SESSION_COOKIE_AGE, 7 * 24 * 3600)
 
 
 class ImportGuardTests(TestCase):
@@ -338,8 +330,7 @@ class DailyMaintenanceTests(TestCase):
             with self.assertRaises(SystemExit):
                 call_command('daily_maintenance', stdout=out, stderr=err)
 
-        # The second job still ran, and the failure was reported rather than
-        # swallowed -- a scheduler needs a non-zero exit to show a red task.
+        # The second job still ran and the failure was reported.
         self.assertIn('Open visits', out.getvalue())
         self.assertIn('simulated mail failure', err.getvalue())
 
@@ -358,8 +349,7 @@ class EmailTransportTests(TestCase):
             self.assertEqual(mail.outbox[0].subject, 'Subject')
 
     def test_a_send_failure_never_raises_into_the_caller(self):
-        """Mail is best-effort by contract: a broken mail server must not stop a
-        librarian processing a loan."""
+        """A mail failure must not stop a loan."""
         from .emails import send_email
 
         with self.settings(EMAIL_BACKEND='django.core.mail.backends.smtp.EmailBackend',
@@ -368,20 +358,7 @@ class EmailTransportTests(TestCase):
 
 
 class CrossFloorRoutingTests(TestCase):
-    """Routing to a shelf that is not on the floor the patron is standing on.
-
-    The building here is deliberately the simplest one that can go wrong: two
-    floors, a corridor of three waypoints on each, and two staircases per floor
-    so there is a genuinely wrong answer available. The near stairs on floor 1
-    are linked to floor 2; the far ones are not. A route that picks the far
-    stairs, or that quietly stays on one floor, fails.
-
-        floor 1:  W1 --- W2 --- W3          floor 2:  U1 --- U2 --- U3
-                  |             |                     |             |
-              NEAR STAIRS   FAR STAIRS            LANDING       (far, unlinked)
-                  |
-                  +--------- linked --------->  LANDING
-    """
+    """Routing to a shelf that is not on the floor the patron is standing on."""
 
     def setUp(self):
         self.f1 = FloorPlan.objects.create(
@@ -466,11 +443,7 @@ class CrossFloorRoutingTests(TestCase):
         self.assertEqual(data['target_shelf']['shelf_id'], self.shelf.shelf_id)
 
     def test_it_uses_the_staircase_that_is_actually_linked(self):
-        """Starting beside the unlinked far stairs must not tempt it.
-
-        The far stairs are 400 units closer, so a router that picked the nearest
-        staircase would choose them -- and they go nowhere.
-        """
+        """Starting beside the unlinked far stairs must not tempt it."""
         data = self._route(target_shelf_id=self.shelf.shelf_id,
                            from_floor=self.f1.floor_plan_id,
                            start_x=500, start_y=200)
@@ -528,12 +501,7 @@ class CrossFloorRoutingTests(TestCase):
         self.assertEqual(data['target_floor']['floor_plan_id'], self.f2.floor_plan_id)
 
     def test_linking_only_the_upward_flight_is_enough(self):
-        """The landing forgot to name the floor below. Still one staircase.
-
-        This is the ordinary setup mistake -- the flight up gets linked, the one
-        coming down does not -- and it used to leave the two floors as separate
-        islands with no route between them.
-        """
+        """The landing forgot to name the floor below."""
         self.landing.connects_to = None
         self.landing.save(update_fields=['connects_to'])
 
@@ -570,12 +538,7 @@ class CrossFloorRoutingTests(TestCase):
         self.assertEqual(data['target_floor']['label'], self.f2.floor_label)
 
     def test_a_floor_with_stairs_but_no_corridor_explains_itself(self):
-        """Half-drawn upstairs: stairs placed, waypoints not.
-
-        The stairway is a node in the same graph as the waypoints, so a floor
-        that has one and no waypoints looks populated to a careless check and
-        then has nowhere for a route to begin. It has to answer, not raise.
-        """
+        """Half-drawn upstairs: stairs placed, waypoints not."""
         Waypoint.objects.filter(floor_plan=self.f2).delete()
 
         data = self._route(target_shelf_id=self.shelf.shelf_id,
@@ -610,11 +573,7 @@ class CrossFloorRoutingTests(TestCase):
 
 
 class QRLabelSheetTests(TestCase):
-    """The printable QR label sheet.
-
-    These labels get stuck onto physical books, so the two things that must not
-    go wrong are the identity on each sticker and the size it prints at.
-    """
+    """The printable QR label sheet."""
 
     def setUp(self):
         self.user = _admin(modules='books')
@@ -645,11 +604,7 @@ class QRLabelSheetTests(TestCase):
         self.assertEqual(len(codes), 3)
 
     def test_copy_numbers_count_the_whole_catalogue(self):
-        """Printing two of three copies still reads 2 of 3, not 1 of 2.
-
-        The numbers go onto physical books, so they have to agree with the
-        shelf rather than with whatever subset was ticked in the table.
-        """
+        """Printing two of three copies still reads 2 of 3, not 1 of 2."""
         from .labels import copy_numbers
         subset = self.copies[1:]
         numbers = copy_numbers(subset)
@@ -733,24 +688,14 @@ class QRLabelSheetTests(TestCase):
 
 
 class EveryAdminEndpointIsGuardedTests(TestCase):
-    """No /admin-portal/ view is missing its sign-in guard.
+    """No /admin-portal/ view is missing its sign-in guard."""
 
-    Inserting a new view directly above an existing one strands that view's
-    decorator on the newcomer and leaves the original wide open, with nothing
-    about the file looking wrong -- it has happened twice here. Neither reading
-    the source nor eyeballing the decorators catches it, because both keep
-    looking at a decorator that is still present, just attached to the wrong
-    function. So this asks the two questions from outside instead: is every
-    routed admin view decorated at all, and can a stranger get a 200 out of it?
-    """
-
-    # Reached before sign-in by design. Logging out is on the list because
-    # requiring a session in order to end one is how a half-broken session
-    # becomes a trap the user cannot get out of.
+    # Reached before sign-in by design.
     PUBLIC = {
         'admin_login', 'admin_signin', 'admin_forgot_password', 'admin_logout',
         'staff_login', 'staff_forgot_password',
         'desk_sign', 'desk_sign_out', 'desk_scan', 'desk_unlock', 'desk_arm',
+        'desk_identify', 'desk_visit', 'desk_visitor',
     }
     GUARDS = {
         'admin_login_required', 'admin_only_required', 'admin_module_required',
@@ -783,9 +728,7 @@ class EveryAdminEndpointIsGuardedTests(TestCase):
             for node in tree.body:
                 if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                     continue
-                # A view may guard itself by decorating an inner function and
-                # calling it -- close_open_visits_now does exactly that -- so
-                # decorators anywhere inside the view count as the view's own.
+                # Count decorators on inner functions too.
                 names = set()
                 for inner in ast.walk(node):
                     if not isinstance(inner, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -824,11 +767,7 @@ class EveryAdminEndpointIsGuardedTests(TestCase):
 
 
 class LabelPickerTests(TestCase):
-    """The picker's feed, and printing in shelf order.
-
-    Two shelves, two levels each, plus books left unplaced -- the smallest
-    library where "sorted by where it lives" can be wrong.
-    """
+    """The picker's feed, and printing in shelf order."""
 
     def setUp(self):
         self.user = _admin(modules='books')
@@ -905,12 +844,7 @@ class LabelPickerTests(TestCase):
         self.assertTrue(r.content.startswith(b'%PDF'))
 
     def test_groups_do_not_get_their_own_page(self):
-        """Packed tight: five books across three shelf levels is still one page.
-
-        This is the decision the sheet is built on -- a group boundary must not
-        cost a page, or a twenty-shelf job becomes twenty sheets of mostly
-        blank paper.
-        """
+        """Packed tight: five books across three shelf levels is still one page."""
         from .labels import build_label_sheet, sort_for_printing
 
         books = sort_for_printing(list(Book.objects.select_related(
@@ -977,8 +911,7 @@ class ShelfShapeTests(TestCase):
         self.assertTrue(data['success'], data)
         shelf = Shelf.objects.get(shelf_id=data['shelf_id'])
         self.assertEqual(len(shelf.geometry), 6)
-        # Positioned by its own outline, not left at the default 0,0 -- the
-        # label and the route target both hang off map_x/map_y.
+        # Positioned by its outline.
         self.assertIsNotNone(shelf.map_x)
         self.assertGreater(shelf.map_x, 0)
         self.assertGreater(shelf.map_y, 0)
@@ -1314,8 +1247,7 @@ class DoorPlacementTests(TestCase):
         self.client = _signed_in(self.user)
         self.plan = FloorPlan.objects.create(name='Ground', floor_number=1,
                                              is_active=True)
-        # A wide, short room, so "nearest wall" differs per click rather than
-        # every point being equidistant from two of them.
+        # A wide, short room.
         self.room = Room.objects.create(
             floor_plan=self.plan, name='Hallway', map_x=0, map_y=0,
             geometry=[[100, 100], [500, 100], [500, 200], [100, 200]])
@@ -1361,12 +1293,7 @@ class DoorPlacementTests(TestCase):
         self.assertEqual(Door.objects.get(pk=door_id).width, 28)
 
     def test_resizing_from_one_end_leaves_the_other_end_alone(self):
-        """Dragging an end grip sends a new width AND a new centre together.
-
-        The far jamb is what the Administrator is holding still, so it is the
-        thing that must not move; the centre shifting by half is the correct
-        consequence, not a bug.
-        """
+        """Dragging an end grip sends a new width AND a new centre together."""
         door_id = self._add(300, 110)['door']['door_id']
         door = Door.objects.get(pk=door_id)
         self.assertAlmostEqual(door.rotation, 0.0, places=3)   # along the top wall
@@ -1707,8 +1634,7 @@ class SharedDoorTests(TestCase):
 
     def test_a_door_linked_to_other_rooms_excuses_nothing_here(self):
         """The precision the second room buys: a doorway belongs to one wall."""
-        # A door sitting exactly where the crossing happens, but declared to
-        # join two rooms that have nothing to do with it.
+        # A door that links unrelated rooms.
         stray = Door.objects.create(room=self.far, room_b=self.left,
                                     map_x=300, map_y=200, width=80, rotation=90)
         self.assertEqual(stray.room_b_id, self.left.room_id)
@@ -1734,8 +1660,7 @@ class SharedDoorTests(TestCase):
         self.assertEqual(r['doors_moved'][0]['unlinked_from'], 'Right')
 
     def test_readiness_names_rooms_no_door_reaches(self):
-        # With no doors at all the panel says so instead, which is the more
-        # useful message; this is the case where doors exist but link nothing.
+        # Doors exist but connect nothing.
         self._add(self.left, 105, 200)
         data = self.client.get('/admin-portal/floor-plan-readiness/',
                                {'floor_plan_id': self.plan.floor_plan_id}).json()
@@ -1929,6 +1854,51 @@ class BookLocationTests(TestCase):
         book.refresh_from_db()
         self.assertIsNone(book.shelf_slot)
 
+    # Map drawing checks.
+
+    def test_the_route_is_arrows_with_no_line_through_them(self):
+        """The line said a route exists; the arrows say which way to walk."""
+        html = self.client.get('/patron/map/').content.decode()
+        self.assertNotIn('routeLine', html)
+        self.assertIn('drawRouteArrows', html)
+
+    def test_the_marker_is_held_still_rather_than_crept_along(self):
+        """Creeping toward the mean was still creeping, so it never stopped."""
+        html = self.client.get('/patron/map/').content.decode()
+        self.assertIn('STILL_HOLD_M', html)
+        self.assertIn('stillAnchor', html)
+        self.assertNotIn('POS_SMOOTHING_STILL', html)
+
+    def test_there_is_no_facing_arrow(self):
+        """It could not be measured honestly, so it is not drawn."""
+        html = self.client.get('/patron/map/').content.decode()
+        for gone in ('headingMarker', 'headingDeg', 'deviceorientation',
+                     'travelBearing'):
+            self.assertNotIn(gone, html, gone + ' should have gone with the arrow')
+        # Where they are, and which way the route runs, are still shown.
+        self.assertIn('patronMarker', html)
+        self.assertIn('drawRouteArrows', html)
+
+    def test_the_shelf_strip_shows_the_neighbours_not_the_whole_board(self):
+        """One bar per book wanted 1,536 px on a 192-book board."""
+        html = self.client.get('/patron/map/').content.decode()
+        self.assertIn('SPINES_EACH_SIDE', html)
+        self.assertIn('shelfTrack', html)
+        self.assertIn('b.more', html)
+
+    def test_the_marker_is_kept_off_the_furniture(self):
+        """Trilateration returns a point, not a place."""
+        html = self.client.get('/patron/map/').content.decode()
+        for handle in ('clampToFloor', 'pushOffSolids', 'isClearFloor',
+                       'nearestClearPoint', 'solids('):
+            self.assertIn(handle, html, handle + ' is missing')
+
+    def test_the_map_is_given_what_it_needs_to_know_what_is_solid(self):
+        """Shelves, furniture and the stairs all block; rooms bound the floor."""
+        d = self.client.get('/patron/map-data/').json()
+        for key in ('shelves', 'obstacles', 'stairways', 'rooms'):
+            self.assertIn(key, d, key + ' is missing from the map payload')
+
     def test_the_map_is_told_where_on_the_shelf_to_look(self):
         self._book(title='First', shelf_slot=1, status='Available')
         book = self._book(shelf_slot=2, status='Available')
@@ -1937,8 +1907,7 @@ class BookLocationTests(TestCase):
         target = r.context['target']
         self.assertEqual(target['shelf_slot'], 2)
         self.assertEqual(target['level_number'], 3)
-        # The marker is placed against the copies on the shelf, so it is the
-        # 2nd of 3 rather than anything to do with the stored slot numbers.
+        # Position counts only copies on the shelf.
         self.assertEqual(target['position'], 2)
         self.assertEqual(target['position_of'], 3)
         self.assertIn('2nd book along', target['location'])
@@ -2150,22 +2119,1183 @@ class ReorderBooksTests(TestCase):
     def test_an_empty_order_is_refused(self):
         self.assertFalse(self._reorder(self.level, [])['success'])
 
-    def test_the_tree_returns_books_in_shelf_order(self):
-        a, b, c = self.books
-        self._reorder(self.level, [c.book_id, b.book_id, a.book_id])
-        data = self.client.get('/admin-portal/get-shelf-tree/').json()
-
+    def _board_node(self, data):
         def walk(nodes):
             for n in nodes:
                 if n['type'] == 'shelflevel' and n['id'] == self.level.shelf_level_id:
-                    return [k['name'] for k in n.get('children', [])]
+                    return n
                 found = walk(n.get('children', []))
                 if found:
                     return found
             return None
+        return walk(data['tree'])
 
-        self.assertEqual(walk(data['tree']), ['Three', 'Two', 'One'])
+    def test_a_board_returns_its_books_in_shelf_order(self):
+        """Where the tree's book list went."""
+        a, b, c = self.books
+        self._reorder(self.level, [c.book_id, b.book_id, a.book_id])
+        d = self.client.get('/admin-portal/board-books/',
+                            {'level': self.level.shelf_level_id}).json()
+        self.assertTrue(d['success'], d)
+        self.assertEqual([bk['title'] for bk in d['books']], ['Three', 'Two', 'One'])
+        self.assertEqual([bk['slot'] for bk in d['books']], [1, 2, 3])
 
+    def test_the_tree_counts_a_boards_books_instead_of_listing_them(self):
+        data = self.client.get('/admin-portal/get-shelf-tree/').json()
+        board = self._board_node(data)
+        self.assertIsNotNone(board)
+        self.assertEqual(board['book_count'], 3)
+        self.assertEqual(board.get('children'), [],
+                         'the tree carries structure, not the catalogue')
+
+    def test_a_board_that_is_gone_is_reported_not_crashed(self):
+        gone = self.level.shelf_level_id
+        self.level.delete()
+        d = self.client.get('/admin-portal/board-books/', {'level': gone}).json()
+        self.assertFalse(d['success'])
+        self.assertIn('no longer exists', d['error'])
+
+
+
+class ShelfColumnTreeTests(TestCase):
+    """Shelf > Column > Level, but only on a shelf that has more than one."""
+
+    def setUp(self):
+        self.user = _admin(modules='shelf')
+        self.client = _signed_in(self.user)
+        plan = FloorPlan.objects.create(name='Ground', floor_number=1, is_active=True)
+        self.room = Room.objects.create(floor_plan=plan, name='Main', map_x=0, map_y=0)
+
+    def _shelf(self, name):
+        return Shelf.objects.create(room=self.room, name=name, map_x=0, map_y=0)
+
+    def _tree(self):
+        return self.client.get('/admin-portal/get-shelf-tree/').json()['tree']
+
+    def _shelf_node(self, name):
+        for fp in self._tree():
+            for room in fp['children']:
+                for shelf in room['children']:
+                    if shelf['name'] == name:
+                        return shelf
+        return None
+
+    def test_a_single_column_shelf_lists_its_boards_directly(self):
+        shelf = self._shelf('Plain')
+        for n in (1, 2, 3):
+            ShelfLevel.objects.create(shelf=shelf, level_number=n)
+        node = self._shelf_node('Plain')
+        self.assertEqual([c['type'] for c in node['children']],
+                         ['shelflevel'] * 3)
+        self.assertEqual([c['name'] for c in node['children']],
+                         ['Level 1', 'Level 2', 'Level 3'])
+
+    def test_a_divided_shelf_groups_its_boards_under_columns(self):
+        shelf = self._shelf('Divided')
+        for column in (1, 2):
+            for n in (1, 2):
+                ShelfLevel.objects.create(shelf=shelf, level_number=n,
+                                          column_number=column)
+        node = self._shelf_node('Divided')
+        self.assertEqual([c['type'] for c in node['children']],
+                         ['shelfcolumn', 'shelfcolumn'])
+        self.assertEqual([c['name'] for c in node['children']],
+                         ['Column 1', 'Column 2'])
+        for column in node['children']:
+            self.assertEqual([b['name'] for b in column['children']],
+                             ['Level 1', 'Level 2'])
+
+    def test_a_board_under_a_column_does_not_repeat_the_column(self):
+        """The heading says it once. Saying it again on every child is noise."""
+        shelf = self._shelf('Divided')
+        ShelfLevel.objects.create(shelf=shelf, level_number=1, column_number=1)
+        ShelfLevel.objects.create(shelf=shelf, level_number=1, column_number=2)
+        node = self._shelf_node('Divided')
+        for column in node['children']:
+            for board in column['children']:
+                self.assertNotIn('Column', board['name'])
+
+    def test_a_board_still_names_its_column_when_it_stands_alone(self):
+        """A dropdown row or a QR label has no heading above it to inherit."""
+        shelf = self._shelf('Divided')
+        board = ShelfLevel.objects.create(shelf=shelf, level_number=2, column_number=3)
+        board.shelf = shelf
+        self.assertEqual(board.board_label, 'Level 2')
+        self.assertEqual(board.label, 'Level 2, Column 3')
+
+    def test_a_column_carries_the_books_of_the_boards_in_it(self):
+        shelf = self._shelf('Divided')
+        one = ShelfLevel.objects.create(shelf=shelf, level_number=1, column_number=1)
+        two = ShelfLevel.objects.create(shelf=shelf, level_number=2, column_number=1)
+        ShelfLevel.objects.create(shelf=shelf, level_number=1, column_number=2)
+        for level, count in ((one, 2), (two, 3)):
+            for i in range(count):
+                Book.objects.create(title='B%d-%d' % (level.pk, i), author='X',
+                                    shelf_level=level, status='Available')
+        node = self._shelf_node('Divided')
+        first, second = node['children']
+        self.assertEqual(first['book_count'], 5)
+        self.assertEqual(second['book_count'], 0)
+
+    def test_a_top_board_is_not_renumbered_by_the_column_grouping(self):
+        """A top is not level N, and dividing the bay does not make it one."""
+        shelf = self._shelf('Divided')
+        ShelfLevel.objects.create(shelf=shelf, level_number=9, column_number=1,
+                                  is_top=True)
+        ShelfLevel.objects.create(shelf=shelf, level_number=1, column_number=2)
+        node = self._shelf_node('Divided')
+        names = [b['name'] for c in node['children'] for b in c['children']]
+        self.assertIn('Top', names)
+
+    def test_boards_with_no_column_recorded_count_as_one_column(self):
+        """Most of the real data stores NULL, not 1, for an undivided bay."""
+        shelf = self._shelf('Null columns')
+        ShelfLevel.objects.create(shelf=shelf, level_number=1, column_number=None)
+        ShelfLevel.objects.create(shelf=shelf, level_number=2, column_number=None)
+        node = self._shelf_node('Null columns')
+        self.assertEqual([c['type'] for c in node['children']],
+                         ['shelflevel', 'shelflevel'])
+
+    def test_a_null_column_mixed_with_a_numbered_one_still_groups(self):
+        """Half-divided is divided: the reader has to be able to tell them apart."""
+        shelf = self._shelf('Half')
+        ShelfLevel.objects.create(shelf=shelf, level_number=1, column_number=None)
+        ShelfLevel.objects.create(shelf=shelf, level_number=1, column_number=2)
+        node = self._shelf_node('Half')
+        self.assertEqual([c['name'] for c in node['children']],
+                         ['Column 1', 'Column 2'])
+
+
+class ShelfReadAuditTests(TestCase):
+    """Reading a board against a list, and filing what was found."""
+
+    def setUp(self):
+        self.user = _admin(modules='inventory')
+        self.client = _signed_in(self.user)
+        plan = FloorPlan.objects.create(name='Ground', floor_number=1, is_active=True)
+        room = Room.objects.create(floor_plan=plan, name='Main', map_x=0, map_y=0)
+        self.shelf = Shelf.objects.create(room=room, name='Shelf A', map_x=0, map_y=0)
+        self.level = ShelfLevel.objects.create(shelf=self.shelf, level_number=1)
+        self.books = [self._book('One', 1), self._book('Two', 2), self._book('Three', 3)]
+
+    def _book(self, title, slot, status='Available'):
+        return Book.objects.create(title=title, author='X', genre='REF',
+                                   shelf_level=self.level, shelf_slot=slot,
+                                   status=status, qr_code='qr-' + title.lower())
+
+    @property
+    def audits(self):
+        from library.models import StockAudit
+        return StockAudit.objects
+
+    def _sheet(self):
+        return self.client.get('/admin-portal/inventory/audit/sheet/',
+                               {'level': self.level.shelf_level_id}).json()
+
+    def _file(self, **kw):
+        data = {'level': self.level.shelf_level_id}
+        data.update(kw)
+        return self.client.post('/admin-portal/inventory/audit/file/', data).json()
+
+    # The sheet
+
+    def test_the_sheet_lists_the_board_in_shelf_order(self):
+        """The order is half the point: a shelf-read finds books out of place."""
+        d = self._sheet()
+        self.assertTrue(d['success'], d)
+        self.assertEqual([b['title'] for b in d['books']], ['One', 'Two', 'Three'])
+        self.assertEqual(d['expected_count'], 3)
+
+    def test_the_sheet_carries_the_code_that_is_printed_on_the_sticker(self):
+        """The old audit looked up a copy label no printed sticker carries."""
+        d = self._sheet()
+        self.assertEqual([b['qr_code'] for b in d['books']],
+                         ['qr-one', 'qr-two', 'qr-three'])
+
+    def test_a_borrowed_copy_is_shown_but_not_asked_about(self):
+        """The librarian is standing at a gap. Saying why beats hiding it."""
+        self.books[1].status = 'Borrowed'
+        self.books[1].save(update_fields=['status'])
+        d = self._sheet()
+        row = next(b for b in d['books'] if b['title'] == 'Two')
+        self.assertFalse(row['expected_present'])
+        self.assertEqual(d['expected_count'], 2)
+        self.assertEqual(d['elsewhere_count'], 1)
+
+    def test_a_written_off_copy_is_not_on_the_sheet_at_all(self):
+        self.books[0].status = 'Lost'
+        self.books[0].save(update_fields=['status'])
+        d = self._sheet()
+        self.assertEqual([b['title'] for b in d['books']], ['Two', 'Three'])
+
+    # Filing
+
+    def test_filing_records_what_was_confirmed_by_hand_against_what_was_swept(self):
+        """A swept board and a board read spine by spine are not the same claim."""
+        d = self._file(found_ids=[self.books[0].book_id],
+                       bulk_ids=[self.books[1].book_id, self.books[2].book_id])
+        self.assertTrue(d['success'], d)
+        self.assertEqual((d['confirmed'], d['individually'], d['in_bulk']), (3, 1, 2))
+        audit = self.audits.get(audit_id=d['audit_id'])
+        self.assertEqual(audit.found_count, 3)
+        self.assertEqual(audit.scanned_count, 1)
+
+    def test_a_copy_not_found_is_marked_missing_and_not_written_off(self):
+        """One bad count must not destroy a book that was simply misplaced."""
+        gone = self.books[2]
+        d = self._file(found_ids=[self.books[0].book_id, self.books[1].book_id],
+                       missing_ids=[gone.book_id])
+        self.assertEqual(d['flagged'], 1)
+        gone.refresh_from_db()
+        self.assertEqual(gone.status, 'Missing')
+        self.assertEqual(gone.audit_misses, 1)
+        self.assertIsNotNone(gone.missing_since)
+        self.assertNotEqual(gone.status, 'Lost')
+
+    def test_a_second_miss_counts_but_keeps_the_original_date(self):
+        """The gap is measured from when it went, not from the last count."""
+        gone = self.books[2]
+        self._file(missing_ids=[gone.book_id], found_ids=[self.books[0].book_id])
+        gone.refresh_from_db()
+        first_seen_missing = gone.missing_since
+        self._file(missing_ids=[gone.book_id], found_ids=[self.books[0].book_id])
+        gone.refresh_from_db()
+        self.assertEqual(gone.audit_misses, 2)
+        self.assertEqual(gone.missing_since, first_seen_missing)
+
+    def test_a_missing_copy_that_turns_up_is_recovered(self):
+        """The good news in a count, and the reason a miss writes nothing off."""
+        gone = self.books[2]
+        self._file(missing_ids=[gone.book_id], found_ids=[self.books[0].book_id])
+        d = self._file(found_ids=[b.book_id for b in self.books])
+        self.assertEqual(d['recovered'], 1)
+        gone.refresh_from_db()
+        self.assertEqual(gone.status, 'Available')
+        self.assertIsNone(gone.missing_since)
+        self.assertEqual(gone.audit_misses, 0)
+
+    def test_a_borrowed_copy_cannot_be_marked_missing(self):
+        """Not finding it on the shelf is the expected result, not a discrepancy."""
+        out = self.books[1]
+        out.status = 'Borrowed'
+        out.save(update_fields=['status'])
+        d = self._file(found_ids=[self.books[0].book_id], missing_ids=[out.book_id])
+        self.assertEqual(d['flagged'], 0)
+        out.refresh_from_db()
+        self.assertEqual(out.status, 'Borrowed')
+
+    def test_a_confirmation_beats_a_sweep_and_a_miss_beats_both(self):
+        """The verdicts arrive as three lists and a copy can only be in one."""
+        book = self.books[0]
+        d = self._file(found_ids=[book.book_id], bulk_ids=[book.book_id],
+                       missing_ids=[book.book_id])
+        self.assertEqual((d['confirmed'], d['flagged']), (0, 1))
+        book.refresh_from_db()
+        self.assertEqual(book.status, 'Missing')
+
+    def test_confirming_a_copy_records_when_it_was_last_seen(self):
+        self._file(found_ids=[self.books[0].book_id])
+        self.books[0].refresh_from_db()
+        self.assertIsNotNone(self.books[0].last_seen)
+
+    def test_a_board_nobody_marked_cannot_be_filed(self):
+        """Filing an untouched sheet would date a shelf nobody walked."""
+        d = self._file()
+        self.assertFalse(d['success'])
+        self.assertIn('Mark what you found', d['error'])
+        self.assertEqual(self.audits.count(), 0)
+
+    def test_a_book_from_another_board_cannot_be_counted_here(self):
+        elsewhere = Book.objects.create(title='Stranger', author='X',
+                                        status='Available')
+        d = self._file(found_ids=[self.books[0].book_id, elsewhere.book_id])
+        self.assertEqual(d['confirmed'], 1)
+        elsewhere.refresh_from_db()
+        self.assertIsNone(elsewhere.last_seen)
+
+    def test_the_sweep_writes_a_different_mark_from_a_tap(self):
+        """The bug: "the rest are here" wrote the same mark a tap writes."""
+        html = self.client.get('/admin-portal/inventory/?tab=audit').content.decode()
+        self.assertIn("sheet.marks[b.book_id] = 'bulk'", html,
+                      'the sweep must write its own mark')
+        self.assertIn("if (m === 'here') body.append('found_ids'", html)
+        self.assertIn("body.append('bulk_ids'", html)
+
+    def test_the_board_picker_reports_the_oldest_confirmation_not_the_newest(self):
+        """A board is only as counted as its least-recently-seen book."""
+        self._file(found_ids=[self.books[0].book_id])
+        html = self.client.get('/admin-portal/inventory/?tab=audit').content.decode()
+        self.assertIn('never read', html,
+                      'two books here have never been confirmed')
+
+
+class ShapedStairTests(TestCase):
+    """A staircase that turns, drawn once."""
+
+    def setUp(self):
+        self.user = _admin(modules='shelf')
+        self.client = _signed_in(self.user)
+        self.plan = FloorPlan.objects.create(name='Ground', floor_number=1,
+                                             is_active=True)
+        self.upstairs = FloorPlan.objects.create(name='First', floor_number=2)
+        # A tall well: 200 across, 400 along, travel running north-south.
+        self.well = [[100, 100], [300, 100], [300, 500], [100, 500]]
+
+    def _add(self, **kw):
+        data = {'floor_plan_id': self.plan.floor_plan_id,
+                'geometry': json.dumps(self.well)}
+        data.update(kw)
+        return self.client.post('/admin-portal/add-stairway/', data).json()
+
+    @staticmethod
+    def _box(geometry):
+        xs = [p[0] for p in geometry]
+        ys = [p[1] for p in geometry]
+        return min(xs), min(ys), max(xs), max(ys)
+
+    # The shape
+
+    def test_a_straight_stair_stores_no_flights(self):
+        """The overwhelming majority. Footprint and bearing say it all."""
+        r = self._add(shape='straight')
+        self.assertTrue(r['success'], r)
+        st = Stairway.objects.get(stairway_id=r['stairway']['stairway_id'])
+        self.assertIsNone(st.flights)
+        self.assertEqual(r['stairway']['shape'], 'straight')
+
+    def test_a_half_turn_becomes_two_flights_and_a_landing(self):
+        r = self._add(shape='half', bearing=180)
+        st = Stairway.objects.get(stairway_id=r['stairway']['stairway_id'])
+        self.assertEqual([f['kind'] for f in st.flights],
+                         ['flight', 'landing', 'flight'])
+        self.assertEqual(r['stairway']['shape'], 'half')
+
+    def test_the_two_flights_of_a_half_turn_climb_opposite_ways(self):
+        """That is what turning about means, and it is why one bearing failed."""
+        r = self._add(shape='half', bearing=180)
+        st = Stairway.objects.get(stairway_id=r['stairway']['stairway_id'])
+        first, _, second = st.flights
+        self.assertEqual(first['bearing'], 180)
+        self.assertEqual(second['bearing'], 0)
+
+    def test_the_flights_of_a_half_turn_stand_side_by_side(self):
+        r = self._add(shape='half', bearing=180)
+        st = Stairway.objects.get(stairway_id=r['stairway']['stairway_id'])
+        first, landing, second = st.flights
+        fx0, fy0, fx1, fy1 = self._box(first['geometry'])
+        sx0, sy0, sx1, sy1 = self._box(second['geometry'])
+        self.assertLess(fx1, sx0, 'the flights must not overlap')
+        self.assertEqual((fy0, fy1), (sy0, sy1), 'they run the same length')
+
+    def test_the_landing_sits_at_the_end_the_flights_climb_towards(self):
+        """A half-landing is where you turn round, so it is at the far end."""
+        r = self._add(shape='half', bearing=180)          # travelling south
+        st = Stairway.objects.get(stairway_id=r['stairway']['stairway_id'])
+        first, landing, _ = st.flights
+        self.assertGreater(self._box(landing['geometry'])[1],
+                           self._box(first['geometry'])[1],
+                           'travelling south, the landing is at the south end')
+
+        r = self._add(shape='half', bearing=0)            # travelling north
+        st = Stairway.objects.get(stairway_id=r['stairway']['stairway_id'])
+        first, landing, _ = st.flights
+        self.assertLess(self._box(landing['geometry'])[1],
+                        self._box(first['geometry'])[1])
+
+    def test_the_landing_spans_the_whole_well(self):
+        """You walk off one flight and onto the other across it."""
+        r = self._add(shape='half', bearing=180)
+        st = Stairway.objects.get(stairway_id=r['stairway']['stairway_id'])
+        landing = st.flights[1]
+        lx0, _, lx1, _ = self._box(landing['geometry'])
+        wx0, _, wx1, _ = self._box(self.well)
+        self.assertEqual((lx0, lx1), (wx0, wx1))
+
+    def test_a_quarter_turn_leaves_its_landing_sideways(self):
+        r = self._add(shape='quarter', bearing=180)
+        st = Stairway.objects.get(stairway_id=r['stairway']['stairway_id'])
+        first, _, second = st.flights
+        self.assertEqual((first['bearing'], second['bearing']), (180, 270))
+
+    def test_a_well_too_small_to_divide_stays_one_run(self):
+        """Better a straight stair than two flights of three steps."""
+        tiny = [[0, 0], [20, 0], [20, 20], [0, 20]]
+        r = self.client.post('/admin-portal/add-stairway/', {
+            'floor_plan_id': self.plan.floor_plan_id,
+            'geometry': json.dumps(tiny), 'shape': 'half'}).json()
+        st = Stairway.objects.get(stairway_id=r['stairway']['stairway_id'])
+        self.assertIsNone(st.flights)
+
+    # The direction
+
+    def test_the_bearing_is_read_off_the_shape_when_none_is_given(self):
+        """It was a number box asking to convert a direction just drawn."""
+        r = self._add()                                   # no bearing sent
+        st = Stairway.objects.get(stairway_id=r['stairway']['stairway_id'])
+        self.assertEqual(st.bearing, 0, 'the well is taller than it is wide')
+
+        wide = [[100, 100], [500, 100], [500, 300], [100, 300]]
+        r = self.client.post('/admin-portal/add-stairway/', {
+            'floor_plan_id': self.plan.floor_plan_id,
+            'geometry': json.dumps(wide)}).json()
+        st = Stairway.objects.get(stairway_id=r['stairway']['stairway_id'])
+        self.assertEqual(st.bearing, 90, 'a wide well runs left to right')
+
+    def test_an_explicit_bearing_still_wins(self):
+        r = self._add(bearing=270)
+        st = Stairway.objects.get(stairway_id=r['stairway']['stairway_id'])
+        self.assertEqual(st.bearing, 270)
+
+    def test_turning_a_shaped_stair_redraws_what_is_inside_it(self):
+        """Arrows that disagree with the footprint they sit on are worse than none."""
+        r = self._add(shape='half', bearing=180)
+        sid = r['stairway']['stairway_id']
+        self.client.post('/admin-portal/edit-stairway/',
+                         {'stairway_id': sid, 'bearing': 0})
+        st = Stairway.objects.get(stairway_id=sid)
+        self.assertEqual([f['bearing'] for f in st.flights], [0, 0, 180])
+        self.assertEqual(len(st.flights), 3, 'it is still a half turn')
+
+    # What gets drawn
+
+    def test_each_flight_gets_its_own_treads(self):
+        r = self._add(shape='half', bearing=180)
+        parts = r['stairway']['parts']
+        self.assertEqual([p['kind'] for p in parts], ['flight', 'landing', 'flight'])
+        self.assertTrue(parts[0]['treads'])
+        self.assertTrue(parts[2]['treads'])
+
+    def test_a_landing_has_no_treads_because_it_is_a_floor(self):
+        """Steps across it would say you climb it."""
+        r = self._add(shape='half', bearing=180)
+        landing = r['stairway']['parts'][1]
+        self.assertEqual(landing['treads'], [])
+
+    def test_a_lift_has_no_treads_at_all(self):
+        """Drawing steps on one would be wrong, not merely decorative."""
+        r = self._add(kind='Elevator', shape='half')
+        self.assertEqual(r['stairway']['parts'], [])
+        self.assertEqual(r['stairway']['treads'], [])
+
+    def test_a_straight_stair_still_reports_treads_for_the_maps(self):
+        """Four maps draw a stair from this. None of them may go blank."""
+        r = self._add(shape='straight')
+        self.assertTrue(r['stairway']['treads'])
+        self.assertEqual(len(r['stairway']['parts']), 1)
+
+
+class UnshelvedInMoverTests(TestCase):
+    """Books on no board, opened where they can be put away."""
+
+    def setUp(self):
+        self.user = _admin(modules='shelf')
+        self.client = _signed_in(self.user)
+        plan = FloorPlan.objects.create(name='Ground', floor_number=1, is_active=True)
+        room = Room.objects.create(floor_plan=plan, name='Main', map_x=0, map_y=0)
+        self.shelf = Shelf.objects.create(room=room, name='Shelf A', map_x=0, map_y=0)
+        self.level = ShelfLevel.objects.create(shelf=self.shelf, level_number=1)
+
+    def _book(self, title, level=None, slot=None, status='Available'):
+        return Book.objects.create(title=title, author='X', genre='REF',
+                                   shelf_level=level, shelf_slot=slot, status=status)
+
+    def _pile(self):
+        return self.client.get('/admin-portal/board-books/', {'level': 'none'}).json()
+
+    def test_the_pile_opens_like_any_other_board(self):
+        self._book('Homeless one')
+        self._book('Homeless two')
+        self._book('Shelved', self.level, 1)
+        d = self._pile()
+        self.assertTrue(d['success'], d)
+        self.assertEqual(d['level'], 'none')
+        self.assertEqual(d['shelf'], 'Not shelved')
+        self.assertEqual([b['title'] for b in d['books']],
+                         ['Homeless one', 'Homeless two'])
+
+    def test_a_book_with_no_board_has_no_position(self):
+        """A number here would invent a place along a shelf it is not on."""
+        self._book('Homeless')
+        self.assertIsNone(self._pile()['books'][0]['slot'])
+
+    def test_a_written_off_copy_is_not_waiting_to_be_shelved(self):
+        """It is gone, not mislaid, and offering it as work would be a lie."""
+        self._book('Lost one', status='Lost')
+        self._book('Real one')
+        self.assertEqual([b['title'] for b in self._pile()['books']], ['Real one'])
+
+    def test_shelving_from_the_pile_is_the_same_move_as_any_other(self):
+        a, b = self._book('One'), self._book('Two')
+        r = self.client.post('/admin-portal/move-books/', {
+            'ids': '%d,%d' % (a.book_id, b.book_id),
+            'level': self.level.shelf_level_id}).json()
+        self.assertTrue(r['success'], r)
+        a.refresh_from_db(); b.refresh_from_db()
+        self.assertEqual((a.shelf_level, b.shelf_level), (self.level, self.level))
+        self.assertEqual(sorted([a.shelf_slot, b.shelf_slot]), [1, 2])
+
+    def test_books_shelved_from_the_pile_land_after_the_residents(self):
+        self._book('Resident', self.level, 1)
+        incoming = self._book('Arriving')
+        self.client.post('/admin-portal/move-books/',
+                         {'ids': str(incoming.book_id),
+                          'level': self.level.shelf_level_id})
+        incoming.refresh_from_db()
+        self.assertEqual(incoming.shelf_slot, 2)
+
+    def test_the_page_says_how_many_are_waiting(self):
+        """Otherwise they sit there indefinitely with the page looking complete."""
+        for i in range(3):
+            self._book('Homeless %d' % i)
+        html = self.client.get('/admin-portal/shelf-manager/').content.decode()
+        self.assertIn('3 not on a shelf', html)
+
+    def test_the_button_is_rendered_even_with_none_waiting(self):
+        """Taking a book off a shelf must be able to make it appear."""
+        html = self.client.get('/admin-portal/shelf-manager/').content.decode()
+        self.assertIn('unshelvedBtn', html)
+        self.assertIn('hidden', html[html.index('unshelvedBtn') - 80:
+                                     html.index('unshelvedBtn') + 120])
+
+    def test_the_tree_carries_the_count_so_it_survives_a_move(self):
+        """It is reloaded after every move, and a stale count is a wrong one."""
+        self._book('Homeless')
+        d = self.client.get('/admin-portal/get-shelf-tree/').json()
+        self.assertEqual(d['unshelved'], 1)
+
+    def test_the_count_falls_as_books_are_put_away(self):
+        book = self._book('Homeless')
+        self.client.post('/admin-portal/move-books/',
+                         {'ids': str(book.book_id),
+                          'level': self.level.shelf_level_id})
+        d = self.client.get('/admin-portal/get-shelf-tree/').json()
+        self.assertEqual(d['unshelved'], 0)
+
+    def test_taking_a_book_off_a_shelf_puts_it_in_the_pile(self):
+        """The two directions are the same tool, which is the point."""
+        book = self._book('Shelved', self.level, 1)
+        self.client.post('/admin-portal/move-books/',
+                         {'ids': str(book.book_id), 'level': 'none'})
+        self.assertEqual([b['title'] for b in self._pile()['books']], ['Shelved'])
+
+
+class PrintSeveralFloorsTests(TestCase):
+    """A building printed in one pass rather than one storey at a time."""
+
+    def setUp(self):
+        self.user = _admin(modules='indoor_map')
+        self.client = _signed_in(self.user)
+        self.ground = self._plan('Ground', 1)
+        self.first = self._plan('First', 2)
+        self.draft = FloorPlan.objects.create(name='Attic', floor_number=3,
+                                              is_active=False)
+
+    def _plan(self, name, number):
+        plan = FloorPlan.objects.create(name=name, floor_number=number, is_active=True)
+        room = Room.objects.create(floor_plan=plan, name=name + ' room',
+                                   map_x=100, map_y=100,
+                                   geometry=[[0, 0], [200, 0], [200, 200], [0, 200]])
+        Shelf.objects.create(room=room, name='Shelf on ' + name, map_x=50, map_y=50)
+        return plan
+
+    def _get(self, query=''):
+        return self.client.get('/admin-portal/floor-plan/print/' + query)
+
+    def _pages(self, r):
+        return r.content.decode().count('class="floor-page"')
+
+    def test_one_floor_by_default(self):
+        """A bare link keeps doing what it always did."""
+        r = self._get()
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(self._pages(r), 1)
+
+    def test_a_named_floor_is_the_one_printed(self):
+        r = self._get('?floor=%d' % self.first.floor_plan_id)
+        self.assertEqual(self._pages(r), 1)
+        self.assertContains(r, 'Shelf on First')
+        self.assertNotContains(r, 'Shelf on Ground')
+
+    def test_all_floors_come_out_as_one_document(self):
+        """The point: one trip to the printer, not one per storey."""
+        r = self._get('?floor=all')
+        self.assertEqual(self._pages(r), 2)
+        self.assertContains(r, 'Shelf on Ground')
+        self.assertContains(r, 'Shelf on First')
+
+    def test_two_named_floors_print_together(self):
+        r = self._get('?floor=%d&floor=%d'
+                      % (self.ground.floor_plan_id, self.first.floor_plan_id))
+        self.assertEqual(self._pages(r), 2)
+
+    def test_a_floor_out_of_service_is_never_printed(self):
+        """A wall map of a storey nobody may enter is a wrong map."""
+        r = self._get('?floor=%d' % self.draft.floor_plan_id)
+        self.assertNotContains(r, 'Attic')
+
+    def test_nonsense_falls_back_to_one_floor_rather_than_failing(self):
+        for query in ('?floor=999999', '?floor=abc', '?floor='):
+            r = self._get(query)
+            self.assertEqual(r.status_code, 200, query)
+            self.assertEqual(self._pages(r), 1, query)
+
+    def test_each_floor_gets_its_own_page_break(self):
+        r = self._get('?floor=all')
+        self.assertContains(r, 'page-break-after')
+
+    def test_the_indoor_map_offers_both(self):
+        html = self.client.get('/admin-portal/indoor-map/').content.decode()
+        self.assertIn('Print this floor', html)
+        self.assertIn('Print all floors', html)
+
+
+class ShelfRoomTests(TestCase):
+    """Which room a shelf is filed under, and correcting it."""
+
+    def setUp(self):
+        self.user = _admin(modules='shelf')
+        self.client = _signed_in(self.user)
+        self.plan = FloorPlan.objects.create(name='Ground', floor_number=1,
+                                             is_active=True)
+        self.left = Room.objects.create(
+            floor_plan=self.plan, name='Reading Room', map_x=50, map_y=50,
+            geometry=[[0, 0], [100, 0], [100, 100], [0, 100]])
+        self.right = Room.objects.create(
+            floor_plan=self.plan, name='Study Room', map_x=150, map_y=50,
+            geometry=[[100, 0], [200, 0], [200, 100], [100, 100]])
+
+    def _shelf(self, name, x, y, room):
+        return Shelf.objects.create(room=room, name=name, map_x=x, map_y=y)
+
+    def _mismatches(self):
+        from library.views import _shelf_room_mismatches
+        return _shelf_room_mismatches()
+
+    # Setting it by hand
+
+    def test_a_shelf_can_be_moved_to_another_room(self):
+        shelf = self._shelf('Shelf A', 50, 50, self.left)
+        r = self.client.post('/admin-portal/edit-shelf/',
+                             {'shelf_id': shelf.shelf_id,
+                              'room_id': self.right.room_id}).json()
+        self.assertTrue(r['success'], r)
+        shelf.refresh_from_db()
+        self.assertEqual(shelf.room, self.right)
+
+    def test_the_shelf_does_not_move_on_the_plan_when_its_room_changes(self):
+        """Filing is not placing. Only where it is listed changes."""
+        shelf = self._shelf('Shelf A', 50, 50, self.left)
+        self.client.post('/admin-portal/edit-shelf/',
+                         {'shelf_id': shelf.shelf_id, 'room_id': self.right.room_id})
+        shelf.refresh_from_db()
+        self.assertEqual((shelf.map_x, shelf.map_y), (50, 50))
+
+    def test_a_room_on_another_floor_is_refused(self):
+        """A shelf cannot be in a room upstairs."""
+        upstairs = FloorPlan.objects.create(name='First', floor_number=2, is_active=True)
+        elsewhere = Room.objects.create(floor_plan=upstairs, name='Attic',
+                                        map_x=0, map_y=0)
+        shelf = self._shelf('Shelf A', 50, 50, self.left)
+        r = self.client.post('/admin-portal/edit-shelf/',
+                             {'shelf_id': shelf.shelf_id,
+                              'room_id': elsewhere.room_id}).json()
+        self.assertFalse(r['success'])
+        shelf.refresh_from_db()
+        self.assertEqual(shelf.room, self.left)
+
+    def test_leaving_the_room_out_changes_nothing(self):
+        """Renaming a shelf must not silently re-file it."""
+        shelf = self._shelf('Shelf A', 50, 50, self.left)
+        self.client.post('/admin-portal/edit-shelf/',
+                         {'shelf_id': shelf.shelf_id, 'name': 'Shelf One'})
+        shelf.refresh_from_db()
+        self.assertEqual((shelf.name, shelf.room), ('Shelf One', self.left))
+
+    # Bulk correction
+
+    def test_a_shelf_drawn_in_another_room_is_reported(self):
+        self._shelf('Wanderer', 150, 50, self.left)      # drawn right, filed left
+        rows = self._mismatches()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]['name'], 'Wanderer')
+        self.assertEqual(rows[0]['filed'], 'Reading Room')
+        self.assertEqual(rows[0]['drawn'], 'Study Room')
+
+    def test_a_shelf_in_the_room_it_says_is_not_reported(self):
+        self._shelf('Settled', 50, 50, self.left)
+        self.assertEqual(self._mismatches(), [])
+
+    def test_a_shelf_inside_no_room_is_left_alone(self):
+        """A shelf in a corridor nobody drew a polygon round is not a mistake."""
+        self._shelf('Corridor', 900, 900, self.left)
+        self.assertEqual(self._mismatches(), [])
+
+    def test_correcting_them_files_each_where_it_is_drawn(self):
+        a = self._shelf('Wanderer', 150, 50, self.left)
+        b = self._shelf('Other way', 50, 50, self.right)
+        settled = self._shelf('Settled', 60, 60, self.left)
+        r = self.client.post('/admin-portal/fix-shelf-rooms/').json()
+        self.assertTrue(r['success'], r)
+        self.assertEqual(r['fixed'], 2)
+        a.refresh_from_db(); b.refresh_from_db(); settled.refresh_from_db()
+        self.assertEqual(a.room, self.right)
+        self.assertEqual(b.room, self.left)
+        self.assertEqual(settled.room, self.left)
+
+    def test_correcting_twice_finds_nothing_the_second_time(self):
+        self._shelf('Wanderer', 150, 50, self.left)
+        self.client.post('/admin-portal/fix-shelf-rooms/')
+        r = self.client.post('/admin-portal/fix-shelf-rooms/').json()
+        self.assertEqual(r['fixed'], 0)
+
+    def test_the_page_says_nothing_when_every_shelf_agrees(self):
+        self._shelf('Settled', 50, 50, self.left)
+        html = self.client.get('/admin-portal/shelf-manager/').content.decode()
+        self.assertNotIn('roomMismatchBar', html)
+
+    def test_the_page_names_the_shelves_that_disagree(self):
+        self._shelf('Wanderer', 150, 50, self.left)
+        html = self.client.get('/admin-portal/shelf-manager/').content.decode()
+        self.assertIn('roomMismatchBar', html)
+        self.assertIn('Wanderer', html)
+        self.assertIn('Study Room', html)
+
+
+
+
+class AnalyticsLayoutTests(TestCase):
+    """The page answers before it explains, and one section at a time."""
+
+    def setUp(self):
+        self.user = _admin()
+        self.client = _signed_in(self.user)
+        self.start = timezone.localdate() - timedelta(days=7)
+        self.end = timezone.localdate()
+
+    def _parts(self):
+        from library import analytics
+        return dict(
+            arrivals=analytics.visits_by_hour(self.start, self.end),
+            occupancy=analytics.occupancy_by_hour(self.start, self.end),
+            unshelved=analytics.unshelved_summary(),
+            conditions=analytics.books_by_condition(),
+            borrowed_books=analytics.most_borrowed_books(self.start, self.end),
+            penalties=analytics.penalties_over_time(self.start, self.end, 'day'),
+        )
+
+    def _headline(self):
+        from library import analytics
+        return analytics.headline(**self._parts())
+
+    # -- the headline ------------------------------------------------------
+
+    def test_it_leads_with_a_figure_from_every_section(self):
+        """A strip that only covered the collection would answer a third of the page."""
+        labels = [f['label'] for f in self._headline()]
+        self.assertIn('Visits', labels)
+        self.assertIn('Loans', labels)
+        self.assertIn('Copies held', labels)
+
+    def test_every_figure_says_which_period_it_belongs_to(self):
+        """Some figures follow the date range and some are current."""
+        for f in self._headline():
+            self.assertIn(f['scope'], ('period', 'now'), f)
+
+    def test_the_collection_figures_are_not_claimed_to_be_period_scoped(self):
+        scopes = dict((f['label'], f['scope']) for f in self._headline())
+        self.assertEqual(scopes['Copies held'], 'now')
+        self.assertEqual(scopes['Visits'], 'period')
+
+    def test_it_cannot_disagree_with_the_chart_below_it(self):
+        """Built from the dicts the builders already returned, not re-queried."""
+        parts = self._parts()
+        from library import analytics
+        tiles = dict((f['label'], f['value']) for f in analytics.headline(**parts))
+        self.assertEqual(tiles['Visits'], parts['arrivals']['total'])
+        self.assertEqual(tiles['Loans'], parts['borrowed_books']['total'])
+        self.assertEqual(tiles['Copies held'], parts['unshelved']['total'])
+
+    def test_a_clean_collection_reads_as_good_not_as_nothing(self):
+        """Zero books needing attention is a result, and it is the good one."""
+        tone = dict((f['label'], f['tone']) for f in self._headline())
+        self.assertEqual(tone['Needs attention'], 'good')
+
+    def test_the_page_shows_the_strip(self):
+        html = self.client.get('/admin-portal/analytics/').content.decode()
+        self.assertIn('figure-tile', html)
+        self.assertIn('Copies held', html)
+
+    # -- the tabs ----------------------------------------------------------
+
+    def test_all_three_sections_are_on_the_page(self):
+        """Theme switching runs in the browser, so every page includes it."""
+        html = self.client.get('/admin-portal/analytics/').content.decode()
+        for panel in ('panel-visits', 'panel-collection', 'panel-borrowing'):
+            self.assertIn(panel, html)
+
+    def test_it_opens_on_visits_by_default(self):
+        html = self.client.get('/admin-portal/analytics/').content.decode()
+        self.assertIn('id="viewField" value="visits"', html)
+
+    def test_a_tab_can_be_linked_to(self):
+        html = self.client.get('/admin-portal/analytics/',
+                               {'view': 'collection'}).content.decode()
+        self.assertIn('id="viewField" value="collection"', html)
+
+    def test_a_view_nobody_recognises_falls_back_rather_than_failing(self):
+        """Query strings get edited, truncated and pasted half-copied."""
+        r = self.client.get('/admin-portal/analytics/', {'view': 'nonsense'})
+        self.assertEqual(r.status_code, 200)
+        self.assertIn('id="viewField" value="visits"', r.content.decode())
+
+    def test_the_date_form_carries_the_tab(self):
+        """Otherwise every date change drops the reader back on the first tab."""
+        html = self.client.get('/admin-portal/analytics/',
+                               {'view': 'borrowing'}).content.decode()
+        form = html[html.index('id="periodForm"'):html.index('</form>', html.index('id="periodForm"'))]
+        self.assertIn('name="view"', form)
+
+    def test_the_range_still_filters_when_a_tab_is_named(self):
+        """The tab is presentation. It must not touch what gets counted."""
+        a = self.client.get('/admin-portal/analytics/',
+                            {'start': '2020-01-01', 'end': '2020-01-31'})
+        self.assertEqual(a.status_code, 200)
+        self.assertIn('2020-01-01', a.content.decode())
+
+    # -- the layout itself -------------------------------------------------
+
+    def test_few_category_charts_are_drawn_as_shares_not_as_bars(self):
+        """Three bars in a box built for twenty-four hours is mostly white space."""
+        html = self.client.get('/admin-portal/analytics/').content.decode()
+        self.assertIn('fa-chart-pie', html, 'the proportion list is not on the page')
+
+    def test_the_proportion_bars_are_shares_of_the_whole(self):
+        """Scaling to the biggest row would end every list in one full bar."""
+        tpl = open('templates/admin/_proportions.html', encoding='utf-8').read()
+        self.assertIn('width: {{ m.share }}%', tpl)
+
+    def test_the_period_form_says_when_it_does_not_apply(self):
+        """A control that vanishes looks broken. One that explains itself does not."""
+        html = self.client.get('/admin-portal/analytics/').content.decode()
+        self.assertIn('period-note', html)
+        self.assertIn('do not apply here', html)
+
+    def test_the_tablist_is_reachable_without_a_mouse(self):
+        html = self.client.get('/admin-portal/analytics/').content.decode()
+        self.assertIn('role="tablist"', html)
+        self.assertIn('role="tabpanel"', html)
+        self.assertIn('aria-selected', html)
+
+class RestrictedRoomTests(TestCase):
+    """A room patrons may not enter: drawn, named, and not walked into."""
+
+    def setUp(self):
+        self.user = _admin(modules='shelf')
+        self.client = _signed_in(self.user)
+        self.plan = FloorPlan.objects.create(name='Ground', floor_number=1,
+                                             is_active=True, pixels_per_meter=100)
+        # Two rooms sharing the wall x = 300, joined by a door.
+        self.public = Room.objects.create(
+            floor_plan=self.plan, name='Reading Room', map_x=200, map_y=200,
+            geometry=[[100, 100], [300, 100], [300, 300], [100, 300]])
+        self.store = Room.objects.create(
+            floor_plan=self.plan, name='Store', map_x=400, map_y=200,
+            geometry=[[300, 100], [500, 100], [500, 300], [300, 300]])
+        Door.objects.create(room=self.public, room_b=self.store,
+                            map_x=300, map_y=200, width=70, rotation=90)
+
+    def _close_the_store(self):
+        self.store.patron_access = False
+        self.store.save()
+
+    def _generate(self):
+        return self.client.post('/admin-portal/generate-waypoints/',
+                                {'floor_plan_id': self.plan.floor_plan_id}).json()
+
+    def _readiness(self):
+        return self.client.get('/admin-portal/floor-plan-readiness/',
+                               {'floor_plan_id': self.plan.floor_plan_id}).json()
+
+    # -- the field ---------------------------------------------------------
+
+    def test_rooms_are_open_unless_somebody_closes_them(self):
+        """A library is a place people are allowed into. That is the default."""
+        self.assertTrue(Room.objects.get(pk=self.public.pk).patron_access)
+
+    def test_closing_a_room_does_not_hide_it(self):
+        """The two settings are independent, which is the whole point."""
+        self._close_the_store()
+        self.store.refresh_from_db()
+        self.assertFalse(self.store.patron_access)
+        self.assertTrue(self.store.is_active)
+
+    # -- routing -----------------------------------------------------------
+
+    def test_no_waypoint_is_placed_in_a_closed_room(self):
+        """A* only travels along waypoints, so this is what makes it unroutable."""
+        from library.views import _point_in_polygon
+        self._close_the_store()
+        self.assertTrue(self._generate()['success'])
+        inside = [w for w in Waypoint.objects.filter(floor_plan=self.plan)
+                  if _point_in_polygon(w.map_x, w.map_y, self.store.geometry)]
+        self.assertEqual(inside, [], 'a route was offered into a staff-only room')
+
+    def test_the_open_room_still_gets_waypoints(self):
+        """Closing one room must not quietly disable routing everywhere."""
+        from library.views import _point_in_polygon
+        self._close_the_store()
+        self._generate()
+        inside = [w for w in Waypoint.objects.filter(floor_plan=self.plan)
+                  if _point_in_polygon(w.map_x, w.map_y, self.public.geometry)]
+        self.assertTrue(inside, 'the public room lost its waypoints too')
+
+    def test_closing_every_room_is_refused_rather_than_silently_empty(self):
+        """Otherwise it reports success and quietly leaves a plan nobody can use."""
+        self._close_the_store()
+        self.public.patron_access = False
+        self.public.save()
+        r = self._generate()
+        self.assertFalse(r['success'])
+        self.assertIn('staff-only', r['error'])
+
+    # -- the patron map ----------------------------------------------------
+
+    def _map_rooms(self):
+        r = self.client.get('/patron/map-data/').json()
+        return {room['name']: room for room in r['rooms']}
+
+    def test_a_closed_room_is_still_sent_to_the_patron_map(self):
+        """Hiding it would leave a hole in the plan, which reads as a broken map."""
+        self._close_the_store()
+        rooms = self._map_rooms()
+        self.assertIn('Store', rooms)
+        self.assertFalse(rooms['Store']['patron_access'])
+
+    def test_an_open_room_says_so(self):
+        rooms = self._map_rooms()
+        self.assertTrue(rooms['Reading Room']['patron_access'])
+
+    def test_an_inactive_room_is_still_withheld(self):
+        """The old flag keeps its old meaning. This adds one, it replaces none."""
+        self.store.is_active = False
+        self.store.save()
+        self.assertNotIn('Store', self._map_rooms())
+
+    # -- the map matching that keeps the marker out ------------------------
+
+    def test_the_map_leaves_closed_rooms_out_of_the_walkable_set(self):
+        """roomPolygons is what "somewhere a person could be standing" means."""
+        html = open('templates/patron/patronmap.html', encoding='utf-8').read()
+        start = html.index('function roomPolygons()')
+        body = html[start:html.index('\n}', start)]
+        self.assertIn('patron_access', body,
+                      'the walkable set still includes staff-only rooms')
+
+    def test_closed_rooms_also_block_like_furniture(self):
+        """Belt and braces, for a store room drawn inside a bigger room."""
+        html = open('templates/patron/patronmap.html', encoding='utf-8').read()
+        start = html.index('function solids()')
+        body = html[start:html.index('\n}', start)]
+        self.assertIn('patron_access', body)
+
+    # -- telling the Administrator ----------------------------------------
+
+    def test_the_readiness_check_states_it_rather_than_warning(self):
+        """It is a decision the library made, not a fault in the plan."""
+        self._close_the_store()
+        r = self._readiness()
+        said = [i for i in r['issues'] if 'staff-only' in i['text']]
+        self.assertEqual(len(said), 1, r['issues'])
+        self.assertEqual(said[0]['level'], 'info')
+
+    def test_an_info_line_is_not_counted_as_a_warning(self):
+        """warnings used to be everything-that-is-not-a-blocker."""
+        self._close_the_store()
+        r = self._readiness()
+        self.assertEqual(
+            r['warnings'],
+            sum(1 for i in r['issues'] if i['level'] == 'warning'))
+
+    def test_it_does_not_complain_that_a_closed_room_has_no_waypoint(self):
+        """That is the setting working, reported back as a fault."""
+        self._close_the_store()
+        self._generate()
+        r = self._readiness()
+        for i in r['issues']:
+            self.assertNotIn('No waypoint inside "Store"', i['text'])
+
+    # -- editing it --------------------------------------------------------
+
+    def test_an_administrator_can_close_and_reopen_a_room(self):
+        self.client.post('/admin-portal/edit-room/',
+                         {'room_id': self.store.room_id, 'patron_access': '0'})
+        self.store.refresh_from_db()
+        self.assertFalse(self.store.patron_access)
+
+        self.client.post('/admin-portal/edit-room/',
+                         {'room_id': self.store.room_id, 'patron_access': '1'})
+        self.store.refresh_from_db()
+        self.assertTrue(self.store.patron_access)
+
+    def test_the_edit_dialog_can_actually_be_submitted(self):
+        """step="0.1" on the centroid fields made the whole form unsubmittable."""
+        html = open('templates/admin/floorplanadmin.html', encoding='utf-8').read()
+        block = html[html.index('id="editRoomForm"'):html.index('</form>', html.index('id="editRoomForm"'))]
+        for field in ('map_x', 'map_y'):
+            line = block[block.index('name="%s"' % field) - 120:block.index('name="%s"' % field)]
+            self.assertIn('step="any"', line,
+                          '%s cannot hold a centroid, so the form will not submit' % field)
+
+    def test_a_post_that_does_not_mention_access_leaves_it_alone(self):
+        """Reshaping a room posts room_id and geometry and nothing else."""
+        self._close_the_store()
+        self.client.post('/admin-portal/edit-room/',
+                         {'room_id': self.store.room_id,
+                          'geometry': json.dumps([[300, 100], [520, 100],
+                                                  [520, 300], [300, 300]])})
+        self.store.refresh_from_db()
+        self.assertFalse(self.store.patron_access)
+
+class PatronSchoolTests(TestCase):
+    """School belongs to the patron, and a visit inherits it."""
+
+    def setUp(self):
+        self.user = _admin(modules='patrons,logs')
+        self.client = _signed_in(self.user)
+
+    def _patron(self, name='Ana Cruz', email='ana@example.invalid',
+                school=None, patron_type='Student'):
+        return Patron.objects.create(
+            fullname=name, first_name=name.split()[0], last_name=name.split()[-1],
+            email=email, patron_type=patron_type, school=school,
+            account_status='Active', password_hash=hash_password('SmokeTest123'))
+
+    # The field itself
+
+    def test_a_patron_may_have_no_school(self):
+        """A parent or a resident who walks in has none, and that is not an error."""
+        p = self._patron(patron_type='Parent')
+        p.full_clean(exclude=['password_hash'])
+        self.assertIsNone(p.school)
+
+    def _register(self, email, patron_type, **extra):
+        """An online application. The uploaded ID is the whole identity check."""
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        data = {
+            'action': 'register', 'first_name': 'Ana', 'last_name': 'Cruz',
+            'email': email, 'password': 'SmokeTest123',
+            'confirm_password': 'SmokeTest123', 'patron_type': patron_type,
+            'contact_number': '09171234567', 'address': 'Sala, Cabuyao',
+            'credential_document': SimpleUploadedFile(
+                # A real PNG header.
+                'id.png', bytes([137, 80, 78, 71, 13, 10, 26, 10]) + b'0' * 80,
+                content_type='image/png'),
+        }
+        data.update(extra)
+        return self.client.post('/patron/register/', data)
+
+    def test_registering_records_the_school(self):
+        self._register('ana.new@example.invalid', 'Student',
+                       school='San Juan National High School')
+        p = Patron.objects.filter(email='ana.new@example.invalid').first()
+        self.assertIsNotNone(p, 'registration should have created the patron')
+        self.assertEqual(p.school, 'San Juan National High School')
+
+    def test_registering_without_one_leaves_it_empty_not_blank_string(self):
+        """Null and empty are two states, and the pickers filter on null."""
+        self._register('boy@example.invalid', 'Parent')
+        p = Patron.objects.filter(email='boy@example.invalid').first()
+        self.assertIsNotNone(p)
+        self.assertIsNone(p.school)
+
+    def test_an_administrator_can_change_it(self):
+        p = self._patron(school='Old School')
+        self.client.post('/admin-portal/edit-patron/%d/' % p.patron_id, {
+            'first_name': 'Ana', 'last_name': 'Cruz', 'patron_type': 'Student',
+            'email': 'ana@example.invalid', 'contact_number': '', 'address': '',
+            'school': 'New School', 'account_status': 'Active'})
+        p.refresh_from_db()
+        self.assertEqual(p.school, 'New School')
+
+    def test_clearing_it_stores_nothing_rather_than_an_empty_string(self):
+        p = self._patron(school='Old School')
+        self.client.post('/admin-portal/edit-patron/%d/' % p.patron_id, {
+            'first_name': 'Ana', 'last_name': 'Cruz', 'patron_type': 'Parent',
+            'email': 'ana@example.invalid', 'contact_number': '', 'address': '',
+            'school': '', 'account_status': 'Active'})
+        p.refresh_from_db()
+        self.assertIsNone(p.school)
+
+    # A visit inherits it
+
+    def test_a_visit_takes_the_school_from_the_patron(self):
+        """Nobody should retype it at every entry. That is what drifted."""
+        p = self._patron(school='San Juan National High School')
+        r = self.client.post('/admin-portal/log-entry/',
+                             {'name': p.fullname, 'email': p.email}).json()
+        self.assertTrue(r['success'], r)
+        log = PatronLog.objects.filter(patron=p).first()
+        self.assertEqual(log.school, 'San Juan National High School')
+
+    def test_a_school_typed_for_one_visit_wins(self):
+        """Somebody transfers, or is visiting from elsewhere that day."""
+        p = self._patron(school='San Juan National High School')
+        self.client.post('/admin-portal/log-entry/',
+                         {'name': p.fullname, 'email': p.email,
+                          'school': 'Rizal High School'})
+        log = PatronLog.objects.filter(patron=p).first()
+        self.assertEqual(log.school, 'Rizal High School')
+        p.refresh_from_db()
+        self.assertEqual(p.school, 'San Juan National High School',
+                         'one visit must not rewrite the patron record')
+
+    def test_a_patron_with_no_school_records_a_visit_with_none(self):
+        p = self._patron(patron_type='Parent')
+        self.client.post('/admin-portal/log-entry/',
+                         {'name': p.fullname, 'email': p.email})
+        log = PatronLog.objects.filter(patron=p).first()
+        self.assertIsNone(log.school)
+
+    # The picker
+
+    def test_the_known_school_list_collapses_case(self):
+        """"pnc" and "PNC" were two institutions in the library's own figures."""
+        from library.views import known_schools
+        a = self._patron('Ana Cruz', 'a@example.invalid', school='PNC')
+        b = self._patron('Ben Cruz', 'b@example.invalid', school='pnc')
+        PatronLog.objects.create(patron=a, school='PNC')
+        PatronLog.objects.create(patron=b, school='pnc')
+        PatronLog.objects.create(patron=b, school='PNC')
+        names = known_schools()
+        self.assertEqual(len([n for n in names if n.casefold() == 'pnc']), 1)
+
+    def test_the_list_keeps_the_spelling_used_most(self):
+        """The commonest is likeliest to be the one typed carefully."""
+        from library.views import known_schools
+        p = self._patron(school=None)
+        for _ in range(3):
+            PatronLog.objects.create(patron=p, school='Rizal High School')
+        PatronLog.objects.create(patron=p, school='rizal high school')
+        self.assertIn('Rizal High School', known_schools())
+
+    def test_the_list_draws_on_visits_as_well_as_patrons(self):
+        """Years of visits carry names no patron record has yet."""
+        from library.views import known_schools
+        p = self._patron(school=None)
+        PatronLog.objects.create(patron=p, school='Only On A Visit')
+        self.assertIn('Only On A Visit', known_schools())
+
+    def test_the_forms_offer_the_list(self):
+        self._patron(school='San Juan National High School')
+        for url in ('/admin-portal/manage-patron/', '/admin-portal/log-management/'):
+            html = self.client.get(url).content.decode()
+            self.assertIn('knownSchools', html, url)
+            self.assertIn('San Juan National High School', html, url)
+
+    def test_patron_type_still_exists(self):
+        """Reports group the sample by this field."""
+        self.assertIn(('Student', 'Student'), Patron.PATRON_TYPE_CHOICES)
+        self.assertEqual(len(Patron.PATRON_TYPE_CHOICES), 4)
 
 class TracedShelfTests(TestCase):
     """A shelf drawn corner by corner keeps that shape through every gesture."""
@@ -2212,8 +3342,7 @@ class TracedShelfTests(TestCase):
         r = self._rotate(90)
         self.assertTrue(r['success'], r)
         self.shelf.refresh_from_db()
-        # (100,100) is (-50,-50) from the anchor; a quarter turn puts it at
-        # (+50,-50) from it, which is (200,100).
+        # Expected position after a quarter turn.
         self.assertEqual(self.shelf.geometry[0], [200.0, 100.0])
         self.assertEqual(len(self.shelf.geometry), len(self.shape))
 
@@ -2351,12 +3480,7 @@ class ShelfGridTests(TestCase):
 
 
 class LabelPickerGroupingTests(TestCase):
-    """The picker groups by shelf and by level entirely client-side.
-
-    That only works while the payload carries the keys to group on, so this
-    pins them: dropping shelf_id from the endpoint would silently reduce
-    "By shelf" to one bucket called "Not on a shelf yet".
-    """
+    """The picker groups by shelf and by level entirely client-side."""
 
     def setUp(self):
         self.user = _admin(modules='books')
@@ -2664,7 +3788,7 @@ class CatalogueImportTests(TestCase):
         self.assertIn('Condition', headers)
         self.assertIn('Code Label', headers)
 
-    def _import(self, rows):
+    def _import(self, rows, **extra):
         import io as _io
         import openpyxl
         from django.core.files.uploadedfile import SimpleUploadedFile
@@ -2675,7 +3799,9 @@ class CatalogueImportTests(TestCase):
         wb.save(buf)
         up = SimpleUploadedFile('b.xlsx', buf.getvalue(),
                                 content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-        return self.client.post('/admin-portal/import-books/', {'excel_file': up}).json()
+        data = {'excel_file': up}
+        data.update(extra)          # preview=1, copy_rows=... when a test needs them
+        return self.client.post('/admin-portal/import-books/', data).json()
 
     def test_the_template_can_be_filled_in_and_imported_straight_back(self):
         rows = self._template()
@@ -2785,7 +3911,7 @@ class LocationParsingTests(TestCase):
         from library.views import parse_location
         self.assertEqual(parse_location('Zone 3'), ('Zone 3', None, None, False, False))
 
-    def _import(self, rows):
+    def _import(self, rows, **extra):
         import io as _io
         import openpyxl
         from django.core.files.uploadedfile import SimpleUploadedFile
@@ -2796,7 +3922,9 @@ class LocationParsingTests(TestCase):
         wb.save(buf)
         up = SimpleUploadedFile('b.xlsx', buf.getvalue(),
                                 content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-        return self.client.post('/admin-portal/import-books/', {'excel_file': up}).json()
+        data = {'excel_file': up}
+        data.update(extra)          # preview=1, copy_rows=... when a test needs them
+        return self.client.post('/admin-portal/import-books/', data).json()
 
     def test_importing_the_long_form_lands_on_the_right_board(self):
         r = self._import([['Title', 'Author', 'Location'],
@@ -2855,7 +3983,7 @@ class ImportRepeatAndConditionTests(TestCase):
         shelf = Shelf.objects.create(room=room, name='Shelf C', map_x=0, map_y=0)
         ShelfLevel.objects.create(shelf=shelf, level_number=3, column_number=1)
 
-    def _import(self, rows):
+    def _import(self, rows, **extra):
         import io as _io
         import openpyxl
         from django.core.files.uploadedfile import SimpleUploadedFile
@@ -2866,7 +3994,9 @@ class ImportRepeatAndConditionTests(TestCase):
         wb.save(buf)
         up = SimpleUploadedFile('b.xlsx', buf.getvalue(),
                                 content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-        return self.client.post('/admin-portal/import-books/', {'excel_file': up}).json()
+        data = {'excel_file': up}
+        data.update(extra)          # preview=1, copy_rows=... when a test needs them
+        return self.client.post('/admin-portal/import-books/', data).json()
 
     # Shaped like the real sheet: a blank ISBN column and "GOOD/BAD CONDITION".
     SHEET = [
@@ -2903,14 +4033,125 @@ class ImportRepeatAndConditionTests(TestCase):
         self.assertTrue(second['success'], second)
         self.assertEqual(Book.objects.count(), after_first,
                          'a second run of the same sheet added books again')
-        self.assertIn('already on the same shelf', second['message'])
+        self.assertIn('already in the catalogue', second['message'])
+
+    # Duplicate rows need a decision.
+
+    def test_a_repeat_is_listed_by_name_not_just_counted(self):
+        """A count says a decision is waiting; only the title says which way."""
+        self._import(self.SHEET)
+        preview = self._import(self.SHEET, preview='1')
+        self.assertTrue(preview['success'], preview)
+        titles = sorted(c['title'] for c in preview['clashes'])
+        self.assertEqual(titles, ['A Course on Words',
+                                  'Communication for the Common Good'])
+        for c in preview['clashes']:
+            self.assertEqual(c['have'], 1)
+            self.assertEqual(c['where'], 'Shelf C')
+            self.assertGreaterEqual(c['row'], 2)
+
+    def test_a_repeat_is_rejected_unless_it_is_asked_for(self):
+        """Skipping stays the default: the commoner accident is a double import."""
+        self._import(self.SHEET)
+        before = Book.objects.count()
+        again = self._import(self.SHEET)
+        self.assertEqual(Book.objects.count(), before)
+        self.assertEqual(again['copies_of_existing'], 0)
+
+    def test_a_ticked_row_is_imported_as_a_second_copy(self):
+        self._import(self.SHEET)
+        preview = self._import(self.SHEET, preview='1')
+        wanted = [c for c in preview['clashes']
+                  if c['title'] == 'A Course on Words']
+        self.assertEqual(len(wanted), 1)
+
+        done = self._import(self.SHEET, copy_rows=str(wanted[0]['row']))
+        self.assertTrue(done['success'], done)
+        self.assertEqual(done['copies_of_existing'], 1)
+        self.assertEqual(Book.objects.filter(title='A Course on Words').count(), 2)
+        # The row that was not ticked stayed out.
+        self.assertEqual(
+            Book.objects.filter(title='Communication for the Common Good').count(), 1)
+
+    def test_a_second_copy_does_not_carry_the_first_ones_isbn(self):
+        """The ISBN names the edition; the record already on file holds it."""
+        self._import(self.SHEET)
+        preview = self._import(self.SHEET, preview='1')
+        rows = ','.join(str(c['row']) for c in preview['clashes'])
+        self._import(self.SHEET, copy_rows=rows)
+
+        copies = Book.objects.filter(title='A Course on Words').order_by('book_id')
+        self.assertEqual(copies.count(), 2)
+        self.assertEqual(copies[0].ISBN, '0-472-08101-2')
+        self.assertIsNone(copies[1].ISBN)
+
+    def test_a_copy_bound_for_another_shelf_is_still_a_repeat(self):
+        """Re-importing a book for another shelf is flagged as a duplicate."""
+        shelf = Shelf.objects.get(name='Shelf C')
+        ShelfLevel.objects.create(shelf=shelf, level_number=4, column_number=1)
+        self._import(self.SHEET)
+
+        elsewhere = [self.SHEET[0],
+                     ['A Course on Words', 'Waldo E. Sweet', 1989, '',
+                      'EDUCATION', 'GOOD CONDITION', '', 1,
+                      'Shelf C Column 1 Level 4']]
+        preview = self._import(elsewhere, preview='1')
+        self.assertEqual(len(preview['clashes']), 1, preview)
+        self.assertEqual(preview['clashes'][0]['title'], 'A Course on Words')
+
+    def test_a_preview_writes_nothing_whichever_way_the_rows_are_ticked(self):
+        self._import(self.SHEET)
+        before = Book.objects.count()
+        preview = self._import(
+            self.SHEET, preview='1',
+            copy_rows=','.join(str(c['row'])
+                               for c in self._import(self.SHEET, preview='1')['clashes']))
+        self.assertTrue(preview['success'], preview)
+        self.assertEqual(Book.objects.count(), before)
+
+    def test_the_confirmed_import_does_not_ask_the_same_question_twice(self):
+        """Clashes are a preview's business. After the confirm they are decided."""
+        self._import(self.SHEET)
+        done = self._import(self.SHEET)
+        self.assertEqual(done['clashes'], [])
+
+    def test_a_row_number_that_names_nothing_is_ignored(self):
+        """The sheet is re-uploaded, so a stale or invented number is possible."""
+        self._import(self.SHEET)
+        before = Book.objects.count()
+        done = self._import(self.SHEET, copy_rows='999,,abc,-4')
+        self.assertTrue(done['success'], done)
+        self.assertEqual(Book.objects.count(), before)
+
+    def test_quantity_still_makes_copies_of_a_book_that_is_new(self):
+        """Regression: the snapshot must not let a row block its own copies."""
+        rows = [self.SHEET[0],
+                ['Brand New', 'Nobody', 1990, '', 'EDUCATION', 'GOOD CONDITION',
+                 '', 3, 'Shelf C Column 1 Level 3']]
+        r = self._import(rows)
+        self.assertTrue(r['success'], r)
+        self.assertEqual(Book.objects.filter(title='Brand New').count(), 3)
+
+    def test_the_listing_stops_and_says_so_when_a_sheet_is_all_repeats(self):
+        """Past the cap the sheet is not a delivery, it is the same file again."""
+        from unittest.mock import patch
+        rows = [self.SHEET[0]] + [
+            ['Repeat %d' % i, 'Someone', 1990, '', 'EDUCATION', 'GOOD CONDITION',
+             '', 1, 'Shelf C Column 1 Level 3'] for i in range(5)]
+        self._import(rows)
+
+        with patch('library.views.MAX_CLASH_ROWS', 2):
+            preview = self._import(rows, preview='1')
+        self.assertEqual(len(preview['clashes']), 2, preview)
+        self.assertTrue(preview['clashes_truncated'])
+
+        # Under a cap the sheet fits inside, nothing is claimed to be missing.
+        preview = self._import(rows, preview='1')
+        self.assertEqual(len(preview['clashes']), 5)
+        self.assertFalse(preview['clashes_truncated'])
 
     def test_two_rows_for_one_book_in_a_sheet_are_two_copies(self):
-        """A sheet listing the same book twice is how a library says it holds two.
-
-        Only a LATER import of the same book means nothing new; within one
-        sheet, the second line is the second copy on the shelf.
-        """
+        """A sheet listing the same book twice is how a library says it holds two."""
         rows = [self.SHEET[0],
                 ['Twice Over', 'Someone', 1990, '', 'EDUCATION', 'GOOD CONDITION',
                  '', 1, 'Shelf C Column 1 Level 3'],
@@ -2933,13 +4174,21 @@ class ImportRepeatAndConditionTests(TestCase):
         self.assertTrue(r['success'], r)
         self.assertEqual(Book.objects.filter(title='Three Copies').count(), 3)
 
-    def test_the_same_book_on_a_different_shelf_is_a_different_copy(self):
-        self._import(self.SHEET)
+    def test_the_same_book_on_a_different_shelf_is_still_asked_about(self):
+        """Re-importing a book for another shelf needs confirmation."""
         rows = [self.SHEET[0],
                 ['Communication for the Common Good', 'Florangel Rosario-Braid', 1990,
                  '', 'EDUCATION', 'BAD CONDITION', '', 1, 'Shelf C Column 1 Level 9']]
+        self._import(self.SHEET)
         r = self._import(rows)
         self.assertTrue(r['success'], r)
+        self.assertEqual(
+            Book.objects.filter(title='Communication for the Common Good').count(), 1)
+
+        preview = self._import(rows, preview='1')
+        self.assertEqual(len(preview['clashes']), 1, preview)
+        asked = self._import(rows, copy_rows=str(preview['clashes'][0]['row']))
+        self.assertTrue(asked['success'], asked)
         self.assertEqual(
             Book.objects.filter(title='Communication for the Common Good').count(), 2)
 
@@ -3140,8 +4389,7 @@ class SlowRequestLoggingTests(TestCase):
             status_code = 200
 
         def get_response(request):
-            # No sleeping: the middleware measures with time.monotonic, so the
-            # clock is what gets faked, not the test's patience.
+            # Fake the clock instead of sleeping.
             return FakeResponse()
 
         mw = SlowRequestLoggingMiddleware(get_response)
@@ -3233,3 +4481,1965 @@ class AuditFailuresAreLoggedTests(TestCase):
             with self.assertLogs('library.audit', level='ERROR'):
                 audit.log_admin_action(_FakeRequest(), 'Something', 'detail')
         # Reaching here at all is the assertion: no exception escaped.
+
+
+class ExportLibraryTests(TestCase):
+    """The fixture that carries the library to a new host."""
+
+    def setUp(self):
+        import tempfile
+        self.dir = tempfile.mkdtemp()
+        self.path = os.path.join(self.dir, 'export.json')
+        self.book = Book.objects.create(
+            # Title with an en dash.
+            title='The Science Library (Volumes 1\u20136)',
+            author='Unknown', genre='REFERENCE', status='Available')
+
+    def _export(self, *extra):
+        from django.core.management import call_command
+        out = StringIO()
+        call_command('export_library', '-o', self.path, *extra, stdout=out)
+        return out.getvalue()
+
+    def _objects(self):
+        with io.open(self.path, encoding='utf-8') as fh:
+            return json.load(fh)
+
+    def test_the_file_is_utf8_and_keeps_the_en_dash(self):
+        self._export()
+        titles = [o['fields']['title'] for o in self._objects()
+                  if o['model'] == 'library.book']
+        self.assertIn('The Science Library (Volumes 1\u20136)', titles)
+
+    def test_it_is_decodable_as_utf8_end_to_end(self):
+        """The failure this guards against is a file the server cannot read."""
+        self._export()
+        raw = io.open(self.path, 'rb').read()
+        raw.decode('utf-8')          # raises if the encoding regressed
+
+    def test_transient_security_state_never_travels(self):
+        LoginAttempt.objects.create(scope='admin', identifier='someone@example.com')
+        self._export()
+        models = {o['model'] for o in self._objects()}
+        self.assertNotIn('library.loginattempt', models)
+        self.assertNotIn('library.passwordresetotp', models)
+
+    def test_the_activity_log_is_left_out_unless_asked_for(self):
+        SystemLog.objects.create(actor_role='Admin', admin_name='Someone',
+                                 action='Did a thing', entity_type='Book')
+        self._export()
+        self.assertNotIn('library.systemlog',
+                         {o['model'] for o in self._objects()})
+        self._export('--with-logs')
+        self.assertIn('library.systemlog',
+                      {o['model'] for o in self._objects()})
+
+    def test_book_ids_travel_with_the_rows(self):
+        """Printed QR labels encode book_id; a book must not be renumbered."""
+        self._export()
+        exported = {o['pk'] for o in self._objects() if o['model'] == 'library.book'}
+        self.assertIn(self.book.book_id, exported)
+
+    def test_it_reports_what_it_wrote(self):
+        output = self._export()
+        self.assertIn('Book', output)
+        self.assertIn('Not included', output)
+        self.assertIn('media/credentials', output)
+
+    def test_it_refuses_a_directory_that_does_not_exist(self):
+        from django.core.management import call_command
+        from django.core.management.base import CommandError
+        with self.assertRaises(CommandError):
+            call_command('export_library', '-o',
+                         os.path.join(self.dir, 'nope', 'x.json'), stdout=StringIO())
+
+
+class WrittenLocationReusesBoardsTests(TestCase):
+    """An import must file books on the boards that exist, not make twins."""
+
+    def setUp(self):
+        plan = FloorPlan.objects.create(name='Ground', floor_number=1, is_active=True)
+        room = Room.objects.create(floor_plan=plan, name='Main', map_x=0, map_y=0)
+        self.shelf = Shelf.objects.create(room=room, name='Shelf C', map_x=0, map_y=0)
+
+    def _resolve(self, text):
+        from library.views import _resolve_written_location
+        return _resolve_written_location(text)
+
+    def test_column_1_finds_a_board_stored_without_a_column(self):
+        board = ShelfLevel.objects.create(shelf=self.shelf, level_number=3)
+        before = ShelfLevel.objects.count()
+        self.assertEqual(self._resolve('Shelf C Column 1 Level 3'), board)
+        self.assertEqual(ShelfLevel.objects.count(), before,
+                         'a duplicate board was created')
+
+    def test_no_column_finds_a_board_stored_as_column_1(self):
+        board = ShelfLevel.objects.create(shelf=self.shelf, level_number=3,
+                                          column_number=1)
+        before = ShelfLevel.objects.count()
+        self.assertEqual(self._resolve('Shelf C Level 3'), board)
+        self.assertEqual(ShelfLevel.objects.count(), before)
+
+    def test_importing_the_same_sheet_twice_adds_no_boards(self):
+        ShelfLevel.objects.create(shelf=self.shelf, level_number=3)
+        first = self._resolve('Shelf C Column 1 Level 3')
+        count = ShelfLevel.objects.count()
+        for _ in range(4):
+            self.assertEqual(self._resolve('Shelf C Column 1 Level 3'), first)
+        self.assertEqual(ShelfLevel.objects.count(), count)
+
+    def test_a_genuinely_divided_shelf_still_separates_its_bays(self):
+        c1 = ShelfLevel.objects.create(shelf=self.shelf, level_number=1, column_number=1)
+        c2 = ShelfLevel.objects.create(shelf=self.shelf, level_number=1, column_number=2)
+        self.assertEqual(self._resolve('Shelf C Column 1 Level 1'), c1)
+        self.assertEqual(self._resolve('Shelf C Column 2 Level 1'), c2)
+
+    def test_column_2_never_borrows_column_1(self):
+        ShelfLevel.objects.create(shelf=self.shelf, level_number=1, column_number=1)
+        before = ShelfLevel.objects.count()
+        made = self._resolve('Shelf C Column 2 Level 1')
+        self.assertEqual(made.column_number, 2)
+        self.assertEqual(ShelfLevel.objects.count(), before + 1,
+                         'column 2 should be created, not matched to column 1')
+
+    def test_a_bare_level_on_a_divided_shelf_takes_the_first_bay(self):
+        c1 = ShelfLevel.objects.create(shelf=self.shelf, level_number=2, column_number=1)
+        ShelfLevel.objects.create(shelf=self.shelf, level_number=2, column_number=2)
+        before = ShelfLevel.objects.count()
+        self.assertEqual(self._resolve('Shelf C Level 2'), c1)
+        self.assertEqual(ShelfLevel.objects.count(), before)
+
+    def test_the_top_is_found_whatever_column_the_sheet_mentions(self):
+        top = ShelfLevel.objects.create(shelf=self.shelf, level_number=6, is_top=True)
+        before = ShelfLevel.objects.count()
+        self.assertEqual(self._resolve('Shelf C Top'), top)
+        self.assertEqual(self._resolve('Shelf C Column 1 Top'), top)
+        self.assertEqual(ShelfLevel.objects.count(), before)
+
+    def test_a_board_that_really_is_missing_is_still_created(self):
+        before = ShelfLevel.objects.count()
+        made = self._resolve('Shelf C Level 4')
+        self.assertIsNotNone(made)
+        self.assertEqual(made.level_number, 4)
+        self.assertEqual(ShelfLevel.objects.count(), before + 1)
+
+    def test_an_import_files_books_on_the_existing_board(self):
+        """End to end: the sheet's location must not orphan the real board."""
+        board = ShelfLevel.objects.create(shelf=self.shelf, level_number=3)
+        user = _admin(modules='books')
+        client = _signed_in(user)
+
+        import openpyxl
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        wb = openpyxl.Workbook()
+        wb.active.append(['Title', 'Author', 'Genre', 'Location'])
+        wb.active.append(['A Book', 'An Author', 'EDUCATION',
+                          'Shelf C Column 1 Level 3'])
+        buf = io.BytesIO()
+        wb.save(buf)
+        upload = SimpleUploadedFile(
+            'b.xlsx', buf.getvalue(),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+        before = ShelfLevel.objects.count()
+        r = client.post('/admin-portal/import-books/', {'excel_file': upload})
+        self.assertTrue(r.json()['success'], r.json())
+        self.assertEqual(ShelfLevel.objects.count(), before,
+                         'the import created a duplicate board')
+        self.assertEqual(Book.objects.get(title='A Book').shelf_level, board)
+
+
+class TemplateCommentsDoNotRenderTests(TestCase):
+    """{# #} does not span lines, and a multi-line one prints into the page."""
+
+    def test_no_template_has_a_multi_line_short_comment(self):
+        import re
+        from django.conf import settings
+
+        # Pattern for a comment tag that spans lines.
+        pattern = re.compile(r"\{#(?:(?!#\}).)*\n(?:(?!#\}).)*#\}", re.S)
+
+        offenders = []
+        root = os.path.join(settings.BASE_DIR, "templates")
+        for folder, _dirs, files in os.walk(root):
+            for name in files:
+                if not name.endswith(".html"):
+                    continue
+                path = os.path.join(folder, name)
+                with io.open(path, encoding="utf-8") as handle:
+                    for hit in pattern.findall(handle.read()):
+                        offenders.append("%s: %s" % (
+                            os.path.relpath(path, root),
+                            " ".join(hit.split())[:60]))
+
+        self.assertEqual(offenders, [],
+                         "Multi-line {# #} renders into the page; "
+                         "use {% comment %} instead:\n" + "\n".join(offenders))
+
+    def test_the_check_would_actually_catch_one(self):
+        """A guard that cannot fail is not a guard."""
+        import re
+        pattern = re.compile(r"\{#(?:(?!#\}).)*\n(?:(?!#\}).)*#\}", re.S)
+        self.assertTrue(pattern.search("{# first line\n   second line #}"))
+        self.assertFalse(pattern.search("{# all on one line #}"))
+
+
+class ImportShelfOrderTests(TestCase):
+    """The sheet's row order is the shelf's order."""
+
+    def setUp(self):
+        self.user = _admin(modules='books')
+        self.client = _signed_in(self.user)
+        plan = FloorPlan.objects.create(name='Ground', floor_number=1, is_active=True)
+        room = Room.objects.create(floor_plan=plan, name='Main', map_x=0, map_y=0)
+        self.shelf = Shelf.objects.create(room=room, name='Shelf C', map_x=0, map_y=0)
+        self.level = ShelfLevel.objects.create(shelf=self.shelf, level_number=3)
+
+    def _import(self, rows, header=None):
+        import openpyxl
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        wb = openpyxl.Workbook()
+        wb.active.append(header or ['Title', 'Author', 'Genre', 'Location'])
+        for row in rows:
+            wb.active.append(row)
+        buf = io.BytesIO()
+        wb.save(buf)
+        upload = SimpleUploadedFile(
+            'b.xlsx', buf.getvalue(),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        r = self.client.post('/admin-portal/import-books/', {'excel_file': upload})
+        self.assertTrue(r.json()['success'], r.json())
+        return r.json()
+
+    def _shelf_order(self):
+        """Titles in the order the shelf actually shows them."""
+        from django.db.models import F
+        return list(Book.objects.filter(shelf_level=self.level)
+                    .order_by(F('shelf_slot').asc(nulls_last=True), 'title', 'book_id')
+                    .values_list('title', flat=True))
+
+    LOC = 'Shelf C Column 1 Level 3'
+
+    def test_the_sheet_order_survives_instead_of_going_alphabetical(self):
+        self._import([
+            ['Zebra Handbook', 'A', 'REF', self.LOC],
+            ['Apple Growing', 'B', 'REF', self.LOC],
+            ['Mango Farming', 'C', 'REF', self.LOC],
+        ])
+        self.assertEqual(self._shelf_order(),
+                         ['Zebra Handbook', 'Apple Growing', 'Mango Farming'])
+
+    def test_slots_are_consecutive_from_one(self):
+        self._import([['One', 'A', 'REF', self.LOC],
+                      ['Two', 'B', 'REF', self.LOC],
+                      ['Three', 'C', 'REF', self.LOC]])
+        slots = list(Book.objects.filter(shelf_level=self.level)
+                     .order_by('shelf_slot').values_list('shelf_slot', flat=True))
+        self.assertEqual(slots, [1, 2, 3])
+
+    def test_an_explicit_slot_column_wins(self):
+        self._import(
+            [['First', 'A', 'REF', self.LOC, 3],
+             ['Second', 'B', 'REF', self.LOC, 1],
+             ['Third', 'C', 'REF', self.LOC, 2]],
+            header=['Title', 'Author', 'Genre', 'Location', 'Slot'])
+        self.assertEqual(self._shelf_order(), ['Second', 'Third', 'First'])
+
+    def test_a_later_import_appends_rather_than_jumping_the_queue(self):
+        self._import([['One', 'A', 'REF', self.LOC],
+                      ['Two', 'B', 'REF', self.LOC]])
+        self._import([['Three', 'C', 'REF', self.LOC],
+                      ['Four', 'D', 'REF', self.LOC]])
+        self.assertEqual(self._shelf_order(), ['One', 'Two', 'Three', 'Four'])
+
+    def test_books_already_on_the_board_keep_their_visible_order(self):
+        """Numbering the unnumbered must not appear to move anything."""
+        Book.objects.create(title='Bravo', author='X', shelf_level=self.level)
+        Book.objects.create(title='Alpha', author='X', shelf_level=self.level)
+        before = self._shelf_order()
+        self.assertEqual(before, ['Alpha', 'Bravo'])       # alphabetical fallback
+
+        self._import([['New Arrival', 'C', 'REF', self.LOC]])
+        self.assertEqual(self._shelf_order(), ['Alpha', 'Bravo', 'New Arrival'])
+
+    def test_copies_of_one_row_stand_together(self):
+        self._import(
+            [['Doubled', 'A', 'REF', self.LOC, 2],
+             ['After It', 'B', 'REF', self.LOC, 1]],
+            header=['Title', 'Author', 'Genre', 'Location', 'Quantity'])
+        self.assertEqual(self._shelf_order(), ['Doubled', 'Doubled', 'After It'])
+
+    def test_books_with_no_location_get_no_slot(self):
+        """A book nobody has placed must not claim the first space anywhere."""
+        self._import([['Unplaced', 'A', 'REF', '']])
+        book = Book.objects.get(title='Unplaced')
+        self.assertIsNone(book.shelf_level)
+        self.assertIsNone(book.shelf_slot)
+
+    def test_two_boards_are_numbered_independently(self):
+        other = ShelfLevel.objects.create(shelf=self.shelf, level_number=4)
+        self._import([['A1', 'A', 'REF', self.LOC],
+                      ['B1', 'B', 'REF', 'Shelf C Column 1 Level 4'],
+                      ['A2', 'C', 'REF', self.LOC]])
+        self.assertEqual(
+            sorted(Book.objects.filter(shelf_level=self.level)
+                   .values_list('title', 'shelf_slot')),
+            [('A1', 1), ('A2', 2)])
+        self.assertEqual(
+            list(Book.objects.filter(shelf_level=other)
+                 .values_list('title', 'shelf_slot')),
+            [('B1', 1)])
+
+    def test_an_alphabetical_sheet_still_comes_out_alphabetical(self):
+        """Honouring the sheet costs nothing when the sheet is already sorted."""
+        self._import([['Apple', 'A', 'REF', self.LOC],
+                      ['Mango', 'B', 'REF', self.LOC],
+                      ['Zebra', 'C', 'REF', self.LOC]])
+        self.assertEqual(self._shelf_order(), ['Apple', 'Mango', 'Zebra'])
+
+
+class LabelPrintOrderTests(TestCase):
+    """A pile of labels comes out either in walking order or in A-Z order."""
+
+    def setUp(self):
+        from library import labels
+        self.labels = labels
+        plan = FloorPlan.objects.create(name='Ground', floor_number=1, is_active=True)
+        room = Room.objects.create(floor_plan=plan, name='Main', map_x=0, map_y=0)
+        self.a = Shelf.objects.create(room=room, name='Shelf A', map_x=0, map_y=0)
+        self.b = Shelf.objects.create(room=room, name='Shelf B', map_x=0, map_y=0)
+        self.a1 = ShelfLevel.objects.create(shelf=self.a, level_number=1)
+        self.a2 = ShelfLevel.objects.create(shelf=self.a, level_number=2)
+        self.top = ShelfLevel.objects.create(shelf=self.a, level_number=3, is_top=True)
+        self.b1 = ShelfLevel.objects.create(shelf=self.b, level_number=1)
+
+    def _book(self, title, level=None, slot=None, author='X'):
+        return Book.objects.create(title=title, author=author, genre='REF',
+                                   shelf_level=level, shelf_slot=slot,
+                                   status='Available')
+
+    def _titles(self, books):
+        return [b.title for b in books]
+
+    def test_shelf_order_follows_the_slot_not_the_alphabet(self):
+        """This is the whole point: a shelf is not in alphabetical order."""
+        z = self._book('Zebra', self.a1, slot=1)
+        a = self._book('Apple', self.a1, slot=2)
+        m = self._book('Mango', self.a1, slot=3)
+        got = self.labels.sort_for_printing([a, m, z])
+        self.assertEqual(self._titles(got), ['Zebra', 'Apple', 'Mango'])
+
+    def test_shelf_order_walks_shelves_then_boards(self):
+        b = self._book('On Shelf B', self.b1, slot=1)
+        a2 = self._book('Second board', self.a2, slot=1)
+        a1 = self._book('First board', self.a1, slot=1)
+        got = self.labels.sort_for_printing([b, a2, a1])
+        self.assertEqual(self._titles(got),
+                         ['First board', 'Second board', 'On Shelf B'])
+
+    def test_the_top_of_a_case_comes_last_within_it(self):
+        top = self._book('On the top', self.top, slot=1)
+        low = self._book('Inside it', self.a1, slot=1)
+        got = self.labels.sort_for_printing([top, low])
+        self.assertEqual(self._titles(got), ['Inside it', 'On the top'])
+
+    def test_a_book_with_no_slot_falls_back_to_its_title(self):
+        no_slot_b = self._book('Bravo', self.a1)
+        no_slot_a = self._book('Alpha', self.a1)
+        got = self.labels.sort_for_printing([no_slot_b, no_slot_a])
+        self.assertEqual(self._titles(got), ['Alpha', 'Bravo'])
+
+    def test_slotted_books_come_before_unslotted_on_the_same_board(self):
+        placed = self._book('Zulu', self.a1, slot=1)
+        unplaced = self._book('Alpha', self.a1)
+        got = self.labels.sort_for_printing([unplaced, placed])
+        self.assertEqual(self._titles(got), ['Zulu', 'Alpha'])
+
+    def test_books_on_no_shelf_at_all_come_last(self):
+        loose = self._book('Not placed yet')
+        shelved = self._book('Zulu', self.a1, slot=1)
+        got = self.labels.sort_for_printing([loose, shelved])
+        self.assertEqual(self._titles(got), ['Zulu', 'Not placed yet'])
+
+    def test_alphabetical_ignores_the_shelf_entirely(self):
+        z = self._book('Zebra', self.a1, slot=1)
+        a = self._book('Apple', self.b1, slot=1)
+        m = self._book('Mango', self.a2, slot=1)
+        got = self.labels.sort_alphabetically([z, a, m])
+        self.assertEqual(self._titles(got), ['Apple', 'Mango', 'Zebra'])
+
+    def test_alphabetical_breaks_ties_on_author(self):
+        second = self._book('Same Title', self.a1, slot=1, author='Zed')
+        first = self._book('Same Title', self.a1, slot=2, author='Adams')
+        got = self.labels.sort_alphabetically([second, first])
+        self.assertEqual([b.author for b in got], ['Adams', 'Zed'])
+
+
+class LabelSheetSortParamTests(TestCase):
+    """The dialog's choice reaches the PDF."""
+
+    def setUp(self):
+        self.client = _signed_in(_admin(modules='books'))
+        plan = FloorPlan.objects.create(name='Ground', floor_number=1, is_active=True)
+        room = Room.objects.create(floor_plan=plan, name='Main', map_x=0, map_y=0)
+        shelf = Shelf.objects.create(room=room, name='Shelf A', map_x=0, map_y=0)
+        level = ShelfLevel.objects.create(shelf=shelf, level_number=1)
+        self.z = Book.objects.create(title='Zebra', author='A', genre='REF',
+                                     shelf_level=level, shelf_slot=1,
+                                     status='Available', qr_code=str(uuid4()))
+        self.a = Book.objects.create(title='Apple', author='B', genre='REF',
+                                     shelf_level=level, shelf_slot=2,
+                                     status='Available', qr_code=str(uuid4()))
+
+    def _pdf(self, sort=None):
+        url = '/admin-portal/book-qr-labels/?ids=%d,%d' % (self.a.book_id, self.z.book_id)
+        if sort:
+            url += '&sort=' + sort
+        r = self.client.get(url)
+        self.assertEqual(r.status_code, 200, r.content[:200])
+        self.assertEqual(r['Content-Type'], 'application/pdf')
+        return r.content
+
+    def test_every_order_produces_a_pdf(self):
+        for sort in (None, 'location', 'title', 'alphabetical', 'az', 'id'):
+            self.assertTrue(self._pdf(sort).startswith(b'%PDF'), sort)
+
+    def _titles_in_order(self, sort=None):
+        """The titles as they appear on the sheet, in the order printed."""
+        from pypdf import PdfReader
+        reader = PdfReader(io.BytesIO(self._pdf(sort)))
+        text = '\n'.join(page.extract_text() or '' for page in reader.pages)
+        seen = []
+        for line in text.splitlines():
+            line = line.strip()
+            for title in ('Zebra', 'Apple'):
+                if line.startswith(title) and title not in seen:
+                    seen.append(title)
+        return seen
+
+    def test_shelf_order_prints_by_slot(self):
+        """Zebra is slot 1 and Apple slot 2, so Zebra prints first."""
+        self.assertEqual(self._titles_in_order('location'), ['Zebra', 'Apple'])
+
+    def test_alphabetical_prints_a_before_z(self):
+        self.assertEqual(self._titles_in_order('title'), ['Apple', 'Zebra'])
+
+    def test_the_default_is_shelf_order(self):
+        self.assertEqual(self._titles_in_order(), ['Zebra', 'Apple'])
+
+    def test_an_unknown_sort_falls_back_to_shelf_order(self):
+        self.assertEqual(self._titles_in_order('nonsense'), ['Zebra', 'Apple'])
+
+
+class ShelfManagerBookActionsTests(TestCase):
+    """Moving and unshelving from the page that draws the shelves."""
+
+    def test_shelf_manager_carries_the_mover(self):
+        """The books are dealt with on the page that draws the shelves."""
+        client = _signed_in(_admin(email='shelf-page@example.invalid', modules=''))
+        html = client.get('/admin-portal/shelf-manager/').content.decode()
+        for handle in ('paneLList', 'paneRList', 'movePane', 'unshelfPane',
+                       'selectTail', 'swapPanes', 'board-books', 'move-books'):
+            self.assertIn(handle, html, handle + ' is missing from Shelf Manager')
+
+    def test_both_jobs_are_modals_behind_their_own_button(self):
+        """Moving books and reordering a board are separate questions."""
+        client = _signed_in(_admin(email='modals@example.invalid', modules=''))
+        html = client.get('/admin-portal/shelf-manager/').content.decode()
+        for handle in ('moverModal', 'reorderModal', 'openMover(',
+                       'openReorder(', 'saveReorder', 'sortReorder'):
+            self.assertIn(handle, html, handle + ' is missing')
+        # Both panels start closed.
+        for modal in ('moverModal', 'reorderModal'):
+            at = html.index('id="%s"' % modal)
+            self.assertIn('hidden', html[at - 120:at + 120],
+                          modal + ' should start hidden')
+
+    def test_manage_books_no_longer_offers_to_move_them(self):
+        """Moving books between shelves is done in the shelf manager."""
+        client = _signed_in(_admin(email='books-page@example.invalid', modules='books'))
+        html = client.get('/admin-portal/management/').content.decode()
+        for gone in ('toolbarMoveBtn', 'moveBooksModal', 'openMoveBooks',
+                     'confirmMoveBooks'):
+            self.assertNotIn(gone, html, gone + ' should have moved to Shelf Manager')
+        self.assertIn('toolbarDeleteBtn', html, 'bulk delete stays in Manage Books')
+
+
+class MoveBooksTests(TestCase):
+    """Moving books between boards, and off the shelves."""
+
+    def setUp(self):
+        self.user = _admin(modules='books')
+        self.client = _signed_in(self.user)
+        plan = FloorPlan.objects.create(name='Ground', floor_number=1, is_active=True)
+        room = Room.objects.create(floor_plan=plan, name='Main', map_x=0, map_y=0)
+        self.a = Shelf.objects.create(room=room, name='Shelf A', map_x=0, map_y=0)
+        self.b = Shelf.objects.create(room=room, name='Shelf B', map_x=0, map_y=0)
+        self.a1 = ShelfLevel.objects.create(shelf=self.a, level_number=1)
+        self.b1 = ShelfLevel.objects.create(shelf=self.b, level_number=1)
+
+    def _book(self, title, level=None, slot=None):
+        return Book.objects.create(title=title, author='X', genre='REF',
+                                   shelf_level=level, shelf_slot=slot,
+                                   status='Available')
+
+    def _move(self, books, to):
+        ids = ','.join(str(b.book_id) for b in books)
+        return self.client.post('/admin-portal/move-books/',
+                                {'ids': ids, 'level': to}).json()
+
+    def _on(self, level):
+        from django.db.models import F
+        return list(Book.objects.filter(shelf_level=level)
+                    .order_by(F('shelf_slot').asc(nulls_last=True), 'book_id')
+                    .values_list('title', 'shelf_slot'))
+
+    # Endpoints used by both Shelf Manager and Manage Books.
+
+    def test_an_administrator_holding_no_modules_can_still_move_books(self):
+        """The trap: Shelf Manager opens for them, so its buttons must work."""
+        bare = _admin(email='bare-admin@example.invalid', modules='')
+        client = _signed_in(bare)
+        book = self._book('Maths', self.b1, slot=1)
+
+        page = client.get('/admin-portal/shelf-manager/')
+        self.assertEqual(page.status_code, 200, 'they can open the page')
+
+        r = client.post('/admin-portal/move-books/',
+                        {'ids': str(book.book_id), 'level': self.a1.shelf_level_id})
+        self.assertEqual(r.status_code, 200, 'a redirect here would be a dead button')
+        self.assertTrue(r.json()['success'], r.json())
+        book.refresh_from_db()
+        self.assertEqual(book.shelf_level, self.a1)
+
+    def test_shelf_staff_can_move_books_without_the_catalogue_module(self):
+        """Shelving is shelf work. It is the module for standing at the bay."""
+        from library.models import User
+        staff = User.objects.create(
+            fullname='Shelver', email='shelver@example.invalid',
+            password_hash=hash_password('SmokeTest123'),
+            role='Staff', account_status='Active', modules='shelf')
+        client = _signed_in(staff)
+        book = self._book('Maths', self.b1, slot=1)
+        r = client.post('/admin-portal/move-books/',
+                        {'ids': str(book.book_id), 'level': self.a1.shelf_level_id})
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.json()['success'], r.json())
+
+    def test_staff_with_neither_module_are_refused(self):
+        from library.models import User
+        nobody = User.objects.create(
+            fullname='Desk', email='desk@example.invalid',
+            password_hash=hash_password('SmokeTest123'),
+            role='Staff', account_status='Active', modules='chat')
+        client = _signed_in(nobody)
+        book = self._book('Maths', self.b1, slot=1)
+        r = client.post('/admin-portal/move-books/',
+                        {'ids': str(book.book_id), 'level': self.a1.shelf_level_id})
+        self.assertEqual(r.status_code, 302)
+        book.refresh_from_db()
+        self.assertEqual(book.shelf_level, self.b1, 'the book must not have moved')
+
+    def test_unshelving_is_reported_as_taking_off_not_moving_to(self):
+        """"moved to off the shelves" is not a sentence."""
+        book = self._book('Maths', self.b1, slot=1)
+        r = self._move([book], 'none')
+        self.assertTrue(r['success'], r)
+        self.assertEqual(r['message'], '1 book taken off the shelves.')
+        self.assertNotIn('moved to', r['message'])
+
+    def test_moving_onto_a_board_still_names_the_board(self):
+        book = self._book('Maths', self.b1, slot=1)
+        r = self._move([book], self.a1.shelf_level_id)
+        self.assertIn('moved to Shelf A', r['message'])
+
+    def test_a_book_moves_to_another_shelf(self):
+        book = self._book('Maths', self.b1, slot=1)
+        r = self._move([book], self.a1.shelf_level_id)
+        self.assertTrue(r['success'], r)
+        book.refresh_from_db()
+        self.assertEqual(book.shelf_level, self.a1)
+
+    def test_arrivals_land_after_what_is_already_there(self):
+        """The bug assign_books_to_level has: two books claiming one slot."""
+        self._book('Resident one', self.a1, slot=1)
+        self._book('Resident two', self.a1, slot=2)
+        incoming = self._book('Arriving', self.b1, slot=1)
+        self._move([incoming], self.a1.shelf_level_id)
+        self.assertEqual(self._on(self.a1),
+                         [('Resident one', 1), ('Resident two', 2), ('Arriving', 3)])
+
+    def test_no_two_books_share_a_slot_after_a_move(self):
+        for i in range(3):
+            self._book('Resident %d' % i, self.a1, slot=i + 1)
+        movers = [self._book('Mover %d' % i, self.b1, slot=i + 1) for i in range(3)]
+        self._move(movers, self.a1.shelf_level_id)
+        slots = [slot for _, slot in self._on(self.a1)]
+        self.assertEqual(sorted(slots), list(range(1, 7)))
+        self.assertEqual(len(set(slots)), 6, 'two books share a position')
+
+    def test_a_whole_board_keeps_its_order_when_moved(self):
+        movers = [self._book('Book %d' % i, self.b1, slot=i + 1) for i in range(4)]
+        self._move(movers, self.a1.shelf_level_id)
+        self.assertEqual([t for t, _ in self._on(self.a1)],
+                         ['Book 0', 'Book 1', 'Book 2', 'Book 3'])
+
+    def test_moving_to_none_unshelves_and_clears_the_slot(self):
+        book = self._book('Loose', self.a1, slot=1)
+        r = self._move([book], 'none')
+        self.assertTrue(r['success'], r)
+        book.refresh_from_db()
+        self.assertIsNone(book.shelf_level)
+        self.assertIsNone(book.shelf_slot)
+
+    def test_the_move_is_recorded(self):
+        book = self._book('Tracked', self.b1, slot=1)
+        before = SystemLog.objects.count()
+        self._move([book], self.a1.shelf_level_id)
+        self.assertEqual(SystemLog.objects.count(), before + 1)
+        entry = SystemLog.objects.order_by('-log_id').first()
+        self.assertIn('Shelf A', entry.detail)
+
+    def test_the_reply_names_where_they_went(self):
+        book = self._book('Named', self.b1, slot=1)
+        r = self._move([book], self.a1.shelf_level_id)
+        self.assertIn('Shelf A', r['message'])
+        self.assertEqual(r['moved'], 1)
+
+    def test_nothing_selected_is_refused(self):
+        r = self.client.post('/admin-portal/move-books/',
+                             {'ids': '', 'level': self.a1.shelf_level_id}).json()
+        self.assertFalse(r['success'])
+
+    def test_a_destination_that_does_not_exist_is_refused(self):
+        book = self._book('Stays', self.b1, slot=1)
+        r = self._move([book], 999999)
+        self.assertFalse(r['success'])
+        book.refresh_from_db()
+        self.assertEqual(book.shelf_level, self.b1, 'the book moved anyway')
+
+    def test_no_destination_at_all_is_refused(self):
+        book = self._book('Stays', self.b1, slot=1)
+        r = self.client.post('/admin-portal/move-books/',
+                             {'ids': str(book.book_id)}).json()
+        self.assertFalse(r['success'])
+        book.refresh_from_db()
+        self.assertEqual(book.shelf_level, self.b1)
+
+    def test_a_borrowed_book_moves_with_its_record_intact(self):
+        book = self._book('Out on loan', self.b1, slot=1)
+        book.status = 'Borrowed'
+        book.save()
+        self._move([book], self.a1.shelf_level_id)
+        book.refresh_from_db()
+        self.assertEqual(book.shelf_level, self.a1)
+        self.assertEqual(book.status, 'Borrowed')
+
+    def test_it_is_guarded_against_staff_holding_neither_module(self):
+        """The gate widened, deliberately, and this is what it still refuses."""
+        from library.models import User
+        outsider = _signed_in(User.objects.create(
+            fullname='Front desk', email='no-books@example.invalid',
+            password_hash=hash_password('SmokeTest123'),
+            role='Staff', account_status='Active', modules='chat'))
+        book = self._book('Guarded', self.b1, slot=1)
+        r = outsider.post('/admin-portal/move-books/',
+                          {'ids': str(book.book_id), 'level': self.a1.shelf_level_id})
+        self.assertIn(r.status_code, (302, 403))
+        book.refresh_from_db()
+        self.assertEqual(book.shelf_level, self.b1)
+
+
+class BooksLocationFilterTests(TestCase):
+    """Finding books by where they are -- including the ones that are nowhere."""
+
+    def setUp(self):
+        self.client = _signed_in(_admin(modules='books'))
+        plan = FloorPlan.objects.create(name='Ground', floor_number=1, is_active=True)
+        room = Room.objects.create(floor_plan=plan, name='Main', map_x=0, map_y=0)
+        self.a = Shelf.objects.create(room=room, name='Shelf A', map_x=0, map_y=0)
+        self.a1 = ShelfLevel.objects.create(shelf=self.a, level_number=1)
+        self.a2 = ShelfLevel.objects.create(shelf=self.a, level_number=2)
+        b = Shelf.objects.create(room=room, name='Shelf B', map_x=0, map_y=0)
+        self.b1 = ShelfLevel.objects.create(shelf=b, level_number=1)
+        for level, n in ((self.a1, 3), (self.a2, 2), (self.b1, 4)):
+            for i in range(n):
+                Book.objects.create(title='On %s %d' % (level.shelf_level_id, i),
+                                    author='X', genre='REF', shelf_level=level)
+        for i in range(5):
+            Book.objects.create(title='Loose %d' % i, author='X', genre='REF')
+
+    def _rows(self, query=''):
+        r = self.client.get('/admin-portal/management/' + query)
+        self.assertEqual(r.status_code, 200)
+        return r.context['books'].paginator.count
+
+    def test_filtering_by_shelf(self):
+        self.assertEqual(self._rows('?shelf=%d' % self.a.shelf_id), 5)
+
+    def test_filtering_by_board(self):
+        self.assertEqual(self._rows('?level=%d' % self.a1.shelf_level_id), 3)
+
+    def test_the_board_wins_over_its_shelf(self):
+        self.assertEqual(
+            self._rows('?shelf=%d&level=%d' % (self.a.shelf_id, self.a2.shelf_level_id)), 2)
+
+    def test_filtering_for_the_unshelved(self):
+        self.assertEqual(self._rows('?shelf=none'), 5)
+
+    def test_nonsense_is_ignored_rather_than_emptying_the_table(self):
+        for bad in ('?shelf=banana', '?shelf=', '?level=notanumber'):
+            self.assertEqual(self._rows(bad), 14, bad)
+
+    def test_it_combines_with_the_other_filters(self):
+        Book.objects.filter(shelf_level=self.a1).update(status='Borrowed')
+        self.assertEqual(self._rows('?shelf=%d&status=Borrowed' % self.a.shelf_id), 3)
+
+    def test_the_filter_survives_paging(self):
+        r = self.client.get('/admin-portal/management/?shelf=none')
+        self.assertIn('shelf=none', r.context['querystring'])
+
+    def test_the_page_offers_every_shelf_and_a_count_of_the_unshelved(self):
+        r = self.client.get('/admin-portal/management/')
+        names = [s['name'] for s in r.context['shelf_choices']]
+        self.assertIn('Shelf A', names)
+        self.assertIn('Shelf B', names)
+        self.assertEqual(r.context['unshelved_count'], 5)
+
+
+class DeleteBooksTests(TestCase):
+    """Deleting the ticked books, and what it takes with them."""
+
+    def setUp(self):
+        self.user = _admin(modules='books')
+        self.client = _signed_in(self.user)
+        plan = FloorPlan.objects.create(name='Ground', floor_number=1, is_active=True)
+        room = Room.objects.create(floor_plan=plan, name='Main', map_x=0, map_y=0)
+        shelf = Shelf.objects.create(room=room, name='Shelf A', map_x=0, map_y=0)
+        self.level = ShelfLevel.objects.create(shelf=shelf, level_number=1)
+        self.patron = Patron.objects.create(
+            first_name='Pat', last_name='Ron', email='pat@example.invalid',
+            patron_type='Student')
+
+    def _book(self, title, status='Available'):
+        return Book.objects.create(title=title, author='X', genre='REF',
+                                   shelf_level=self.level, status=status)
+
+    def _post(self, books, confirm=False):
+        data = {'ids': ','.join(str(b.book_id) for b in books)}
+        if confirm:
+            data['confirm'] = '1'
+        return self.client.post('/admin-portal/delete-books/', data).json()
+
+    def test_asking_first_deletes_nothing(self):
+        books = [self._book('One'), self._book('Two')]
+        before = Book.objects.count()
+        r = self._post(books)
+        self.assertTrue(r['success'], r)
+        self.assertTrue(r['preview'])
+        self.assertEqual(r['deletable'], 2)
+        self.assertEqual(Book.objects.count(), before, 'the preview deleted books')
+
+    def test_confirming_deletes_them(self):
+        books = [self._book('One'), self._book('Two')]
+        r = self._post(books, confirm=True)
+        self.assertTrue(r['success'], r)
+        self.assertEqual(r['deleted'], 2)
+        self.assertEqual(Book.objects.filter(title__in=['One', 'Two']).count(), 0)
+
+    def test_a_borrowed_book_is_kept_not_deleted(self):
+        """Deleting it would lose the only record that it is out."""
+        out = self._book('Out on loan', status='Borrowed')
+        ok = self._book('On the shelf')
+        r = self._post([out, ok], confirm=True)
+        self.assertTrue(r['success'], r)
+        self.assertEqual(r['deleted'], 1)
+        self.assertTrue(Book.objects.filter(pk=out.pk).exists())
+        self.assertFalse(Book.objects.filter(pk=ok.pk).exists())
+
+    def test_an_overdue_book_is_kept_too(self):
+        out = self._book('Overdue', status='Overdue')
+        r = self._post([out], confirm=True)
+        self.assertFalse(r['success'])
+        self.assertTrue(Book.objects.filter(pk=out.pk).exists())
+
+    def test_the_preview_names_the_books_it_will_keep(self):
+        out = self._book('Out on loan', status='Borrowed')
+        r = self._post([out, self._book('Fine')])
+        self.assertEqual(r['on_loan_count'], 1)
+        self.assertEqual(r['on_loan'][0]['title'], 'Out on loan')
+
+    def test_the_preview_counts_the_loan_history_that_would_go(self):
+        book = self._book('Has history')
+        for _ in range(3):
+            Transaction.objects.create(book=book, patron=self.patron,
+                                       transaction_type='Borrow')
+        r = self._post([book])
+        self.assertEqual(r['loan_records'], 3)
+
+    def test_deleting_really_does_take_the_loan_history(self):
+        """Not a warning about a hypothetical: this is what CASCADE does."""
+        book = self._book('Has history')
+        Transaction.objects.create(book=book, patron=self.patron,
+                                   transaction_type='Borrow')
+        self.assertEqual(Transaction.objects.count(), 1)
+        self._post([book], confirm=True)
+        self.assertEqual(Transaction.objects.count(), 0)
+
+    def test_everything_selected_being_on_loan_is_refused(self):
+        out = [self._book('A', status='Borrowed'), self._book('B', status='Borrowed')]
+        r = self._post(out, confirm=True)
+        self.assertFalse(r['success'])
+        self.assertEqual(Book.objects.filter(status='Borrowed').count(), 2)
+
+    def test_the_deletion_is_recorded(self):
+        book = self._book('Tracked')
+        before = SystemLog.objects.count()
+        self._post([book], confirm=True)
+        self.assertEqual(SystemLog.objects.count(), before + 1)
+        self.assertIn('Tracked', SystemLog.objects.order_by('-log_id').first().detail)
+
+    def test_nothing_selected_is_refused(self):
+        r = self.client.post('/admin-portal/delete-books/', {'ids': ''}).json()
+        self.assertFalse(r['success'])
+
+    def test_it_needs_the_books_module(self):
+        outsider = _signed_in(_admin(email='no-books@example.invalid', modules=''))
+        book = self._book('Guarded')
+        r = outsider.post('/admin-portal/delete-books/',
+                          {'ids': str(book.book_id), 'confirm': '1'})
+        self.assertIn(r.status_code, (302, 403))
+        self.assertTrue(Book.objects.filter(pk=book.pk).exists())
+
+    def test_too_many_at_once_is_refused(self):
+        from library.views import MAX_BOOKS_PER_MOVE
+        ids = ','.join(str(i) for i in range(MAX_BOOKS_PER_MOVE + 2))
+        r = self.client.post('/admin-portal/delete-books/',
+                             {'ids': ids, 'confirm': '1'}).json()
+        self.assertFalse(r['success'])
+
+
+class RowDeleteAsksFirstTests(TestCase):
+    """The trash icon on a row used to delete on one click, with no question."""
+
+    def test_the_row_delete_form_carries_a_confirmation(self):
+        user = _admin(modules='books')
+        client = _signed_in(user)
+        plan = FloorPlan.objects.create(name='G', floor_number=1, is_active=True)
+        room = Room.objects.create(floor_plan=plan, name='R', map_x=0, map_y=0)
+        shelf = Shelf.objects.create(room=room, name='S', map_x=0, map_y=0)
+        level = ShelfLevel.objects.create(shelf=shelf, level_number=1)
+        Book.objects.create(title='Deletable', author='X', genre='REF',
+                            shelf_level=level, status='Available')
+
+        html = client.get('/admin-portal/management/').content.decode('utf-8', 'replace')
+        # The row's delete form must opt in to ayla-dialog's declarative confirmation.
+        self.assertIn('data-confirm', html, 'the row delete has no confirmation')
+        self.assertIn('Deletable', html, 'the book is not even on the page')
+
+
+class AnalyticsTests(TestCase):
+    """The charts, and the arithmetic behind them."""
+
+    def setUp(self):
+        from library import analytics
+        self.analytics = analytics
+        self.start = date(2026, 6, 1)
+        self.end = date(2026, 6, 30)
+        self.patron = Patron.objects.create(
+            first_name='Pat', last_name='Ron', email='p@example.invalid',
+            patron_type='Student')
+
+    def _borrow(self, book, day):
+        """A borrow on a given day."""
+        tx = Transaction.objects.create(book=book, patron=self.patron,
+                                        transaction_type='Borrow')
+        Transaction.objects.filter(pk=tx.pk).update(
+            transaction_date=date(2026, 6, day))
+        return tx
+
+    def _visit(self, day, in_hour, out_hour=None, auto_closed=False,
+               purpose='Study', school='Central', patron=None):
+        tz = timezone.get_current_timezone()
+        entry = timezone.make_aware(datetime(2026, 6, day, in_hour, 0), tz)
+        exit_at = (timezone.make_aware(datetime(2026, 6, day, out_hour, 0), tz)
+                   if out_hour is not None else None)
+        return PatronLog.objects.create(
+            patron=patron or self.patron, entry_time=entry, exit_time=exit_at,
+            auto_closed=auto_closed, purpose_of_visit=purpose, school=school)
+
+    # Arrivals vs occupancy
+
+    def test_arrivals_counts_the_moment_people_walk_in(self):
+        for _ in range(3):
+            self._visit(1, 9, 10)
+        self._visit(1, 14, 15)
+        out = self.analytics.visits_by_hour(self.start, self.end)
+        self.assertEqual(out['peak'], '9 AM')
+        self.assertEqual(out['peak_count'], 3)
+        self.assertEqual(out['total'], 4)
+
+    def test_occupancy_is_not_the_same_as_arrivals(self):
+        """Three arrive at 9 and leave at 9:59; one arrives at 2 and stays till 6."""
+        for _ in range(3):
+            self._visit(1, 9, 9)
+        self._visit(1, 14, 18)
+        arrivals = self.analytics.visits_by_hour(self.start, self.end)
+        occupancy = self.analytics.occupancy_by_hour(self.start, self.end)
+        self.assertEqual(arrivals['peak'], '9 AM')
+        rows = dict(occupancy['rows'])
+        self.assertEqual(rows['9 AM'], '3.0')
+        # The long visit covers 2, 3, 4, 5 and 6 PM.
+        for hour in ('2 PM', '3 PM', '4 PM', '5 PM', '6 PM'):
+            self.assertEqual(rows[hour], '1.0', hour)
+
+    def test_a_visit_spanning_hours_counts_in_each_one(self):
+        self._visit(1, 9, 12)
+        rows = dict(self.analytics.occupancy_by_hour(self.start, self.end)['rows'])
+        for hour in ('9 AM', '10 AM', '11 AM', '12 PM'):
+            self.assertEqual(rows[hour], '1.0', hour)
+
+    def test_guessed_exits_are_left_out_of_occupancy(self):
+        """A visit closed by the nightly sweep has an invented exit time."""
+        self._visit(1, 9, 17, auto_closed=True)
+        out = self.analytics.occupancy_by_hour(self.start, self.end)
+        self.assertEqual(out['measured_visits'], 0)
+        self.assertEqual(out['excluded_visits'], 1)
+        self.assertFalse(out['chart']['has_data'])
+
+    def test_visits_still_open_are_left_out_of_occupancy(self):
+        self._visit(1, 9, None)
+        out = self.analytics.occupancy_by_hour(self.start, self.end)
+        self.assertEqual(out['measured_visits'], 0)
+        self.assertEqual(out['excluded_visits'], 1)
+
+    def test_occupancy_averages_over_the_days_measured(self):
+        """Two people on each of two days is an average of two, not four."""
+        for day in (1, 2):
+            self._visit(day, 9, 10)
+            self._visit(day, 9, 10)
+        out = self.analytics.occupancy_by_hour(self.start, self.end)
+        self.assertEqual(out['days_measured'], 2)
+        self.assertEqual(dict(out['rows'])['9 AM'], '2.0')
+
+    # The other visit charts
+
+    def test_weekday_chart_finds_the_busiest_day(self):
+        self._visit(1, 9, 10)          # 2026-06-01 is a Monday
+        self._visit(1, 10, 11)
+        self._visit(2, 9, 10)
+        out = self.analytics.visits_by_weekday(self.start, self.end)
+        self.assertEqual(out['busiest'], 'Monday')
+
+    def test_purpose_chart_ranks_by_count(self):
+        for _ in range(3):
+            self._visit(1, 9, 10, purpose='Research')
+        self._visit(1, 11, 12, purpose='Reading')
+        out = self.analytics.visits_by_purpose(self.start, self.end)
+        self.assertEqual(out['top'], 'Research')
+        self.assertEqual(dict(out['rows'])['Research'], '3')
+
+    def test_visitor_type_counts_per_visit_not_per_person(self):
+        """A regular counts each time they come, because the question is who is using the room."""
+        for _ in range(4):
+            self._visit(1, 9, 10)
+        out = self.analytics.visitors_by_type(self.start, self.end)
+        self.assertEqual(dict(out['rows'])['Student'], '4')
+
+    def test_school_chart_counts_distinct_schools(self):
+        self._visit(1, 9, 10, school='Central')
+        self._visit(1, 9, 10, school='Northside')
+        out = self.analytics.visitors_by_school(self.start, self.end)
+        self.assertEqual(out['distinct'], 2)
+
+    # The collection
+
+    def test_condition_chart_reports_the_damaged_share(self):
+        for _ in range(3):
+            Book.objects.create(title='Fine', author='X', genre='REF',
+                                condition='Good', status='Available')
+        Book.objects.create(title='Broken', author='X', genre='REF',
+                            condition='Damaged', status='Available')
+        out = self.analytics.books_by_condition()
+        self.assertEqual(out['damaged'], 1)
+        self.assertEqual(out['damaged_share'], 25.0)
+
+    def test_unshelved_summary_counts_books_on_no_shelf(self):
+        plan = FloorPlan.objects.create(name='G', floor_number=1, is_active=True)
+        room = Room.objects.create(floor_plan=plan, name='R', map_x=0, map_y=0)
+        shelf = Shelf.objects.create(room=room, name='A', map_x=0, map_y=0)
+        level = ShelfLevel.objects.create(shelf=shelf, level_number=1)
+        Book.objects.create(title='Placed', author='X', genre='REF', shelf_level=level)
+        Book.objects.create(title='Loose', author='X', genre='REF')
+        out = self.analytics.unshelved_summary()
+        self.assertEqual(out['count'], 1)
+        self.assertEqual(out['shelved'], 1)
+        self.assertEqual(out['share'], 50.0)
+
+    def test_shelf_occupancy_ranks_fullest_first(self):
+        plan = FloorPlan.objects.create(name='G', floor_number=1, is_active=True)
+        room = Room.objects.create(floor_plan=plan, name='R', map_x=0, map_y=0)
+        big = Shelf.objects.create(room=room, name='Big', map_x=0, map_y=0)
+        small = Shelf.objects.create(room=room, name='Small', map_x=0, map_y=0)
+        Shelf.objects.create(room=room, name='Empty', map_x=0, map_y=0)
+        big_lv = ShelfLevel.objects.create(shelf=big, level_number=1)
+        small_lv = ShelfLevel.objects.create(shelf=small, level_number=1)
+        for i in range(3):
+            Book.objects.create(title='B%d' % i, author='X', genre='REF', shelf_level=big_lv)
+        Book.objects.create(title='S', author='X', genre='REF', shelf_level=small_lv)
+        out = self.analytics.shelf_occupancy()
+        self.assertEqual(out['rows'][0], ('Big', '3'))
+        self.assertEqual(out['empty_shelves'], 1)
+
+    # Borrowing and fines
+
+    def test_most_borrowed_books_ranks_titles(self):
+        popular = Book.objects.create(title='Popular', author='A', genre='FIC')
+        quiet = Book.objects.create(title='Quiet', author='B', genre='FIC')
+        for _ in range(3):
+            self._borrow(popular, 5)
+        self._borrow(quiet, 5)
+        out = self.analytics.most_borrowed_books(self.start, self.end)
+        self.assertEqual(out['rows'][0], ('Popular', 'A', '3'))
+        self.assertEqual(out['total'], 4)
+
+    def test_most_borrowed_genres_groups_across_titles(self):
+        a = Book.objects.create(title='One', author='A', genre='Science')
+        b = Book.objects.create(title='Two', author='B', genre='Science')
+        c = Book.objects.create(title='Three', author='C', genre='Poetry')
+        for book in (a, b, c):
+            self._borrow(book, 5)
+        out = self.analytics.most_borrowed_genres(self.start, self.end)
+        self.assertEqual(out['rows'][0], ('Science', '2'))
+
+    def test_never_borrowed_finds_stock_that_has_not_moved(self):
+        moved = Book.objects.create(title='Moved', author='A', genre='FIC')
+        Book.objects.create(title='Still here', author='B', genre='FIC')
+        self._borrow(moved, 5)
+        out = self.analytics.never_borrowed()
+        self.assertEqual(out['count'], 1)
+        self.assertEqual(out['rows'][0][0], 'Still here')
+
+    def test_penalties_group_by_day_week_and_month(self):
+        book = Book.objects.create(title='Late', author='A', genre='FIC')
+        for day, amount in ((1, 10), (2, 5), (15, 20)):
+            Transaction.objects.create(
+                book=book, patron=self.patron, transaction_type='Borrow',
+                transaction_date=date(2026, 6, day),
+                return_date=date(2026, 6, day), fine_amount=amount)
+
+        by_day = self.analytics.penalties_over_time(self.start, self.end, 'day')
+        by_week = self.analytics.penalties_over_time(self.start, self.end, 'week')
+        by_month = self.analytics.penalties_over_time(self.start, self.end, 'month')
+
+        self.assertEqual(by_day['total'], 35.0)
+        self.assertEqual(by_week['total'], 35.0)
+        self.assertEqual(by_month['total'], 35.0)
+        # 1 and 2 June fall in one week; 15 June in another.
+        self.assertEqual(by_week['periods_with_fines'], 2)
+        self.assertEqual(by_month['periods_with_fines'], 1)
+        self.assertEqual(by_day['periods_with_fines'], 3)
+
+    def test_penalties_average_is_over_periods_that_had_fines(self):
+        book = Book.objects.create(title='Late', author='A', genre='FIC')
+        for day in (1, 2):
+            Transaction.objects.create(
+                book=book, patron=self.patron, transaction_type='Borrow',
+                transaction_date=date(2026, 6, day),
+                return_date=date(2026, 6, day), fine_amount=10)
+        out = self.analytics.penalties_over_time(self.start, self.end, 'day')
+        self.assertEqual(out['average'], 10.0)
+
+    # Empty data
+
+    def test_every_builder_survives_an_empty_library(self):
+        PatronLog.objects.all().delete()
+        Book.objects.all().delete()
+        Transaction.objects.all().delete()
+        for call in (
+            lambda: self.analytics.visits_by_hour(self.start, self.end),
+            lambda: self.analytics.occupancy_by_hour(self.start, self.end),
+            lambda: self.analytics.visits_by_weekday(self.start, self.end),
+            lambda: self.analytics.visits_by_purpose(self.start, self.end),
+            lambda: self.analytics.visitors_by_type(self.start, self.end),
+            lambda: self.analytics.visitors_by_school(self.start, self.end),
+            lambda: self.analytics.books_by_genre(),
+            lambda: self.analytics.books_by_condition(),
+            lambda: self.analytics.shelf_occupancy(),
+            lambda: self.analytics.unshelved_summary(),
+            lambda: self.analytics.most_borrowed_books(self.start, self.end),
+            lambda: self.analytics.most_borrowed_genres(self.start, self.end),
+            lambda: self.analytics.never_borrowed(),
+            lambda: self.analytics.penalties_over_time(self.start, self.end, 'day'),
+        ):
+            self.assertIsNotNone(call())
+
+
+class AnalyticsPageTests(TestCase):
+    """The page itself."""
+
+    def setUp(self):
+        # Logs module so the Log Management page is reachable.
+        self.client = _signed_in(_admin(modules='logs'))
+
+    def test_the_page_renders(self):
+        r = self.client.get('/admin-portal/analytics/')
+        self.assertEqual(r.status_code, 200)
+
+    def test_it_draws_every_section(self):
+        html = self.client.get('/admin-portal/analytics/').content.decode('utf-8', 'replace')
+        for title in ('Arrivals by hour', 'People inside, by hour',
+                      'Visits by day of the week', 'Why people visit',
+                      'Who visits', 'Visitors by school', 'Collection by genre',
+                      'Condition of the collection', 'Books per shelf',
+                      'Never borrowed', 'Most borrowed titles',
+                      'Most borrowed genres'):
+            self.assertIn(title, html, title)
+
+    def test_the_fine_grouping_can_be_changed(self):
+        for period in ('day', 'week', 'month'):
+            r = self.client.get('/admin-portal/analytics/?period=' + period)
+            self.assertEqual(r.context['period'], period)
+            self.assertIn('per %s' % period, r.context['penalties']['chart']['title'])
+
+    def test_a_nonsense_period_falls_back_to_day(self):
+        r = self.client.get('/admin-portal/analytics/?period=fortnight')
+        self.assertEqual(r.context['period'], 'day')
+
+    def test_it_is_administrator_only(self):
+        staff = User.objects.create(
+            fullname='Staff', email='an-analytics-staff@example.invalid',
+            password_hash=hash_password('SmokeTest123'),
+            role='Staff', account_status='Active', modules='logs')
+        r = _signed_in(staff).get('/admin-portal/analytics/')
+        self.assertIn(r.status_code, (302, 403))
+
+    def test_log_management_carries_the_peak_hour_chart(self):
+        """The chart the research adviser asked for, where the visits are."""
+        html = self.client.get('/admin-portal/log-management/').content.decode('utf-8', 'replace')
+        self.assertIn('Arrivals by hour', html)
+
+
+class CardNumberTests(TestCase):
+    """Seven digits that have to survive being read off a card and typed."""
+
+    def test_a_minted_number_validates(self):
+        from library.cardnumbers import LENGTH, generate, is_valid
+
+        number = generate(exists=lambda candidate: False)
+        self.assertEqual(len(number), LENGTH)
+        self.assertTrue(number.startswith('7'))
+        self.assertTrue(is_valid(number))
+
+    def test_a_mistyped_digit_is_rejected_without_a_lookup(self):
+        from library.cardnumbers import generate, is_valid
+
+        number = generate(exists=lambda candidate: False)
+        wrong = list(number)
+        wrong[3] = str((int(wrong[3]) + 1) % 10)
+        self.assertFalse(is_valid(''.join(wrong)))
+
+    def test_two_swapped_digits_are_rejected(self):
+        """The reason it is Luhn and not a plain sum."""
+        from library.cardnumbers import is_valid
+
+        # Built rather than generated, so the two digits being swapped differ.
+        from library.cardnumbers import _check_digit
+        body = '712345'
+        number = body + _check_digit(body)
+        swapped = '712435' + number[-1]
+        self.assertTrue(is_valid(number))
+        self.assertFalse(is_valid(swapped))
+
+    def test_punctuation_and_the_printed_prefix_do_not_change_the_number(self):
+        from library.cardnumbers import _check_digit, is_valid, normalise
+
+        number = '712345' + _check_digit('712345')
+        for typed in (number, '  ' + number + ' ', '712-3455'[:3] + '-' + number[3:],
+                      'AYLA-' + number):
+            self.assertEqual(normalise(typed), number, typed)
+            self.assertTrue(is_valid(typed), typed)
+
+    def test_a_card_number_is_shown_as_seven_unbroken_digits(self):
+        from library.cardnumbers import _check_digit, format_card
+
+        number = '712345' + _check_digit('712345')
+        self.assertEqual(format_card(number), number)
+        self.assertNotIn('-', format_card(number))
+
+    def test_every_member_is_given_one_and_visitors_are_not(self):
+        member = Patron.objects.create(
+            fullname='Card Holder', email='card-holder@example.invalid',
+            password_hash=hash_password('x'), account_status='Active')
+        visitor = Patron.objects.create(
+            fullname='Walk In', password_hash=hash_password(None),
+            account_status='Visitor')
+
+        self.assertTrue(member.card_number)
+        self.assertIsNone(visitor.card_number)
+
+        # Made a member later: the number is minted then, not never.
+        visitor.account_status = 'Active'
+        visitor.save()
+        self.assertTrue(visitor.card_number)
+
+    def test_no_two_patrons_share_a_number(self):
+        made = set()
+        for index in range(25):
+            patron = Patron.objects.create(
+                fullname='Member %d' % index,
+                email='member-%d@example.invalid' % index,
+                password_hash=hash_password('x'), account_status='Active')
+            self.assertNotIn(patron.card_number, made)
+            made.add(patron.card_number)
+
+
+class DeskKioskTests(TestCase):
+    """The screen a patron stands in front of: identify, then state a direction."""
+
+    def setUp(self):
+        from .desk import DESK_SESSION_KEY
+
+        self.user = _admin(modules='logs,patrons')
+        self.client = _signed_in(self.user)
+        session = self.client.session
+        session[DESK_SESSION_KEY] = True
+        session.save()
+
+        self.patron = Patron.objects.create(
+            fullname='Juan Dela Cruz', first_name='Juan', last_name='Dela Cruz',
+            email='juan@example.invalid', password_hash=hash_password('x'),
+            account_status='Active', qr_code='card-juan')
+
+    def _post(self, path, **data):
+        return self.client.post(path, data).json()
+
+    def test_the_armed_desk_shows_the_kiosk_and_no_table(self):
+        response = self.client.get('/admin-portal/log-management/')
+        self.assertEqual(response.status_code, 200)
+        body = response.content.decode()
+        self.assertIn('I have a library card', body)
+        # The kiosk must not show other visitors.
+        self.assertNotIn('<table', body)
+        self.assertNotIn(self.patron.fullname, body)
+
+    def test_a_card_number_identifies_its_holder(self):
+        r = self._post('/desk/identify/', value=self.patron.card_display)
+        self.assertTrue(r['success'])
+        self.assertEqual(r['name'], 'Juan Dela Cruz')
+        self.assertFalse(r['inside'])
+        self.assertEqual(r['suggest'], 'entry')
+
+    def test_an_email_identifies_its_holder(self):
+        r = self._post('/desk/identify/', value='JUAN@example.invalid')
+        self.assertTrue(r['success'])
+        self.assertEqual(r['name'], 'Juan Dela Cruz')
+
+    def test_a_mistyped_card_number_says_so_rather_than_not_found(self):
+        wrong = list(self.patron.card_number)
+        wrong[2] = str((int(wrong[2]) + 1) % 10)
+        r = self._post('/desk/identify/', value=''.join(wrong))
+        self.assertFalse(r['success'])
+        self.assertIn('not quite right', r['error'])
+
+    def test_an_unknown_email_is_pointed_at_the_visitor_form(self):
+        r = self._post('/desk/identify/', value='nobody@example.invalid')
+        self.assertFalse(r['success'])
+        self.assertIn('visitor', r['error'].lower())
+
+    def test_a_suspended_card_is_sent_to_the_librarian_and_says_nothing_else(self):
+        self.patron.account_status = 'Suspended'
+        self.patron.save()
+        r = self._post('/desk/identify/', value=self.patron.card_display)
+        self.assertFalse(r['success'])
+        self.assertIn('librarian', r['error'])
+        self.assertNotIn('Juan', r['error'])
+
+    def test_entry_then_exit_records_one_visit(self):
+        self._post('/desk/identify/', value=self.patron.card_display)
+        entry = self._post('/desk/visit/', direction='entry', purpose='Study')
+        self.assertTrue(entry['success'])
+        self.assertEqual(entry['action'], 'entry')
+
+        log = PatronLog.objects.get(patron=self.patron)
+        self.assertIsNone(log.exit_time)
+
+        self._post('/desk/identify/', value=self.patron.card_display)
+        leaving = self._post('/desk/visit/', direction='exit')
+        self.assertTrue(leaving['success'])
+        self.assertEqual(leaving['action'], 'exit')
+        log.refresh_from_db()
+        self.assertIsNotNone(log.exit_time)
+        self.assertEqual(PatronLog.objects.filter(patron=self.patron).count(), 1)
+
+    def test_exit_with_nothing_open_is_refused_rather_than_invented(self):
+        self._post('/desk/identify/', value=self.patron.card_display)
+        r = self._post('/desk/visit/', direction='exit')
+        self.assertFalse(r['success'])
+        self.assertEqual(r['action'], 'not_inside')
+        self.assertEqual(PatronLog.objects.count(), 0)
+
+    def test_a_direction_cannot_be_recorded_for_somebody_who_did_not_identify(self):
+        """The identity lives in the session, never in the page."""
+        r = self._post('/desk/visit/', direction='entry')
+        self.assertFalse(r['success'])
+        self.assertTrue(r.get('expired'))
+        self.assertEqual(PatronLog.objects.count(), 0)
+
+    def test_a_walk_in_is_logged_without_an_account(self):
+        r = self._post('/desk/visitor/', direction='entry', name='Ana Reyes',
+                       patron_type='General Visitor', purpose='Reading')
+        self.assertTrue(r['success'])
+        visitor = Patron.objects.get(fullname='Ana Reyes')
+        self.assertEqual(visitor.account_status, 'Visitor')
+        self.assertIsNone(visitor.qr_code)
+        self.assertIsNone(visitor.card_number)
+        self.assertEqual(PatronLog.objects.filter(patron=visitor).count(), 1)
+
+    def test_a_returning_walk_in_is_the_same_person(self):
+        self._post('/desk/visitor/', direction='entry', name='Ana Reyes',
+                   purpose='Reading')
+        PatronLog.objects.update(exit_time=timezone.now())
+        self._post('/desk/visitor/', direction='entry', name='ana reyes',
+                   purpose='Study')
+        self.assertEqual(Patron.objects.filter(fullname__icontains='Ana').count(), 1)
+
+    def test_a_walk_in_cannot_sign_out_on_a_name_alone(self):
+        self._post('/desk/visitor/', direction='entry', name='Ana Reyes',
+                   contact='ana@example.invalid', purpose='Reading')
+        bare = self._post('/desk/visitor/', direction='exit', name='Ana Reyes')
+        self.assertFalse(bare['success'])
+        self.assertIsNone(PatronLog.objects.get().exit_time)
+
+        with_contact = self._post('/desk/visitor/', direction='exit',
+                                  name='Ana Reyes', contact='ana@example.invalid')
+        self.assertTrue(with_contact['success'])
+        self.assertIsNotNone(PatronLog.objects.get().exit_time)
+
+    def test_a_stranger_cannot_reach_the_kiosk_endpoints(self):
+        stranger = Client()
+        for path in ('/desk/identify/', '/desk/visit/', '/desk/visitor/'):
+            r = stranger.post(path, {'value': 'x', 'direction': 'entry', 'name': 'x'})
+            self.assertFalse(r.json()['success'], path)
+        self.assertEqual(PatronLog.objects.count(), 0)
+
+
+class ElementPropertiesTests(TestCase):
+    """Everything drawn on a floor plan can be described after it is drawn."""
+
+    def setUp(self):
+        self.user = _admin(modules='shelf')
+        self.client = _signed_in(self.user)
+        self.plan = FloorPlan.objects.create(name='Ground', floor_number=1,
+                                             is_active=True)
+        self.upstairs = FloorPlan.objects.create(name='First', floor_number=2)
+        self.room = Room.objects.create(
+            floor_plan=self.plan, name='Reading Room', map_x=50, map_y=50,
+            geometry=[[0, 0], [100, 0], [100, 100], [0, 100]])
+        self.shelf = Shelf.objects.create(room=self.room, name='Shelf A',
+                                          map_x=50, map_y=50)
+
+    def _post(self, path, **data):
+        return self.client.post(path, data).json()
+
+    # Shelves
+
+    def test_a_shelf_can_be_told_what_it_really_is(self):
+        r = self._post('/admin-portal/edit-shelf/', shelf_id=self.shelf.shelf_id,
+                       kind='Display', mount='Wall', mount_height_m='1.4')
+        self.assertTrue(r['success'], r)
+        self.shelf.refresh_from_db()
+        self.assertEqual(self.shelf.kind, 'Display')
+        self.assertEqual(self.shelf.mount, 'Wall')
+        self.assertEqual(self.shelf.mount_height_m, 1.4)
+
+    def test_a_shelf_type_the_model_does_not_know_is_refused(self):
+        r = self._post('/admin-portal/edit-shelf/', shelf_id=self.shelf.shelf_id,
+                       kind='Hammock')
+        self.assertFalse(r['success'])
+        self.shelf.refresh_from_db()
+        self.assertEqual(self.shelf.kind, 'Shelf')
+
+    def test_an_impossible_mounting_height_is_refused(self):
+        r = self._post('/admin-portal/edit-shelf/', shelf_id=self.shelf.shelf_id,
+                       mount_height_m='40')
+        self.assertFalse(r['success'])
+        self.shelf.refresh_from_db()
+        self.assertIsNone(self.shelf.mount_height_m)
+
+    def test_a_blank_height_clears_it_rather_than_failing(self):
+        self.shelf.mount_height_m = 1.2
+        self.shelf.save()
+        r = self._post('/admin-portal/edit-shelf/', shelf_id=self.shelf.shelf_id,
+                       mount_height_m='')
+        self.assertTrue(r['success'], r)
+        self.shelf.refresh_from_db()
+        self.assertIsNone(self.shelf.mount_height_m)
+
+    def test_a_shelf_can_be_hidden_without_being_unplaced(self):
+        r = self._post('/admin-portal/edit-shelf/', shelf_id=self.shelf.shelf_id,
+                       is_active='0')
+        self.assertTrue(r['success'], r)
+        self.shelf.refresh_from_db()
+        self.assertFalse(self.shelf.is_active)
+        self.assertEqual(self.shelf.map_x, 50)
+
+    # Rooms
+
+    def test_a_room_can_be_hidden_and_kept(self):
+        r = self._post('/admin-portal/edit-room/', room_id=self.room.room_id,
+                       is_active='0', description='Closed for repairs')
+        self.assertTrue(r['success'], r)
+        self.room.refresh_from_db()
+        self.assertFalse(self.room.is_active)
+        self.assertEqual(self.room.description, 'Closed for repairs')
+        self.assertTrue(Shelf.objects.filter(shelf_id=self.shelf.shelf_id).exists())
+
+    def test_a_room_edit_that_says_nothing_about_visibility_leaves_it_alone(self):
+        """Absent is "not on this form", never "unticked"."""
+        self._post('/admin-portal/edit-room/', room_id=self.room.room_id,
+                   name='Quiet Room')
+        self.room.refresh_from_db()
+        self.assertTrue(self.room.is_active)
+        self.assertTrue(self.room.patron_access)
+
+    # Doors
+
+    def test_a_door_can_be_named_and_closed_off(self):
+        door = Door.objects.create(room=self.room, map_x=50, map_y=0, width=28)
+        r = self._post('/admin-portal/edit-door/', door_id=door.door_id,
+                       label='Fire exit', is_active='0')
+        self.assertTrue(r['success'], r)
+        door.refresh_from_db()
+        self.assertEqual(door.label, 'Fire exit')
+        self.assertFalse(door.is_active)
+
+    # Waypoints
+
+    def test_a_waypoint_can_be_pointed_at_a_shelf_afterwards(self):
+        wp = Waypoint.objects.create(floor_plan=self.plan, map_x=10, map_y=10)
+        r = self._post('/admin-portal/edit-waypoint/', waypoint_id=wp.waypoint_id,
+                       label='Aisle 2', linked_shelf_id=self.shelf.shelf_id)
+        self.assertTrue(r['success'], r)
+        wp.refresh_from_db()
+        self.assertEqual(wp.label, 'Aisle 2')
+        self.assertEqual(wp.linked_shelf, self.shelf)
+
+    def test_a_waypoint_link_can_be_cleared(self):
+        wp = Waypoint.objects.create(floor_plan=self.plan, map_x=10, map_y=10,
+                                     linked_shelf=self.shelf)
+        r = self._post('/admin-portal/edit-waypoint/', waypoint_id=wp.waypoint_id,
+                       linked_shelf_id='')
+        self.assertTrue(r['success'], r)
+        wp.refresh_from_db()
+        self.assertIsNone(wp.linked_shelf)
+
+    def test_a_waypoint_cannot_stand_in_front_of_a_shelf_upstairs(self):
+        other_room = Room.objects.create(floor_plan=self.upstairs, name='Loft',
+                                         map_x=10, map_y=10)
+        far = Shelf.objects.create(room=other_room, name='Shelf Z',
+                                   map_x=10, map_y=10)
+        wp = Waypoint.objects.create(floor_plan=self.plan, map_x=10, map_y=10)
+        r = self._post('/admin-portal/edit-waypoint/', waypoint_id=wp.waypoint_id,
+                       linked_shelf_id=far.shelf_id)
+        self.assertFalse(r['success'])
+        wp.refresh_from_db()
+        self.assertIsNone(wp.linked_shelf)
+
+    # Stairways
+
+    def test_a_stairway_can_be_reshaped_into_a_switchback(self):
+        st = Stairway.objects.create(
+            floor_plan=self.plan, kind='Stairs', direction='up', bearing=0,
+            geometry=[[0, 0], [60, 0], [60, 200], [0, 200]], map_x=30, map_y=100)
+        r = self._post('/admin-portal/edit-stairway/', stairway_id=st.stairway_id,
+                       shape='half', bearing=0)
+        self.assertTrue(r['success'], r)
+        st.refresh_from_db()
+        # A switchback is more than one run; a straight flight is one or none.
+        self.assertGreater(len(st.flights or []), 1)
+
+    def test_a_stairway_can_be_closed_off_without_being_deleted(self):
+        st = Stairway.objects.create(
+            floor_plan=self.plan, kind='Elevator', direction='both', bearing=0,
+            geometry=[[0, 0], [40, 0], [40, 40], [0, 40]], map_x=20, map_y=20)
+        r = self._post('/admin-portal/edit-stairway/', stairway_id=st.stairway_id,
+                       is_active='0')
+        self.assertTrue(r['success'], r)
+        st.refresh_from_db()
+        self.assertFalse(st.is_active)
+        self.assertTrue(Stairway.objects.filter(stairway_id=st.stairway_id).exists())
+
+
+class CanvasResizeTests(TestCase):
+    """The canvas a plan is drawn on, changed after it has been drawn on."""
+
+    def setUp(self):
+        self.user = _admin()
+        self.client = _signed_in(self.user)
+        self.plan = FloorPlan.objects.create(name='Ground', floor_number=1,
+                                             is_active=True, canvas_width=1000,
+                                             canvas_height=800, pixels_per_meter=50)
+        self.room = Room.objects.create(
+            floor_plan=self.plan, name='Reading Room', map_x=500, map_y=400,
+            geometry=[[400, 300], [600, 300], [600, 500], [400, 500]])
+        self.shelf = Shelf.objects.create(room=self.room, name='Shelf A',
+                                          map_x=500, map_y=400, width=40, depth=12)
+        self.beacon = BLEBeacon.objects.create(
+            floor_plan=self.plan, beacon_uuid=str(uuid4()), map_x=900, map_y=700)
+
+    def _resize(self, width, height, scale=False):
+        return self.client.post('/admin-portal/set-floorplan-canvas/', {
+            'floorplan_id': self.plan.floor_plan_id,
+            'canvas_width': width,
+            'canvas_height': height,
+            'scale_contents': '1' if scale else '0',
+        }).json()
+
+    def test_growing_the_canvas_leaves_everything_where_it_was(self):
+        r = self._resize(1600, 1200)
+        self.assertTrue(r['success'], r)
+        self.plan.refresh_from_db()
+        self.room.refresh_from_db()
+        self.assertEqual(self.plan.canvas_width, 1600)
+        self.assertEqual(self.room.geometry[0], [400, 300])
+        self.assertEqual(self.plan.pixels_per_meter, 50)
+
+    def test_shrinking_is_refused_when_it_would_strand_something(self):
+        r = self._resize(500, 500)
+        self.assertFalse(r['success'])
+        # The refusal has to say what, or there is nothing to act on.
+        self.assertIn('Reading Room', r['error'])
+        self.plan.refresh_from_db()
+        self.assertEqual(self.plan.canvas_width, 1000)
+
+    def test_shrinking_into_empty_space_is_allowed(self):
+        BLEBeacon.objects.all().delete()
+        r = self._resize(700, 600)
+        self.assertTrue(r['success'], r)
+        self.plan.refresh_from_db()
+        self.assertEqual(self.plan.canvas_width, 700)
+
+    def test_resizing_everything_to_fit_keeps_its_proportions(self):
+        r = self._resize(500, 400, scale=True)
+        self.assertTrue(r['success'], r)
+        self.room.refresh_from_db()
+        self.shelf.refresh_from_db()
+        self.beacon.refresh_from_db()
+        self.assertEqual(self.room.geometry[0], [200, 150])
+        self.assertEqual(self.room.map_x, 250)
+        # Footprints are distances too, or a shelf ends up inside the wall.
+        self.assertEqual(self.shelf.width, 20)
+        self.assertEqual(self.shelf.depth, 6)
+        self.assertEqual((self.beacon.map_x, self.beacon.map_y), (450, 350))
+
+    def test_the_building_is_still_the_same_size_in_metres_afterwards(self):
+        """Halving the drawing without halving the scale moves every beacon fix."""
+        self._resize(500, 400, scale=True)
+        self.plan.refresh_from_db()
+        self.assertEqual(self.plan.pixels_per_meter, 25)
+        self.room.refresh_from_db()
+        width_in_metres = (self.room.geometry[1][0] - self.room.geometry[0][0]) / 25
+        self.assertEqual(width_in_metres, 4)     # 200 units at 50/m before, 100 at 25/m now
+
+    def test_scaling_uses_one_factor_so_nothing_is_stretched(self):
+        """A square room stays square even when the canvas changes shape."""
+        self._resize(2000, 900, scale=True)      # x doubles, y is 1.125
+        self.room.refresh_from_db()
+        width = self.room.geometry[1][0] - self.room.geometry[0][0]
+        height = self.room.geometry[2][1] - self.room.geometry[1][1]
+        self.assertEqual(width, height)
+
+    def test_an_absurd_canvas_is_refused(self):
+        for width, height in ((10, 800), (1000, 99999)):
+            self.assertFalse(self._resize(width, height)['success'])
+        self.plan.refresh_from_db()
+        self.assertEqual(self.plan.canvas_width, 1000)
+
+    def test_a_stranger_cannot_resize_a_canvas(self):
+        r = Client().post('/admin-portal/set-floorplan-canvas/', {
+            'floorplan_id': self.plan.floor_plan_id,
+            'canvas_width': 4000, 'canvas_height': 4000})
+        self.assertEqual(r.status_code, 302)
+        self.plan.refresh_from_db()
+        self.assertEqual(self.plan.canvas_width, 1000)
+
+
+class ScannedCodeResolutionTests(TestCase):
+    """One scanner at the desk, so one lookup has to say what was scanned."""
+
+    def setUp(self):
+        self.user = _admin(modules='transactions')
+        self.client = _signed_in(self.user)
+        self.patron = Patron.objects.create(
+            fullname='Juan Dela Cruz', first_name='Juan', last_name='Dela Cruz',
+            email='juan-scan@example.invalid', password_hash=hash_password('x'),
+            account_status='Active', qr_code=str(uuid4()))
+        self.book = Book.objects.create(title='Noli Me Tangere', author='Rizal',
+                                        status='Available', qr_code=str(uuid4()))
+
+    def _resolve(self, code):
+        return self.client.get('/admin-portal/resolve-qr/',
+                               {'qr_code': code}).json()
+
+    def test_a_card_comes_back_as_a_patron(self):
+        r = self._resolve(self.patron.qr_code)
+        self.assertTrue(r['success'], r)
+        self.assertEqual(r['kind'], 'patron')
+        self.assertEqual(r['patron']['fullname'], 'Juan Dela Cruz')
+        self.assertIn('eligible', r['patron'])
+
+    def test_a_book_label_comes_back_as_a_book(self):
+        r = self._resolve(self.book.qr_code)
+        self.assertTrue(r['success'], r)
+        self.assertEqual(r['kind'], 'book')
+        self.assertEqual(r['book']['title'], 'Noli Me Tangere')
+
+    def test_a_code_that_is_neither_says_so(self):
+        r = self._resolve(str(uuid4()))
+        self.assertFalse(r['success'])
+        self.assertEqual(r['kind'], 'unknown')
+        # The error names both expected types.
+        self.assertIn('card', r['error'])
+        self.assertIn('label', r['error'])
+
+    def test_an_empty_scan_is_refused_without_a_query(self):
+        r = self._resolve('   ')
+        self.assertFalse(r['success'])
+        self.assertEqual(r['kind'], 'unknown')
+
+    def test_the_payloads_match_the_single_kind_endpoints(self):
+        """One helper each, so a field cannot be added to one scanner only."""
+        unified = self._resolve(self.book.qr_code)['book']
+        single = self.client.get('/admin-portal/search-book-by-qr/',
+                                 {'qr_code': self.book.qr_code}).json()['book']
+        self.assertEqual(unified, single)
+
+        unified = self._resolve(self.patron.qr_code)['patron']
+        single = self.client.get('/admin-portal/search-patron-by-qr/',
+                                 {'qr_code': self.patron.qr_code}).json()['patron']
+        self.assertEqual(unified, single)
+
+    def test_a_stranger_cannot_look_codes_up(self):
+        """The card payload names a patron and says whether they may borrow."""
+        r = Client().get('/admin-portal/resolve-qr/',
+                         {'qr_code': self.patron.qr_code})
+        self.assertEqual(r.status_code, 302)
+
+
+class PaginationTests(TestCase):
+    """Table footers show a handful of page links, never every page there is."""
+
+    def setUp(self):
+        self.user = _admin(modules='books')
+        self.client = _signed_in(self.user)
+        # 15 per page gives 14 pages.
+        Book.objects.bulk_create([
+            Book(title='Book %03d' % i, author='Author', status='Available')
+            for i in range(200)
+        ])
+
+    def test_the_tag_keeps_the_ends_and_the_neighbours(self):
+        from django.core.paginator import Paginator
+        from library.templatetags.pagination import elided_pages
+
+        page = Paginator(range(1000), 10).get_page(50)
+        pages = elided_pages(page)
+        self.assertEqual(pages[0], 1)
+        self.assertEqual(pages[-1], 100)
+        self.assertIn(Paginator.ELLIPSIS, pages)
+        for near in (48, 49, 50, 51, 52):
+            self.assertIn(near, pages)
+        self.assertLess(len(pages), 12)
+
+    def test_a_middle_page_does_not_list_every_page(self):
+        body = self.client.get('/admin-portal/management/?page=7').content.decode()
+        self.assertIn('aria-current="page">7<', body)
+        self.assertIn('&hellip;', body)
+        # Page 12 is outside the window around 7 and not an end, so it has no link.
+        self.assertNotIn('?page=12"', body)
+        self.assertIn('?page=14', body)
+
+    def test_moving_page_keeps_the_filters(self):
+        body = self.client.get('/admin-portal/management/?page=2&q=Book').content.decode()
+        self.assertIn('href="?page=3&q=Book"', body)
+
+    def test_a_single_page_renders_no_pager(self):
+        Book.objects.filter(title__gt='Book 010').delete()
+        body = self.client.get('/admin-portal/management/').content.decode()
+        self.assertNotIn('class="ayla-pager', body)
+
+
+class PatronCatalogTests(TestCase):
+    """The catalogue a patron browses: titles, real filters, nothing hidden that exists."""
+
+    def setUp(self):
+        self.client = Client()
+        plan = FloorPlan.objects.create(name='Ground', floor_number=1, is_active=True)
+        room = Room.objects.create(floor_plan=plan, name='Reading Room', map_x=0, map_y=0)
+        self.shelf = Shelf.objects.create(room=room, name='Shelf A', map_x=1, map_y=1)
+        self.level = ShelfLevel.objects.create(shelf=self.shelf, level_number=1)
+
+    def _book(self, title, **kw):
+        kw.setdefault('author', 'Author')
+        kw.setdefault('status', 'Available')
+        return Book.objects.create(title=title, **kw)
+
+    def _get(self, **params):
+        return self.client.get('/patron/catalog/', params)
+
+    def _titles(self, response):
+        return [row['title'] for row in response.context['page']]
+
+    def test_an_unshelved_book_is_listed(self):
+        self._book('Waiting For A Shelf')
+        r = self._get()
+        self.assertIn('Waiting For A Shelf', self._titles(r))
+        self.assertContains(r, 'Not yet shelved')
+
+    def test_a_book_on_loan_is_listed_rather_than_hidden(self):
+        self._book('Out Right Now', status='Borrowed', shelf_level=self.level)
+        self.assertIn('Out Right Now', self._titles(self._get()))
+
+    def test_written_off_copies_are_not_listed(self):
+        self._book('Gone For Good', status='Lost')
+        self._book('Given Away', status='Donated')
+        titles = self._titles(self._get())
+        self.assertNotIn('Gone For Good', titles)
+        self.assertNotIn('Given Away', titles)
+
+    def test_copies_of_one_title_are_one_entry(self):
+        for status in ('Available', 'Available', 'Borrowed'):
+            self._book('Noli Me Tangere', author='Rizal', status=status,
+                       shelf_level=self.level)
+        rows = list(self._get().context['page'])
+        self.assertEqual(len(rows), 1)
+        self.assertEqual((rows[0]['copies'], rows[0]['available']), (3, 2))
+
+    def test_the_card_opens_a_copy_that_is_in_and_shelved(self):
+        self._book('Two Copies', status='Borrowed', shelf_level=self.level)
+        unshelved = self._book('Two Copies', status='Available')
+        shelved = self._book('Two Copies', status='Available', shelf_level=self.level)
+        row = list(self._get().context['page'])[0]
+        self.assertEqual(row['book'].book_id, shelved.book_id)
+        self.assertNotEqual(row['book'].book_id, unshelved.book_id)
+
+    def test_filters_narrow_by_subject_availability_and_location(self):
+        self._book('Algebra', genre='Mathematics', shelf_level=self.level)
+        self._book('Poems', genre='Poetry', status='Borrowed')
+        self._book('Loose', genre='Mathematics')
+
+        self.assertEqual(sorted(self._titles(self._get(genre='Mathematics'))),
+                         ['Algebra', 'Loose'])
+        self.assertEqual(self._titles(self._get(availability='on_loan')), ['Poems'])
+        self.assertEqual(sorted(self._titles(self._get(availability='available'))),
+                         ['Algebra', 'Loose'])
+        self.assertEqual(self._titles(self._get(shelf=self.shelf.shelf_id)), ['Algebra'])
+        self.assertEqual(sorted(self._titles(self._get(shelf='none'))), ['Loose', 'Poems'])
+
+    def test_search_still_finds_by_author(self):
+        self._book('Florante at Laura', author='Balagtas')
+        self._book('Something Else', author='Nobody')
+        self.assertEqual(self._titles(self._get(search='balagtas')), ['Florante at Laura'])
+
+    def test_sorting_is_applied_on_the_server(self):
+        self._book('Beta', publication_year=1990)
+        self._book('Alpha', publication_year=2020)
+        self.assertEqual(self._titles(self._get(sort='newest')), ['Alpha', 'Beta'])
+        self.assertEqual(self._titles(self._get(sort='title_desc')), ['Beta', 'Alpha'])
+
+    def test_an_unknown_filter_value_is_ignored_not_an_error(self):
+        self._book('Still Here')
+        r = self._get(shelf='upstairs', availability='maybe', sort='sideways')
+        self.assertEqual(r.status_code, 200)
+        self.assertIn('Still Here', self._titles(r))
+
+    def test_the_list_is_paginated_and_keeps_filters(self):
+        for i in range(45):
+            self._book('Book %02d' % i, genre='Fiction')
+        r = self._get(genre='Fiction', page=2)
+        self.assertEqual(len(self._titles(r)), 20)
+        self.assertContains(r, 'href="?page=3&genre=Fiction"')
+
+    def test_each_active_filter_can_be_removed_on_its_own(self):
+        self._book('Algebra', genre='Mathematics', shelf_level=self.level)
+        r = self._get(genre='Mathematics', availability='available')
+        removes = {f['label']: f['remove'] for f in r.context['active_filters']}
+        self.assertEqual(removes['Mathematics'], '?availability=available')
+        self.assertEqual(removes['Available now'], '?genre=Mathematics')
+
+    def test_an_unshelved_book_offers_the_desk_instead_of_the_map(self):
+        book = self._book('Waiting For A Shelf')
+        r = self.client.get('/patron/book-details/%d/' % book.book_id)
+        self.assertNotContains(r, 'Navigate on Map')
+        self.assertContains(r, 'front desk')
+
+
+class InventoryPaginationTests(TestCase):
+    """Inventory pages three tables on one screen, each under its own parameter."""
+
+    def setUp(self):
+        from django.urls import reverse
+        from library import views
+
+        self.url = reverse(views.inventory_management)
+        self.client = _signed_in(_admin())
+
+    def test_the_stock_table_keeps_its_filters_across_pages(self):
+        from library.models import InventoryRecord
+
+        InventoryRecord.objects.bulk_create(
+            [InventoryRecord(title_hint='Box %02d' % i) for i in range(45)])
+        body = self.client.get(self.url, {'q': 'Box', 'page': 2}).content.decode()
+        self.assertIn('class="ayla-pager', body)
+        # Encoded by the view.
+        self.assertIn('href="?page=3&q=Box"', body)
+
+    def test_the_history_table_pages_under_its_own_parameter_and_tab(self):
+        from library.models import InventoryRecord, StockMovement
+
+        record = InventoryRecord.objects.create(title_hint='Box')
+        StockMovement.objects.bulk_create(
+            [StockMovement(inventory_record=record, action='Received') for _ in range(30)])
+        body = self.client.get(self.url, {'tab': 'history'}).content.decode()
+        self.assertIn('href="?mpage=2&tab=history"', body)
+        self.assertNotIn('href="?page=2&tab=history"', body)
+
+    def test_a_search_with_an_ampersand_survives_the_page_link(self):
+        from library.models import InventoryRecord
+
+        InventoryRecord.objects.bulk_create(
+            [InventoryRecord(title_hint='Pens & Paper %02d' % i) for i in range(25)])
+        body = self.client.get(self.url, {'q': 'Pens & Paper'}).content.decode()
+        self.assertIn('q=Pens+%26+Paper', body)
+
+
+class MapBookSearchTests(TestCase):
+    """The map's Find a book sheet runs the catalogue's own search."""
+
+    def setUp(self):
+        self.client = Client()
+        plan = FloorPlan.objects.create(name='Ground', floor_number=1, is_active=True)
+        room = Room.objects.create(floor_plan=plan, name='Reading Room', map_x=0, map_y=0)
+        self.placed = Shelf.objects.create(room=room, name='Shelf A', map_x=10, map_y=10)
+        self.unplaced = Shelf.objects.create(room=room, name='Shelf Z')
+        self.level = ShelfLevel.objects.create(shelf=self.placed, level_number=1)
+        self.hidden_level = ShelfLevel.objects.create(shelf=self.unplaced, level_number=1)
+
+    def _book(self, title, **kw):
+        kw.setdefault('author', 'Author')
+        kw.setdefault('status', 'Available')
+        return Book.objects.create(title=title, **kw)
+
+    def _search(self, **params):
+        return self.client.get('/patron/catalog/search/', params).json()
+
+    def test_results_come_back_as_titles_with_a_copy_to_open(self):
+        for _ in range(2):
+            self._book('Noli Me Tangere', author='Rizal', shelf_level=self.level)
+        r = self._search(search='noli')
+        self.assertTrue(r['success'])
+        self.assertEqual(r['count'], 1)
+        hit = r['results'][0]
+        self.assertEqual((hit['copies'], hit['available']), (2, 2))
+        self.assertTrue(hit['navigable'])
+        self.assertIn('Shelf A', hit['location'])
+
+    def test_the_filters_mean_what_they_mean_in_the_catalogue(self):
+        self._book('Algebra', genre='Mathematics', shelf_level=self.level)
+        self._book('Poems', genre='Poetry', status='Borrowed', shelf_level=self.level)
+        self._book('Loose', genre='Mathematics')
+
+        def titles(**p):
+            return sorted(x['title'] for x in self._search(**p)['results'])
+
+        self.assertEqual(titles(genre='Mathematics'), ['Algebra', 'Loose'])
+        self.assertEqual(titles(availability='on_loan'), ['Poems'])
+        self.assertEqual(titles(shelf='none'), ['Loose'])
+        self.assertEqual(titles(shelf=self.placed.shelf_id), ['Algebra', 'Poems'])
+
+    def test_an_unshelved_book_is_listed_but_not_offered_a_route(self):
+        self._book('Waiting For A Shelf')
+        hit = self._search()['results'][0]
+        self.assertFalse(hit['shelved'])
+        self.assertFalse(hit['navigable'])
+
+    def test_a_shelf_with_no_place_on_the_plan_is_not_offered_a_route(self):
+        self._book('Somewhere Unmapped', shelf_level=self.hidden_level)
+        hit = self._search()['results'][0]
+        self.assertTrue(hit['shelved'])
+        self.assertFalse(hit['navigable'])
+
+    def test_written_off_copies_are_not_found(self):
+        self._book('Gone', status='Lost')
+        self.assertEqual(self._search(search='Gone')['count'], 0)
+
+    def test_filter_choices_come_only_when_asked_for(self):
+        self._book('Algebra', genre='Mathematics', shelf_level=self.level)
+        self._book('Loose')
+        self.assertNotIn('options', self._search())
+        options = self._search(options=1)['options']
+        self.assertEqual(options['genres'], ['Mathematics'])
+        self.assertEqual([s['name'] for s in options['shelves']], ['Shelf A'])
+        self.assertTrue(options['has_unshelved'])
+
+    def test_results_page_for_show_more(self):
+        for i in range(15):
+            self._book('Book %02d' % i, shelf_level=self.level)
+        first = self._search()
+        self.assertEqual(len(first['results']), 12)
+        self.assertTrue(first['has_next'])
+        second = self._search(page=2)
+        self.assertEqual(len(second['results']), 3)
+        self.assertFalse(second['has_next'])
+
+    def test_the_map_offers_the_search_and_the_guide(self):
+        body = self.client.get('/patron/map/').content.decode()
+        self.assertIn('Find a book', body)
+        self.assertIn('/patron/help/live-position/', body)
+
+
+class LivePositionGuideTests(TestCase):
+    def test_the_guide_is_public_and_carries_the_flag_address(self):
+        r = Client().get('/patron/help/live-position/')
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, 'chrome://flags/#enable-experimental-web-platform-features')
+        self.assertContains(r, 'Experimental Web Platform features')
+
+
+class PortalMapBookSearchTests(TestCase):
+    """The staff and Administrator indoor maps search with the catalogue's filters."""
+
+    def setUp(self):
+        plan = FloorPlan.objects.create(name='Ground', floor_number=1, is_active=True,
+                                        canvas_width=1000, canvas_height=800)
+        room = Room.objects.create(floor_plan=plan, name='Reading Room', map_x=0, map_y=0)
+        self.shelf = Shelf.objects.create(room=room, name='Shelf A', map_x=10, map_y=10)
+        self.level = ShelfLevel.objects.create(shelf=self.shelf, level_number=1)
+
+    def test_a_result_carries_the_shelf_the_portal_maps_highlight(self):
+        Book.objects.create(title='Algebra', author='Author', status='Available',
+                            shelf_level=self.level)
+        hit = Client().get('/patron/catalog/search/', {'search': 'Algebra'}).json()['results'][0]
+        self.assertEqual(hit['shelf_id'], self.shelf.shelf_id)
+
+    def test_an_unshelved_result_has_no_shelf_to_highlight(self):
+        Book.objects.create(title='Loose', author='Author', status='Available')
+        hit = Client().get('/patron/catalog/search/').json()['results'][0]
+        self.assertIsNone(hit['shelf_id'])
+
+    def test_the_staff_map_offers_the_search(self):
+        staff = User.objects.create(
+            fullname='Desk Staff', email='desk-staff@example.invalid',
+            password_hash=hash_password('SmokeTest123'), role='Staff',
+            account_status='Active', modules='indoor_map')
+        r = _signed_in(staff).get('/library-staff/indoor-map/')
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        self.assertIn('id="findPanel"', body)
+        self.assertIn('/patron/catalog/search/', body)
+
+    def test_the_admin_map_offers_the_search(self):
+        r = _signed_in(_admin()).get('/admin-portal/indoor-map/')
+        self.assertEqual(r.status_code, 200)
+        self.assertIn('id="findPanel"', r.content.decode())

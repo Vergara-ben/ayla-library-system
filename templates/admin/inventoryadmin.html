@@ -45,6 +45,48 @@
         .tab-btn.active { background: var(--tint-accent); color: var(--accent); border: 1px solid var(--accent-border); }
         .tab-btn:not(.active) { color: var(--text-muted); border: 1px solid transparent; }
         .tab-btn:not(.active):hover { color: var(--text-primary); background: var(--bg-subtle); }
+
+        /* Shelf count sheet. */
+        .arow {
+            display: flex; align-items: center; gap: 10px;
+            padding: 8px 10px; cursor: pointer; user-select: none;
+            border-bottom: 1px solid var(--border-color);
+            transition: background-color .1s ease;
+        }
+        .arow:last-child { border-bottom: 0; }
+        .arow:hover { background: var(--tint-accent); }
+        .arow.here { background: rgba(16, 185, 129, .12); }
+        /* Covered by "the rest are here". */
+        .arow.bulk { background: rgba(16, 185, 129, .05); }
+        .arow.gone { background: rgba(225, 29, 72, .12); }
+        /* Borrowed copies. */
+        .arow.locked { cursor: default; opacity: .55; }
+        .arow.locked:hover { background: transparent; }
+        .apos {
+            width: 30px; flex: 0 0 auto; text-align: right; font-size: 10px;
+            font-variant-numeric: tabular-nums; color: var(--text-muted);
+        }
+        .atick {
+            width: 20px; height: 20px; flex: 0 0 auto; border-radius: 6px;
+            border: 1px solid var(--border-color); display: flex;
+            align-items: center; justify-content: center; font-size: 10px;
+        }
+        .arow.here .atick { border-color: #10b981; color: #10b981; }
+        .arow.bulk .atick { border-color: rgba(16, 185, 129, .45); color: rgba(16, 185, 129, .55); }
+        .arow.gone .atick { border-color: #e11d48; color: #e11d48; }
+        .atitle {
+            flex: 1 1 auto; min-width: 0; font-size: 12px; color: var(--text-primary);
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .ameta { font-size: 10px; color: var(--text-muted); flex: 0 0 auto; }
+        .anote { font-size: 10px; flex: 0 0 auto; }
+        .agone {
+            width: 22px; height: 22px; flex: 0 0 auto; border-radius: 6px;
+            border: 1px solid var(--border-color); background: transparent;
+            color: var(--text-muted); font-size: 10px; cursor: pointer;
+        }
+        .agone:hover { color: #e11d48; border-color: #e11d48; background: rgba(225,29,72,.1); }
+        @media (max-width: 640px) { .ameta, .anote { display: none; } }
     </style>
     <link rel="stylesheet" href="{% static 'css/admin-enhance.css' %}">
     <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
@@ -122,9 +164,7 @@
                         <a href="?tab=history" class="tab-btn {% if tab == 'history' %}active{% endif %}"><i class="fa-solid fa-clock-rotate-left mr-1"></i> Movement History</a>
                     </div>
                     <div class="flex items-center gap-2">
-                        {# Bulk donation intake sits here rather than on the Donations #}
-                        {# page, which tracks accessioning and creates nothing. Two ways #}
-                        {# in was the confusing part, not the spreadsheet itself. #}
+                        {# Bulk donation intake. #}
                         <a href="{% url 'download_donation_template' %}" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-emerald-500/90 text-[11px] font-semibold px-3 py-2 rounded-lg flex items-center gap-2 transition-colors" title="Spreadsheet layout for a bulk donation">
                             <i class="fa-solid fa-file-excel"></i> Donation Template
                         </a>
@@ -139,87 +179,80 @@
                 </div>
 
                 {% if tab == 'audit' %}
-                <!-- ── Stock audit: what should be on the shelf vs what is on it ── -->
+                {# Reading a shelf, rather than scanning one. #}
                 <div class="p-5 space-y-4">
                     <p class="text-xs text-slate-400 leading-relaxed">
-                        Pick a shelf and scan every copy on it. Books that are borrowed right now are
-                        counted for you. Anything you still cannot find is marked
-                        <strong class="text-slate-300">Missing</strong> &mdash; not lost, because books turn up.
-                        Giving up on one is a separate step, done later on the Missing Stock tab.
+                        Pick a board and read it against the list. Mark only what is not there or
+                        is out of place, then confirm the rest in one go. Borrowed copies are
+                        accounted for already. Anything still unfound is marked
+                        <strong class="text-slate-300">Missing</strong> &mdash; not lost, because books
+                        turn up. Giving up on one is a separate step on the Missing Stock tab.
                     </p>
 
-                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                        <div class="space-y-3">
-                            <div>
-                                <label class="field-label" for="auditShelf">Shelf to audit <span class="text-slate-500 font-normal">&mdash; optional</span></label>
-                                <select id="auditShelf" class="field-input">
-                                    <option value="">Sweep &mdash; just scan, shelves sort themselves</option>
-                                    {% for s in shelves %}
-                                    {# Last counted matters more than the name: it is how staff #}
-                                    {# decide which shelf to walk next. #}
-                                    <option value="{{ s.shelf_id }}">{{ s.name }}{% if s.room %} — {{ s.room.name }}{% endif %} · {% if s.last_audited %}last counted {{ s.last_audited|date:"M j, Y" }}{% else %}never counted{% endif %}</option>
-                                    {% endfor %}
-                                </select>
-                            </div>
-                            <div>
-                                {# This box is also where a handheld scanner lands: it types the #}
-                                {# label and presses Enter, which is what the box already expects. #}
-                                {# It said "type or paste", so nobody knew that. #}
-                                <label class="field-label" for="auditManual">Add a copy label &mdash; scanner or typed</label>
-                                <div class="flex gap-2">
-                                    <input type="text" id="auditManual" class="field-input" placeholder="Scan with a handheld here, or type a label, then Enter">
-                                    <button type="button" onclick="addScannedLabel(document.getElementById('auditManual').value); document.getElementById('auditManual').value='';" class="px-3 rounded-lg border border-slate-700 text-slate-300 text-xs font-semibold hover:bg-slate-800/50">Add</button>
-                                </div>
-                            </div>
-                            <div class="flex gap-2">
-                                <button type="button" id="auditCamBtn" onclick="toggleAuditCamera()" class="flex-1 bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-cyan-400 text-xs font-bold px-3 py-2 rounded-lg">
-                                    <i class="fa-solid fa-camera mr-1"></i> Scan with camera
-                                </button>
-                                <button type="button" onclick="clearScanned()" class="px-3 py-2 rounded-lg border border-slate-700 text-slate-400 text-xs font-semibold hover:bg-slate-800/50">Clear</button>
-                            </div>
-                            <div id="auditCamWrap" class="hidden relative aspect-video w-full max-w-[260px] mx-auto bg-slate-900 rounded-lg overflow-hidden">
-                                <video id="auditVideo" class="w-full h-full object-contain" autoplay playsinline></video>
-                                <canvas id="auditCanvas" class="hidden"></canvas>
-                            </div>
-                            <p id="auditScanStatus" class="text-[11px] text-slate-500"></p>
+                    <div class="flex items-end gap-2 flex-wrap">
+                        <div class="flex-1 min-w-[260px]">
+                            <label class="field-label" for="auditBoard">Board to read</label>
+                            <select id="auditBoard" class="field-input" onchange="loadAuditSheet(this.value)">
+                                <option value="">Choose a board&hellip;</option>
+                                {% for b in audit_boards %}
+                                {# Last read date. #}
+                                <option value="{{ b.id }}">{{ b.shelf }} · {{ b.label }} ({{ b.books }}) — {% if b.last_read %}last read {{ b.last_read|date:"M j, Y" }}{% else %}never read{% endif %}</option>
+                                {% endfor %}
+                            </select>
                         </div>
-
-                        <div class="space-y-3">
-                            {# Every label already identifies its own copy, and a copy #}
-                            {# knows its shelf -- so which shelf you are standing at is #}
-                            {# derivable rather than something to ask for first.        #}
-                            <div class="rounded-lg border border-slate-800 p-3" style="background-color: var(--bg-main);">
-                                <div class="flex items-center justify-between mb-2">
-                                    <span class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Progress by shelf</span>
-                                    <span id="sweepTotal" class="text-xs text-cyan-400 font-bold">0 scanned</span>
-                                </div>
-                                <div id="sweepGroups" class="space-y-2 max-h-48 overflow-y-auto text-xs text-slate-300">
-                                    <p class="text-slate-600">Scan anything and its shelf appears here.</p>
-                                </div>
-                            </div>
-                            <div class="rounded-lg border border-slate-800 p-3" style="background-color: var(--bg-main);">
-                                <div class="flex items-center justify-between mb-2">
-                                    <span class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Scanned copies</span>
-                                    <span id="scannedCount" class="text-xs text-cyan-400 font-bold">0</span>
-                                </div>
-                                <div id="scannedList" class="space-y-1 max-h-40 overflow-y-auto text-xs text-slate-300"></div>
-                            </div>
-                        </div>
+                        <button type="button" id="auditCamBtn" onclick="toggleAuditCamera()" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-cyan-400 text-xs font-bold px-3 py-2.5 rounded-lg">
+                            <i class="fa-solid fa-camera mr-1"></i> Scan a stray
+                        </button>
                     </div>
 
-                    <button type="button" onclick="runAuditCompare()" class="w-full bg-cyan-600/20 text-cyan-400 border border-cyan-600/30 px-4 py-3 rounded-lg text-sm font-semibold hover:bg-cyan-600/30 transition-colors">
-                        <i class="fa-solid fa-clipboard-check mr-1"></i> <span id="auditCtaLabel">Done scanning &mdash; check this shelf</span>
-                    </button>
-                    <p class="text-[11px] text-slate-500 -mt-2">
-                        Shows what is on the shelf, what is borrowed, and what could not be found.
-                        Nothing is saved until you file the count.
-                    </p>
+                    <div id="auditCamWrap" class="hidden space-y-2">
+                        <div class="relative aspect-video w-full max-w-[260px] bg-slate-900 rounded-lg overflow-hidden">
+                            <video id="auditVideo" class="w-full h-full object-contain" autoplay playsinline></video>
+                            <canvas id="auditCanvas" class="hidden"></canvas>
+                        </div>
+                        <div class="flex gap-2 max-w-md">
+                            <input type="text" id="auditManual" class="field-input" placeholder="Or type a label from a sticker, then Enter">
+                            <button type="button" onclick="checkStray(document.getElementById('auditManual').value); document.getElementById('auditManual').value='';" class="px-3 rounded-lg border border-slate-700 text-slate-300 text-xs font-semibold hover:bg-slate-800/50">Check</button>
+                        </div>
+                        <p class="text-[11px] text-slate-500">
+                            Scanning a book on this board ticks it. Scanning one that belongs
+                            elsewhere says where it should go &mdash; which is the thing tapping
+                            down a list can never tell you.
+                        </p>
+                    </div>
+
+                    <p id="auditScanStatus" class="text-[11px] text-slate-500"></p>
+
+                    <div id="auditSheetWrap" class="hidden space-y-3">
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <span id="auditWhere" class="text-xs font-bold text-slate-200"></span>
+                            <span id="auditTally" class="text-[11px] text-slate-500"></span>
+                            <div class="ml-auto flex items-center gap-1.5 flex-wrap">
+                                <button type="button" onclick="markRest()" class="text-[10px] font-semibold px-2.5 py-1.5 rounded-md border border-emerald-800/60 text-emerald-400 hover:bg-emerald-950/40">The rest are here</button>
+                                <button type="button" onclick="clearMarks()" class="text-[10px] font-semibold px-2.5 py-1.5 rounded-md border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/50">Start over</button>
+                            </div>
+                        </div>
+
+                        <div id="auditSheet" class="rounded-lg border border-slate-800 overflow-y-auto" style="background-color: var(--bg-main); max-height: 52vh;"></div>
+
+                        <p class="text-[11px] text-slate-500 leading-relaxed">
+                            Tap a row to mark it <strong class="text-emerald-400">here</strong>. Tap the
+                            cross to mark it <strong class="text-rose-400">not found</strong>. Rows you
+                            never touch are covered by &ldquo;the rest are here&rdquo;, and the count
+                            records how many you confirmed one by one against how many were swept, so
+                            the shortcut shows in the history rather than hiding in it.
+                        </p>
+
+                        <button type="button" id="auditFileBtn" onclick="fileShelfRead()" disabled class="w-full bg-cyan-600/20 text-cyan-400 border border-cyan-600/30 disabled:opacity-40 disabled:cursor-not-allowed px-4 py-3 rounded-lg text-sm font-semibold hover:bg-cyan-600/30 transition-colors">
+                            <i class="fa-solid fa-clipboard-check mr-1"></i> <span id="auditFileLabel">File this count</span>
+                        </button>
+                    </div>
 
                     <div id="auditReport" class="hidden rounded-lg border border-slate-800 p-4 space-y-3" style="background-color: var(--bg-main);"></div>
                 </div>
 
                 {% elif tab == 'missing' %}
-                <!-- ── Missing stock: absent, but not yet written off ─────────── -->
+                <!-- Missing stock -->
                 <div class="p-5 space-y-4">
                     <p class="text-xs text-slate-400 leading-relaxed">
                         Copies a stock-take could not find and no loan explains. They are still the
@@ -277,7 +310,7 @@
                 </div>
 
                 {% elif tab == 'audits' %}
-                <!-- ── Audit history: when each shelf was counted, and what it showed ── -->
+                <!-- Audit history -->
                 <div class="p-5 space-y-4">
                     <p class="text-xs text-slate-400 leading-relaxed">
                         Every shelf count that has been filed &mdash; when the shelf was last checked,
@@ -320,16 +353,15 @@
                         </table>
                     </div>
                     {% if audits.has_other_pages %}
-                    <div class="flex items-center justify-center gap-2 text-xs text-slate-400">
-                        {% if audits.has_previous %}<a href="?tab=audits&apage={{ audits.previous_page_number }}" class="px-3 py-1.5 rounded border border-slate-800 hover:bg-slate-800/20">&larr; Prev</a>{% endif %}
-                        <span>Page {{ audits.number }} of {{ audits.paginator.num_pages }}</span>
-                        {% if audits.has_next %}<a href="?tab=audits&apage={{ audits.next_page_number }}" class="px-3 py-1.5 rounded border border-slate-800 hover:bg-slate-800/20">Next &rarr;</a>{% endif %}
+                    <div class="flex items-center justify-between gap-2 text-xs text-slate-500">
+                        <span class="font-medium">Page <span class="text-slate-400">{{ audits.number }}</span> of <span class="text-slate-400">{{ audits.paginator.num_pages }}</span></span>
+                        {% include 'admin/_pagination.html' with page=audits accent='cyan' param='apage' qs='tab=audits' %}
                     </div>
                     {% endif %}
                 </div>
 
                 {% elif tab == 'history' %}
-                <!-- ── Movement history: actor, reason, source for every change ── -->
+                <!-- Movement history -->
                 <div class="overflow-x-auto">
                     <table class="w-full text-left border-collapse">
                         <thead>
@@ -376,17 +408,14 @@
                     </table>
                 </div>
                 {% if movements.has_other_pages %}
-                <div class="px-6 py-4 flex items-center justify-between text-xs text-slate-400 border-t border-slate-800/60">
-                    <span>Page {{ movements.number }} of {{ movements.paginator.num_pages }}</span>
-                    <div class="flex gap-2">
-                        {% if movements.has_previous %}<a href="?tab=history&mpage={{ movements.previous_page_number }}" class="px-3 py-1.5 rounded border border-slate-800 hover:bg-slate-800/20">&larr; Prev</a>{% endif %}
-                        {% if movements.has_next %}<a href="?tab=history&mpage={{ movements.next_page_number }}" class="px-3 py-1.5 rounded border border-slate-800 hover:bg-slate-800/20">Next &rarr;</a>{% endif %}
-                    </div>
+                <div class="px-6 py-4 flex items-center justify-between text-xs text-slate-500 border-t border-slate-800/60">
+                    <span class="font-medium">Page <span class="text-slate-400">{{ movements.number }}</span> of <span class="text-slate-400">{{ movements.paginator.num_pages }}</span></span>
+                    {% include 'admin/_pagination.html' with page=movements accent='cyan' param='mpage' qs='tab=history' %}
                 </div>
                 {% endif %}
 
                 {% else %}
-                <!-- ── Stock list ── -->
+                <!-- Stock list -->
                 <form method="get" class="px-5 py-3.5 bg-slate-900/20 border-b border-slate-800/60 flex flex-col lg:flex-row lg:items-center gap-3">
                     <div class="relative flex-1">
                         <i class="fa-solid fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-xs"></i>
@@ -476,12 +505,10 @@
                     </table>
                 </div>
                 {% if records.has_other_pages %}
-                <div class="px-6 py-4 flex items-center justify-between text-xs text-slate-400 border-t border-slate-800/60">
-                    <span>Page {{ records.number }} of {{ records.paginator.num_pages }} — {{ paginator.count }} copies</span>
-                    <div class="flex gap-2">
-                        {% if records.has_previous %}<a href="?page={{ records.previous_page_number }}&q={{ q }}&condition={{ condition_filter }}&source={{ source_filter }}" class="px-3 py-1.5 rounded border border-slate-800 hover:bg-slate-800/20">&larr; Prev</a>{% endif %}
-                        {% if records.has_next %}<a href="?page={{ records.next_page_number }}&q={{ q }}&condition={{ condition_filter }}&source={{ source_filter }}" class="px-3 py-1.5 rounded border border-slate-800 hover:bg-slate-800/20">Next &rarr;</a>{% endif %}
-                    </div>
+                <div class="px-6 py-4 flex items-center justify-between text-xs text-slate-500 border-t border-slate-800/60">
+                    <span class="font-medium">Showing <span class="text-slate-400">{{ records|length }}</span> of <span class="text-slate-400">{{ paginator.count }}</span> copies</span>
+                    {# Filters are encoded by the view. #}
+                    {% include 'admin/_pagination.html' with page=records accent='cyan' qs=stock_qs %}
                 </div>
                 {% endif %}
                 {% endif %}
@@ -788,10 +815,7 @@
             (donation ? ship : don).classList.add(...idle);
         }
 
-        // ── Building up a delivery ───────────────────────────────────────
-        // A box holds several titles, so nothing is written until the whole
-        // list is assembled and submitted once. Everything lives in this array
-        // until then; the hidden field is packed on submit.
+        // Delivery items, submitted together.
         let rcvItems = [];
 
         function onPickCatalogued() {
@@ -877,6 +901,8 @@
             totals.textContent = rcvItems.length + ' title(s) · ' + copies + ' copy(ies)';
         }
 
+        // Named for its first caller; it is the page's only escaper.
+        function esc(s) { return escapeIntake(s); }
         function escapeIntake(s) {
             return String(s == null ? '' : s).replace(/[&<>"]/g, function (ch) {
                 return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch];
@@ -939,15 +965,12 @@
             return m ? decodeURIComponent(m.pop()) : '';
         }
 
-        // ── Missing stock write-off ────────────────────────────────────
+        // Missing stock write-off
         function toggleAllMissing(box) {
             document.querySelectorAll('.missing-writeoff').forEach(function (cb) { cb.checked = box.checked; });
         }
 
-        // The most destructive action in the system, so it gets the modal that
-        // can actually name what is about to happen. It used to return a
-        // boolean to block the submit; a modal cannot answer in time for that,
-        // so the submit is stopped, asked, and re-fired on yes.
+        // Confirm before writing off.
         async function confirmWriteOff(form) {
             if (form.dataset.aylaConfirmed === '1') return true;
             const n = form.querySelectorAll('.missing-writeoff:checked').length;
@@ -966,177 +989,128 @@
             return false;
         }
 
-        // ── Stock audit ────────────────────────────────────────────────
-        let scannedLabels = [];
+        // Shelf count.
+        let sheet = { level: null, books: [], marks: {}, where: '' };
         let auditStream = null, auditInterval = null, lastAuditCode = '';
 
-        function renderScanned() {
-            const list = document.getElementById('scannedList');
-            document.getElementById('scannedCount').textContent = scannedLabels.length;
-            list.innerHTML = scannedLabels.length
-                ? scannedLabels.map(function (l, i) {
-                    return '<div class="flex items-center justify-between gap-2 px-2 py-1 rounded border border-slate-800">'
-                        + '<span class="truncate">' + l + '</span>'
-                        + '<button type="button" onclick="removeScanned(' + i + ')" class="text-slate-500 hover:text-rose-400" aria-label="Close"><i class="fa-solid fa-xmark"></i></button></div>';
-                  }).join('')
-                : '<p class="text-slate-600">Nothing scanned yet.</p>';
-            persistScanned();
-        }
-
-        function addScannedLabel(label) {
-            label = (label || '').trim();
-            if (!label) return;
-            if (scannedLabels.indexOf(label) === -1) scannedLabels.push(label);
-            refreshSweep();
-            renderScanned();
-        }
-        function removeScanned(i) { scannedLabels.splice(i, 1); renderScanned(); refreshSweep(); }
-
-        // ── Which shelf am I on? ──────────────────────────────────────────
-        // Asked of the server rather than of the librarian. Debounced because
-        // a handheld scanner fires as fast as someone can wave it, and the
-        // answer only has to be right when they pause to look at it.
-        let sweepTimer = null;
-        let sweepGroups = [];
-
-        function refreshSweep() {
-            clearTimeout(sweepTimer);
-            sweepTimer = setTimeout(runSweep, 400);
-        }
-
-        async function runSweep() {
-            const box = document.getElementById('sweepGroups');
-            const total = document.getElementById('sweepTotal');
-            if (!box) return;
-            if (!scannedLabels.length) {
-                sweepGroups = [];
-                box.innerHTML = '<p class="text-slate-600">Scan anything and its shelf appears here.</p>';
-                total.textContent = '0 scanned';
-                syncAuditCta();
+        async function loadAuditSheet(levelId) {
+            const wrap = document.getElementById('auditSheetWrap');
+            document.getElementById('auditReport').classList.add('hidden');
+            if (!levelId) {
+                wrap.classList.add('hidden');
+                sheet = { level: null, books: [], marks: {}, where: '' };
                 return;
             }
+            const r = await fetch("{% url 'stock_audit_sheet' %}?level=" + encodeURIComponent(levelId),
+                                  { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+            const d = await r.json();
+            if (!d.success) { alert(d.error || 'That board could not be opened.'); return; }
+            sheet.level = d.level;
+            sheet.books = d.books;
+            sheet.marks = {};
+            sheet.where = d.shelf + ' · ' + d.label;
+            document.getElementById('auditWhere').textContent = sheet.where;
+            wrap.classList.remove('hidden');
+            renderSheet();
+        }
 
-            const body = new URLSearchParams();
-            scannedLabels.forEach(function (l) { body.append('scanned', l); });
-            let d;
-            try {
-                const res = await fetch("{% url 'stock_audit_progress' %}", {
-                    method: 'POST',
-                    headers: {
-                        'X-CSRFToken': '{{ csrf_token }}',
-                        'X-Requested-With': 'XMLHttpRequest',
-                        'Content-Type': 'application/x-www-form-urlencoded',
-                    },
-                    body: body,
-                });
-                d = await res.json();
-            } catch (e) { return; }               // offline: the cache still holds the scans
-            if (!d.success) {
-                box.innerHTML = '<p class="text-amber-400">' + escapeIntake(d.error || 'Could not group the scans.') + '</p>';
-                return;
+        function statusNote(b) {
+            if (b.status === 'Missing') {
+                return '<span class="text-rose-400">missing since '
+                     + (b.missing_since || 'an earlier count')
+                     + (b.audit_misses > 1 ? ' · ' + b.audit_misses + ' counts' : '') + '</span>';
             }
+            if (!b.expected_present) {
+                return '<span class="text-blue-400">' + esc(b.status)
+                     + ' — not expected on the shelf</span>';
+            }
+            return b.last_seen ? '<span class="text-slate-600">last seen ' + esc(b.last_seen) + '</span>'
+                               : '<span class="text-slate-600">never confirmed</span>';
+        }
 
-            sweepGroups = d.groups || [];
-            total.textContent = d.total_scanned + ' scanned';
-
-            let html = sweepGroups.map(function (g) {
-                const pct = g.percent == null ? 0 : Math.min(100, g.percent);
-                const tone = g.complete ? 'emerald' : (pct >= 60 ? 'cyan' : 'slate');
-                return '<div class="rounded-lg border border-slate-800 px-2.5 py-2">'
-                     + '<div class="flex items-center justify-between gap-2">'
-                     + '<span class="font-semibold text-slate-200 truncate">' + escapeIntake(g.shelf_name) + '</span>'
-                     + '<span class="text-[11px] text-' + tone + '-400 font-bold whitespace-nowrap">'
-                     + g.found_count + ' of ' + g.expected_count
-                     + (g.complete ? ' \u2713' : '') + '</span></div>'
-                     + '<div class="mt-1 h-1.5 rounded-full bg-slate-800 overflow-hidden">'
-                     + '<div class="h-full bg-' + tone + '-500/70" style="width:' + pct + '%"></div></div>'
-                     + '<button type="button" class="mt-1.5 text-[10px] font-semibold text-cyan-400 hover:text-cyan-300" '
-                     + 'onclick="reviewShelf(' + g.shelf_id + ')">Check this shelf &rarr;</button>'
+        function renderSheet() {
+            const host = document.getElementById('auditSheet');
+            host.innerHTML = sheet.books.map(function (b, i) {
+                const mark = sheet.marks[b.book_id] || '';
+                // Borrowed copies cannot be marked.
+                const locked = !b.expected_present;
+                return '<div class="arow ' + (locked ? 'locked' : mark) + '"'
+                     + (locked ? '' : ' onclick="markHere(' + b.book_id + ')"') + '>'
+                     + '<span class="apos">' + (b.slot || (i + 1)) + '</span>'
+                     + '<span class="atick">'
+                        + (mark === 'here' || mark === 'bulk' ? '<i class="fa-solid fa-check"></i>'
+                           : mark === 'gone' ? '<i class="fa-solid fa-xmark"></i>' : '') + '</span>'
+                     + '<span class="atitle">' + esc(b.title) + '</span>'
+                     + '<span class="ameta">' + esc(b.call_number || b.author || '') + '</span>'
+                     + '<span class="anote">' + statusNote(b) + '</span>'
+                     + (locked ? ''
+                        : '<button type="button" class="agone" title="Not found"'
+                          + ' onclick="event.stopPropagation(); markGone(' + b.book_id + ')">'
+                          + '<i class="fa-solid fa-xmark"></i></button>')
                      + '</div>';
             }).join('');
-
-            if (d.unshelved && d.unshelved.length) {
-                html += '<p class="text-[10px] text-amber-400 pt-1">' + d.unshelved.length
-                      + ' scanned copy(ies) have no shelf assigned yet.</p>';
-            }
-            if (d.unknown && d.unknown.length) {
-                html += '<p class="text-[10px] text-rose-400">' + d.unknown.length
-                      + ' label(s) matched no copy in the catalogue.</p>';
-            }
-            box.innerHTML = html || '<p class="text-slate-600">Nothing recognised yet.</p>';
-            syncAuditCta();
+            paintTally();
         }
 
-        // Jump straight from a progress row into the full discrepancy report.
-        window.reviewShelf = function (shelfId) {
-            const sel = document.getElementById('auditShelf');
-            if (sel) sel.value = String(shelfId);
-            syncAuditCta();
-            runAuditCompare();
-        };
+        function paintTally() {
+            let here = 0, gone = 0, untouched = 0, elsewhere = 0;
+            sheet.books.forEach(function (b) {
+                if (!b.expected_present) { elsewhere++; return; }
+                const m = sheet.marks[b.book_id];
+                if (m === 'here' || m === 'bulk') here++;
+                else if (m === 'gone') gone++;
+                else untouched++;
+            });
+            document.getElementById('auditTally').innerHTML =
+                '<span class="text-emerald-400 font-semibold">' + here + ' here</span> · '
+                + '<span class="text-rose-400 font-semibold">' + gone + ' not found</span> · '
+                + untouched + ' untouched'
+                + (elsewhere ? ' · ' + elsewhere + ' out on loan' : '');
+            // Filing needs a verdict on something.
+            document.getElementById('auditFileBtn').disabled = !(here || gone);
+            document.getElementById('auditFileLabel').textContent = untouched
+                ? 'File this count — the ' + untouched + ' untouched count as here'
+                : 'File this count';
+        }
 
+        function markHere(id) {
+            // Tapping a swept row confirms it.
+            sheet.marks[id] = sheet.marks[id] === 'here' ? '' : 'here';
+            renderSheet();
+        }
+        function markGone(id) {
+            sheet.marks[id] = sheet.marks[id] === 'gone' ? '' : 'gone';
+            renderSheet();
+        }
+        // A sweep is its own mark, not the same one a tap writes.
+        function markRest() {
+            sheet.books.forEach(function (b) {
+                if (b.expected_present && !sheet.marks[b.book_id]) sheet.marks[b.book_id] = 'bulk';
+            });
+            renderSheet();
+        }
+        function clearMarks() { sheet.marks = {}; renderSheet(); }
 
-        function syncAuditCta() {
-            const label = document.getElementById('auditCtaLabel');
-            const sel = document.getElementById('auditShelf');
+        // Scan a label to find misplaced books.
+        async function checkStray(code) {
+            const label = (code || '').trim();
+            const status = document.getElementById('auditScanStatus');
             if (!label) return;
-            if (sel && sel.value) {
-                label.innerHTML = 'Done scanning &mdash; check this shelf';
-            } else if (sweepGroups.length === 1) {
-                label.innerHTML = 'Done scanning &mdash; check ' + escapeIntake(sweepGroups[0].shelf_name);
-            } else if (sweepGroups.length > 1) {
-                label.innerHTML = 'Pick a shelf above to check ('
-                                + sweepGroups.length + ' touched)';
-            } else {
-                label.innerHTML = 'Done scanning &mdash; check this shelf';
+            const hit = sheet.books.find(function (b) { return String(b.qr_code) === label; });
+            if (hit) {
+                sheet.marks[hit.book_id] = 'here';
+                renderSheet();
+                status.innerHTML = '<span class="text-emerald-400">Ticked ' + esc(hit.title) + '.</span>';
+                return;
             }
+            const r = await fetch("{% url 'search_book_by_qr' %}?qr_code=" + encodeURIComponent(label),
+                                  { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+            const d = await r.json();
+            status.innerHTML = d.success
+                ? '<span class="text-amber-400">' + esc(d.book.title) + ' belongs on '
+                  + esc(d.book.shelf_level) + ', not this board.</span>'
+                : '<span class="text-rose-400">No book carries that label.</span>';
         }
-        // Walking a shelf of 500 books is not one sitting, so the scan list is
-        // kept in the browser rather than lost with the tab.
-        const AUDIT_CACHE = 'ayla.audit.scanned';
-
-        function persistScanned() {
-            try { localStorage.setItem(AUDIT_CACHE, JSON.stringify(scannedLabels)); } catch (e) {}
-        }
-
-        function restoreScanned() {
-            try {
-                const saved = JSON.parse(localStorage.getItem(AUDIT_CACHE) || '[]');
-                if (Array.isArray(saved) && saved.length) { scannedLabels = saved; renderScanned(); }
-            } catch (e) {
-                // Private mode and cleared site data are expected; anything
-                // else is a bug that should not be invisible a second time.
-                console.warn('Could not restore the previous count:', e);
-            }
-        }
-
-        // ── Resume an interrupted count ───────────────────────────────────
-        // Runs here, at the end, rather than up beside renderScanned. It used
-        // to be called before `const AUDIT_CACHE` was declared, so it hit the
-        // temporal dead zone, threw, and the empty catch below swallowed it --
-        // meaning the cache that exists to survive a dropped connection never
-        // restored anything, and the first render then overwrote it with [].
-        if (document.getElementById('scannedList')) {
-            restoreScanned();
-            if (scannedLabels.length) refreshSweep();
-        }
-
-        function clearScanned() {
-            scannedLabels = [];
-            lastAuditCode = '';
-            try { localStorage.removeItem(AUDIT_CACHE); } catch (e) {}
-            renderScanned();
-        }
-
-        document.addEventListener('DOMContentLoaded', function () {
-            const manual = document.getElementById('auditManual');
-            if (manual) {
-                manual.addEventListener('keydown', function (e) {
-                    if (e.key === 'Enter') { e.preventDefault(); addScannedLabel(this.value); this.value = ''; }
-                });
-                renderScanned();
-            }
-        });
 
         async function toggleAuditCamera() {
             const wrap = document.getElementById('auditCamWrap');
@@ -1154,7 +1128,7 @@
                 const video = document.getElementById('auditVideo');
                 video.srcObject = auditStream;
                 video.onloadedmetadata = function () {
-                    status.textContent = 'Point the camera at each copy label — scans are added automatically.';
+                    status.textContent = 'Point the camera at a label.';
                     const canvas = document.getElementById('auditCanvas');
                     const ctx = canvas.getContext('2d');
                     auditInterval = setInterval(function () {
@@ -1165,14 +1139,12 @@
                         const code = jsQR(img.data, img.width, img.height);
                         if (code && code.data && code.data.trim() !== lastAuditCode) {
                             lastAuditCode = code.data.trim();
-                            addScannedLabel(lastAuditCode);
-                            status.textContent = 'Added ' + lastAuditCode;
+                            checkStray(lastAuditCode);
                         }
                     }, 150);
                 };
             } catch (err) {
-                status.textContent = 'Camera unavailable — type the labels instead.';
-                wrap.classList.add('hidden');
+                status.textContent = 'Camera unavailable — type the label instead.';
             }
         }
         function stopAuditCamera() {
@@ -1182,138 +1154,59 @@
             if (v) v.srcObject = null;
         }
 
-        async function runAuditCompare() {
-            const shelfSel = document.getElementById('auditShelf');
+        async function fileShelfRead() {
+            const body = new URLSearchParams();
+            body.append('level', sheet.level);
+            let untouched = 0;
+            sheet.books.forEach(function (b) {
+                if (!b.expected_present) return;
+                const m = sheet.marks[b.book_id];
+                if (m === 'here') body.append('found_ids', b.book_id);
+                else if (m === 'gone') body.append('missing_ids', b.book_id);
+                // Swept and untouched rows are counted together.
+                else { body.append('bulk_ids', b.book_id); untouched++; }
+            });
+
+            const gone = sheet.books.filter(function (b) {
+                return sheet.marks[b.book_id] === 'gone'; }).length;
+            const ok = await AylaDialog.confirm(
+                'File this count for ' + sheet.where + '?',
+                { title: 'File the count',
+                  detail: gone
+                    ? gone + ' copy(ies) will be marked Missing. They stay in the catalogue and '
+                      + 'are not written off — a book absent from one count is usually mislaid.'
+                    : 'Nothing will be marked missing.',
+                  confirmLabel: 'File it', danger: false });
+            if (!ok) return;
+
+            const btn = document.getElementById('auditFileBtn');
+            btn.disabled = true;
+            const r = await fetch("{% url 'stock_audit_file' %}", {
+                method: 'POST', body: body,
+                headers: { 'X-CSRFToken': '{{ csrf_token }}',
+                           'Content-Type': 'application/x-www-form-urlencoded',
+                           'X-Requested-With': 'XMLHttpRequest' },
+            });
+            const d = await r.json();
+            if (!d.success) { alert(d.error || 'The count could not be filed.'); btn.disabled = false; return; }
+
             const report = document.getElementById('auditReport');
-            const shelfId = shelfSel.value;
-            if (!shelfId) { alert('Pick a shelf to audit first.'); return; }
-
-            const fd = new FormData();
-            fd.append('shelf_id', shelfId);
-            scannedLabels.forEach(function (l) { fd.append('scanned', l); });
-
-            const res = await fetch("{% url 'stock_audit_compare' %}", {
-                method: 'POST', body: fd,
-                headers: { 'X-CSRFToken': getCookie('csrftoken'), 'X-Requested-With': 'XMLHttpRequest' },
-            });
-            const data = await res.json();
-            if (!data.success) { alert(data.error || 'Comparison failed'); return; }
-
-            const shelfName = shelfSel.options[shelfSel.selectedIndex].text;
-            lastAuditData = data;
-            let html = '<div class="grid grid-cols-2 sm:grid-cols-5 gap-3 text-center">'
-                + '<div><p class="text-[10px] uppercase text-slate-500 font-bold">Should be here</p><p class="text-2xl font-bold text-slate-200">' + data.expected_count + '</p></div>'
-                + '<div><p class="text-[10px] uppercase text-slate-500 font-bold">You scanned</p><p class="text-2xl font-bold text-cyan-400">' + data.scanned_count + '</p></div>'
-                + '<div><p class="text-[10px] uppercase text-slate-500 font-bold">Found</p><p class="text-2xl font-bold text-emerald-400">' + data.found_count + '</p></div>'
-                + '<div><p class="text-[10px] uppercase text-slate-500 font-bold">Borrowed</p><p class="text-2xl font-bold text-blue-400">' + data.on_loan_count + '</p></div>'
-                + '<div><p class="text-[10px] uppercase text-slate-500 font-bold">Not found</p><p class="text-2xl font-bold ' + (data.missing.length ? 'text-amber-400' : 'text-slate-500') + '">' + data.missing.length + '</p></div>'
-                + '</div>';
-
-            if (data.on_loan_count) {
-                html += '<p class="text-[11px] text-blue-300/80">'
-                     + data.on_loan_count + ' copy(ies) are borrowed right now, so they should not be on the shelf.</p>';
-            }
-            if (data.recovered.length) {
-                html += '<div><p class="text-[10px] uppercase font-bold text-emerald-400 mb-1">Turned up again (' + data.recovered.length + ')</p>'
-                    + '<div class="space-y-1 max-h-32 overflow-y-auto text-xs text-slate-300">'
-                    + data.recovered.map(function (r) {
-                        return '<div class="px-2 py-1 rounded border border-emerald-900/60 truncate">' + r.title
-                             + (r.missing_since ? ' <span class="text-slate-600">· missing since ' + r.missing_since + '</span>' : '')
-                             + '</div>';
-                      }).join('')
-                    + '</div></div>';
-            }
-
-            if (data.reconciled) {
-                html += '<p class="text-xs text-emerald-400 font-semibold">Every copy is accounted for — nothing is missing.</p>';
-            } else {
-                if (data.missing.length) {
-                    html += '<div><p class="text-[10px] uppercase font-bold text-amber-400 mb-1">Could not be found (' + data.missing.length + ')</p>'
-                        + '<div class="space-y-1 max-h-40 overflow-y-auto">'
-                        + data.missing.map(function (m) {
-                            const history = m.already_missing
-                                ? ' <span class="text-amber-500/80">· missing since ' + (m.missing_since || '?') + ', ' + m.audit_misses + ' previous count(s)</span>'
-                                : '';
-                            return '<label class="flex items-center gap-2 text-xs text-slate-300 px-2 py-1 rounded border border-slate-800">'
-                                + '<input type="checkbox" class="missing-cb" value="' + m.inventory_id + '" checked> '
-                                + '<span class="truncate">' + m.title + ' <span class="text-slate-600">· copy #' + m.inventory_id + '</span>' + history + '</span></label>';
-                          }).join('')
-                        + '</div></div>';
-                }
-                if (data.unexpected.length) {
-                    html += '<div><p class="text-[10px] uppercase font-bold text-amber-400 mb-1">On the wrong shelf (' + data.unexpected.length + ')</p>'
-                        + '<div class="space-y-1 max-h-40 overflow-y-auto text-xs text-slate-300">'
-                        + data.unexpected.map(function (u) {
-                            return '<div class="px-2 py-1 rounded border border-slate-800 truncate">' + u.title
-                                 + ' <span class="text-slate-600">· belongs to ' + u.belongs_to + '</span></div>';
-                          }).join('')
-                        + '</div><p class="text-[10px] text-slate-500 mt-1">These are reported only — reshelving is handled in Shelf Manager.</p></div>';
-                }
-            }
-            html += '<div class="pt-2 border-t border-slate-800 space-y-2">'
-                + '<input type="text" id="auditNotes" class="field-input" placeholder="Notes for this count (optional)">'
-                + (data.missing.length
-                    ? '<input type="text" id="auditReason" class="field-input" placeholder="Reason" value="Not found during stock audit">'
-                      + '<label class="flex items-center gap-2 text-[11px] text-amber-300">'
-                      + '<input type="checkbox" id="auditConfirm"> I confirm this count. The ticked copies will be flagged '
-                      + '<strong>Missing</strong> &mdash; not written off.</label>'
-                    : '<label class="flex items-center gap-2 text-[11px] text-emerald-300">'
-                      + '<input type="checkbox" id="auditConfirm"> I confirm this count and want it filed.</label>')
-                + '<button type="button" onclick="applyAudit(\'' + shelfName.replace(/'/g, "") + '\')" class="w-full bg-cyan-600/20 text-cyan-300 border border-cyan-600/40 px-4 py-2.5 rounded-lg text-xs font-bold hover:bg-cyan-600/30">File this count</button>'
-                + '</div>';
-            report.innerHTML = html;
+            report.innerHTML =
+                '<p class="text-sm font-bold text-slate-200">' + esc(sheet.where) + ' — counted</p>'
+              + '<ul class="text-xs text-slate-400 space-y-1">'
+              + '<li><span class="text-emerald-400 font-semibold">' + d.confirmed + '</span> confirmed on the shelf'
+              + ' <span class="text-slate-600">(' + d.individually + ' one by one, ' + d.in_bulk + ' swept)</span></li>'
+              + (d.flagged ? '<li><span class="text-rose-400 font-semibold">' + d.flagged
+                    + '</span> marked Missing — not written off. Review them on the Missing Stock tab.</li>' : '')
+              + (d.recovered ? '<li><span class="text-cyan-400 font-semibold">' + d.recovered
+                    + '</span> turned up again and are back in stock.</li>' : '')
+              + '</ul>';
             report.classList.remove('hidden');
-        }
-
-        // Filing a count records the count itself, flags what could not be
-        // found, and puts back anything that turned up. Nothing is written off.
-        let lastAuditData = null;
-
-        async function applyAudit(shelfName) {
-            if (!document.getElementById('auditConfirm').checked) {
-                alert('Tick the confirmation box before this count can be filed.');
-                return;
-            }
-            if (!lastAuditData) { alert('Run the comparison first.'); return; }
-
-            const fd = new FormData();
-            fd.append('confirm', 'yes');
-            fd.append('shelf_id', document.getElementById('auditShelf').value);
-            fd.append('shelf_name', shelfName);
-            const reasonEl = document.getElementById('auditReason');
-            fd.append('reason', (reasonEl && reasonEl.value) || 'Not found during stock audit');
-            const notesEl = document.getElementById('auditNotes');
-            if (notesEl && notesEl.value.trim()) fd.append('notes', notesEl.value.trim());
-
-            [...document.querySelectorAll('.missing-cb:checked')]
-                .forEach(function (c) { fd.append('missing_ids', c.value); });
-            // Everything scanned goes up too, so a copy previously written down
-            // as missing is put back rather than staying flagged for ever.
-            (lastAuditData.recovered || []).forEach(function (r) {
-                fd.append('found_ids', r.inventory_id);
-            });
-            ['expected_count', 'scanned_count', 'found_count', 'on_loan_count']
-                .forEach(function (k) { fd.append(k, lastAuditData[k]); });
-            fd.append('unexpected_count', lastAuditData.unexpected.length);
-
-            const res = await fetch("{% url 'stock_audit_apply' %}", {
-                method: 'POST', body: fd,
-                headers: { 'X-CSRFToken': getCookie('csrftoken'), 'X-Requested-With': 'XMLHttpRequest' },
-            });
-            const data = await res.json();
-            if (!data.success) { alert(data.error || 'Filing the count failed'); return; }
-            alert('Count filed. ' + data.flagged + ' flagged missing, '
-                + data.recovered + ' found again.');
             stopAuditCamera();
-            clearScanned();
-            window.location.href = '?tab=audits';
+            AylaDialog.toast(d.message, 'success');
+            await loadAuditSheet(sheet.level);
         }
 
-        window.addEventListener('beforeunload', stopAuditCamera);
-
-        // Bulk donation intake. Each row becomes a catalogue record, an
-        // accessioning row and a copy in stock, which is the same thing
-        // Receive Stock does one delivery at a time.
         async function uploadDonationExcel(input) {
             if (!input.files || !input.files[0]) return;
             const body = new FormData();

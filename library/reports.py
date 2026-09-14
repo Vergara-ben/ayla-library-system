@@ -1,21 +1,4 @@
-"""Report generation for the AYLA admin panel.
-
-Builds the manuscript-defined reports as plain data dictionaries
-(consumed by both the on-screen preview and the PDF exporter) and renders
-them to PDF with ReportLab (pure-Python, deploys on PythonAnywhere).
-
-Each builder returns a dict shaped like::
-
-    {
-        'key': 'transactions',
-        'title': 'Transactions Report',
-        'subtitle': 'Borrowing and returning transactions',
-        'period_label': 'June 01, 2026 — June 17, 2026',  # or 'As of ...'
-        'columns': ['Date', 'Type', ...],
-        'rows': [['2026-06-01', 'Borrow', ...], ...],
-        'summary': [('Total Borrows', 12), ...],
-    }
-"""
+"""Report generation for the admin panel."""
 
 import math
 from datetime import date, datetime, timedelta
@@ -43,17 +26,13 @@ REPORT_TYPES = [
 ]
 
 # Reports that represent a real-time snapshot rather than a date range.
-# Stock levels are a point-in-time count; stock movement is a log over time.
-# Unreturned books are a point-in-time answer to "what is out right now", not a
-# question about a period -- a book borrowed last year and still missing belongs
-# on the list whatever dates are chosen.
 SNAPSHOT_REPORTS = {'books', 'patrons', 'stock_levels', 'unreturned'}
 
 LIBRARY_NAME = 'Ayla Public Library'
 LIBRARY_LOCATION = 'Brgy. Sala, Cabuyao, Laguna'
 
 
-# ─── Date handling ────────────────────────────────────────────
+# Date handling
 def parse_date_range(start_str, end_str):
     """Parse YYYY-MM-DD strings, falling back to a sensible 30-day window."""
     today = timezone.localdate()
@@ -87,15 +66,7 @@ def _fmt_dt(value):
     return timezone.localtime(value).strftime('%Y-%m-%d %H:%M') if value else '—'
 
 
-# ─── Chart geometry ───────────────────────────────────────────
-# Coordinates are worked out here, in Python, for two reasons. The template
-# language cannot do arithmetic, and the same numbers have to drive two very
-# different renderers: inline SVG on screen and ReportLab shapes in the PDF. One
-# geometry, two drawings, so the printed chart is provably the same chart.
-#
-# No charting library either. The screen copy has to survive a print dialog, and
-# a scripted canvas does not; a CDN chart script would also be one more thing to
-# fail on a library PC with a filtered connection.
+# Chart geometry.
 
 CHART_W, CHART_H = 720, 240
 CHART_PAD_L, CHART_PAD_R, CHART_PAD_T, CHART_PAD_B = 46, 16, 20, 32
@@ -115,30 +86,18 @@ def _axis_label(value):
 
 def _chart(series, kind='line', title='', note='', empty_note='',
            highlight=None, axis_note='', total=None):
-    """Geometry for one chart.
-
-    `series` is [(label, value), ...] already in the order it should be drawn --
-    chronological for a line, ranked or natural for bars. `highlight` names the
-    label to emphasise (the peak hour, the biggest bucket); None emphasises
-    nothing, which is right where no single point is the finding.
-
-    Returns a dict the template and the PDF renderer both consume. An empty
-    series still returns a well-formed chart, so callers never have to guard.
-    """
+    """Geometry for one chart."""
     plot_w = CHART_W - CHART_PAD_L - CHART_PAD_R
     plot_h = CHART_H - CHART_PAD_T - CHART_PAD_B
     base_y = CHART_PAD_T + plot_h
 
     values = [v for _lbl, v in series]
-    # `total` may be passed in when the series is a truncated top-N: the shares
-    # then read against the whole collection rather than against the twelve bars
-    # that happened to fit, which is the number the reader assumes anyway.
+    # Optional total for percentage shares.
     charted = sum(values)
     total = charted if total is None else total
     y_max = _nice_max(max(values)) if values else 5
 
-    # Past a dozen labels they collide. Thin them rather than shrinking the type
-    # past readable; the exact figures live in the table underneath either way.
+    # Past a dozen labels they collide.
     count = len(series)
     label_every = 1 if count <= 12 else 2 if count <= 26 else max(1, count // 12)
 
@@ -167,9 +126,7 @@ def _chart(series, kind='line', title='', note='', empty_note='',
     else:
         slot = (plot_w / count) if count else plot_w
         bar_w = min(slot * 0.6, 56)
-        # Category names are arbitrary length -- "Children's Literature" is wider
-        # than its own bar at twelve across -- so the axis gets a clipped version
-        # while the full name stays on the mark for the tooltip and the table.
+        # Shorten long category names on the axis.
         max_chars = max(6, int(slot / 4.6))
         for i, (label, value) in enumerate(series):
             cx = CHART_PAD_L + slot * (i + 0.5)
@@ -192,8 +149,7 @@ def _chart(series, kind='line', title='', note='', empty_note='',
             })
 
     line = ' '.join(f"{p['x']},{p['y']}" for p in points)
-    # The area under a line is closed along the baseline, so the fill reads as
-    # volume rather than as a shape floating over the axis.
+    # Close the area along the baseline.
     area = ''
     if points:
         area = (f"M {points[0]['x']},{base_y} "
@@ -205,10 +161,7 @@ def _chart(series, kind='line', title='', note='', empty_note='',
         y = round(CHART_PAD_T + plot_h * step / 4, 2)
         gridlines.append({
             'y': y,
-            # Offsets are computed here rather than with the template's `add`
-            # filter: `add` casts both sides to int and returns an empty string
-            # when either will not convert, so 14.0|add:'3.5' silently became ''
-            # and dropped every axis label to y=0, stacked on each other.
+            # Compute offsets here; the add filter drops decimals.
             'label_y': round(y + 3.5, 2),
             'label': _axis_label(y_max * (4 - step) / 4),
         })
@@ -255,7 +208,7 @@ def _day_label(d, span):
     return d.strftime('%b %d') if span > 31 else d.strftime('%d %b')
 
 
-# ─── Individual report builders ───────────────────────────────
+# Individual report builders
 def _transactions(start, end):
     txns = (Transaction.objects
             .select_related('patron', 'book')
@@ -284,9 +237,7 @@ def _transactions(start, end):
             f'{tx.fine_amount:.2f}' if tx.fine_amount else '—',
         ])
 
-    # Activity per day. A transactions report that is only a list answers "what
-    # happened"; the line answers "is it rising or falling", which is the
-    # question a librarian actually brings to it.
+    # Activity per day.
     per_day = {}
     for tx in txns:
         if tx.transaction_date:
@@ -348,8 +299,7 @@ def _patron_logs(start, end):
             _fmt_dt(lg.exit_time),
         ])
 
-    # Visits per day, which is the shape of demand: term time against holidays,
-    # and which weekdays carry the load.
+    # Visits per day.
     per_day, per_purpose = {}, {}
     for lg in logs:
         d = timezone.localtime(lg.entry_time).date()
@@ -412,8 +362,7 @@ def _books(start, end):
             location,
         ])
 
-    # What the collection is made of. A catalogue listing cannot be read for
-    # shape; the distribution is what a collection-development decision needs.
+    # What the collection is made of.
     per_genre, per_status = {}, {}
     for b in books:
         g = (b.genre or 'Uncategorised').strip() or 'Uncategorised'
@@ -526,8 +475,7 @@ def _donations(start, end):
             d.status,
         ])
 
-    # Donations arrive in bursts -- a school clear-out, an estate -- so the
-    # month-by-month line says more about supply than any single total.
+    # Donations per month.
     per_month, per_status = {}, {}
     for d in donations:
         if d.date_donated:
@@ -578,8 +526,7 @@ def _stock_levels(start, end):
                .select_related('book', 'book__shelf_level', 'book__shelf_level__shelf')
                .order_by('book__title', 'title_hint', 'inventory_id'))
 
-    # Group copies by the title they belong to, so the report reads as stock
-    # levels rather than a list of individual copies.
+    # Group copies by title.
     groups = {}
     totals = {'Good': 0, 'Damaged': 0, 'Lost': 0, 'Withdrawn': 0}
     removed = 0
@@ -704,12 +651,7 @@ _BUILDERS = {
 
 
 def _unreturned(start, end):
-    """Every borrowed copy that has not come back, oldest first.
-
-    A snapshot rather than a period: the point of the list is chasing what is
-    still out, and the ones worth chasing hardest are the oldest, so the date
-    range is deliberately ignored.
-    """
+    """Every borrowed copy that has not come back, oldest first."""
     txns = (Transaction.objects
             .select_related('patron', 'book')
             .filter(transaction_type='Borrow', return_date__isnull=True)
@@ -730,9 +672,7 @@ def _unreturned(start, end):
         if is_over:
             overdue += 1
             total_days_over += days_over
-            # What the fine would be if it came back today. Not charged yet --
-            # the fine is only written when the return is processed -- so this is
-            # an exposure figure, not money owed.
+            # What the fine would be if it came back today.
             billable = max(days_over - (rule.grace_period_days or 0), 0)
             accruing += Decimal(billable) * (rule.fine_per_day or Decimal('0'))
         rows.append([
@@ -744,9 +684,7 @@ def _unreturned(start, end):
             'Overdue' if is_over else 'On loan',
         ])
 
-    # How overdue, not just how many. Chasing is triaged by age -- a book three
-    # days late is a reminder, one three months late is a replacement invoice --
-    # and a single "Overdue: 15" count cannot tell those apart.
+    # How overdue, not just how many.
     buckets = [
         ('Not yet due', lambda d: d <= 0),
         ('1-7 days', lambda d: 1 <= d <= 7),
@@ -787,12 +725,7 @@ def _unreturned(start, end):
 
 
 def _penalties(start, end):
-    """Fines actually charged, totalled by day, week and month.
-
-    Only fines on transactions settled inside the range are counted: a fine is
-    written when the book comes back or is written off, so the return date is
-    when the library actually charged it.
-    """
+    """Fines actually charged, totalled by day, week and month."""
     txns = (Transaction.objects
             .select_related('patron', 'book')
             .filter(fine_amount__gt=0)
@@ -859,13 +792,7 @@ def _penalties(start, end):
 
 
 def _analytics(start, end):
-    """What gets borrowed, and when the library is busiest.
-
-    Two questions the library actually plans around: which titles to buy more
-    of, and which hours need someone on the desk. Both are counts over the
-    chosen period rather than all time, because last year's answer does not
-    tell you how to staff next week.
-    """
+    """What gets borrowed, and when the library is busiest."""
     borrows = (Transaction.objects
                .select_related('book')
                .filter(transaction_type='Borrow', transaction_date__range=(start, end)))
@@ -878,10 +805,7 @@ def _analytics(start, end):
         per_title[key] = per_title.get(key, 0) + 1
     ranked = sorted(per_title.items(), key=lambda kv: (-kv[1], kv[0][0]))
 
-    # ── When the library is busy ──────────────────────────────────────
-    # Visits are the honest measure of how busy the room is: a borrow happens at
-    # the desk, but most people who come in never borrow anything, and staffing
-    # has to cover the room rather than the counter.
+    # Busiest hours.
     visits = PatronLog.objects.filter(entry_time__date__range=(start, end))
 
     per_hour = {}
@@ -894,9 +818,7 @@ def _analytics(start, end):
         total_visits += 1
 
     def _hour_label(h):
-        # Built by hand rather than with strftime('%-I'): the dash modifier that
-        # strips the leading zero is a glibc extension and raises on Windows,
-        # which is what this runs on.
+        # Format the hour by hand so it works on Windows.
         if h is None:
             return '\u2014'
         suffix = 'AM' if h < 12 else 'PM'
@@ -904,17 +826,12 @@ def _analytics(start, end):
         return f'{hour12} {suffix}'
 
     def _hour_span(h):
-        """Renders an hour as the range it is: 9 AM - 10 AM.
-
-        Staffing is rostered in ranges, and a bare "9 AM" reads as a moment.
-        """
+        """Renders an hour as the range it is: 9 AM - 10 AM."""
         if h is None:
             return '\u2014'
         return f'{_hour_label(h)} \u2013 {_hour_label((h + 1) % 24)}'
 
-    # Ties broken towards the earlier hour so the same data always names the same
-    # peak; dict order would otherwise depend on which visit happened to be read
-    # first.
+    # The earlier hour wins a tie.
     peak_hour, peak_count = (max(per_hour.items(), key=lambda kv: (kv[1], -kv[0]))
                              if per_hour else (None, 0))
     quiet_hour, quiet_count = (min(per_hour.items(), key=lambda kv: (kv[1], kv[0]))
@@ -924,22 +841,15 @@ def _analytics(start, end):
     busy_day, busy_day_count = (max(per_weekday.items(), key=lambda kv: (kv[1], -kv[0]))
                                 if per_weekday else (None, 0))
 
-    # Averaged over the hours that actually saw someone, not over 24: a library
-    # open seven hours a day would otherwise look two-thirds empty by arithmetic
-    # alone, and the number would say nothing about how busy it gets.
+    # Average over hours that had visits.
     active_hours = len(per_hour)
     avg_per_active_hour = (total_visits / active_hours) if active_hours else 0
     peak_share = (peak_count / total_visits * 100) if total_visits else 0
 
-    # How much busier the peak is than a typical open hour. This is the number
-    # that answers "is one hour worth extra staff, or is the day flat?" -- a peak
-    # 1.1x the average is noise, 3x is a queue.
+    # How much busier the peak is than a typical open hour.
     peak_vs_average = (peak_count / avg_per_active_hour) if avg_per_active_hour else 0
 
-    # The series runs from the first hour anyone arrived to the last, rather than
-    # over only the hours with visits: a quiet hour in the middle of the day is
-    # part of the shape, and dropping it would close the gap on the line and hide
-    # the dip entirely.
+    # Include quiet hours between the first and last visit.
     hours = []
     if per_hour:
         for h in range(min(per_hour), max(per_hour) + 1):
@@ -983,8 +893,7 @@ def _analytics(start, end):
             ('Average Per Open Hour', f'{avg_per_active_hour:.1f}'),
             ('Total Visits', total_visits),
         ],
-        # Screen only. The exporters walk `columns`/`rows`, so the hourly numbers
-        # are repeated under `breakdown` below to keep them in the Excel and PDF.
+        # Screen only.
         'chart': dict(hour_chart, peak_label=_hour_span(peak_hour), peak_count=peak_count),
         'breakdown': {
             'Visits by hour': [
@@ -999,8 +908,7 @@ def _analytics(start, end):
     }
 
 
-# Registered here rather than in the literal above because these three are
-# defined below it.
+# Registered here rather than in the literal above because these three are defined below it.
 _BUILDERS['unreturned'] = _unreturned
 _BUILDERS['penalties'] = _penalties
 _BUILDERS['analytics'] = _analytics
@@ -1014,7 +922,7 @@ def build_report(report_type, start, end):
     return report
 
 
-# ─── Excel rendering ──────────────────────────────────────────
+# Excel rendering
 def render_report_excel(report):
     """Render a report dict to a formatted .xlsx and return a BytesIO buffer."""
     from openpyxl import Workbook
@@ -1078,10 +986,7 @@ def render_report_excel(report):
                 max_len = max(max_len, len(str(row[c - 1])))
         ws.column_dimensions[letter].width = min(max(max_len + 3, 12), 50)
 
-    # Breakdowns get their own sheet rather than being dropped. Visits by hour is
-    # the substance of the peak-hour finding, and fine totals per day/week/month
-    # are what the penalties report is for -- a spreadsheet that carries only the
-    # detail rows makes the reader recompute what the screen already worked out.
+    # Breakdowns get their own sheet rather than being dropped.
     breakdown = report.get('breakdown') or {}
     if breakdown:
         bs = wb.create_sheet('Breakdowns')
@@ -1107,17 +1012,10 @@ def render_report_excel(report):
     return buf
 
 
-# ─── PDF rendering ────────────────────────────────────────────
+# PDF rendering
 
 def _pdf_chart(chart, avail_width):
-    """Redraw an on-screen chart as ReportLab shapes.
-
-    The same coordinates the SVG uses, with two conversions: everything is
-    scaled to the page width, and y is flipped, because ReportLab's origin is at
-    the bottom-left while SVG's is at the top-left. Drawing from the shared
-    geometry rather than re-deriving it is what keeps the printed chart honest --
-    the two cannot drift apart and start disagreeing about where the peak is.
-    """
+    """Redraw an on-screen chart as ReportLab shapes."""
     from reportlab.graphics.shapes import (
         Drawing, Line, PolyLine, Polygon, String, Circle, Rect,
     )
@@ -1176,8 +1074,7 @@ def _pdf_chart(chart, avail_width):
     else:
         for b in chart['bars']:
             fill = accent if b['is_peak'] else colors.Color(14 / 255, 116 / 255, 144 / 255, 0.45)
-            # Rect is anchored bottom-left, so the y is the baseline minus height
-            # once flipped -- not the top edge the SVG uses.
+            # ReportLab rectangles are anchored bottom-left.
             d.add(Rect(sx(b['x']), sy(chart['baseline_y']),
                        sx(b['w']), b['h'] * scale,
                        fillColor=fill, strokeColor=None))
@@ -1266,9 +1163,7 @@ def render_report_pdf(report):
     if summary_text:
         elements.append(Paragraph(summary_text, summary_style))
 
-    # The chart goes above the detail rows: it is the answer, and the rows are the
-    # working. Kept together with its caption so a page break cannot separate a
-    # chart from the sentence explaining what its axes are.
+    # The chart goes above the detail rows: it is the answer, and the rows are the working.
     chart = report.get('chart')
     if chart and chart.get('has_data'):
         drawing = _pdf_chart(chart, doc.width)
@@ -1309,9 +1204,7 @@ def render_report_pdf(report):
     ]))
     elements.append(table)
 
-    # Same reasoning as the spreadsheet: the hourly and per-period totals are the
-    # answer, not a footnote to it, so they go in the printed copy too. Side by
-    # side under one heading, after the detail rows they summarise.
+    # Add the summary totals to the PDF.
     breakdown = report.get('breakdown') or {}
     if breakdown:
         elements.append(Spacer(1, 10 * mm))

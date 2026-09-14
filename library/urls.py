@@ -10,6 +10,8 @@ urlpatterns = [
     path('patron/forgot-password/', views.patron_forgot_password, name='patron_forgot_password'),
     path('patron/dashboard/', views.patron_dashboard, name='patron_dashboard'),
     path('patron/catalog/', views.patron_catalog, name='patron_catalog'),
+    path('patron/catalog/search/', views.patron_catalog_search, name='patron_catalog_search'),
+    path('patron/help/live-position/', views.live_position_guide, name='live_position_guide'),
     path('patron/book-details/<int:book_id>/', views.patron_book_details, name='patron_book_details'),
     path('patron/map/', views.patron_map, name='patron_map'),
     path('patron/map-data/', views.get_patron_map_data, name='get_patron_map_data'),
@@ -29,7 +31,7 @@ urlpatterns = [
     path('admin-portal/logout/', views.admin_logout, name='admin_logout'),
     path('admin-portal/dashboard/', views.admin_dashboard, name='admin_dashboard'),
     path('admin-portal/signin/', views.admin_signin, name='admin_signin'),
-    # ─── Library Staff portal (role: Staff) ───────────────────────
+    # Library Staff portal
     path('library-staff/login/', views.staff_login, name='staff_login'),
     path('library-staff/forgot-password/', views.staff_forgot_password, name='staff_forgot_password'),
     path('library-staff/logout/', views.staff_logout, name='staff_logout'),
@@ -44,7 +46,7 @@ urlpatterns = [
     path('library-staff/receiving/', views.staff_inventory_receive, name='staff_inventory_receive'),
     path('library-staff/patrons/', views.staff_manage_patron, name='staff_manage_patron'),
 
-    # ─── Ask a Librarian ─────────────────────────────────────────────────
+    # Ask a Librarian
     path('patron/messages/', chat.patron_messages, name='patron_messages'),
     path('patron/messages/send/', chat.patron_send_message, name='patron_send_message'),
     path('patron/messages/poll/', chat.patron_poll_messages, name='patron_poll_messages'),
@@ -53,12 +55,16 @@ urlpatterns = [
     path('admin-portal/messages/close/', chat.close_conversation, name='close_conversation'),
     path('admin-portal/messages/poll/', chat.staff_poll_messages, name='staff_poll_messages'),
 
-    # ─── Desk mode: Log Management, handed to the patron ──────────────────
+    # Desk mode
     path('desk/arm/', desk.arm_desk_mode, name='desk_arm'),
     path('desk/unlock/', desk.unlock_desk_mode, name='desk_unlock'),
     path('desk/sign/', desk.desk_sign, name='desk_sign'),
     path('desk/sign-out/', desk.desk_sign_out, name='desk_sign_out'),
     path('desk/scan/', desk.desk_scan, name='desk_scan'),
+    # The kiosk a patron stands in front of: identify, then state which way they are walking.
+    path('desk/identify/', desk.desk_identify, name='desk_identify'),
+    path('desk/visit/', desk.desk_visit, name='desk_visit'),
+    path('desk/visitor/', desk.desk_visitor, name='desk_visitor'),
     path('admin-portal/close-open-visits/', desk.close_open_visits_now, name='close_open_visits'),
     # Inventory Management (Administrator-only)
     path('admin-portal/inventory/', views.inventory_management, name='inventory_management'),
@@ -67,6 +73,8 @@ urlpatterns = [
     path('admin-portal/inventory/update/', views.update_inventory_record, name='update_inventory_record'),
     path('admin-portal/inventory/deaccession/', views.deaccession_copy, name='deaccession_copy'),
     path('admin-portal/inventory/search-by-qr/', views.search_inventory_by_qr, name='search_inventory_by_qr'),
+    path('admin-portal/inventory/audit/sheet/', views.stock_audit_sheet, name='stock_audit_sheet'),
+    path('admin-portal/inventory/audit/file/', views.stock_audit_file, name='stock_audit_file'),
     path('admin-portal/inventory/audit/progress/', views.stock_audit_progress, name='stock_audit_progress'),
     path('admin-portal/inventory/audit/compare/', views.stock_audit_compare, name='stock_audit_compare'),
     path('admin-portal/inventory/audit/apply/', views.stock_audit_apply, name='stock_audit_apply'),
@@ -106,6 +114,7 @@ urlpatterns = [
     path('admin-portal/book-details/<int:book_id>/', views.admin_book_details_ajax, name='admin_book_details_ajax'),
     path('admin-portal/book-qr/<int:book_id>/', views.book_qr_png, name='book_qr_png'),
     path('admin-portal/search-book-by-qr/', views.search_book_by_qr, name='search_book_by_qr'),
+    path('admin-portal/resolve-qr/', views.resolve_transaction_qr, name='resolve_transaction_qr'),
     path('admin-portal/search-patron-by-qr/', views.search_patron_by_qr, name='search_patron_by_qr'),
     path('admin-portal/download-book-template/', views.download_book_template, name='download_book_template'),
     path('admin-portal/import-books/', views.import_books, name='import_books'),
@@ -136,6 +145,7 @@ urlpatterns = [
     path('admin-portal/calibrate-beacon/', views.calibrate_beacon, name='calibrate_beacon'),
     path('admin-portal/set-active-floorplan/', views.set_active_floorplan, name='set_active_floorplan'),
     path('admin-portal/set-floorplan-scale/', views.set_floorplan_scale, name='set_floorplan_scale'),
+    path('admin-portal/set-floorplan-canvas/', views.set_floorplan_canvas, name='set_floorplan_canvas'),
     path('admin-portal/set-floorplan-north/', views.set_floorplan_north, name='set_floorplan_north'),
     path('admin-portal/set-floorplan-floor/', views.set_floorplan_floor_number, name='set_floorplan_floor_number'),
     path('admin-portal/toggle-renovation/', views.toggle_renovation, name='toggle_renovation'),
@@ -153,6 +163,7 @@ urlpatterns = [
     path('admin-portal/delete-room/', views.delete_room, name='delete_room'),
     path('admin-portal/add-shelf/', views.add_shelf, name='add_shelf'),
     path('admin-portal/edit-shelf/', views.edit_shelf, name='edit_shelf'),
+    path('admin-portal/fix-shelf-rooms/', views.fix_shelf_rooms, name='fix_shelf_rooms'),
     path('admin-portal/delete-shelf/', views.delete_shelf, name='delete_shelf'),
     path('admin-portal/add-shelf-level/', views.add_shelf_level, name='add_shelf_level'),
     path('admin-portal/edit-shelf-level/', views.edit_shelf_level, name='edit_shelf_level'),
@@ -170,6 +181,7 @@ urlpatterns = [
     path('admin-portal/edit-log/', views.edit_patron_log, name='edit_patron_log'),
     path('admin-portal/delete-log/', views.delete_patron_log, name='delete_patron_log'),
     # Reports
+    path('admin-portal/analytics/', views.admin_analytics, name='admin_analytics'),
     path('admin-portal/reports/', views.admin_reports, name='admin_reports'),
     path('admin-portal/reports/pdf/', views.admin_report_pdf, name='admin_report_pdf'),
     path('admin-portal/reports/excel/', views.admin_report_excel, name='admin_report_excel'),
@@ -179,6 +191,9 @@ urlpatterns = [
     path('admin-portal/shelf-manager/', views.shelf_manager, name='shelf_manager'),
     path('admin-portal/books-for-placement/', views.get_books_for_placement, name='get_books_for_placement'),
     path('admin-portal/assign-books-to-level/', views.assign_books_to_level, name='assign_books_to_level'),
+    path('admin-portal/move-books/', views.move_books, name='move_books'),
+    path('admin-portal/board-books/', views.get_board_books, name='get_board_books'),
+    path('admin-portal/delete-books/', views.delete_books, name='delete_books'),
     path('admin-portal/get-shelf-tree/', views.get_shelf_tree, name='get_shelf_tree'),
     path('admin-portal/get-shelf-levels-flat/', views.get_shelf_levels_flat, name='get_shelf_levels_flat'),
     path('admin-portal/toggle-active/', views.toggle_active, name='toggle_active'),
@@ -205,6 +220,7 @@ urlpatterns = [
     path('admin-portal/delete-beacon/', views.delete_beacon, name='delete_beacon'),
     path('admin-portal/update-beacon/', views.update_beacon, name='update_beacon'),
     path('admin-portal/add-waypoint/', views.add_waypoint, name='add_waypoint'),
+    path('admin-portal/edit-waypoint/', views.edit_waypoint, name='edit_waypoint'),
     path('admin-portal/move-waypoint/', views.move_waypoint, name='move_waypoint'),
     path('admin-portal/delete-waypoint/', views.delete_waypoint, name='delete_waypoint'),
     path('admin-portal/add-waypoint-connection/', views.add_waypoint_connection, name='add_waypoint_connection'),

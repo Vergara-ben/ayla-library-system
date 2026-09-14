@@ -61,10 +61,7 @@
         <main id="main-content" tabindex="-1" class="flex-1 overflow-hidden p-6">
             <div class="h-full grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-4">
 
-                {# One list of everybody, because writing to a patron who has never #}
-                {# asked anything — a held book, an overdue notice — is the same job #}
-                {# as answering one, and a list of existing threads has nowhere to #}
-                {# start from. Unanswered questions float to the top. #}
+                {# All patrons, unanswered first. #}
                 <div class="rounded-xl border border-slate-800/80 overflow-hidden flex flex-col" style="background-color: var(--bg-card);">
                     <div class="p-3 border-b border-slate-800">
                         <form method="get" class="relative">
@@ -236,17 +233,14 @@
                 const data = await r.json();
                 const hint = document.getElementById('replyHint');
                 if (!data.success) { hint.textContent = data.error; return; }
-                // A first message creates the thread, so pick up its id or the
-                // next reply would open a second one.
+                // Save the new thread id.
                 CHAT.id = data.conversation_id;
                 field.value = '';
                 renderThread(data.messages);
-                // Replying is activity, and on a brand new thread it is also
-                // the first moment there is anything to poll for.
+                // Replying counts as activity.
                 threadCount = data.messages ? data.messages.length : threadCount;
                 poller.bump();
-                // Whether the email actually went is worth saying: silence here
-                // is how a librarian assumes a patron was told when they were not.
+                // Show whether the email was sent.
                 hint.textContent = data.emailed
                     ? 'Sent, and ' + CHAT.patronFirst + ' has been emailed.'
                     : 'Sent. No email — they are reading this now, or were emailed a moment ago.';
@@ -258,8 +252,7 @@
 
         const replyField = document.getElementById('replyBody');
         if (replyField) {
-            // Enter sends, because a reply is usually one line and reaching for
-            // the mouse every time is what makes a desk tool feel slow.
+            // Enter sends.
             replyField.addEventListener('keydown', function (e) {
                 if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendReply(); }
             });
@@ -278,10 +271,7 @@
             return changed;
         }
 
-        // A librarian mid-conversation gets the same 6s as before. A thread
-        // that has gone quiet steps down, and one abandoned for a quarter of an
-        // hour stops -- a desk PC left signed in overnight should not spend the
-        // night asking about a conversation that ended at four.
+        // A librarian mid-conversation gets the same 6s as before.
         const poller = AylaPoll({
             poll: poll,
             tiers: [[0, 6000], [2 * 60 * 1000, 15000], [5 * 60 * 1000, 30000]],

@@ -39,7 +39,7 @@
             padding: 9px 12px; font-size: 13px; color: var(--text-primary); outline: none;
         }
         .field-input:focus { border-color: var(--accent-strong); }
-        /* Row +/- buttons — same treatment as the shelf-placement picker. */
+        /* Row +/- buttons, same as the shelf placement picker. */
         .tbtn { width: 24px; height: 24px; border-radius: 6px; border: 1px solid var(--border-color); display: flex; align-items: center; justify-content: center; font-size: 10px; cursor: pointer; background: transparent; flex-shrink: 0; }
         .tbtn.add { color: var(--accent); } .tbtn.add:hover { background: var(--tint-accent); }
         .tbtn.del { color: var(--danger); } .tbtn.del:hover { background: var(--tint-danger); }
@@ -257,7 +257,7 @@
                     </div>
                 </div>
 
-                {# Module access — same cart-style picker as "Add Books to Shelf Level". #}
+                {# Module access picker. #}
                 <div id="modulesWrap">
                     <label class="field-label">Module Access</label>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -319,7 +319,7 @@
         const editUrlTpl = "{% url 'edit_staff' 0 %}";       // .../users/0/edit/
         const resetUrlTpl = "{% url 'reset_staff_password' 0 %}";
 
-        // ── Module access (cart-style picker, mirrors "Add Books to Shelf Level") ──
+        // Module access picker
         const MODULES = [
             {% for key, label, description, icon in staff_module_choices %}
             { key: "{{ key }}", label: "{{ label|escapejs }}", description: "{{ description|escapejs }}", icon: "{{ icon }}" }{% if not forloop.last %},{% endif %}
@@ -375,10 +375,7 @@
             renderModuleLists();
         }
 
-        // Both roles carry module grants. An Administrator governs the system
-        // whatever is granted here -- accounts, configuration, reports and the
-        // rest are gated by role. What this adds is desk work, and none of it is
-        // granted by default.
+        // Both roles carry module grants.
         function syncModulesVisibility() {
             const isStaff = document.getElementById('f_role').value === 'Staff';
             document.getElementById('modulesWrap').style.display = '';
@@ -406,8 +403,7 @@
             document.getElementById('userModalTitle').textContent = 'Add Staff';
             document.getElementById('passwordWrap').style.display = '';
             document.getElementById('f_password').setAttribute('required', 'required');
-            // form.reset() snaps Role back to the first option (Administrator);
-            // this modal is "Add Staff", so start on Staff with the picker showing.
+            // Default the role to Staff.
             document.getElementById('f_role').value = 'Staff';
             setModules([]);
             syncModulesVisibility();

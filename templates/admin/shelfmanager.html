@@ -17,6 +17,24 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" integrity="sha384-c6Rcwz4e4CITMbu/NBmnNS8yN2sC3cUElMEMfP3vqqKFp7GOYaaBBCqmaWBjmkjb" crossorigin="anonymous" referrerpolicy="no-referrer"/>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" integrity="sha384-NElt3Op+9NBMCYaef5HxeJmU4Xeard/Lku8ek6hoPTvYkQPh3zLIrJP7KiRocsxO" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <style>
+        /* Layout: tree on the left, plan and front view on the right. */
+        .shelf-workspace {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr);
+            gap: 1.5rem;
+            align-items: start;
+        }
+        @media (min-width: 1280px) {
+            .shelf-workspace {
+                grid-template-columns: minmax(0, 1fr) 22rem;
+            }
+            .shelf-aside {
+                position: sticky;
+                top: 1rem;
+                max-height: calc(100vh - 6rem);
+                overflow-y: auto;
+            }
+        }
         body { font-family: 'Inter', sans-serif; background-color: var(--bg-main); color: var(--text-primary); }
         .logo-text { font-family: 'Rowdies', sans-serif; }
         ::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -30,7 +48,7 @@
             main { padding: 1rem; }
         }
 
-        /* ── Tree (IDE project explorer) ── */
+        /* Tree */
         .tree { font-size: 13px; }
         /* Drawn bottom board at the bottom, the way the bay stands. */
         .elev { display: flex; flex-direction: column-reverse; gap: 3px; }
@@ -48,7 +66,11 @@
             font-size: 10px; font-weight: 600; color: var(--text-muted);
             transition: all .12s;
         }
-        .elev-cell:hover { border-color: var(--text-muted); color: var(--text-primary); }
+        .elev-cell:hover {
+            border-color: var(--accent);
+            background: var(--tint-accent);
+            color: var(--text-primary);
+        }
         .elev-cell.on {
             border-color: var(--warning); color: var(--text-primary);
             background: rgba(245, 158, 11, .16);
@@ -56,16 +78,13 @@
         }
         .elev-cell.empty { opacity: .45; }
 
-        .bookrow { cursor: grab; }
-        .bookrow.dragging { opacity: .4; }
-        /* A line where the book would land, rather than a highlight on what it
-           would land next to: a gap is the thing being chosen. */
-        .bookrow.drop-before { box-shadow: inset 0 2px 0 0 var(--accent-cyan, #0891b2); }
-        .bookrow.drop-after { box-shadow: inset 0 -2px 0 0 var(--accent-cyan, #0891b2); }
-        .levelrow.drop-into { outline: 1px dashed var(--accent-cyan, #0891b2); outline-offset: -2px; }
-
         .trow { display: flex; align-items: center; gap: 8px; padding: 5px 10px; border-radius: 8px; }
-        .trow:hover { background: var(--bg-subtle); }
+        /* Hovered tree row. */
+        .trow { box-shadow: inset 0 0 0 0 transparent; transition: background-color .12s ease, box-shadow .12s ease; }
+        .trow:hover {
+            background: var(--tint-accent);
+            box-shadow: inset 3px 0 0 0 var(--accent);
+        }
         .chev { width: 14px; flex-shrink: 0; text-align: center; color: var(--text-muted); cursor: pointer; transition: transform .15s; font-size: 10px; }
         .chev.open { transform: rotate(90deg); }
         .chev.leaf { visibility: hidden; cursor: default; }
@@ -79,7 +98,39 @@
         .tbtn.edit { color: var(--warning); } .tbtn.edit:hover { background: var(--tint-warning); }
         .tbtn.del { color: var(--danger); } .tbtn.del:hover { background: var(--tint-danger); }
         .tbtn.view { color: var(--text-muted); } .tbtn.view:hover { background: var(--border-color); }
+        .tbtn.pick { color: var(--accent-cyan, #0891b2); } .tbtn.pick:hover { background: var(--tint-accent); }
         .op50 { opacity: .5; }
+
+        /* Book mover. */
+        .mover { display: grid; grid-template-columns: 1fr auto 1fr; gap: 12px; align-items: stretch; }
+        @media (max-width: 1023px) {
+            .mover { grid-template-columns: 1fr; }
+            .mover-arrows { flex-direction: row !important; justify-content: center; }
+        }
+        .pane-list {
+            height: 340px; overflow-y: auto; border-radius: 10px;
+            border: 1px solid var(--border-color); background: var(--bg-input);
+        }
+        .brow {
+            display: flex; align-items: center; gap: 8px; padding: 5px 9px;
+            cursor: pointer; user-select: none; border-bottom: 1px solid transparent;
+        }
+        .brow:hover { background: var(--tint-accent); }
+        /* Selected rows. */
+        .brow.on { background: rgba(8, 145, 178, .18); box-shadow: inset 3px 0 0 0 var(--accent); }
+        .brow .pos {
+            width: 26px; flex: 0 0 auto; text-align: right; font-size: 10px;
+            font-variant-numeric: tabular-nums; color: var(--text-muted);
+        }
+        .brow .btitle {
+            flex: 1 1 auto; min-width: 0; font-size: 11.5px; color: var(--text-primary);
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .brow .bmeta { font-size: 10px; color: var(--text-muted); }
+        /* Dragged to reorder within its own board. */
+        .brow.dragging { opacity: .4; }
+        .brow.drop-before { box-shadow: inset 0 2px 0 0 var(--accent-cyan, #0891b2); }
+        .brow.drop-after  { box-shadow: inset 0 -2px 0 0 var(--accent-cyan, #0891b2); }
 
         /* toggle switch */
         .sw { position: relative; display: inline-block; width: 30px; height: 16px; flex-shrink: 0; }
@@ -119,54 +170,51 @@
                     <button id="tabTree" onclick="switchView('tree')" class="px-3 py-1.5 rounded-md text-xs font-bold tracking-wide bg-cyan-700/30 text-cyan-400 border border-cyan-800/50 flex items-center gap-2"><i class="fa-solid fa-folder-tree text-[10px]"></i> Tree</button>
                     <button id="tabTable" onclick="switchView('table')" class="px-3 py-1.5 rounded-md text-xs font-bold tracking-wide text-slate-500 hover:text-slate-300 flex items-center gap-2"><i class="fa-solid fa-table-list text-[10px]"></i> Table</button>
                 </div>
-                <p class="text-[11px] text-slate-500">Toggle a switch to show/hide a location from patrons. Inactive items appear dimmed.</p>
+
+                {# The two things done to the books on a shelf, as opposed to the shelf itself. #}
+                <div class="flex items-center gap-2 flex-wrap">
+                    {# Books on no board at all, said out loud. #}
+                    <button type="button" id="unshelvedBtn" onclick="openMover('none')" class="{% if not unshelved_count %}hidden {% endif %}bg-amber-950/40 border border-amber-800/50 hover:bg-amber-900/40 text-amber-300 text-[11px] font-semibold px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors">
+                        <i class="fa-solid fa-box-open"></i>
+                        <span id="unshelvedCount">{{ unshelved_count }} not on a shelf</span>
+                    </button>
+                    <button type="button" onclick="openMover()" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-violet-400/90 text-[11px] font-semibold px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors">
+                        <i class="fa-solid fa-right-left"></i> Move books
+                    </button>
+                    <button type="button" onclick="openReorder()" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-cyan-400/90 text-[11px] font-semibold px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors">
+                        <i class="fa-solid fa-arrow-down-1-9"></i> Reorder a board
+                    </button>
+                </div>
+
+                <p class="text-[11px] text-slate-500 w-full">Toggle a switch to show/hide a location from patrons. Inactive items appear dimmed.</p>
             </div>
 
-            {# A small read-only plan of the active floor, so a shelf can be found #}
-            {# by where it actually is rather than by remembering its name. Editing #}
-            {# stays in Floor Plan Management; this is for locating. #}
-            <div id="miniMapCard" class="rounded-xl border border-slate-800/80 shadow-2xl overflow-hidden" style="background-color: var(--bg-card);">
-                <div class="p-4 border-b border-slate-800 flex items-center gap-2 flex-wrap">
-                    <i class="fa-solid fa-map-location-dot text-cyan-600 text-xs"></i>
-                    <h4 class="text-sm font-bold text-slate-200 tracking-wide">Floor Plan</h4>
-                    {# The structure below has one root per storey now, so the plan #}
-                    {# beside it needs to be able to follow. Hidden when there is  #}
-                    {# only one floor in service. #}
-                    <select id="miniFloorPicker" onchange="switchMiniFloor(this.value)"
-                            class="hidden text-[11px] font-semibold rounded-md border border-slate-700 px-2 py-1"
-                            style="background-color: var(--bg-main); color: var(--text-primary);"
-                            aria-label="Choose which floor to show"></select>
-                    <span class="text-[10px] text-slate-500">click a shelf to find it below</span>
-                    <span id="miniMapNote" class="text-[10px] text-amber-500/90 ml-1"></span>
-                    <div class="ml-auto flex items-center gap-2">
-                        <button type="button" onclick="miniMapFit()" class="text-[10px] text-slate-400 hover:text-cyan-400 flex items-center gap-1"><i class="fa-solid fa-expand"></i> Fit</button>
-                        <a href="{% url 'floorplan_management' %}" class="text-[10px] text-slate-400 hover:text-cyan-400 flex items-center gap-1"><i class="fa-solid fa-pen-to-square"></i> Edit layout</a>
-                        <button type="button" onclick="toggleMiniMap()" id="miniMapToggle" class="text-[10px] text-slate-400 hover:text-cyan-400 flex items-center gap-1"><i class="fa-solid fa-chevron-up"></i> Hide</button>
-                    </div>
+            {# Shelves filed under one room and drawn inside another. #}
+            {% if room_mismatches %}
+            <div id="roomMismatchBar" class="rounded-xl border border-amber-800/50 bg-amber-950/25 p-4 flex items-start gap-3 flex-wrap">
+                <i class="fa-solid fa-triangle-exclamation text-amber-400 text-sm mt-0.5"></i>
+                <div class="min-w-0 flex-1">
+                    <p class="text-xs font-bold text-amber-300 mb-1">
+                        {{ room_mismatches|length }} shelf{{ room_mismatches|length|pluralize:"es" }} listed under the wrong room
+                    </p>
+                    <ul class="text-[11px] text-slate-400 space-y-0.5">
+                        {% for m in room_mismatches %}
+                        <li><span class="text-slate-200 font-semibold">{{ m.name }}</span>
+                            is listed in {{ m.filed }}, but it is drawn in
+                            <span class="text-slate-200">{{ m.drawn }}</span>.</li>
+                        {% endfor %}
+                    </ul>
                 </div>
-                {# Deliberately short. It is a locator beside the list, not a canvas #}
-                {# to work on, and a tall map would push the structure off screen. #}
-                <div id="miniMap" style="height:300px;background:var(--bg-main);"></div>
+                <button type="button" onclick="fixShelfRooms()" class="bg-amber-800/40 border border-amber-700/50 hover:bg-amber-700/40 text-amber-200 text-[11px] font-semibold px-3 py-1.5 rounded-lg flex items-center gap-2">
+                    <i class="fa-solid fa-wand-magic-sparkles text-[10px]"></i>
+                    File {{ room_mismatches|length|pluralize:"it,them" }} where {{ room_mismatches|length|pluralize:"it is,they are" }} drawn
+                </button>
             </div>
+            {% endif %}
 
-            <!-- SHELF ELEVATION -->
-            <!-- A plan view says where a bay stands; it cannot say which board
-                 a book is on, because that is height. This is the bay seen
-                 from the front, which is the view somebody standing at it
-                 actually has. -->
-            <div id="elevationPanel" class="hidden rounded-xl border border-slate-800/80 shadow-2xl mb-4" style="background-color: var(--bg-card);">
-                <div class="p-4 border-b border-slate-800 flex items-center gap-2">
-                    <i class="fa-solid fa-bars-staggered text-cyan-600 text-xs"></i>
-                    <h4 class="text-sm font-bold text-slate-200 tracking-wide">Front view</h4>
-                    <span id="elevationName" class="text-[10px] text-slate-500"></span>
-                    <button type="button" onclick="hideElevation()" class="ml-auto text-[10px] text-slate-400 hover:text-cyan-400 flex items-center gap-1"><i class="fa-solid fa-xmark"></i> Close</button>
-                </div>
-                <div class="p-4">
-                    <div id="elevationBody"></div>
-                    <p id="elevationNote" class="text-[10px] text-slate-500 mt-3"></p>
-                </div>
-            </div>
-
+            {# Structure on the left, the two ways of looking at a bay stacked on the right. #}
+            <div class="shelf-workspace">
+                <div class="shelf-structure space-y-6">
             <!-- TREE VIEW -->
             <div id="treeView" class="rounded-xl border border-slate-800/80 shadow-2xl" style="background-color: var(--bg-card);">
                 <div class="p-4 border-b border-slate-800 flex items-center gap-2">
@@ -178,6 +226,7 @@
                 <div class="tree p-3" id="treeRoot">
                     <div class="text-slate-500 text-sm p-4">Loading…</div>
                 </div>
+
             </div>
 
             <!-- TABLE VIEW -->
@@ -204,6 +253,49 @@
                     </table>
                 </div>
             </div>
+                </div>
+
+                <aside class="shelf-aside space-y-4">
+            {# Read-only mini floor plan. #}
+            <div id="miniMapCard" class="rounded-xl border border-slate-800/80 shadow-2xl overflow-hidden" style="background-color: var(--bg-card);">
+                <div class="p-4 border-b border-slate-800 flex items-center gap-2 flex-wrap">
+                    <i class="fa-solid fa-map-location-dot text-cyan-600 text-xs"></i>
+                    <h4 class="text-sm font-bold text-slate-200 tracking-wide">Floor Plan</h4>
+                    {# Floor picker, hidden with one floor. #}
+                    <select id="miniFloorPicker" onchange="switchMiniFloor(this.value)"
+                            class="hidden text-[11px] font-semibold rounded-md border border-slate-700 px-2 py-1"
+                            style="background-color: var(--bg-main); color: var(--text-primary);"
+                            aria-label="Choose which floor to show"></select>
+                    <span class="text-[10px] text-slate-500">click a shelf to find it below</span>
+                    <span id="miniMapNote" class="text-[10px] text-amber-500/90 ml-1"></span>
+                    <div class="ml-auto flex items-center gap-2">
+                        <button type="button" onclick="miniMapFit()" class="text-[10px] text-slate-400 hover:text-cyan-400 flex items-center gap-1"><i class="fa-solid fa-expand"></i> Fit</button>
+                        <a href="{% url 'floorplan_management' %}" class="text-[10px] text-slate-400 hover:text-cyan-400 flex items-center gap-1"><i class="fa-solid fa-pen-to-square"></i> Edit layout</a>
+                        <button type="button" onclick="toggleMiniMap()" id="miniMapToggle" class="text-[10px] text-slate-400 hover:text-cyan-400 flex items-center gap-1"><i class="fa-solid fa-chevron-up"></i> Hide</button>
+                    </div>
+                </div>
+                {# Deliberately short. #}
+                <div id="miniMap" style="height:260px;background:var(--bg-main);"></div>
+            </div>
+
+            <!-- SHELF ELEVATION -->
+            <!-- Front view of the bay. -->
+            <div id="elevationPanel" class="hidden rounded-xl border border-slate-800/80 shadow-2xl" style="background-color: var(--bg-card);">
+                <div class="p-4 border-b border-slate-800 flex items-center gap-2">
+                    <i class="fa-solid fa-bars-staggered text-cyan-600 text-xs"></i>
+                    <h4 class="text-sm font-bold text-slate-200 tracking-wide">Front view</h4>
+                    <span id="elevationName" class="text-[10px] text-slate-500"></span>
+                    <button type="button" onclick="hideElevation()" class="ml-auto text-[10px] text-slate-400 hover:text-cyan-400 flex items-center gap-1"><i class="fa-solid fa-xmark"></i> Close</button>
+                </div>
+                <div class="p-4">
+                    <div id="elevationBody"></div>
+                    <p id="elevationNote" class="text-[10px] text-slate-500 mt-3"></p>
+                </div>
+            </div>
+
+                </aside>
+            </div>
+
         </main>
     </div>
 
@@ -275,9 +367,14 @@
                     <label for="editName" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Name</label>
                     <input type="text" id="editName" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
                 </div>
-                <!-- Shelves only. Boards are otherwise added one dialog at a
-                     time, which for a five-level bay three bays wide is
-                     fifteen dialogs to say one thing. -->
+                {# Which room the shelf is filed under. #}
+                <div id="editRoomField" class="hidden space-y-1.5">
+                    <label for="editRoom" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Room</label>
+                    <select id="editRoom" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);"></select>
+                    <p id="editRoomNote" class="text-[10px] text-slate-500"></p>
+                </div>
+
+                <!-- Shelves only. -->
                 <div id="editGridFields" class="hidden space-y-2">
                     <div class="grid grid-cols-2 gap-3">
                         <div class="space-y-1.5">
@@ -297,9 +394,7 @@
                     </label>
                     <p id="editGridNote" class="text-[10px] text-slate-500"></p>
                 </div>
-                <!-- Which kind of board this is could be set when it was made
-                     and never afterwards, so a level recorded wrongly had to be
-                     deleted and remade, taking its books with it. -->
+                <!-- Level type. -->
                 <div id="editLevelKind" class="hidden space-y-2">
                     <label class="flex items-start gap-2 cursor-pointer">
                         <input type="checkbox" id="editIsTop" onchange="syncEditLevelKind()" class="accent-cyan-600 w-3.5 h-3.5 mt-0.5">
@@ -336,6 +431,129 @@
                 <button type="button" onclick="closeModal('bookModal')" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40" aria-label="Close"><i class="fa-solid fa-xmark text-sm"></i></button>
             </div>
             <div id="bookBody" class="text-xs text-slate-300 space-y-2"></div>
+        </div>
+    </div>
+
+    {# Move books between two boards. #}
+    <div id="moverModal" class="hidden fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
+        <div class="w-full max-w-6xl rounded-2xl border shadow-2xl flex flex-col my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color); max-height: 92vh;">
+            <div class="p-4 border-b border-slate-800 flex items-center gap-2 flex-wrap flex-shrink-0">
+                <div class="w-8 h-8 rounded-lg flex items-center justify-center text-sm flex-shrink-0 bg-violet-500/10 text-violet-400 border border-violet-500/25">
+                    <i class="fa-solid fa-right-left"></i>
+                </div>
+                <h3 class="text-sm font-bold text-slate-200 tracking-wide">Move books</h3>
+                <span class="text-[10px] text-slate-500">open a board on each side, then send books across</span>
+                <button type="button" onclick="swapPanes()" class="ml-auto text-[10px] text-slate-400 hover:text-cyan-400 flex items-center gap-1.5" title="Swap the two sides"><i class="fa-solid fa-arrow-right-arrow-left"></i> Swap sides</button>
+                <button type="button" onclick="closeModal('moverModal')" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40" aria-label="Close"><i class="fa-solid fa-xmark text-sm"></i></button>
+            </div>
+
+            <div class="p-4 overflow-y-auto">
+                <div class="mover">
+                    <!-- LEFT BOARD -->
+                    <div class="flex flex-col gap-2 min-w-0">
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <select id="paneLBoard" onchange="loadPane('L', this.value)" class="flex-1 min-w-0 rounded-lg px-2.5 py-2 text-[11px] text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                                <option value="">Choose a board…</option>
+                            </select>
+                            <span id="paneLCount" class="text-[10px] text-slate-500 whitespace-nowrap"></span>
+                        </div>
+                        {# Search books on this board. #}
+                        <input type="text" id="paneLSearch" oninput="filterPane('L', this.value)"
+                               placeholder="Search this list…"
+                               class="w-full rounded-lg px-2.5 py-1.5 text-[11px] text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700"
+                               style="background-color: var(--bg-input);">
+                        <div id="paneLList" class="pane-list">
+                            <p class="text-slate-600 text-xs p-4 text-center">Choose a board above.</p>
+                        </div>
+                        <div class="flex items-center gap-1.5 flex-wrap">
+                            <button type="button" onclick="selectAllIn('L')" class="text-[10px] font-semibold px-2 py-1 rounded-md border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/50">All</button>
+                            <button type="button" onclick="selectTail('L')" class="text-[10px] font-semibold px-2 py-1 rounded-md border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/50" title="From the last one you clicked to the bottom">To the end</button>
+                            <button type="button" onclick="clearPane('L')" class="text-[10px] font-semibold px-2 py-1 rounded-md border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/50">None</button>
+                            <button type="button" onclick="unshelfPane('L')" class="ml-auto text-[10px] font-semibold px-2 py-1 rounded-md border border-slate-800 text-amber-400/90 hover:bg-slate-800/50 flex items-center gap-1.5"><i class="fa-solid fa-box-open text-[9px]"></i> Take off shelf</button>
+                        </div>
+                    </div>
+
+                    <!-- THE CROSSING -->
+                    <div class="mover-arrows flex flex-col items-center justify-center gap-2">
+                        <button type="button" id="moveToR" onclick="movePane('L','R')" disabled title="Move the selected books to the board on the right" class="w-11 h-11 rounded-xl border border-violet-700/50 bg-violet-800/30 text-violet-300 hover:bg-violet-700/40 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center">
+                            <i class="fa-solid fa-arrow-right"></i>
+                        </button>
+                        <button type="button" id="moveToL" onclick="movePane('R','L')" disabled title="Move the selected books to the board on the left" class="w-11 h-11 rounded-xl border border-violet-700/50 bg-violet-800/30 text-violet-300 hover:bg-violet-700/40 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center">
+                            <i class="fa-solid fa-arrow-left"></i>
+                        </button>
+                    </div>
+
+                    <!-- RIGHT BOARD -->
+                    <div class="flex flex-col gap-2 min-w-0">
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <select id="paneRBoard" onchange="loadPane('R', this.value)" class="flex-1 min-w-0 rounded-lg px-2.5 py-2 text-[11px] text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                                <option value="">Choose a board…</option>
+                            </select>
+                            <span id="paneRCount" class="text-[10px] text-slate-500 whitespace-nowrap"></span>
+                        </div>
+                        {# Search books on this board. #}
+                        <input type="text" id="paneRSearch" oninput="filterPane('R', this.value)"
+                               placeholder="Search this list…"
+                               class="w-full rounded-lg px-2.5 py-1.5 text-[11px] text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700"
+                               style="background-color: var(--bg-input);">
+                        <div id="paneRList" class="pane-list">
+                            <p class="text-slate-600 text-xs p-4 text-center">Choose a board above.</p>
+                        </div>
+                        <div class="flex items-center gap-1.5 flex-wrap">
+                            <button type="button" onclick="selectAllIn('R')" class="text-[10px] font-semibold px-2 py-1 rounded-md border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/50">All</button>
+                            <button type="button" onclick="selectTail('R')" class="text-[10px] font-semibold px-2 py-1 rounded-md border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/50" title="From the last one you clicked to the bottom">To the end</button>
+                            <button type="button" onclick="clearPane('R')" class="text-[10px] font-semibold px-2 py-1 rounded-md border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/50">None</button>
+                            <button type="button" onclick="unshelfPane('R')" class="ml-auto text-[10px] font-semibold px-2 py-1 rounded-md border border-slate-800 text-amber-400/90 hover:bg-slate-800/50 flex items-center gap-1.5"><i class="fa-solid fa-box-open text-[9px]"></i> Take off shelf</button>
+                        </div>
+                    </div>
+                </div>
+
+                <p class="text-[10px] text-slate-500 mt-3 leading-relaxed">
+                    Click a book to select it, shift-click for a run. Books that cross land at
+                    the end of the board they arrive on, keeping the order they were in.
+                    <span class="text-slate-400">Take off shelf</span> leaves a book in the
+                    catalogue with its borrowing history, but on no board, where it is listed
+                    as Not shelved until it is put back. To change the order within one board,
+                    use Reorder.
+                </p>
+            </div>
+        </div>
+    </div>
+
+    {# Reorder books on one board. #}
+    <div id="reorderModal" class="hidden fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
+        <div class="w-full max-w-2xl rounded-2xl border shadow-2xl flex flex-col my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color); max-height: 92vh;">
+            <div class="p-4 border-b border-slate-800 flex items-center gap-2 flex-wrap flex-shrink-0">
+                <div class="w-8 h-8 rounded-lg flex items-center justify-center text-sm flex-shrink-0 bg-cyan-500/10 text-cyan-400 border border-cyan-500/25">
+                    <i class="fa-solid fa-arrow-down-1-9"></i>
+                </div>
+                <h3 class="text-sm font-bold text-slate-200 tracking-wide">Reorder board</h3>
+                <span id="reorderWhere" class="text-[10px] text-slate-500"></span>
+                <button type="button" onclick="closeModal('reorderModal')" class="ml-auto w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40" aria-label="Close"><i class="fa-solid fa-xmark text-sm"></i></button>
+            </div>
+
+            <div class="p-4 flex flex-col gap-3 overflow-y-auto">
+                <div class="flex items-center gap-1.5 flex-wrap">
+                    <span class="text-[10px] uppercase font-bold tracking-wider text-slate-500 mr-1">Sort by</span>
+                    <button type="button" onclick="sortReorder('call_number')" class="text-[10px] font-semibold px-2 py-1 rounded-md border border-slate-800 text-slate-300 hover:bg-slate-800/60" title="The order a library actually shelves in">Call number</button>
+                    <button type="button" onclick="sortReorder('title')" class="text-[10px] font-semibold px-2 py-1 rounded-md border border-slate-800 text-slate-300 hover:bg-slate-800/60">Title</button>
+                    <button type="button" onclick="sortReorder('author')" class="text-[10px] font-semibold px-2 py-1 rounded-md border border-slate-800 text-slate-300 hover:bg-slate-800/60">Author</button>
+                    <button type="button" onclick="reverseReorder()" class="text-[10px] font-semibold px-2 py-1 rounded-md border border-slate-800 text-slate-300 hover:bg-slate-800/60"><i class="fa-solid fa-arrow-up-a-z text-[9px] mr-1"></i>Reverse</button>
+                    <button type="button" onclick="resetReorder()" class="ml-auto text-[10px] font-semibold px-2 py-1 rounded-md border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/50">Start over</button>
+                </div>
+
+                <div id="reorderList" class="pane-list" style="height: 46vh;"></div>
+
+                <p class="text-[10px] text-slate-500 leading-relaxed">
+                    Drag a book to move it. Position 1 is the end of the board you reach first
+                    walking up to it. <span id="reorderDirty" class="text-amber-400 font-semibold"></span>
+                </p>
+            </div>
+
+            <div class="p-4 border-t border-slate-800 flex items-center justify-end gap-2.5 flex-shrink-0">
+                <button type="button" onclick="closeModal('reorderModal')" class="px-4 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:text-slate-100 hover:bg-slate-800/40 font-semibold text-[11px] min-w-[92px]">Cancel</button>
+                <button type="button" id="reorderSave" onclick="saveReorder()" disabled class="bg-cyan-700 hover:bg-cyan-600 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold px-4 py-2.5 rounded-lg flex items-center gap-2 text-[11px]"><i class="fa-solid fa-check text-xs"></i> Save the order</button>
+            </div>
         </div>
     </div>
 
@@ -391,18 +609,27 @@
             assignBooks: "{% url 'assign_books_to_level' %}",
             setShelfGrid: "{% url 'set_shelf_grid' %}",
             reorderBooks: "{% url 'reorder_books_on_level' %}",
+            moveBooks: "{% url 'move_books' %}",
+            boardBooks: "{% url 'get_board_books' %}",
+            fixShelfRooms: "{% url 'fix_shelf_rooms' %}",
         };
         const TYPE = {
             floorplan: { icon: 'fa-layer-group', color: 'text-cyan-400', child: 'room' },
             room:       { icon: 'fa-door-open',  color: 'text-amber-400', child: 'shelf',      toggle: 'room',       edit: U.editRoom,   del: U.delRoom,   idField: 'room_id',        word: 'Room' },
             shelf:      { icon: 'fa-box',         color: 'text-purple-400', child: 'shelflevel', toggle: 'shelf',      edit: U.editShelf,  del: U.delShelf,  idField: 'shelf_id',       word: 'Shelf' },
+            // A bay divided down its width.
+            shelfcolumn: { icon: 'fa-table-columns', color: 'text-indigo-400', word: 'Column' },
             shelflevel: { icon: 'fa-bars-staggered', color: 'text-blue-400', toggle: 'shelflevel', edit: U.editLevel, del: U.delLevel,  idField: 'shelf_level_id', word: 'Shelf Level' },
-            book:       { icon: 'fa-book',        color: 'text-slate-400', word: 'Book' },
         };
         const childWord = { room: 'Room', shelf: 'Shelf', shelflevel: 'Shelf Level' };
 
         let flatData = [];
         let addTarget = null, editTarget = null;
+
+        // The structure as last loaded.
+        let treeNodes = [];
+        // How many books are on no board at all, as of this page load.
+        let unshelvedCount = {{ unshelved_count|default:0 }};
 
         function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
         function val(id) { return document.getElementById(id).value; }
@@ -429,48 +656,44 @@
             return '<span class="border px-2 py-0.5 rounded text-[10px] font-bold ' + (map[s] || map['Lost']) + '">' + esc(s) + '</span>';
         }
 
-        // ── Tree ──
+        // Tree
         function renderNode(node, depth) {
             const t = TYPE[node.type] || {};
-            const isBook = node.type === 'book';
+            const isBoard = node.type === 'shelflevel';
             const hasKids = node.children && node.children.length;
             const pad = depth * 18 + 10;
-            const inactive = (!isBook && node.is_active === false) ? ' op50' : '';
-            const open = !isBook && hasKids && depth < 2;
+            const inactive = (node.is_active === false) ? ' op50' : '';
+            const open = hasKids && depth < 2;
 
-            let right = '';
-            if (isBook) {
-                right = '<div class="spacer flex items-center gap-2">' + statusBadge(node.status)
-                    + '<button class="tbtn view" title="View" onclick="viewBook(' + node.id + ')"><i class="fa-solid fa-eye"></i></button></div>';
-            } else {
-                let a = '';
-                if (node.type === 'floorplan') a += '<button class="tbtn view" title="Show this floor on the plan above" onclick="switchMiniFloor(' + node.id + ')"><i class="fa-solid fa-map-location-dot"></i></button>';
-                if (t.child) a += '<button class="tbtn add" title="Add ' + childWord[t.child] + '" onclick="openAdd(\'' + node.type + '\',' + node.id + ')"><i class="fa-solid fa-plus"></i></button>';
-                if (node.type === 'shelflevel') a += '<button class="tbtn view" title="Show on the front view" onclick="showElevation(' + node.id + ')"><i class="fa-solid fa-bars-staggered"></i></button>';
-                if (node.type === 'shelflevel') a += '<button class="tbtn add" title="Add Books" onclick="openPlacement(' + node.id + ', this)"><i class="fa-solid fa-book-medical"></i></button>';
-                if (t.edit) a += '<button class="tbtn edit" title="Rename" onclick="openEdit(\'' + node.type + '\',' + node.id + ',this)"><i class="fa-solid fa-pen"></i></button>';
-                if (t.del) a += '<button class="tbtn del" title="Delete" onclick="delNode(\'' + node.type + '\',' + node.id + ')"><i class="fa-solid fa-trash-can"></i></button>';
-                let tog = '';
-                if (t.toggle) tog = '<label class="sw"><input type="checkbox" ' + (node.is_active ? 'checked' : '') + ' onchange="tToggle(this,\'' + t.toggle + '\',' + node.id + ')"><span class="tk"></span></label>';
-                right = '<div class="spacer flex items-center gap-2"><div class="tactions">' + a + '</div>' + tog + '</div>';
+            let a = '';
+            if (node.type === 'floorplan') a += '<button class="tbtn view" title="Show this floor on the plan above" onclick="switchMiniFloor(' + node.id + ')"><i class="fa-solid fa-map-location-dot"></i></button>';
+            if (t.child) a += '<button class="tbtn add" title="Add ' + childWord[t.child] + '" onclick="openAdd(\'' + node.type + '\',' + node.id + ')"><i class="fa-solid fa-plus"></i></button>';
+            if (isBoard) a += '<button class="tbtn view" title="Show on the front view" onclick="showElevation(' + node.id + ')"><i class="fa-solid fa-bars-staggered"></i></button>';
+            if (isBoard) a += '<button class="tbtn add" title="Add Books" onclick="openPlacement(' + node.id + ', this)"><i class="fa-solid fa-book-medical"></i></button>';
+            // Move and reorder buttons for a board.
+            if (isBoard) {
+                a += '<button class="tbtn pick" title="Move books off or onto this board" onclick="openMover(' + node.id + ')"><i class="fa-solid fa-right-left"></i></button>';
+                a += '<button class="tbtn pick" title="Change the order of this board" onclick="openReorder(' + node.id + ')"><i class="fa-solid fa-arrow-down-1-9"></i></button>';
             }
+            if (t.edit) a += '<button class="tbtn edit" title="Rename" onclick="openEdit(\'' + node.type + '\',' + node.id + ',this)"><i class="fa-solid fa-pen"></i></button>';
+            if (t.del) a += '<button class="tbtn del" title="Delete" onclick="delNode(\'' + node.type + '\',' + node.id + ')"><i class="fa-solid fa-trash-can"></i></button>';
+            let tog = '';
+            if (t.toggle) tog = '<label class="sw"><input type="checkbox" ' + (node.is_active ? 'checked' : '') + ' onchange="tToggle(this,\'' + t.toggle + '\',' + node.id + ')"><span class="tk"></span></label>';
+            const right = '<div class="spacer flex items-center gap-2"><div class="tactions">' + a + '</div>' + tog + '</div>';
 
-            const meta = (node.type === 'shelflevel')
+            // How full it is, on every container.
+            const meta = (typeof node.book_count === 'number')
                 ? '<span class="tmeta">· ' + node.book_count + ' book' + (node.book_count === 1 ? '' : 's') + '</span>'
-                : (isBook && node.author) ? '<span class="tmeta">· ' + esc(node.author) + '</span>' : '';
-            const chev = (isBook || !hasKids)
+                : '';
+            const chev = !hasKids
                 ? '<span class="chev leaf">▶</span>'
                 : '<span class="chev' + (open ? ' open' : '') + '" onclick="tChev(this)">▶</span>';
             const data = 'data-name="' + esc(node.name || '') + '" data-label="' + esc(node.category || '') + '" data-level="' + (node.level_number || '') + '"'
                 + ' data-type="' + node.type + '" data-id="' + node.id + '"';
 
             let html = '<div class="tnode">';
-            // Books drag; a level accepts them. Everything else is inert, so a
-            // stray drag cannot rearrange rooms or shelves by accident.
-            const drag = isBook ? ' draggable="true"' : '';
-            html += '<div class="trow' + inactive + (isBook ? ' bookrow' : '')
-                 + (node.type === 'shelflevel' ? ' levelrow' : '')
-                 + '" style="padding-left:' + pad + 'px"' + drag + ' ' + data + '>';
+            html += '<div class="trow' + inactive + (isBoard ? ' levelrow' : '')
+                 + '" style="padding-left:' + pad + 'px" ' + data + '>';
             html += chev;
             html += '<i class="fa-solid ' + (t.icon || 'fa-file') + ' ' + (t.color || 'text-slate-400') + ' text-xs"></i>';
             html += '<span class="tname">' + esc(node.name || '') + '</span>' + meta;
@@ -484,38 +707,9 @@
             return html;
         }
 
-        // Dragging a book: within its level to reorder it, onto another level
-        // to move it there. The order is sent as a whole list rather than as
-        // "book X now sits at 4", because a position only means anything
-        // relative to the others and two half-applied moves would contradict.
-        let dragBookId = null;
+        // Books were dragged between rows of this tree to reorder and to move them.
 
-        function levelOf(row) {
-            const node = row.closest('.tnode');
-            const parentKids = node && node.parentElement;
-            const levelNode = parentKids && parentKids.closest('.tnode');
-            const levelRow = levelNode && levelNode.querySelector(':scope > .trow');
-            return (levelRow && levelRow.dataset.type === 'shelflevel') ? levelRow : null;
-        }
-
-        function booksUnder(levelRow) {
-            const node = levelRow.closest('.tnode');
-            const kids = node.querySelector(':scope > .tkids');
-            if (!kids) return [];
-            return Array.prototype.slice.call(kids.children)
-                .map(function (n) { return n.querySelector(':scope > .trow'); })
-                .filter(function (r) { return r && r.dataset.type === 'book'; });
-        }
-
-        function clearDropMarks() {
-            document.querySelectorAll('.drop-before, .drop-after, .drop-into')
-                .forEach(function (el) {
-                    el.classList.remove('drop-before', 'drop-after', 'drop-into');
-                });
-        }
-
-        // The bay drawn from the front. Levels run bottom-up because that is
-        // how the physical thing is numbered and how somebody reads it.
+        // The bay drawn from the front.
         let elevationShelfId = null;
 
         window.hideElevation = function () {
@@ -532,9 +726,7 @@
             return (shelfRow && shelfRow.dataset.type === 'shelf') ? shelfNode : null;
         }
 
-        // Read off the tree rather than fetched: the tree already holds every
-        // level of every shelf, and a second source could disagree with what
-        // is on screen.
+        // Read levels from the tree.
         function levelsOfShelfNode(shelfNode) {
             const kids = shelfNode.querySelector(':scope > .tkids');
             if (!kids) return [];
@@ -551,6 +743,20 @@
                     };
                 });
         }
+
+        // Clicking a shelf shows that shelf.
+        window.showElevationForShelf = function (shelfId) {
+            const row = document.querySelector(
+                '.trow[data-type="shelf"][data-id="' + shelfId + '"]');
+            const node = row && row.closest('.tnode');
+            const levels = node ? levelsOfShelfNode(node) : [];
+            if (!levels.length) { hideElevation(); return; }
+            // Open on the fullest board.
+            const busiest = levels.slice().sort(function (a, b) {
+                return (parseInt(b.books, 10) || 0) - (parseInt(a.books, 10) || 0);
+            })[0];
+            showElevation(busiest.id);
+        };
 
         window.showElevation = function (levelId) {
             const shelfNode = shelfNodeFor(levelId);
@@ -586,7 +792,11 @@
                             + (books ? books + ' book' + (books === 1 ? '' : 's') : '\u2014')
                             + '</div>';
                     }).join('');
-                    return '<div class="elev-row"><span class="elev-rownum">Level ' + n + '</span>'
+                    // Board name without the bay.
+                    const boardName = (byLevel[n][0].name || ('Level ' + n))
+                        .replace(/,\s*Column\s*\d+$/i, '');
+                    return '<div class="elev-row"><span class="elev-rownum">'
+                         + esc(boardName) + '</span>'
                          + cells + '</div>';
                 }).join('') + '</div>';
 
@@ -597,76 +807,16 @@
             document.getElementById('elevationPanel').classList.remove('hidden');
         };
 
-        function wireTreeDragging() {
-            const tree = document.getElementById('treeRoot');
-            if (!tree || tree.dataset.dragWired === '1') return;
-            tree.dataset.dragWired = '1';
-
-            tree.addEventListener('dragstart', function (e) {
-                const row = e.target.closest && e.target.closest('.bookrow');
-                if (!row) return;
-                dragBookId = row.dataset.id;
-                row.classList.add('dragging');
-                e.dataTransfer.effectAllowed = 'move';
-                // Firefox refuses to start a drag with nothing on the transfer.
-                e.dataTransfer.setData('text/plain', dragBookId);
-            });
-
-            tree.addEventListener('dragend', function () {
-                document.querySelectorAll('.dragging')
-                    .forEach(function (el) { el.classList.remove('dragging'); });
-                clearDropMarks();
-                dragBookId = null;
-            });
-
-            tree.addEventListener('dragover', function (e) {
-                if (!dragBookId) return;
-                const book = e.target.closest && e.target.closest('.bookrow');
-                const level = e.target.closest && e.target.closest('.levelrow');
-                if (!book && !level) return;
-                e.preventDefault();
-                e.dataTransfer.dropEffect = 'move';
-                clearDropMarks();
-                if (book) {
-                    if (book.dataset.id === dragBookId) return;
-                    const box = book.getBoundingClientRect();
-                    book.classList.add((e.clientY - box.top) < box.height / 2
-                        ? 'drop-before' : 'drop-after');
-                } else {
-                    level.classList.add('drop-into');
-                }
-            });
-
-            tree.addEventListener('drop', async function (e) {
-                if (!dragBookId) return;
-                e.preventDefault();
-                const book = e.target.closest && e.target.closest('.bookrow');
-                const levelRow = book ? levelOf(book)
-                                      : (e.target.closest && e.target.closest('.levelrow'));
-                clearDropMarks();
-                if (!levelRow) return;
-
-                const order = booksUnder(levelRow)
-                    .map(function (r) { return r.dataset.id; })
-                    .filter(function (id) { return id !== dragBookId; });
-
-                if (book && book.dataset.id !== dragBookId) {
-                    const box = book.getBoundingClientRect();
-                    const before = (e.clientY - box.top) < box.height / 2;
-                    const at = order.indexOf(book.dataset.id);
-                    order.splice(before ? at : at + 1, 0, dragBookId);
-                } else {
-                    // Dropped on the level itself: it goes to the end.
-                    order.push(dragBookId);
-                }
-
-                const r = await post(U.reorderBooks, {
-                    shelf_level_id: levelRow.dataset.id,
-                    book_ids: order.join(','),
-                });
-                if (!r.success) { alert(r.error || 'Could not save the new order'); return; }
-                dragBookId = null;
-                loadTree();
+        // Delegated click handler.
+        function wireShelfClicks() {
+            const host = document.getElementById('treeBody') || document.getElementById('treeView');
+            if (!host || host.dataset.shelfClicks) return;
+            host.dataset.shelfClicks = '1';
+            host.addEventListener('click', function (e) {
+                // Let buttons and toggles keep their own action.
+                if (e.target.closest('.chev, .tbtn, .sw, button, input, a')) return;
+                const row = e.target.closest('.trow[data-type="shelf"]');
+                if (row) showElevationForShelf(row.dataset.id);
             });
         }
 
@@ -679,13 +829,9 @@
         }
 
 
-        // ── Mini floor plan ─────────────────────────────────────────────
-        // Read-only on purpose: this page is where the hierarchy is managed,
-        // and a second editable canvas would be two places to change the same
-        // thing. Clicking a shelf here just finds it in the tree.
+        // Mini floor plan.
         let miniMap = null, miniH = 0, miniShelves = {}, miniBounds = null;
-        // Which storey the little plan is showing. Null until the tree says which
-        // floors exist, at which point it settles on the lowest one in service.
+        // Which storey the little plan is showing.
         let miniFloorId = null;
         let floorList = [];
 
@@ -701,8 +847,7 @@
             });
         }
 
-        // The floors come from the tree, which is the one place that already knows
-        // which plans are in service and what each storey is called.
+        // Floors from the tree.
         function buildMiniFloorPicker() {
             const picker = document.getElementById('miniFloorPicker');
             if (!picker) return;
@@ -712,10 +857,7 @@
                      + (f.id === miniFloorId ? ' selected' : '') + '>'
                      + esc(f.name) + '</option>';
             }).join('');
-            // Set the value as well as the attribute: once a select has been
-            // touched, the browser keeps the user's choice and ignores `selected`
-            // on freshly written options, so the box would say one floor while
-            // the map drew another.
+            // Set the select value too.
             picker.value = String(miniFloorId);
             picker.classList.remove('hidden');
         }
@@ -742,9 +884,7 @@
             }
             document.getElementById('miniMapCard').classList.remove('hidden');
 
-            // Torn down and rebuilt rather than cleared: Leaflet keeps the old
-            // canvas bound to the container, and drawing a second floor into it
-            // stacks two storeys on one map.
+            // Rebuild the map for a new floor.
             if (miniMap) { miniMap.remove(); miniMap = null; }
             miniShelves = {};
             miniBounds = null;
@@ -764,7 +904,7 @@
             (d.rooms || []).forEach(function (r) {
                 if (!r.geometry || r.geometry.length < 3) return;
                 L.polygon(r.geometry.map(function (pt) { return miniToLatLng(pt[0], pt[1]); }), {
-                    color: strong, weight: 1.5, fillColor: accent, fillOpacity: 0.10,
+                    color: strong, weight: 2.5, fillColor: accent, fillOpacity: 0.10,
                     interactive: false,
                 }).addTo(miniMap).bindTooltip(r.name || 'Room', { direction: 'top', sticky: true });
             });
@@ -772,7 +912,7 @@
             (d.obstacles || []).forEach(function (o) {
                 if (!o.geometry || o.geometry.length < 3) return;
                 L.polygon(o.geometry.map(function (pt) { return miniToLatLng(pt[0], pt[1]); }), {
-                    color: '#b45309', weight: 1.2, fillColor: '#b45309', fillOpacity: 0.18,
+                    color: '#b45309', weight: 2, fillColor: '#b45309', fillOpacity: 0.18,
                     interactive: false,
                 }).addTo(miniMap).bindTooltip(o.label || 'Furniture',
                                               { direction: 'top', sticky: true });
@@ -782,17 +922,14 @@
             (d.shelves || []).forEach(function (sh) {
                 if (!sh.placed) { unplaced += 1; return; }
                 placed += 1;
-                // The shape it was drawn as, not a rectangle standing in for it.
-                // A corner unit traced round a wall showed here as a plain box,
-                // so the two views of one library disagreed about its shape.
+                // Draw the shelf's real outline.
                 const outline = (sh.footprint && sh.footprint.length >= 3)
                     ? sh.footprint.map(function (pt) { return miniToLatLng(pt[0], pt[1]); })
                     : miniShelfCorners(sh.map_x, sh.map_y, sh.rotation, sh.width, sh.depth);
-                // And the same three colours the floor plan uses, so a table
-                // that holds books is not mistaken for a bookcase here either.
+                // Same colours as the floor plan.
                 const tint = (sh.kind && sh.kind !== 'Shelf') ? '#0f766e' : '#a855f7';
                 const poly = L.polygon(outline, {
-                        color: tint, weight: 1.5, fillColor: tint, fillOpacity: 0.35,
+                        color: tint, weight: 3, fillColor: tint, fillOpacity: 0.45,
                     }).addTo(miniMap);
                 poly.bindTooltip(sh.name || ('Shelf #' + sh.shelf_id),
                                  { direction: 'top', sticky: true });
@@ -800,8 +937,7 @@
                 miniShelves[sh.shelf_id] = poly;
             });
 
-            // A shelf in the list but not on the plan is the thing this panel is
-            // most likely to expose, so it says so rather than just omitting it.
+            // Say when a shelf is not on the plan.
             note.textContent = unplaced
                 ? unplaced + ' shelf/shelves not placed on the plan yet'
                 : (placed || (d.rooms || []).length ? '' : 'Nothing drawn on this floor yet');
@@ -820,10 +956,7 @@
                 miniMap.setView(miniToLatLng((d.canvas_width || 1000) / 2, miniH / 2), -1);
             }
 
-            // The tree is rendered just before this runs and changes the page
-            // height as it does, so Leaflet can measure the container before the
-            // layout settles and then draw everything outside the visible box --
-            // a card that looks empty with the geometry sitting just off-screen.
+            // Resize after the layout settles.
             setTimeout(function () {
                 if (!miniMap) return;
                 miniMap.invalidateSize();
@@ -846,14 +979,13 @@
             if (hidden && miniMap) setTimeout(function () { miniMap.invalidateSize(); miniMapFit(); }, 60);
         }
 
-        // ── Clicking a shelf on the plan finds it in the structure ──────
+        // Clicking a shelf on the plan selects it in the tree
         function focusShelf(shelfId, poly) {
             if (currentView !== 'tree') switchView('tree');
 
             const row = document.querySelector('.trow[data-type="shelf"][data-id="' + shelfId + '"]');
             if (!row) {
-                // Drawn on the plan but missing from the tree, which means its
-                // floor is not in service.
+                // Drawn on the plan but missing from the tree, which means its floor is not in service.
                 document.getElementById('miniMapNote').textContent =
                     'That shelf is not in the structure below.';
                 return;
@@ -874,9 +1006,9 @@
             flashRow(row);
             if (poly) {
                 const original = poly.options.color;
-                poly.setStyle({ color: '#f59e0b', weight: 3, fillOpacity: 0.55 });
+                poly.setStyle({ color: '#f59e0b', weight: 5, fillOpacity: 0.7 });
                 setTimeout(function () {
-                    poly.setStyle({ color: original, weight: 1.5, fillOpacity: 0.35 });
+                    poly.setStyle({ color: original, weight: 3, fillOpacity: 0.45 });
                 }, 1600);
             }
         }
@@ -895,9 +1027,15 @@
                 root.innerHTML = '<div class="text-slate-500 text-sm p-4">No active floor plan or structure yet. Activate a floor plan and place rooms/shelves on the map first.</div>';
                 return;
             }
+            treeNodes = d.tree;
+            unshelvedCount = d.unshelved || 0;
+            paintUnshelvedButton();
+
             let html = '';
             d.tree.forEach(function (n) { html += renderNode(n, 0); });
             root.innerHTML = html;
+            // Rebuild the mover's board pickers.
+            buildBoardPickers();
 
             // The plan beside the tree follows the same set of floors.
             floorList = d.tree.map(function (n) {
@@ -905,10 +1043,412 @@
             });
             if (!miniFloorId && floorList.length) miniFloorId = floorList[0].id;
             buildMiniFloorPicker();
-            // The listeners live on the container, not the rows, so they are
-            // wired once and survive every re-render of the tree beneath them.
-            wireTreeDragging();
+            // Listeners on the container.
+            wireShelfClicks();
         }
+
+        // Book mover.
+        const panes = {
+            L: { level: null, books: [], sel: new Set(), anchor: null },
+            R: { level: null, books: [], sel: new Set(), anchor: null },
+        };
+
+        // Every board in the library, for the two pickers.
+        function buildBoardPickers() {
+            let html = '<option value="">Choose a board…</option>';
+            // Unshelved books first.
+            if (unshelvedCount > 0) {
+                html += '<option value="none">Not shelved (' + unshelvedCount + ')</option>';
+            }
+            (function walk(nodes, room, shelf) {
+                nodes.forEach(function (n) {
+                    if (n.type === 'room') { walk(n.children || [], n, null); return; }
+                    if (n.type === 'shelf') { walk(n.children || [], room, n); return; }
+                    if (n.type === 'shelfcolumn') { walk(n.children || [], room, shelf); return; }
+                    if (n.type === 'shelflevel' && shelf) {
+                        // Include the column in the option name.
+                        const col = n.column_number ? ', Column ' + n.column_number : '';
+                        html += '<option value="' + n.id + '">'
+                             + esc(shelf.name) + ' · ' + esc(n.name) + esc(col)
+                             + ' (' + (n.book_count || 0) + ')</option>';
+                        return;
+                    }
+                    if (n.children) walk(n.children, room, shelf);
+                });
+            })(treeNodes, null, null);
+
+            ['L', 'R'].forEach(function (side) {
+                const sel = document.getElementById('pane' + side + 'Board');
+                const keep = panes[side].level;
+                sel.innerHTML = html;
+                if (keep) sel.value = String(keep);
+            });
+        }
+
+        // Open the mover.
+        window.openMover = function (levelId) {
+            openModal('moverModal');
+            if (levelId) loadPane('L', levelId);
+        };
+
+        window.loadPane = async function (side, levelId) {
+            const pane = panes[side];
+            const id = String(levelId || '');
+            if (!id) {
+                pane.level = null; pane.books = []; pane.sel.clear(); pane.anchor = null;
+                renderPane(side);
+                return;
+            }
+            const d = await getJSON(U.boardBooks + '?level=' + encodeURIComponent(id));
+            if (!d.success) { alert(d.error || 'That board could not be opened.'); return; }
+            pane.level = d.level;              // a board id, or the string 'none'
+            pane.books = d.books;
+            pane.sel.clear();
+            pane.anchor = null;
+            pane.query = '';
+            const box = document.getElementById('pane' + side + 'Search');
+            if (box) box.value = '';
+            pane.name = d.shelf + ' · ' + d.label;
+            document.getElementById('pane' + side + 'Board').value = String(d.level);
+            renderPane(side);
+        };
+
+        function renderPane(side) {
+            const pane = panes[side];
+            const list = document.getElementById('pane' + side + 'List');
+            const count = document.getElementById('pane' + side + 'Count');
+
+            if (!pane.level) {
+                list.innerHTML = '<p class="text-slate-600 text-xs p-4 text-center">'
+                    + 'Choose a board, or press the ' + (side === 'L' ? 'left' : 'right')
+                    + ' arrow on one in the structure above.</p>';
+                count.textContent = '';
+                paintArrows();
+                return;
+            }
+            // What the search box has left showing.
+            const q = (pane.query || '').trim().toLowerCase();
+            pane.view = q
+                ? pane.books.filter(function (b) {
+                    return (b.title + ' ' + b.author + ' ' + b.call_number)
+                           .toLowerCase().indexOf(q) !== -1;
+                  })
+                : pane.books;
+
+            const loose = pane.level === 'none';
+            if (!pane.view.length) {
+                list.innerHTML = '<p class="text-slate-600 text-xs p-4 text-center">'
+                    + (pane.books.length ? 'Nothing here matches that.'
+                       : loose ? 'Every book is on a shelf.' : 'This board is empty.')
+                    + '</p>';
+            } else {
+                list.innerHTML = pane.view.map(function (b, i) {
+                    return '<div class="brow' + (pane.sel.has(b.book_id) ? ' on' : '') + '"'
+                         + ' data-id="' + b.book_id + '" data-i="' + i + '">'
+                         // A book on no board has no position along one, and a number here would invent one.
+                         + '<span class="pos">' + (loose ? '·' : (b.slot || (i + 1))) + '</span>'
+                         + '<span class="btitle">' + esc(b.title) + '</span>'
+                         + '<span class="bmeta">' + esc(b.call_number || b.author || '') + '</span>'
+                         + statusBadge(b.status) + '</div>';
+                }).join('');
+            }
+            paintPaneSelection(side);
+        }
+
+        // Selecting is not re-rendering.
+        function paintPaneSelection(side) {
+            const pane = panes[side];
+            const list = document.getElementById('pane' + side + 'List');
+            list.querySelectorAll('.brow').forEach(function (row) {
+                row.classList.toggle('on', pane.sel.has(Number(row.dataset.id)));
+            });
+            const n = pane.sel.size;
+            const shown = (pane.view || pane.books).length;
+            const total = pane.books.length;
+            document.getElementById('pane' + side + 'Count').textContent =
+                pane.level === null ? ''
+                : (shown === total ? total + ' book' + (total === 1 ? '' : 's')
+                                   : shown + ' of ' + total + ' shown')
+                  + (n ? ' · ' + n + ' selected' : '');
+            paintArrows();
+        }
+
+        function paintArrows() {
+            // Enable a direction only when a move is possible.
+            document.getElementById('moveToR').disabled =
+                !(panes.L.sel.size && panes.R.level !== null && panes.L.level !== panes.R.level);
+            document.getElementById('moveToL').disabled =
+                !(panes.R.sel.size && panes.L.level !== null && panes.R.level !== panes.L.level);
+        }
+
+        // One listener per pane.
+        ['L', 'R'].forEach(function (side) {
+            const list = document.getElementById('pane' + side + 'List');
+
+            list.addEventListener('click', function (e) {
+                const row = e.target.closest('.brow');
+                if (!row) return;
+                const pane = panes[side];
+                const i = Number(row.dataset.i);
+                const id = Number(row.dataset.id);
+
+                if (e.shiftKey && pane.anchor !== null) {
+                    // A run.
+                    const rows = pane.view || pane.books;
+                    const [from, to] = pane.anchor < i ? [pane.anchor, i] : [i, pane.anchor];
+                    for (let k = from; k <= to; k++) pane.sel.add(rows[k].book_id);
+                } else {
+                    if (pane.sel.has(id)) pane.sel.delete(id); else pane.sel.add(id);
+                    pane.anchor = i;
+                }
+                paintPaneSelection(side);
+            });
+
+            // Reordering was a drag inside this list.
+        });
+
+        // Everything on screen, which under a search is what was searched for.
+        function paintUnshelvedButton() {
+            const btn = document.getElementById('unshelvedBtn');
+            if (!btn) return;
+            btn.classList.toggle('hidden', unshelvedCount === 0);
+            const label = document.getElementById('unshelvedCount');
+            if (label) label.textContent = unshelvedCount + ' not on a shelf';
+        }
+
+        window.filterPane = function (side, text) {
+            panes[side].query = text || '';
+            // Reset the anchor if its row is hidden.
+            panes[side].anchor = null;
+            renderPane(side);
+        };
+
+        window.selectAllIn = function (side) {
+            const pane = panes[side];
+            (pane.view || pane.books).forEach(function (b) { pane.sel.add(b.book_id); });
+            paintPaneSelection(side);
+        };
+        window.clearPane = function (side) {
+            panes[side].sel.clear();
+            panes[side].anchor = null;
+            paintPaneSelection(side);
+        };
+        // From the last book clicked to the bottom of the board.
+        window.selectTail = function (side) {
+            const pane = panes[side];
+            const rows = pane.view || pane.books;
+            if (!rows.length) return;
+            const from = pane.anchor === null ? 0 : pane.anchor;
+            for (let k = from; k < rows.length; k++) pane.sel.add(rows[k].book_id);
+            paintPaneSelection(side);
+        };
+
+        window.swapPanes = function () {
+            const l = panes.L.level, r = panes.R.level;
+            loadPane('L', r || '');
+            loadPane('R', l || '');
+        };
+
+        window.movePane = async function (from, to) {
+            const src = panes[from], dst = panes[to];
+            if (!src.sel.size || dst.level === null) return;
+            // Keep shelf order.
+            const ids = src.books.filter(function (b) { return src.sel.has(b.book_id); })
+                                 .map(function (b) { return b.book_id; });
+            await sendMove(ids, dst.level);
+        };
+
+        window.unshelfPane = async function (side) {
+            const pane = panes[side];
+            if (!pane.sel.size) return;
+            const n = pane.sel.size;
+            const ok = await AylaDialog.confirm(
+                'Take ' + n + ' book' + (n === 1 ? '' : 's') + ' off the shelf?',
+                { title: 'Take off shelf',
+                  detail: 'They stay in the catalogue and keep their loan history. '
+                        + 'They will be listed as not shelved until they are put back.',
+                  confirmLabel: 'Take off shelf', danger: false });
+            if (!ok) return;
+            const ids = pane.books.filter(function (b) { return pane.sel.has(b.book_id); })
+                                  .map(function (b) { return b.book_id; });
+            await sendMove(ids, 'none');
+        };
+
+        async function sendMove(ids, level) {
+            const r = await post(U.moveBooks, { ids: ids.join(','), level: level });
+            if (!r.success) { alert(r.error || 'The books could not be moved.'); return; }
+            alert(r.message);
+            // Reload after moving.
+            const wasShowing = elevationShelfId;
+            const l = panes.L.level, rlvl = panes.R.level;
+            await loadTree();
+            if (l) await loadPane('L', l);
+            if (rlvl) await loadPane('R', rlvl);
+            if (wasShowing) showElevationForShelf(wasShowing);
+        }
+
+        // Reorder a board (saved on Save).
+        const reorder = { level: null, books: [], original: [] };
+
+        window.openReorder = async function (levelId) {
+            // Pick a board in the mover first.
+            if (!levelId) {
+                const boards = boardOptions();
+                if (!boards.length) { alert('There are no boards to reorder yet.'); return; }
+                openModal('reorderModal');
+                document.getElementById('reorderWhere').textContent = '';
+                document.getElementById('reorderList').innerHTML = boardChooserHTML(boards);
+                document.getElementById('reorderSave').disabled = true;
+                document.getElementById('reorderDirty').textContent = '';
+                return;
+            }
+            const d = await getJSON(U.boardBooks + '?level=' + encodeURIComponent(levelId));
+            if (!d.success) { alert(d.error || 'That board could not be opened.'); return; }
+            reorder.level = d.level;
+            reorder.books = d.books.slice();
+            reorder.original = d.books.map(function (b) { return b.book_id; });
+            document.getElementById('reorderWhere').textContent = d.shelf + ' · ' + d.label;
+            openModal('reorderModal');
+            renderReorder();
+        };
+
+        function boardOptions() {
+            const out = [];
+            (function walk(nodes, shelf) {
+                nodes.forEach(function (n) {
+                    if (n.type === 'shelf') { walk(n.children || [], n); return; }
+                    if (n.type === 'shelfcolumn') { walk(n.children || [], shelf); return; }
+                    if (n.type === 'shelflevel' && shelf) {
+                        const col = n.column_number ? ', Column ' + n.column_number : '';
+                        out.push({ id: n.id, books: n.book_count || 0,
+                                   name: shelf.name + ' · ' + n.name + col });
+                        return;
+                    }
+                    if (n.children) walk(n.children, shelf);
+                });
+            })(treeNodes, null);
+            return out;
+        }
+
+        function boardChooserHTML(boards) {
+            return '<div class="p-2">'
+                + '<p class="text-[11px] text-slate-400 px-2 py-2">Which board?</p>'
+                + boards.map(function (b) {
+                    return '<div class="brow" onclick="openReorder(' + b.id + ')">'
+                         + '<span class="btitle">' + esc(b.name) + '</span>'
+                         + '<span class="bmeta">' + b.books
+                         + ' book' + (b.books === 1 ? '' : 's') + '</span></div>';
+                  }).join('') + '</div>';
+        }
+
+        function renderReorder() {
+            const list = document.getElementById('reorderList');
+            if (!reorder.books.length) {
+                list.innerHTML = '<p class="text-slate-600 text-xs p-4 text-center">This board is empty.</p>';
+            } else {
+                list.innerHTML = reorder.books.map(function (b, i) {
+                    return '<div class="brow" draggable="true" data-id="' + b.book_id + '">'
+                         + '<span class="pos">' + (i + 1) + '</span>'
+                         + '<i class="fa-solid fa-grip-vertical text-slate-600 text-[9px]"></i>'
+                         + '<span class="btitle">' + esc(b.title) + '</span>'
+                         + '<span class="bmeta">' + esc(b.call_number || b.author || '') + '</span>'
+                         + '</div>';
+                }).join('');
+            }
+            const changed = reorder.books.some(function (b, i) {
+                return b.book_id !== reorder.original[i];
+            });
+            document.getElementById('reorderSave').disabled = !changed;
+            document.getElementById('reorderDirty').textContent =
+                changed ? 'Changed. Nothing is saved until you press Save the order.' : '';
+        }
+
+        // Blank call numbers sort last.
+        function byField(field) {
+            return function (a, b) {
+                const x = (a[field] || '').trim(), y = (b[field] || '').trim();
+                if (!x && !y) return a.title.localeCompare(b.title);
+                if (!x) return 1;
+                if (!y) return -1;
+                return x.localeCompare(y, undefined, { numeric: true, sensitivity: 'base' })
+                    || a.title.localeCompare(b.title);
+            };
+        }
+        window.sortReorder = function (field) {
+            reorder.books.sort(byField(field));
+            renderReorder();
+        };
+        window.reverseReorder = function () {
+            reorder.books.reverse();
+            renderReorder();
+        };
+        window.resetReorder = function () {
+            const by = {};
+            reorder.books.forEach(function (b) { by[b.book_id] = b; });
+            reorder.books = reorder.original.map(function (id) { return by[id]; });
+            renderReorder();
+        };
+
+        (function wireReorderDrag() {
+            const list = document.getElementById('reorderList');
+            let dragId = null;
+            list.addEventListener('dragstart', function (e) {
+                const row = e.target.closest('.brow');
+                if (!row || !row.dataset.id) return;
+                dragId = row.dataset.id;
+                row.classList.add('dragging');
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text/plain', dragId);   // Firefox needs this
+            });
+            list.addEventListener('dragend', function () {
+                dragId = null;
+                list.querySelectorAll('.dragging, .drop-before, .drop-after').forEach(
+                    function (el) { el.classList.remove('dragging', 'drop-before', 'drop-after'); });
+            });
+            list.addEventListener('dragover', function (e) {
+                if (!dragId) return;
+                const row = e.target.closest('.brow');
+                if (!row || row.dataset.id === dragId) return;
+                e.preventDefault();
+                list.querySelectorAll('.drop-before, .drop-after').forEach(
+                    function (el) { el.classList.remove('drop-before', 'drop-after'); });
+                const box = row.getBoundingClientRect();
+                row.classList.add((e.clientY - box.top) < box.height / 2
+                    ? 'drop-before' : 'drop-after');
+            });
+            list.addEventListener('drop', function (e) {
+                if (!dragId) return;
+                e.preventDefault();
+                const row = e.target.closest('.brow');
+                list.querySelectorAll('.drop-before, .drop-after').forEach(
+                    function (el) { el.classList.remove('drop-before', 'drop-after'); });
+                if (!row || row.dataset.id === dragId) return;
+                const moving = reorder.books.find(function (b) { return String(b.book_id) === dragId; });
+                const rest = reorder.books.filter(function (b) { return String(b.book_id) !== dragId; });
+                const box = row.getBoundingClientRect();
+                const at = rest.findIndex(function (b) { return String(b.book_id) === row.dataset.id; });
+                rest.splice((e.clientY - box.top) < box.height / 2 ? at : at + 1, 0, moving);
+                reorder.books = rest;
+                dragId = null;
+                renderReorder();
+            });
+        })();
+
+        window.saveReorder = async function () {
+            // Send the whole order.
+            const r = await post(U.reorderBooks, {
+                shelf_level_id: reorder.level,
+                book_ids: reorder.books.map(function (b) { return b.book_id; }).join(','),
+            });
+            if (!r.success) { alert(r.error || 'Could not save the new order'); return; }
+            closeModal('reorderModal');
+            alert('The board is in its new order.');
+            reorder.original = reorder.books.map(function (b) { return b.book_id; });
+            // A pane showing this board is now out of date.
+            ['L', 'R'].forEach(function (side) {
+                if (panes[side].level === reorder.level) loadPane(side, reorder.level);
+            });
+        };
 
         async function tToggle(cb, modelType, id) {
             const r = await post(U.toggle, { model_type: modelType, id: id });
@@ -940,8 +1480,7 @@
         window.syncTopLevel = function () {
             const top = document.getElementById('addLevelIsTop');
             const under = document.getElementById('addLevelIsUnder');
-            // A level is one or the other, never both -- ticking one releases
-            // the other rather than letting an impossible pair be submitted.
+            // Top and underneath are exclusive.
             if (top.checked && under.checked) {
                 (this === under ? top : under).checked = false;
             }
@@ -973,11 +1512,7 @@
             if (r.success !== false) { closeModal('addModal'); loadTree(); } else alert(r.error || 'Failed to add');
         }
 
-        // What the shelf already has, counted off the tree that is on screen
-        // rather than fetched again: a second source could disagree with what
-        // the Administrator is looking at.
-        // A shelf top is not also its underside, so ticking one clears the
-        // other rather than letting a board claim to be both.
+        // Existing top and underneath levels.
         window.syncEditLevelKind = function () {
             const top = document.getElementById('editIsTop');
             const under = document.getElementById('editIsUnder');
@@ -1001,8 +1536,7 @@
                     const r = n.querySelector(':scope > .trow');
                     if (!r || r.dataset.type !== 'shelflevel') return;
                     total += 1;
-                    // A top or an underside is not one of the numbered boards,
-                    // so it must not inflate the level count in the box.
+                    // Don't count top or underneath as levels.
                     const what = r.dataset.name || '';
                     if (/^Top\b/.test(what)) { hasTop = true; return; }
                     if (/^Underneath\b/.test(what)) return;
@@ -1024,8 +1558,7 @@
                 show('editLevelKind');
                 document.getElementById('editLevelNum').value = row.getAttribute('data-level') || '';
                 document.getElementById('editLabel').value = row.getAttribute('data-label') || '';
-                // The label is the only place the tree records which kind of
-                // board this is: 'Top', 'Underneath', or a numbered level.
+                // Level type from its label.
                 const what = (row.getAttribute('data-name') || '');
                 document.getElementById('editIsTop').checked = /^Top\b/.test(what);
                 document.getElementById('editIsUnder').checked = /^Underneath\b/.test(what);
@@ -1034,6 +1567,7 @@
             else { show('editNameField'); hide('editLevelFields'); hide('editLevelKind'); document.getElementById('editName').value = row.getAttribute('data-name') || ''; }
 
             if (type === 'shelf') {
+                fillRoomPicker(row);
                 const grid = shelfGridOf(row);
                 editGridWas = grid;
                 document.getElementById('editHasTop').checked = grid.hasTop;
@@ -1048,10 +1582,49 @@
             } else if (type !== 'shelflevel') {
                 hide('editGridFields');
             }
+            if (type !== 'shelf') hide('editRoomField');
             openModal('editModal');
         }
 
+        window.fixShelfRooms = async function () {
+            const ok = await AylaDialog.confirm(
+                'File each of these shelves under the room it is drawn in?',
+                { title: 'Correct the rooms',
+                  detail: 'Nothing moves on the floor plan. Only the room each shelf is '
+                        + 'listed under changes, so the structure and the map agree.',
+                  confirmLabel: 'Correct them', danger: false });
+            if (!ok) return;
+            const r = await post(U.fixShelfRooms, {});
+            if (!r.success) { alert(r.error || 'They could not be corrected.'); return; }
+            alert(r.message);
+            window.location.reload();
+        };
+
         let editGridWas = null;
+
+        // Rooms on the same floor.
+        function fillRoomPicker(shelfRow) {
+            const roomNode = shelfRow.closest('.tkids') &&
+                             shelfRow.closest('.tkids').closest('.tnode');
+            const roomRow = roomNode && roomNode.querySelector(':scope > .trow');
+            const currentId = roomRow ? roomRow.dataset.id : '';
+            const floorKids = roomNode && roomNode.parentElement;
+
+            const rooms = [];
+            if (floorKids) {
+                floorKids.querySelectorAll(':scope > .tnode > .trow[data-type="room"]')
+                    .forEach(function (r) { rooms.push({ id: r.dataset.id, name: r.dataset.name }); });
+            }
+            const sel = document.getElementById('editRoom');
+            sel.innerHTML = rooms.map(function (r) {
+                return '<option value="' + r.id + '"' + (r.id === currentId ? ' selected' : '')
+                     + '>' + esc(r.name) + '</option>';
+            }).join('');
+            document.getElementById('editRoomNote').textContent = rooms.length > 1
+                ? 'Where the shelf is listed. Moving it here does not move it on the floor plan.'
+                : 'This floor has only one room.';
+            show('editRoomField');
+        }
 
         async function submitEdit() {
             const t = editTarget; if (!t) return;
@@ -1065,12 +1638,14 @@
                 if (!data.level_number) { alert('Level number is required'); return; }
             }
             else { data.name = val('editName').trim(); if (!data.name) { alert('Name is required'); return; } }
+            if (t.type === 'shelf') {
+                const room = val('editRoom');
+                if (room) data.room_id = room;
+            }
             const r = await post(cfg.edit, data);
             if (r.success === false) { alert(r.error || 'Failed to save'); return; }
 
-            // The grid is a second request because it is a different kind of
-            // change: renaming a shelf touches one row, and building its boards
-            // can create dozens. Only sent when the numbers actually moved.
+            // Save the grid only if it changed.
             let note = '';
             if (t.type === 'shelf') {
                 const levels = parseInt(val('editGridLevels'), 10);
@@ -1099,8 +1674,30 @@
             if (note) alert(note);
         }
 
+        // How many books sit under a node.
+        function countBooksUnder(type, id) {
+            const row = document.querySelector(
+                '.trow[data-type="' + type + '"][data-id="' + id + '"]');
+            const node = row && row.closest('.tnode');
+            return node ? node.querySelectorAll('.trow[data-type="book"]').length : 0;
+        }
+
         async function delNode(type, id) {
-            if (!await AylaDialog.confirm('Delete this ' + TYPE[type].word + ' and everything inside it?')) return;
+            const books = countBooksUnder(type, id);
+            const word = TYPE[type].word;
+
+            // "and everything inside it" was not true.
+            let question = 'Delete this ' + word + '?';
+            if (books) {
+                question += '\n\n' + books + ' book' + (books === 1 ? '' : 's')
+                    + ' will stay in the catalogue but lose their place on the '
+                    + 'shelf. You will find them under "Not shelved" in Manage '
+                    + 'Books, and they will have to be put somewhere again.';
+            } else {
+                question += ' It holds no books.';
+            }
+            if (!await AylaDialog.confirm(question)) return;
+
             const cfg = TYPE[type]; let data = {}; data[cfg.idField] = id;
             const r = await post(cfg.del, data);
             if (r.success !== false) { loadTree(); } else alert(r.error || 'Failed to delete');
@@ -1120,7 +1717,7 @@
                 + row('Year', d.publication_year) + row('Copies', d.copies);
         }
 
-        // ── Table ──
+        // Table
         async function loadFlat() {
             const d = await getJSON(U.flat);
             flatData = d.shelf_levels || [];
@@ -1165,14 +1762,12 @@
         document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { closeModal('addModal'); closeModal('editModal'); closeModal('bookModal'); closeModal('placementModal'); } });
         ['addModal', 'editModal', 'bookModal', 'placementModal'].forEach(function (id) {
             const el = document.getElementById(id);
-            // Guarded because this runs at the very end of the script: one
-            // absent modal threw here and took every listener registered after
-            // it with it, on a page that otherwise looked fine.
+            // Guard against a missing modal.
             if (!el) return;
             el.addEventListener('click', function (e) { if (e.target === el) closeModal(id); });
         });
 
-        // ── Add Books to a shelf level (cart-style picker) ──
+        // Add books to a shelf level
         var placeLevelId = null;
         var placeBooks = [];      // all fetched books
         var placeCartIds = [];    // selected book ids, in click order
@@ -1241,8 +1836,7 @@
             else { err.textContent = r.error || 'Failed to add books.'; err.classList.remove('hidden'); }
         }
 
-        // The tree first: it decides which floors exist, and the plan opens on
-        // whichever one that makes the current floor.
+        // Load the tree first.
         (async function () {
             await loadTree();
             await loadMiniMap();

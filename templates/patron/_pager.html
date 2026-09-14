@@ -1,0 +1,43 @@
+{% load pagination %}
+{# The page links under a patron list. #}
+{% if page.paginator.num_pages > 1 %}
+{% elided_pages page 1 1 as pages %}{% page_ellipsis as gap %}
+<nav class="p-pager" aria-label="Pages">
+  {% if page.has_previous %}
+    <a class="p-pager-step" href="?page={{ page.previous_page_number }}{% if qs %}&{{ qs }}{% endif %}" aria-label="Previous page">‹</a>
+  {% else %}
+    <span class="p-pager-step is-off" aria-disabled="true">‹</span>
+  {% endif %}
+
+  {% for n in pages %}
+    {% if n == gap %}
+      <span class="p-pager-gap" aria-hidden="true">&hellip;</span>
+    {% elif n == page.number %}
+      <span class="p-pager-num is-current" aria-current="page">{{ n }}</span>
+    {% else %}
+      <a class="p-pager-num" href="?page={{ n }}{% if qs %}&{{ qs }}{% endif %}">{{ n }}</a>
+    {% endif %}
+  {% endfor %}
+
+  {% if page.has_next %}
+    <a class="p-pager-step" href="?page={{ page.next_page_number }}{% if qs %}&{{ qs }}{% endif %}" aria-label="Next page">›</a>
+  {% else %}
+    <span class="p-pager-step is-off" aria-disabled="true">›</span>
+  {% endif %}
+</nav>
+<style>
+  .p-pager{display:flex;align-items:center;justify-content:center;gap:6px;flex-wrap:wrap;margin:18px auto 8px;max-width:900px;padding:0 20px;}
+  .p-pager-step,.p-pager-num{
+    min-width:38px;height:38px;padding:0 10px;border-radius:10px;
+    display:inline-flex;align-items:center;justify-content:center;
+    border:1px solid var(--border);background:var(--surface);color:var(--text);
+    font-size:13px;font-weight:600;text-decoration:none;font-variant-numeric:tabular-nums;
+    transition:border-color .15s,color .15s,background-color .15s;
+  }
+  .p-pager-step{font-size:18px;}
+  a.p-pager-step:hover,a.p-pager-num:hover{border-color:var(--accent);color:var(--accent);}
+  .p-pager-num.is-current{background:var(--tint-accent);border-color:var(--accent);color:var(--accent);font-weight:800;}
+  .p-pager-step.is-off{opacity:.35;}
+  .p-pager-gap{min-width:18px;text-align:center;color:var(--muted);}
+</style>
+{% endif %}

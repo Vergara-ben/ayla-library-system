@@ -1,19 +1,4 @@
-/* =====================================================================
-   tailwind-theme.js — makes the Tailwind CDN colour utilities follow the
-   light/dark theme.
-
-   Load immediately AFTER <script src="https://cdn.tailwindcss.com">.
-
-   The admin and library-staff templates carry ~2,000 hard-coded colour
-   utilities (text-slate-400, bg-cyan-950/50, border-violet-700 …) that
-   were chosen for a dark background. Rather than rewrite that markup,
-   every colour is redefined as a CSS variable, and theme.css swaps the
-   variable values per theme. The "R G B / <alpha-value>" form is required
-   so slash-opacity classes such as bg-slate-800/50 keep working.
-
-   Only the shades actually used in the templates are declared. Any other
-   shade simply falls back to Tailwind's stock colour.
-   ===================================================================== */
+/* tailwind-theme.js: maps Tailwind colours to theme variables. */
 (function () {
     'use strict';
 

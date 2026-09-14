@@ -1,11 +1,4 @@
-"""Flag overdue borrows and email patrons their overdue reminders.
-
-Run on a schedule (e.g. a daily PythonAnywhere scheduled task):
-
-    python manage.py send_overdue_notifications
-
-Use --dry-run to preview without sending email or changing data.
-"""
+"""Flag overdue borrows and email patrons their overdue reminders."""
 
 from django.core.management.base import BaseCommand
 from django.utils import timezone
@@ -71,9 +64,7 @@ class Command(BaseCommand):
                     pass
 
         if not dry_run and (flagged or sent or failed):
-            # A dry run changes nothing, so it leaves no trail; a real run marks
-            # books overdue and emails patrons without any person behind it,
-            # which is exactly what the System role is for.
+            # Log real runs as a system action.
             from library.audit import log_system_action
             log_system_action('Notify', 'Transaction', None,
                               f'Overdue sweep: {flagged} item(s) flagged, '

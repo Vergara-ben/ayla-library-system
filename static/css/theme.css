@@ -1,63 +1,30 @@
-/* =====================================================================
-   theme.css — AYLA single source of truth for colour.
+/* theme.css: colour tokens for the light and dark themes. */
 
-   Loaded FIRST on every page (before each page's own <style>), so pages
-   can consume these tokens and override nothing.
+/* Tailwind colour ramps */
 
-   Two axes:
-     data-theme  = "light" (default) | "dark"      -> on <html>
-     data-module = "admin" | "staff" | "patron"    -> on <html>
-
-   Light is the real default: a visitor whose OS is in dark mode still
-   lands on the light theme. Dark is opt-in through the header toggle and
-   remembered in localStorage (see static/js/theme.js).
-
-   Section 1 re-maps the Tailwind colour ramps to CSS variables so the
-   ~2,000 utility classes already written into the admin/staff markup
-   (text-slate-400, bg-cyan-950/50, …) follow the theme with no markup
-   changes. Channels are stored as "R G B" triplets so Tailwind's slash
-   opacity modifiers keep working (see static/js/tailwind-theme.js).
-
-   Sections 2-4 define the semantic tokens the hand-written CSS uses.
-   ===================================================================== */
-
-/* =====================================================================
-   1. TAILWIND RAMPS
-   ===================================================================== */
-
-/* ---- 1a. Light: the neutral ramp is inverted -------------------------
-   In the dark design slate-100 was near-white body text and slate-800
-   was a raised panel. Inverting the ramp keeps every existing class
-   meaningful: slate-100 becomes near-black text, slate-800 becomes a
-   light panel. */
+/* Light theme: the neutral ramp is inverted. */
 :root {
     --tw-slate-50:  15 23 42;
     --tw-slate-100: 15 23 42;
     --tw-slate-200: 30 41 59;
     --tw-slate-300: 51 65 85;
-    --tw-slate-400: 71 85 105;     /* most common muted text — 7.4:1 on white */
+    --tw-slate-400: 71 85 105;     /* muted text, 7.4:1 on white */
     --tw-slate-500: 85 99 122;     /* 5.6:1 on the subtle table-header fill */
     --tw-slate-600: 100 116 139;   /* dim text, still 4.8:1 on white */
-    --tw-slate-700: 127 139 158;   /* borders — 3.4:1+, boundaries must be visible (WCAG 1.4.11) */
-    --tw-slate-800: 241 245 249;   /* panel / hover fills only — see admin-theme.css for the
-                                       border-slate-800 redirect to --tw-slate-700 */
+    --tw-slate-700: 127 139 158;   /* borders, 3.4:1+ (WCAG 1.4.11) */
+    --tw-slate-800: 241 245 249;   /* Panel and hover fills. */
     --tw-slate-900: 248 250 252;
     --tw-slate-950: 255 255 255;
 
-    /* ---- Accents ----------------------------------------------------
-       Not a straight inversion. Solid button fills (600/700) stay
-       saturated so buttons still read as buttons; the light shades that
-       were "bright accent text on black" are darkened to pass contrast
-       on white, and the near-black tints (800-950) become pale washes. */
+    /* Accents. */
 
-    /* Cyan — admin */
-    /* "cyan" is the admin panel's accent ramp — now the AYLA brand blue.
-       The class names stay so no template needs editing. */
+    /* Cyan: admin */
+    /* Cyan is the AYLA brand blue. */
     --tw-cyan-50:  239 244 252;
     --tw-cyan-100: 219 232 250;
     --tw-cyan-200: 0 42 128;       /* text on a pale blue chip */
     --tw-cyan-300: 0 48 143;
-    --tw-cyan-400: 0 56 168;       /* accent text — 9.9:1 on white */
+    --tw-cyan-400: 0 56 168;       /* accent text, 9.9:1 on white */
     --tw-cyan-500: 0 56 168;
     --tw-cyan-600: 0 56 168;       /* fill; also used as text */
     --tw-cyan-700: 0 56 168;       /* fill + border */
@@ -65,13 +32,13 @@
     --tw-cyan-900: 219 232 250;
     --tw-cyan-950: 239 244 252;    /* pale chip fill */
 
-    /* Violet — library staff */
-    /* "violet" is the staff panel's accent ramp — also the brand blue now. */
+    /* Violet: library staff */
+    /* Staff accent, set to the brand blue. */
     --tw-violet-50:  239 244 252;
     --tw-violet-100: 219 232 250;
     --tw-violet-200: 0 42 128;
     --tw-violet-300: 0 48 143;
-    --tw-violet-400: 0 56 168;     /* accent text — 9.9:1 on white */
+    --tw-violet-400: 0 56 168;     /* accent text, 9.9:1 on white */
     --tw-violet-500: 0 56 168;
     --tw-violet-600: 0 56 168;
     --tw-violet-700: 0 56 168;
@@ -79,7 +46,7 @@
     --tw-violet-900: 219 232 250;
     --tw-violet-950: 239 244 252;
 
-    /* Emerald / green — success + patron */
+    /* Emerald: success and patron */
     --tw-emerald-50:  236 253 245;
     --tw-emerald-100: 6 78 59;
     --tw-emerald-200: 6 95 70;
@@ -104,7 +71,7 @@
     --tw-green-900: 220 252 231;
     --tw-green-950: 240 253 244;
 
-    /* Rose / red — danger, overdue */
+    /* Rose: danger and overdue */
     --tw-rose-50:  255 241 242;
     --tw-rose-100: 136 19 55;
     --tw-rose-200: 159 18 57;
@@ -128,9 +95,7 @@
     --tw-red-900: 254 226 226;
     --tw-red-950: 254 242 242;
 
-    /* Amber — pending, borrowed, warnings.
-       500 is used both as text and as a fill, so it is pinned to a shade
-       that clears 4.5:1 either way. */
+    /* Amber: pending, borrowed and warnings. */
     --tw-amber-50:  255 251 235;
     --tw-amber-100: 120 53 15;
     --tw-amber-200: 146 64 14;
@@ -151,7 +116,7 @@
     --tw-orange-500: 234 88 12;
     --tw-orange-600: 234 88 12;
 
-    /* Blue / teal / purple / pink — occasional secondary accents */
+    /* Blue, teal, purple, pink: secondary accents */
     --tw-blue-50:  239 246 255;
     --tw-blue-100: 30 58 138;
     --tw-blue-300: 29 78 216;
@@ -186,34 +151,34 @@
     --tw-indigo-950: 238 242 255;
 }
 
-/* ---- 1b. Dark: the original Tailwind values ------------------------- */
+/* Dark theme */
 [data-theme="dark"] {
     --tw-slate-50:  248 250 252;
     --tw-slate-100: 241 245 249;
     --tw-slate-200: 226 232 240;
     --tw-slate-300: 203 213 225;
     --tw-slate-400: 148 163 184;
-    --tw-slate-500: 130 143 163;   /* lifted from #64748b — failed AA on dark panels */
+    --tw-slate-500: 130 143 163;   /* lighter than #64748b for contrast on dark panels */
     --tw-slate-600: 125 139 161;   /* likewise: used for small separator text */
-    --tw-slate-700: 94 112 146;    /* borders — clears 3:1 on both admin navy and staff purple */
+    --tw-slate-700: 94 112 146;    /* borders, 3:1 on admin and staff backgrounds */
     --tw-slate-800: 30 41 59;
     --tw-slate-900: 15 23 42;
     --tw-slate-950: 2 6 23;
 
-    /* admin accent ramp — brand blue, lightened for dark surfaces */
+    /* admin accent, brand blue lightened for dark mode */
     --tw-cyan-50:  239 246 255;
     --tw-cyan-100: 219 234 254;
     --tw-cyan-200: 191 219 254;
     --tw-cyan-300: 147 197 253;
-    --tw-cyan-400: 96 165 250;     /* accent text — 6.6:1 on card */
-    --tw-cyan-500: 59 130 246;     /* border strength — 4.7:1 on card */
+    --tw-cyan-400: 96 165 250;     /* accent text, 6.6:1 on card */
+    --tw-cyan-500: 59 130 246;     /* border, 4.7:1 on card */
     --tw-cyan-600: 37 99 235;
     --tw-cyan-700: 29 78 216;
     --tw-cyan-800: 30 64 175;
     --tw-cyan-900: 30 58 138;
     --tw-cyan-950: 23 37 84;
 
-    /* staff accent ramp — same brand blue */
+    /* staff accent, same brand blue */
     --tw-violet-50:  239 246 255;
     --tw-violet-100: 219 234 254;
     --tw-violet-200: 191 219 254;
@@ -327,37 +292,31 @@
     --tw-indigo-950: 30 27 75;
 }
 
-/* =====================================================================
-   2. SEMANTIC SURFACE TOKENS — light (default)
-
-   Both historical naming systems are declared so every page keeps
-   working: the admin/staff pages read --bg-main / --bg-card /
-   --text-primary, the patron pages read --bg / --surface / --text.
-   ===================================================================== */
+/* Surface tokens, light theme */
 :root {
     color-scheme: light;
 
     /* admin + staff naming */
     --bg-main:      #f4f6f9;
-    --bg-dark:      #f4f6f9;   /* legacy alias used by the dashboards */
+    --bg-dark:      #f4f6f9;   /* alias used by the dashboards */
     --bg-darker:    #eef1f6;
     --bg-sidebar:   #ffffff;
     --bg-card:      #ffffff;
     --bg-modal:     #ffffff;
     --bg-input:     #ffffff;
-    --input-bg:     #ffffff;   /* legacy alias used by the sign-in pages */
+    --input-bg:     #ffffff;   /* alias used by the sign-in pages */
     --bg-subtle:    #f1f5f9;   /* table headers, hover rows */
     --text-primary: #0f172a;
     --text-main:    #0f172a;
     --text-muted:   #55637a;   /* 6.2:1 on white */
-    --border-color: #7f8b9e;   /* 3.4:1+ on white/page — a real boundary, not a hint of one */
+    --border-color: #7f8b9e;   /* 3.4:1+ on white */
     --border-modal: #7f8b9e;
 
     /* patron naming */
     --bg:        #f4f6f9;
     --surface:   #ffffff;
     --surface2:  #eff3f8;
-    --border:    #7f8b9e;      /* 3.1:1+ on white/surface — same boundary rule as --border-color */
+    --border:    #7f8b9e;      /* 3.1:1+ on white, same as --border-color */
     --text:      #0f172a;
     --muted:     #55637a;      /* 5.5:1 on white */
     --danger:    #b91c1c;
@@ -370,7 +329,7 @@
     /* translucent sticky bars (navbar / bottom nav) */
     --nav-bg: rgba(255, 255, 255, 0.92);
 
-    /* soft status washes — replace the old hard-coded #xxxxxx20 fills */
+    /* soft status fills */
     --tint-success: rgba(4, 120, 87, 0.10);
     --tint-warning: rgba(180, 83, 9, 0.10);
     --tint-danger:  rgba(190, 18, 60, 0.10);
@@ -389,8 +348,7 @@
     --on-accent: #ffffff;
     --on-status: #ffffff;
 
-    /* Book-cover placeholder fills. Always carry white text, so both
-       themes stay in the mid-dark range. */
+    /* Book-cover placeholder fills. */
     --cover-1: #15803d;
     --cover-2: #1d4ed8;
     --cover-3: #7e22ce;
@@ -398,31 +356,17 @@
     --cover-5: #475569;
     --cover-6: #0f766e;
 
-    /* Sign-in screens: a photo background needs a scrim and a floating
-       card. In light mode the scrim lightens the photo instead of
-       darkening it, so the card can carry dark text. */
+    /* Sign-in screens: a photo background needs a scrim and a floating card. */
     --auth-overlay-1: rgba(255, 255, 255, 0.74);
     --auth-overlay-2: rgba(255, 255, 255, 0.84);
     --auth-card:      rgba(255, 255, 255, 0.95);
     --glass:          rgba(255, 255, 255, 0.75);
     --glass-soft:     rgba(255, 255, 255, 0.55);
-    /* Form fields on the sign-in/register cards use this as their border. At
-       the old 0.12 it read 1.3:1 — effectively no edge at all. 0.50 clears
-       the 3:1 non-text minimum while still looking like a glass edge. */
+    /* Form fields on the sign-in/register cards use this as their border. */
     --glass-border:   rgba(15, 23, 42, 0.50);
     --on-glass:       #0f172a;
 
-    /* flat-design primitives.
-
-       Four steps, and nothing outside them. The markup had drifted across
-       rounded-lg (630 uses), rounded-xl (192) and rounded-2xl (62) for boxes
-       doing the same job, so the point of naming these is to give every one of
-       those a defined place to land:
-
-           xs  chips and status tags
-           sm  icon buttons and row actions
-           --  buttons, inputs, sidebar links
-           lg  cards, panels and modals -- the largest anything gets   */
+    /* flat-design primitives. */
     --radius-xs:   6px;
     --radius-sm:   8px;
     --radius:     10px;
@@ -432,25 +376,15 @@
     --scrim:      rgba(15, 23, 42, 0.35);
 }
 
-/* =====================================================================
-   3. MODULE ACCENTS — light
-   All three modules share the AYLA brand blue (#0038A8, the flag blue from
-   the logo) so the product reads as one identity. Portals stay
-   distinguishable by their header badge ("ADMIN"/"STAFF"), sidebar label
-   and nav contents rather than by hue.
-
-   The logo's other two colours are deliberately NOT used as accents: red
-   is already --danger and gold is already --warning, so promoting them
-   would make ordinary pages read as alerts. They live in the logo mark.
-   ===================================================================== */
+/* Module accents, light theme */
 [data-module="admin"] {
     --accent:        #0038A8;   /* 9.9:1 on white */
     --accent-strong: #002A80;
     --tint-accent:   rgba(0, 56, 168, 0.10);
     --accent-soft:   #eef3fc;
-    --accent-border: #0038A8;  /* same as --accent — was a pale wash at 1.25:1 */
+    --accent-border: #0038A8;  /* same as --accent */
     --accent-ring:   rgba(0, 56, 168, 0.22);
-    --accent-blue:   #0038A8;  /* legacy names kept so pages need no edit */
+    --accent-blue:   #0038A8;  /* aliases used across pages */
     --accent-cyan:   #0038A8;
 }
 
@@ -459,7 +393,7 @@
     --accent-strong: #002A80;
     --tint-accent:   rgba(0, 56, 168, 0.10);
     --accent-soft:   #eef3fc;
-    --accent-border: #0038A8;  /* same as --accent — was a pale wash at 1.39:1 */
+    --accent-border: #0038A8;  /* same as --accent */
     --accent-ring:   rgba(0, 56, 168, 0.22);
     --accent-blue:   #0038A8;
     --accent-violet: #0038A8;
@@ -470,29 +404,24 @@
     --accent-strong: #002A80;
     --tint-accent:   rgba(0, 56, 168, 0.10);
     --accent-soft:   #eef3fc;
-    --accent-border: #0038A8;  /* same as --accent — was a pale wash at 1.21:1 */
+    --accent-border: #0038A8;  /* same as --accent */
     --accent-ring:   rgba(0, 56, 168, 0.22);
-    --accent2:       #b45309;   /* amber secondary — echoes the logo's sun */
-    /* login page token system — names kept, values now brand blue */
+    --accent2:       #b45309;   /* amber secondary, from the logo */
+    /* sign-in page colours */
     --green:  #0038A8;
     --green2: #002A80;
     --dark:   #f4f6f9;
 }
 
-/* =====================================================================
-   4. DARK THEME — opt-in. Each module keeps the tint it has today.
-   ===================================================================== */
+/* Dark theme surfaces */
 [data-theme="dark"] {
     color-scheme: dark;
 
-    /* Neutral dark defaults for every surface token. The per-module blocks
-       below refine these; without them a token a module does not define
-       would fall through to its light value from :root. */
+    /* Neutral dark defaults for every surface token. */
     --bg-main:   #0b1220;  --bg-dark:    #0b1220;  --bg-darker: #070d18;
     --bg-sidebar:#0d1524;  --bg-card:    #111a2b;  --bg-modal:  #141e32;
     --bg-input:  #0e1727;  --input-bg:   #0e1727;
-    /* Patron has no --border-color override of its own, so shared components
-       like .theme-toggle fall through to this default — must clear 3:1 too. */
+    /* Default border colour for patron pages. */
     --border-color: #5e7092; --border-modal: #5e7092;
     --bg:        #0e1520;  --surface:    #141c29;  --surface2:  #1a2432;
     --border:    #243044;  --text:       #e9eef7;
@@ -508,7 +437,7 @@
     --auth-overlay-2: rgba(0, 0, 0, 0.82);
     --glass:          rgba(255, 255, 255, 0.06);
     --glass-soft:     rgba(255, 255, 255, 0.03);
-    --glass-border:   rgba(255, 255, 255, 0.42);   /* 3:1+ on card and field — was 0.10 (1.3:1) */
+    --glass-border:   rgba(255, 255, 255, 0.42);   /* 3:1+ on card and field */
     --on-glass:       #f8fafc;
 
     --danger:  #f87171;
@@ -537,7 +466,7 @@
     --scrim:      rgba(2, 6, 23, 0.62);
 }
 
-/* Admin — navy */
+/* Admin: navy */
 [data-theme="dark"][data-module="admin"] {
     --bg-main:      #0b1220;
     --bg-dark:      #0b1220;
@@ -552,20 +481,19 @@
     --nav-bg:       rgba(13, 21, 36, 0.92);
     --auth-card:    rgba(12, 25, 37, 0.80);
 
-    /* The flag blue is 1.8:1 on this navy — far too dark to use as-is, so
-       dark mode uses a lightened tint of the same hue (6.6:1+). */
+    /* Lighter blue for dark mode contrast. */
     --accent:        #60A5FA;
     --accent-strong: #93C5FD;
     --tint-accent:   rgba(96, 165, 250, 0.12);
     --accent-soft:   rgba(96, 165, 250, 0.10);
-    --accent-border: #60A5FA;  /* full strength — the 32% wash was 2.1:1 */
+    --accent-border: #60A5FA;  /* full strength for contrast */
     --accent-ring:   rgba(96, 165, 250, 0.30);
     --accent-blue:   #60A5FA;
     --accent-cyan:   #60A5FA;
     --on-accent:     #06132b;
 }
 
-/* Library staff — brand navy (was violet) */
+/* Library staff: brand navy */
 [data-theme="dark"][data-module="staff"] {
     --bg-main:      #0b1220;
     --bg-dark:      #0b1220;
@@ -575,7 +503,7 @@
     --bg-modal:     #141e32;
     --bg-input:     #0e1727;
     --input-bg:     #0e1727;
-    --border-color: #5e7092;   /* 3.3:1+ on card/sidebar/input — same neutral used by admin */
+    --border-color: #5e7092;   /* 3.3:1+ on card, sidebar and input */
     --border-modal: #5e7092;
     --nav-bg:       rgba(13, 21, 36, 0.92);
     --auth-card:    rgba(12, 25, 37, 0.80);
@@ -584,14 +512,14 @@
     --accent-strong: #93C5FD;
     --tint-accent:   rgba(96, 165, 250, 0.12);
     --accent-soft:   rgba(96, 165, 250, 0.10);
-    --accent-border: #60A5FA;  /* full strength — the 32% wash was 1.8:1 */
+    --accent-border: #60A5FA;  /* full strength for contrast */
     --accent-ring:   rgba(96, 165, 250, 0.30);
     --accent-blue:   #60A5FA;
     --accent-violet: #60A5FA;
     --on-accent:     #06132b;
 }
 
-/* Patron — brand navy (was green) */
+/* Patron: brand navy */
 [data-theme="dark"][data-module="patron"] {
     --bg:        #0b1220;
     --surface:   #111a2b;
@@ -606,32 +534,22 @@
     --accent-strong: #93C5FD;
     --tint-accent:   rgba(96, 165, 250, 0.12);
     --accent-soft:   rgba(96, 165, 250, 0.10);
-    --accent-border: #60A5FA;  /* full strength — the 30% wash was 2.1:1 */
+    --accent-border: #60A5FA;  /* full strength for contrast */
     --accent-ring:   rgba(96, 165, 250, 0.28);
-    --accent2:       #fbbf24;   /* amber secondary — echoes the logo's sun */
+    --accent2:       #fbbf24;   /* amber secondary, from the logo */
     --on-accent:     #06132b;   /* light blue fill needs dark text */
     --green:  #60A5FA;
     --green2: #93C5FD;
     --dark:   #070d18;
 }
 
-/* =====================================================================
-   5. BASE — applies to every page in both themes
-   ===================================================================== */
+/* Base styles */
 html {
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
 }
 
-/* ---- AYLA logo -------------------------------------------------------
-   The logo is a plain <img> whose src theme.js swaps for the light-wordmark
-   variant in dark mode. Deliberately NOT a CSS background and NOT two
-   stacked <img> tags: both of those fail invisibly (an empty box, or the
-   logo drawn twice) whenever this stylesheet is stale or outranked. An
-   <img> with a real src always renders something.
-
-   Size it by HEIGHT only — the logo is a wide lockup and a fixed width
-   would squash it. */
+/* Logo. */
 .ayla-logo { width: auto; flex-shrink: 0; }
 
 /* Native form controls, scrollbars and autofill follow the theme */
@@ -643,23 +561,13 @@ html {
 }
 ::-webkit-scrollbar-thumb:hover { background: rgb(var(--tw-slate-600)); }
 
-/* Visible keyboard focus everywhere — important for the accessibility
-   requirement, and it costs nothing visually until a key is used.
-
-   !important is doing real work here, not papering over a specificity guess.
-   The templates carry 239 Tailwind `focus:outline-none` utilities, and the
-   Tailwind CDN injects its stylesheet at runtime — after this file in document
-   order — so without it this rule loses every time. Tabbing through a form gave
-   no visible focus ring at all, which was measurably true rather than
-   theoretical: the element matched :focus-visible while computing
-   outline-style: none. */
+/* Visible keyboard focus. */
 :focus-visible {
     outline: 2px solid var(--accent) !important;
     outline-offset: 2px !important;
 }
 
-/* Some controls sit flush against a container edge, where a 2px ring at a 2px
-   offset is clipped. A matching shadow keeps the indicator visible there. */
+/* Shadow fallback for clipped focus rings. */
 input:focus-visible,
 select:focus-visible,
 textarea:focus-visible {
@@ -669,9 +577,7 @@ textarea:focus-visible {
 /* Modal scrims are a theme token rather than a hard-coded black */
 .bg-black\/60, .bg-black\/80 { background: var(--scrim) !important; }
 
-/* =====================================================================
-   6. THEME TOGGLE BUTTON — one component, used by all three modules
-   ===================================================================== */
+/* Theme toggle button */
 .theme-toggle {
     display: inline-flex;
     align-items: center;
@@ -712,14 +618,7 @@ textarea:focus-visible {
 [data-theme="dark"] .theme-toggle .label-dark  { display: none; }
 [data-theme="dark"] .theme-toggle .label-light { display: inline; }
 
-/* =====================================================================
-   7. SKIP LINK
-
-   Every page puts a sidebar of roughly fifteen links ahead of its content.
-   Without this, reaching the page itself by keyboard means tabbing past all
-   of them, on every single navigation. Off-screen until focused, so it costs
-   the visual design nothing and appears exactly when it is useful.
-   ===================================================================== */
+/* Skip link */
 .skip-link {
     position: fixed;
     top: 8px;
@@ -731,9 +630,7 @@ textarea:focus-visible {
     color: var(--on-accent);
     font: 600 13px/1 'Inter', system-ui, sans-serif;
     text-decoration: none;
-    /* Moved out of view rather than positioned off-screen: transform is
-       cheaper to animate than top, and leaves the box where it will land so
-       nothing shifts when it arrives. */
+    /* Skip link hidden until focused. */
     transform: translateY(-160%);
     transition: transform .15s ease;
 }
@@ -745,15 +642,12 @@ textarea:focus-visible {
     outline-offset: 2px;
 }
 
-/* main takes focus so the skip actually lands there rather than only
-   scrolling, but it is a landing place, not a control -- so no focus ring. */
+/* No focus ring on main. */
 #main-content:focus {
     outline: none;
 }
 
-/* =====================================================================
-   8. REDUCED MOTION
-   ===================================================================== */
+/* Reduced motion */
 @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after {
         animation-duration: .001ms !important;

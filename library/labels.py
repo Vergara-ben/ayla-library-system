@@ -1,20 +1,4 @@
-"""Printable QR label sheets, laid out as a grid at true physical size.
-
-These get cut out and stuck onto physical books, which makes this the one PDF
-in AYLA where the millimetre matters. Everything is therefore positioned in mm
-against the page itself rather than flowed through a document template: a
-flowable that reflows is exactly what must not happen when the output is going
-to be measured against a book spine.
-
-The grid packs as many labels onto a sheet as the chosen QR size allows, since
-a class set of two hundred books is a lot of pages otherwise.
-
-One subtlety worth stating: the catalogue stores one row per physical copy, so
-every Book already carries its own unique qr_code. "Copy 2 of 5" is therefore
-counted across the whole catalogue rather than across the selection -- print
-three of five copies and they must still read 2, 3 and 4 of 5, or the labels
-would contradict the shelf.
-"""
+"""Printable QR label sheets, laid out as a grid at true physical size."""
 
 import re
 from io import BytesIO
@@ -34,9 +18,7 @@ PAGE_SIZES = {
 }
 DEFAULT_PAGE = 'A4'
 
-# The printed QR square, edge to edge, in millimetres. 25 mm scans reliably off
-# a phone at arm's length and still fits a paperback spine; below about 15 mm
-# the modules get smaller than most office printers resolve cleanly.
+# The printed QR square, edge to edge, in millimetres.
 DEFAULT_QR_MM = 25.0
 MIN_QR_MM = 12.0
 MAX_QR_MM = 60.0
@@ -45,8 +27,7 @@ PAGE_MARGIN_MM = 10.0
 CELL_PAD_MM = 2.0            # breathing room around each label, for the scissors
 LINE_LEADING = 1.18          # multiple of font size
 
-# Text sizes step down with the label so a 15 mm sticker does not carry 7pt
-# type it has no room for.
+# Smaller text on smaller labels.
 def _font_size(qr_mm):
     return max(3.6, min(7.0, qr_mm * 0.235))
 
@@ -91,11 +72,7 @@ def _fit(canvas, text, font, size, max_w):
 
 
 def copy_numbers(books):
-    """{book_id: (n, total)} for every book that shares a title with another.
-
-    Counted over the whole catalogue, not the selection -- see the module note.
-    Books held as a single copy are absent, so nothing prints "Copy 1 of 1".
-    """
+    """{book_id: (n, total)} for every book that shares a title with another."""
     from .models import Book
 
     keys = {(_safe(b.title).lower(), _safe(b.author).lower()) for b in books}
@@ -122,22 +99,12 @@ def copy_numbers(books):
 
 
 def sort_for_printing(books):
-    """Shelf, then level, then title -- so the cut pile is in walking order.
-
-    Nothing is grouped onto its own page or its own row: the sheet stays packed
-    edge to edge, because a 20-shelf job that started each group on a fresh row
-    would throw away most of two pages. What keeps the pile sortable is that
-    each label carries its own location, not that the paper was divided up.
-
-    Books with no shelf assigned sort last rather than first -- they are the
-    ones still to be placed, and they belong at the end of the walk.
-    """
+    """Shelf, then board, then the position along it, the walking order."""
     def key(b):
         level = getattr(b, 'shelf_level', None)
         shelf = getattr(level, 'shelf', None) if level else None
-        # Bottom to top within a unit -- underneath first, the top last -- and
-        # left to right across its bays, which is the order someone actually
-        # works a case when they are putting labels on.
+        slot = getattr(b, 'shelf_slot', None)
+        # Bottom to top, left to right.
         return (
             0 if shelf is not None else 1,
             _safe(getattr(shelf, 'name', '')).lower(),
@@ -145,19 +112,23 @@ def sort_for_printing(books):
                 2 if getattr(level, 'is_top', False) else 1),
             getattr(level, 'level_number', 0) or 0,
             getattr(level, 'column_number', 0) or 0,
+            0 if slot is not None else 1,      # unplaced within a board go last
+            slot or 0,
             _safe(b.title).lower(),
             b.book_id,
         )
     return sorted(books, key=key)
 
 
-def location_of(book):
-    """'Shelf A · L2', 'Shelf A · Top', or '' when it has not been placed.
+def sort_alphabetically(books):
+    """Title, then author, then copy, for checking a list against a catalogue."""
+    return sorted(books, key=lambda b: (_safe(b.title).lower(),
+                                        _safe(b.author).lower(),
+                                        b.book_id))
 
-    "Top" rather than a number because that is where the book physically is --
-    on the flat top of the case, not on a shelf inside it. Someone handed a
-    label reading L5 would open the fifth shelf and not find it.
-    """
+
+def location_of(book):
+    """'Shelf A · L2', 'Shelf A · Top', or '' when it has not been placed."""
     level = getattr(book, 'shelf_level', None)
     if level is None:
         return ''
@@ -175,8 +146,7 @@ def _qr_image(payload):
     """A QR bitmap at a resolution that survives being scaled down to 15 mm."""
     qr = qrcode.QRCode(
         version=None,
-        # M tolerates roughly 15% damage. These end up stuck on books that get
-        # handled, scuffed and shelved; the extra modules are cheap insurance.
+        # M tolerates roughly 15% damage.
         error_correction=qrcode.constants.ERROR_CORRECT_M,
         box_size=10,
         border=1,          # 1 module: the cell padding supplies the quiet zone
@@ -189,21 +159,12 @@ def _qr_image(payload):
     return ImageReader(buf)
 
 
-# How many lines a title may take before it is cut. Three is enough for the
-# long ones this catalogue actually holds -- "A Manual for Writers of Term
-# Papers, Theses, and Dissertations (Fourth Edition)" -- without one runaway
-# title making every cell on the sheet that tall.
+# How many lines a title may take before it is cut.
 MAX_TITLE_LINES = 3
 
 
 def _wrap(text, font, size, max_w, max_lines):
-    """Break text across lines at spaces, ellipsising only if it still overruns.
-
-    Truncating a title is how "Volume 1" and "Volume 2" become the same label.
-    The distinguishing part of a title is almost always at the end -- the
-    volume, the edition, the book number -- which is exactly what a single
-    ellipsised line throws away.
-    """
+    """Break text across lines at spaces, ellipsising only if it still overruns."""
     text = _safe(text)
     if not text:
         return ['']
@@ -222,10 +183,7 @@ def _wrap(text, font, size, max_w, max_lines):
         lines.append(current)
         return [l for l in lines if l]
 
-    # Out of lines with words still to place. Cutting here would throw away the
-    # end of the title -- and the end is where "Volume 2", "Book 3" and
-    # "(Fourth Edition)" live, which is the whole reason two labels need to be
-    # told apart. So the middle goes instead and the ending survives.
+    # Out of lines with words still to place.
     remaining = text[len(' '.join(lines)):].strip()
     if remaining:
         ell = '… '
@@ -252,8 +210,7 @@ def _label_lines(book, numbers, show):
         lines.append(('title', _safe(book.title) or 'Untitled'))
     if show.get('author') and _safe(book.author):
         lines.append(('author', _safe(book.author)))
-    # The spine number, above the copy count: it is the thing somebody reads
-    # off a label to reshelve the book, and a database id never was.
+    # Call number above the copy count.
     if show.get('call_number') and _safe(getattr(book, 'call_number', '')):
         lines.append(('call_number', _safe(book.call_number)))
     if show.get('copy') and book.book_id in numbers:
@@ -270,11 +227,7 @@ def _label_lines(book, numbers, show):
 
 def build_label_sheet(books, page=DEFAULT_PAGE, qr_mm=DEFAULT_QR_MM,
                       show=None, cut_guides=True, skip=0):
-    """Render the grid. Returns PDF bytes.
-
-    `skip` leaves that many cells blank at the start, so a sheet that was half
-    used last time can be fed back through the printer instead of thrown away.
-    """
+    """Render the grid."""
     show = show or {'title': True, 'call_number': True, 'copy': True}
     qr_mm = max(MIN_QR_MM, min(MAX_QR_MM, float(qr_mm or DEFAULT_QR_MM)))
     _label, size = PAGE_SIZES.get(page, PAGE_SIZES[DEFAULT_PAGE])
@@ -286,13 +239,11 @@ def build_label_sheet(books, page=DEFAULT_PAGE, qr_mm=DEFAULT_QR_MM,
     fs = _font_size(qr_mm)
     line_h = fs * LINE_LEADING
 
-    # The cell's width comes from the QR alone, so the text can be measured
-    # against it before deciding how tall a cell has to be.
+    # Cell width comes from the QR size.
     cell_w = qr_mm * mm + CELL_PAD_MM * mm
     inner_w = cell_w - CELL_PAD_MM * mm
 
-    # Wrapped once, up front: the tallest label decides the cell height, and
-    # that cannot be known until every title has been broken into its lines.
+    # Wrap titles first to find the tallest label.
     rendered = {}
     for book in books:
         out = []
@@ -314,8 +265,7 @@ def build_label_sheet(books, page=DEFAULT_PAGE, qr_mm=DEFAULT_QR_MM,
     rows = max(1, int(usable_h // cell_h))
     per_page = cols * rows
 
-    # Centre the block so the leftover margin is shared, which also means a
-    # sheet cut by hand has an even border rather than all the slack on one side.
+    # Center the grid on the page.
     origin_x = (page_w - cols * cell_w) / 2
     origin_y = page_h - (page_h - rows * cell_h) / 2
 
@@ -355,8 +305,7 @@ def build_label_sheet(books, page=DEFAULT_PAGE, qr_mm=DEFAULT_QR_MM,
         for kind, value in rendered.get(book.book_id, []):
             face = bold if kind in ('title', 'book_id') else font
             c.setFont(face, fs)
-            # Title lines are already broken to width; everything else is one
-            # line and is still trimmed rather than allowed to run over.
+            # Trim text to fit the label.
             text = value if kind == 'title' else _fit(c, value, face, fs, inner_w)
             c.drawCentredString(x + cell_w / 2, text_y, text)
             text_y -= line_h
@@ -368,12 +317,7 @@ def build_label_sheet(books, page=DEFAULT_PAGE, qr_mm=DEFAULT_QR_MM,
 
 
 def _page_footer(c, page_w, page_no, total, qr_mm):
-    """A ruler statement, so a mis-scaled print is obvious before it is used.
-
-    "Printed at 100%" is the whole point of the feature: if the printer has
-    helpfully shrunk the page to fit, these labels are the wrong size and the
-    only way to notice is to measure one.
-    """
+    """A ruler statement, so a mis-scaled print is obvious before it is used."""
     c.setFont('Helvetica', 6.5)
     c.setFillColorRGB(0.45, 0.45, 0.45)
     c.drawString(PAGE_MARGIN_MM * mm, PAGE_MARGIN_MM * mm / 2,

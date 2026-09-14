@@ -1,0 +1,29 @@
+{# A handful of categories, read as shares rather than drawn as a chart. #}
+<div class="rounded-xl border border-slate-800/80 overflow-hidden shadow-2xl" style="background-color: var(--bg-card);">
+    <div class="p-5 border-b border-slate-800 flex items-center gap-2 flex-wrap">
+        <i class="fa-solid fa-chart-pie text-cyan-600 text-xs"></i>
+        <h4 class="text-sm font-bold text-slate-200 tracking-wide">{{ chart.title }}</h4>
+        <span class="text-[10px] text-slate-500 ml-auto">{{ chart.note }}</span>
+    </div>
+    <div class="p-5">
+        {% if chart.has_data %}
+        <ul class="space-y-2.5">
+            {% for m in chart.marks %}
+            <li class="grid items-center gap-3" style="grid-template-columns: minmax(90px, 9rem) 1fr auto;">
+                <span class="text-[11px] font-semibold {% if m.is_peak %}text-slate-200{% else %}text-slate-400{% endif %} truncate" title="{{ m.label }}">{{ m.label }}</span>
+                <span class="h-2.5 rounded-full overflow-hidden" style="background-color: var(--bg-input);">
+                    {# Bar width is the share of the total. #}
+                    <span class="block h-full rounded-full" style="width: {{ m.share }}%; background-color: var(--accent, #0e7490); opacity: {% if m.is_peak %}1{% else %}.5{% endif %};"></span>
+                </span>
+                <span class="text-[11px] text-slate-400 tabular-nums whitespace-nowrap">
+                    <span class="{% if m.is_peak %}text-cyan-400 font-bold{% else %}font-semibold{% endif %}">{{ m.value }}</span>
+                    <span class="text-slate-600">· {{ m.share }}%</span>
+                </span>
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p class="py-6 text-center text-slate-500 text-xs">{{ chart.note }}</p>
+        {% endif %}
+    </div>
+</div>

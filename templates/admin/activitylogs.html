@@ -108,9 +108,7 @@
 
         <main id="main-content" tabindex="-1" class="flex-1 overflow-y-auto p-8 space-y-6">
 
-            {# Says what this is, because the visitor logbook next to it in the #}
-            {# sidebar is also called a log and answers a completely different  #}
-            {# question. #}
+            {# Page description. #}
             <div class="rounded-xl border border-slate-800/80 p-4" style="background-color: var(--bg-card);">
                 <div class="flex items-start gap-3">
                     <i class="fa-solid fa-user-shield text-cyan-500 mt-1"></i>
@@ -242,25 +240,7 @@
                         {% if is_filtered %}matching {% endif %}entr{{ filtered_count|pluralize:"y,ies" }}
                     </span>
 
-                    {% if page_obj.paginator.num_pages > 1 %}
-                    <div class="flex items-center gap-1">
-                        {% if page_obj.has_previous %}
-                            <a href="?page={{ page_obj.previous_page_number }}{% if querystring %}&{{ querystring }}{% endif %}" class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors">&larr; Prev</a>
-                        {% else %}
-                            <button class="px-3 py-1.5 rounded border border-slate-800 text-slate-600 font-medium cursor-not-allowed" disabled>&larr; Prev</button>
-                        {% endif %}
-
-                        <span class="px-3 py-1.5 text-slate-400 font-medium">
-                            Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}
-                        </span>
-
-                        {% if page_obj.has_next %}
-                            <a href="?page={{ page_obj.next_page_number }}{% if querystring %}&{{ querystring }}{% endif %}" class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors">Next &rarr;</a>
-                        {% else %}
-                            <button class="px-3 py-1.5 rounded border border-slate-800 text-slate-600 font-medium cursor-not-allowed" disabled>Next &rarr;</button>
-                        {% endif %}
-                    </div>
-                    {% endif %}
+                    {% include 'admin/_pagination.html' with page=page_obj accent='cyan' qs=querystring %}
                 </div>
             </div>
 

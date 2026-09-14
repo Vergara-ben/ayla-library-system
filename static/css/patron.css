@@ -1,21 +1,6 @@
-/* =====================================================================
-   patron.css — shared polish layer for the AYLA Patron Module.
+/* patron.css: shared styles for the patron pages. */
 
-   Presentation-only. Loaded LAST on every patron page (after theme.css
-   and after each page's own <style>), so it composes on top without
-   changing any HTML structure, IDs, classes, JavaScript behaviour, or
-   Django bindings.
-
-   All colour comes from theme.css tokens — this file contains no literal
-   colours, so it works in both light and dark automatically.
-
-   Design direction: flat. Surfaces are separated by a 1px border rather
-   than by shadow or gradient; shadow is reserved for things that float
-   above the page (modals, dropdowns). Hover states change colour, not
-   position.
-   ===================================================================== */
-
-/* ---- 1. Base canvas ------------------------------------------------- */
+/* Base canvas */
 html { scroll-behavior: smooth; }
 ::selection { background: var(--tint-accent); color: var(--text); }
 
@@ -33,7 +18,7 @@ select:focus-visible, textarea:focus-visible,
   outline-offset: 2px;
 }
 
-/* ---- 2. Typography (Syne display + DM Sans body) ------------------- */
+/* Typography */
 body { font-family: 'DM Sans', sans-serif; }
 .logo h1, .title, .nav-title, .logo-text, .greeting h1, .stat-num,
 .card-title, .section-title, .detail-section-title, .modal-title,
@@ -42,7 +27,7 @@ body { font-family: 'DM Sans', sans-serif; }
   font-family: 'Syne', sans-serif;
 }
 
-/* ---- 3. Top navigation --------------------------------------------- */
+/* Top navigation */
 .navbar {
   background: var(--nav-bg) !important;
   -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
@@ -56,7 +41,7 @@ body { font-family: 'DM Sans', sans-serif; }
 }
 .back-btn:hover, .nav-btn:hover, .save-btn:hover { border-color: var(--accent); color: var(--accent); }
 
-/* ---- 4. Cards & panels — flat, border-defined ---------------------- */
+/* Cards and panels */
 .card, .section, .detail-card, .ann-card, .notif-card, .profile-hero {
   border-radius: var(--radius-lg);
   background: var(--surface);
@@ -74,21 +59,21 @@ body { font-family: 'DM Sans', sans-serif; }
 .stat-card:hover { border-color: var(--accent); }
 .stat-card::before { height: 3px !important; }
 
-/* ---- 5. Buttons & tappable controls -------------------------------- */
+/* Buttons */
 .btn, .btn-primary, .btn-map, .btn-nav, .btn-enable, .save-changes,
 .q-btn, .tab, .chip, .type-card, .btn-renew, .btn-dl, .btn-reserve,
 .btn-layers, .btn-secondary, .btn-skip, .logout-btn {
   transition: background-color .15s ease, border-color .15s ease,
               color .15s ease;
 }
-/* Solid buttons stay solid — no gradient, no lift */
+/* Solid buttons, no gradient or lift */
 .btn, .btn-primary, .btn-map, .btn-enable, .save-changes {
   background-image: none !important;
 }
 .btn:hover, .btn-primary:hover, .btn-map:hover, .btn-nav:not(.disabled):hover,
 .btn-enable:hover, .save-changes:hover { background-color: var(--accent-strong) !important; }
 
-/* ---- 6. Forms ------------------------------------------------------- */
+/* Forms */
 input:not([type=checkbox]):not([type=radio]), select, textarea, .search-input {
   transition: border-color .15s ease, box-shadow .15s ease;
 }
@@ -99,7 +84,7 @@ input:focus, select:focus, textarea:focus, .search-input:focus {
 }
 ::placeholder { color: var(--muted); opacity: .8; }
 
-/* ---- 7. Book cards (catalog) --------------------------------------- */
+/* Book cards (catalog) */
 .book-card {
   border-radius: var(--radius);
   background: var(--surface);
@@ -116,7 +101,7 @@ input:focus, select:focus, textarea:focus, .search-input:focus {
   .book-card { margin-bottom: 0 !important; }
 }
 
-/* ---- 8. Bottom navigation (mobile app bar) ------------------------- */
+/* Bottom navigation (mobile app bar) */
 .bottom-nav {
   background: var(--nav-bg) !important;
   -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
@@ -129,17 +114,17 @@ input:focus, select:focus, textarea:focus, .search-input:focus {
   width: 26px; height: 3px; border-radius: 0 0 3px 3px; background: var(--accent);
 }
 
-/* ---- 9. Badges & status pills -------------------------------------- */
+/* Badges */
 .book-badge, .avail-badge, .loan-badge, .ann-tag, .status-badge,
 .book-item .book-badge { letter-spacing: .3px; }
 .status-badge { box-shadow: none; }
 
-/* ---- 10. Empty states ---------------------------------------------- */
+/* Empty states */
 .empty { padding: 56px 24px !important; color: var(--muted); }
 .empty .empty-icon { font-size: 48px !important; margin-bottom: 14px !important; opacity: .7; }
 .empty > div:not(.empty-icon) { font-size: 14px; }
 
-/* ---- 11. Modals — the one place depth is allowed ------------------- */
+/* Modals */
 .modal, .modal-overlay .modal {
   border-radius: var(--radius-lg);
   background: var(--surface);
@@ -148,10 +133,10 @@ input:focus, select:focus, textarea:focus, .search-input:focus {
 }
 .modal-overlay { background: var(--scrim); }
 
-/* ---- 12. Announcement / notification cards ------------------------- */
+/* Announcement cards */
 .ann-card:hover, .notif-card:hover { border-color: var(--accent-border); }
 
-/* ---- 13. Touch targets on small screens ---------------------------- */
+/* Touch targets on small screens */
 @media (max-width: 640px) {
   .back-btn, .nav-btn, .save-btn, .theme-toggle { min-width: 42px; min-height: 42px; }
   .chip { padding: 9px 16px !important; }

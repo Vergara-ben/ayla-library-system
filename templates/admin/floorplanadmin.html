@@ -21,9 +21,7 @@
 
     <link rel="stylesheet" href="{% static 'css/theme.css' %}">
     <style>
-        /* Rides with the pointer rather than sitting in the corner: the
-           number answers "how long is this edge", and reading it means looking
-           away from the very line being drawn if it lives somewhere else. */
+        /* Measurement label that follows the pointer. */
         #drawReadout {
             position: absolute; z-index: 500; left: 0; top: 0;
             background: var(--bg-modal, #101826); color: var(--text-primary, #e2e8f0);
@@ -91,14 +89,95 @@
             }
         }
 
-        /* Map configuration (beacons & waypoints) */
+        /* Map canvas; the height can be resized. */
         #mapConfig {
-            height: 520px;
+            height: var(--map-height, 560px);
+            min-height: 320px;
             width: 100%;
             border-radius: 0.75rem;
             border: 1px solid var(--border-color);
             position: relative;
+            resize: vertical;
+            overflow: hidden;
             z-index: 0; /* contain Leaflet's high z-index panes so modals sit on top */
+        }
+        /* Full-window mode. */
+        body.map-full .map-editor {
+            position: fixed; inset: 0; z-index: 60; border-radius: 0;
+            margin: 0; display: flex; flex-direction: column;
+        }
+        body.map-full .map-editor .map-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+        body.map-full #mapConfig { height: calc(100vh - 190px) !important; resize: none; }
+
+        /* Tool rail. */
+        .map-rail {
+            display: flex; flex-direction: column; gap: 4px;
+            padding: 8px; border-radius: 0.75rem;
+            border: 1px solid var(--border-color);
+            background: var(--bg-subtle);
+            align-self: stretch;
+        }
+        .rail-btn {
+            display: flex; align-items: center; gap: 9px;
+            padding: 8px 9px; border-radius: 8px;
+            border: 1px solid transparent; background: none; cursor: pointer;
+            color: var(--text-muted);
+            font-size: 11px; font-weight: 700; text-align: left; white-space: nowrap;
+            transition: background-color .12s ease, color .12s ease;
+        }
+        .rail-btn i { width: 14px; text-align: center; font-size: 12px; }
+        .rail-btn:hover { background: var(--bg-card); color: var(--text-primary); }
+        .rail-btn.mode-active {
+            background: var(--accent-strong); color: var(--on-accent);
+            border-color: var(--accent-strong);
+        }
+        .rail-sep { height: 1px; background: var(--border-color); margin: 5px 2px; }
+        .rail-head {
+            font-size: 9px; font-weight: 700; letter-spacing: .09em;
+            text-transform: uppercase; color: var(--text-muted);
+            padding: 4px 9px 2px;
+        }
+        /* Icons only once the window is too narrow to carry the words. */
+        @media (max-width: 1400px) {
+            .rail-btn span { display: none; }
+            .rail-btn { justify-content: center; padding: 9px 8px; }
+            .rail-head { text-align: center; padding: 4px 0 2px; font-size: 8px; }
+        }
+
+        /* Grouped menus in the header */
+        .map-menu-wrap { position: relative; }
+        .map-menu {
+            position: absolute; top: calc(100% + 6px); right: 0; z-index: 30;
+            min-width: 210px; padding: 8px;
+            border-radius: 10px; border: 1px solid var(--border-modal);
+            background: var(--bg-modal); box-shadow: 0 18px 40px rgb(0 0 0 / .35);
+        }
+        .map-menu-title {
+            font-size: 9px; font-weight: 700; letter-spacing: .09em;
+            text-transform: uppercase; color: var(--text-muted); padding: 2px 6px 6px;
+        }
+        .map-menu .see-btn, .map-menu .mode-btn {
+            display: flex; align-items: center; gap: 8px; width: 100%;
+            margin-bottom: 3px; text-align: left;
+        }
+        .map-menu .see-btn::before {
+            content: '\f00c'; font-family: 'Font Awesome 6 Free'; font-weight: 900;
+            font-size: 9px; opacity: 0; width: 10px;
+        }
+        .map-menu .see-btn.on::before { opacity: 1; }
+        .map-tool-btn {
+            display: inline-flex; align-items: center; gap: 6px;
+            background: var(--bg-card); border: 1px solid var(--border-color);
+            color: var(--text-muted); border-radius: 8px;
+            font-size: 11px; font-weight: 700; padding: 6px 10px; cursor: pointer;
+            transition: color .12s ease, border-color .12s ease;
+        }
+        .map-tool-btn:hover { color: var(--text-primary); border-color: var(--accent-cyan); }
+        .map-tool-btn i { font-size: 10px; }
+        .map-canvas-col { min-width: 0; }
+        .map-foot {
+            display: flex; flex-wrap: wrap; align-items: center; gap: 14px;
+            margin-top: 8px; font-size: 10px; color: var(--text-muted);
         }
         .leaflet-container {
             background: var(--bg-sidebar);
@@ -119,8 +198,7 @@
             font-size: 12px;
             line-height: 1.5;
         }
-        /* Context-menu actions stack vertically, one per row, so they are easy
-           to hit and read at a glance. */
+        /* Panel action buttons, one per row. */
         .map-actions {
             display: flex;
             flex-direction: column;
@@ -150,18 +228,20 @@
         .map-popup-title { font-weight: 700; font-size: 12px; }
         .map-popup-sub { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
 
-        /* ---- Docked properties panel -------------------------------------
-           Editing happens here rather than in a popup anchored to the click,
-           so the canvas is never covered and the panel can stay open while a
-           shape is being dragged. */
+        /* Docked properties panel. */
         .map-workspace {
             display: grid;
-            grid-template-columns: minmax(0, 1fr) 260px;
-            gap: 14px;
+            grid-template-columns: auto minmax(0, 1fr) 260px;
+            gap: 12px;
             align-items: start;
         }
         @media (max-width: 1100px) {
+            .map-workspace { grid-template-columns: auto minmax(0, 1fr); }
+        }
+        @media (max-width: 700px) {
             .map-workspace { grid-template-columns: minmax(0, 1fr); }
+            .map-rail { flex-direction: row; flex-wrap: wrap; }
+            .map-rail .rail-sep, .map-rail .rail-head { display: none; }
         }
         .see-btn {
             background-color: var(--bg-card);
@@ -171,8 +251,7 @@
             padding: 4px 8px; border-radius: 7px; transition: all .15s;
         }
         .see-btn:hover { color: var(--text-primary); }
-        /* On is the resting state: a plan with everything visible is the one
-           an Administrator expects to find, so hiding is what looks unusual. */
+        /* Layer toggles are on by default. */
         .see-btn.on { color: var(--text-primary); border-color: var(--accent-cyan); }
         .see-btn:not(.on) { opacity: .45; text-decoration: line-through; }
 
@@ -207,6 +286,8 @@
         }
         .readiness-dot.blocker { background-color: var(--danger); }
         .readiness-dot.warning { background-color: var(--warning); }
+        /* Not a fault. */
+        .readiness-dot.info { background-color: var(--text-muted); }
         .readiness-text { font-size: 11px; font-weight: 600; color: var(--text-primary); }
         .readiness-detail { font-size: 10px; color: var(--text-muted); line-height: 1.5; margin-top: 2px; }
         .readiness-counts { font-size: 10px; color: var(--text-muted); font-weight: 500; }
@@ -251,12 +332,18 @@
             display: block; font-size: 9px; font-weight: 700; letter-spacing: .07em;
             text-transform: uppercase; color: var(--text-muted); margin-bottom: 3px;
         }
-        .insp-field input {
+        /* Style selects and text areas like inputs. */
+        .insp-field input,
+        .insp-field select,
+        .insp-field textarea {
             width: 100%; background: var(--bg-input); border: 1px solid var(--border-color);
             border-radius: 6px; padding: 6px 8px; font-size: 12px; font-family: inherit;
             color: var(--text-primary); outline: none;
         }
-        .insp-field input:focus { border-color: var(--accent); }
+        .insp-field textarea { resize: vertical; line-height: 1.45; }
+        .insp-field input:focus,
+        .insp-field select:focus,
+        .insp-field textarea:focus { border-color: var(--accent); }
         .insp-field input[readonly] { opacity: .65; cursor: not-allowed; }
         /* Rotation is a first-class control here, not a hidden drag handle. */
         .insp-rot-row { display: flex; gap: 4px; margin-bottom: 10px; }
@@ -271,8 +358,7 @@
         .insp-note { font-size: 10px; color: var(--text-muted); line-height: 1.5; margin-top: 8px; }
         .insp-saved { font-size: 10px; font-weight: 700; color: var(--success); margin-top: 8px; min-height: 13px; }
 
-        /* Bounding-box resize handles — drag a side or a corner to scale the
-           whole room, the way a shape behaves in a design tool. */
+        /* Resize handles. */
         .geo-handle {
             background: var(--bg-card);
             border: 2px solid var(--accent);
@@ -284,8 +370,7 @@
         .geo-handle.h-ne, .geo-handle.h-sw { cursor: nesw-resize; }
         .geo-handle.h-n,  .geo-handle.h-s  { cursor: ns-resize; }
         .geo-handle.h-e,  .geo-handle.h-w  { cursor: ew-resize; }
-        /* Rotate handle: round, warning-coloured, and its own cursor so it
-           never reads as "just another resize square". */
+        /* Rotate handle. */
         .geo-handle.rotate {
             border-radius: 50%;
             border-color: var(--warning);
@@ -294,8 +379,7 @@
         .geo-handle.rotate:active { cursor: grabbing; }
         .geo-outline { pointer-events: none; }
 
-        /* Beacons and waypoints: small solid dots, natively draggable via
-           L.Marker (a divIcon, not the old non-draggable circleMarker). */
+        /* Beacon and waypoint markers. */
         .map-dot {
             width: 16px; height: 16px; border-radius: 50%;
             border: 2px solid rgba(0, 0, 0, 0.18);
@@ -306,6 +390,20 @@
         .map-dot.beacon { background: var(--info); }
         .map-dot.waypoint { background: var(--success); }
         .map-dot.waypoint.selected { background: var(--warning); }
+
+        /* Stair shape buttons. */
+        .stair-shape {
+            display: flex; flex-direction: column; align-items: center; gap: 4px;
+            padding: 10px 6px; border-radius: 10px; cursor: pointer;
+            border: 1px solid var(--border-color); background: var(--bg-input);
+            color: var(--text-muted); font-size: 10px; font-weight: 600;
+            line-height: 1.2; text-align: center; transition: all .12s ease;
+        }
+        .stair-shape i { font-size: 15px; }
+        .stair-shape:hover { color: var(--text-primary); border-color: var(--text-muted); }
+        .stair-shape.on {
+            color: #fb7185; border-color: #be123c; background: rgba(190, 18, 60, .12);
+        }
     </style>
     <link rel="stylesheet" href="{% static 'css/admin-enhance.css' %}">
     <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
@@ -393,9 +491,7 @@
                                 <td class="py-4 px-6 font-mono text-slate-400">#{{ floorplan.floor_plan_id }}</td>
                                 <td class="py-4 px-6 font-semibold text-slate-200">{{ floorplan.name }}</td>
                                 <td class="py-4 px-6">
-                                    {# Which storey this is. Orders the patron's floor switcher and #}
-                                    {# names each entry, so it has to match the building rather     #}
-                                    {# than the order the plans happened to be drawn in.            #}
+                                    {# Which storey this is. #}
                                     <div class="flex items-center gap-1">
                                         <input type="number" id="floor-{{ floorplan.floor_plan_id }}" value="{{ floorplan.floor_number }}" min="-5" max="100" step="1" class="w-14 rounded px-1.5 py-0.5 text-[10px] text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700" style="background-color: var(--bg-input);">
                                         <button type="button" onclick="saveFloorNumber({{ floorplan.floor_plan_id }})" class="text-[10px] font-bold px-1.5 py-0.5 rounded border border-slate-700 text-cyan-400 hover:bg-slate-800/60">Set</button>
@@ -403,7 +499,13 @@
                                     <div class="text-[9px] text-slate-500 mt-1">{{ floorplan.floor_label }}</div>
                                 </td>
                                 <td class="py-4 px-6 font-mono text-slate-400">
-                                    {{ floorplan.canvas_width|floatformat:0 }} × {{ floorplan.canvas_height|floatformat:0 }}
+                                    {# Click to change the canvas size. #}
+                                    <button type="button" class="hover:text-cyan-400 transition-colors"
+                                            title="Change the canvas size"
+                                            onclick="openCanvasSize({{ floorplan.floor_plan_id }}, {{ floorplan.canvas_width|floatformat:0 }}, {{ floorplan.canvas_height|floatformat:0 }})">
+                                        {{ floorplan.canvas_width|floatformat:0 }} × {{ floorplan.canvas_height|floatformat:0 }}
+                                        <i class="fa-solid fa-pen text-[8px] ml-1 opacity-60"></i>
+                                    </button>
                                     {# Scale is what makes BLE trilateration possible at all. #}
                                     <div class="mt-1 flex items-center gap-1">
                                         <input type="number" id="scale-{{ floorplan.floor_plan_id }}" value="{{ floorplan.pixels_per_meter|default_if_none:'' }}" placeholder="units/m" min="0.1" max="1000" step="0.1" class="w-20 rounded px-1.5 py-0.5 text-[10px] text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700" style="background-color: var(--bg-input);">
@@ -465,10 +567,9 @@
 
             </div>
 
-            <!-- Map Configuration. Any plan can be drawn on, not just the live
-                 one, so a new layout can be finished before it is activated. -->
+            <!-- Map Configuration. -->
             {% if floorplans %}
-            <div class="rounded-xl border border-slate-800/80 overflow-hidden shadow-2xl flex flex-col" style="background-color: var(--bg-card);">
+            <div class="map-editor rounded-xl border border-slate-800/80 overflow-hidden shadow-2xl flex flex-col" style="background-color: var(--bg-card);">
                 <div class="p-5 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div class="flex items-center gap-2 flex-wrap">
                         <i class="fa-solid fa-location-dot text-cyan-600 text-xs"></i>
@@ -482,68 +583,72 @@
                         </select>
                         <span id="planLiveBadge" class="hidden text-[10px] font-bold uppercase tracking-wide px-2 py-1 rounded bg-amber-500/10 text-amber-500 border border-amber-500/20">Draft — not visible to patrons</span>
                     </div>
+                    {# Map menus. #}
                     <div class="flex items-center gap-2 self-end sm:self-auto flex-wrap">
-                        {# Drawing aids. Separated from the placement tools by a divider #}
-                        {# because they change how drawing behaves rather than what is    #}
-                        {# being drawn. #}
-                        <button id="aid-rightAngles" type="button" onclick="toggleDrawAid('rightAngles')" title="Snap each new wall square to the one before it"
-                                class="mode-btn mode-active bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-emerald-400 text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
-                            <i class="fa-solid fa-vector-square text-[10px]"></i> Right Angles
-                        </button>
-                        <button id="aid-grid" type="button" onclick="toggleDrawAid('grid')" title="Snap corners to the grid"
-                                class="mode-btn mode-active bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-emerald-400 text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
-                            <i class="fa-solid fa-magnet text-[10px]"></i> Snap
-                        </button>
-                        <button id="aid-showGrid" type="button" onclick="toggleDrawAid('showGrid')" title="Show or hide the grid"
-                                class="mode-btn mode-active bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-slate-300 text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
-                            <i class="fa-solid fa-border-all text-[10px]"></i> Grid
-                        </button>
-                        <button id="btnUndoVertex" type="button" onclick="undoLastVertex()" title="Remove the last corner you placed (Ctrl+Z or Backspace)"
-                                class="mode-btn hidden bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-amber-400 text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
-                            <i class="fa-solid fa-rotate-left text-[10px]"></i> Undo point
-                        </button>
-                        <span class="w-px h-5 bg-slate-800 mx-1"></span>
-                        <button id="btnRoom" type="button" onclick="setMode('room')" class="mode-btn bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-cyan-400 text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
-                            <i class="fa-solid fa-draw-polygon text-[10px]"></i> Draw Room
-                        </button>
-                        <button id="btnStairs" type="button" onclick="setMode('stairs')" class="mode-btn bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-rose-400 text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
-                            <i class="fa-solid fa-stairs text-[10px]"></i> Draw Stairs
-                        </button>
-                        <button id="btnObstacle" type="button" onclick="setMode('obstacle')" class="mode-btn bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-amber-400 text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
-                            <i class="fa-solid fa-chair text-[10px]"></i> Draw Obstacle
-                        </button>
-                        <button id="btnShelfDraw" type="button" onclick="setMode('shelfdraw')" class="mode-btn bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-purple-400 text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
-                            <i class="fa-solid fa-draw-polygon text-[10px]"></i> Draw Shelf
-                        </button>
-                        <button id="btnShelf" type="button" onclick="setMode('shelf')" class="mode-btn bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-purple-400 text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
-                            <i class="fa-solid fa-box text-[10px]"></i> Place Shelf
-                        </button>
-                        <button id="btnBeacon" type="button" onclick="setMode('beacon')" class="mode-btn bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-blue-400 text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
-                            <i class="fa-solid fa-tower-broadcast text-[10px]"></i> Place Beacon
-                        </button>
-                        <span class="w-px h-5 bg-slate-800 mx-1"></span>
-                        <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500 mr-1">Show</span>
-                        <button id="see-rooms" type="button" onclick="toggleLayer('rooms')" class="see-btn">Rooms</button>
-                        <button id="see-doors" type="button" onclick="toggleLayer('doors')" class="see-btn">Doors</button>
-                        <button id="see-shelves" type="button" onclick="toggleLayer('shelves')" class="see-btn">Shelves</button>
-                        <button id="see-obstacles" type="button" onclick="toggleLayer('obstacles')" class="see-btn">Furniture</button>
-                        <button id="see-stairs" type="button" onclick="toggleLayer('stairs')" class="see-btn">Stairs</button>
-                        <button id="see-beacons" type="button" onclick="toggleLayer('beacons')" class="see-btn">Beacons</button>
-                        <button id="see-waypoints" type="button" onclick="toggleLayer('waypoints')" class="see-btn">Waypoints</button>
-                        <span class="w-px h-5 bg-slate-800 mx-1"></span>
+                        <div class="map-menu-wrap">
+                            <button type="button" class="map-tool-btn" onclick="toggleMapMenu('layersMenu')">
+                                <i class="fa-solid fa-layer-group"></i> Layers <i class="fa-solid fa-chevron-down text-[8px]"></i>
+                            </button>
+                            <div id="layersMenu" class="map-menu hidden">
+                                <p class="map-menu-title">Show on the map</p>
+                                <button id="see-rooms" type="button" onclick="toggleLayer('rooms')" class="see-btn">Rooms</button>
+                                <button id="see-doors" type="button" onclick="toggleLayer('doors')" class="see-btn">Doors</button>
+                                <button id="see-shelves" type="button" onclick="toggleLayer('shelves')" class="see-btn">Shelves</button>
+                                <button id="see-obstacles" type="button" onclick="toggleLayer('obstacles')" class="see-btn">Furniture</button>
+                                <button id="see-stairs" type="button" onclick="toggleLayer('stairs')" class="see-btn">Stairs</button>
+                                <button id="see-beacons" type="button" onclick="toggleLayer('beacons')" class="see-btn">Beacons</button>
+                                <button id="see-waypoints" type="button" onclick="toggleLayer('waypoints')" class="see-btn">Waypoints</button>
+                            </div>
+                        </div>
+
+                        <div class="map-menu-wrap">
+                            <button type="button" class="map-tool-btn" onclick="toggleMapMenu('aidsMenu')">
+                                <i class="fa-solid fa-ruler-combined"></i> Drawing aids <i class="fa-solid fa-chevron-down text-[8px]"></i>
+                            </button>
+                            <div id="aidsMenu" class="map-menu hidden">
+                                <p class="map-menu-title">How the pen behaves</p>
+                                <button id="aid-rightAngles" type="button" onclick="toggleDrawAid('rightAngles')" title="Snap each new wall square to the one before it"
+                                        class="mode-btn map-action-btn">
+                                    <i class="fa-solid fa-vector-square"></i> Square corners
+                                </button>
+                                <button id="aid-grid" type="button" onclick="toggleDrawAid('grid')" title="Snap corners to the grid"
+                                        class="mode-btn map-action-btn">
+                                    <i class="fa-solid fa-magnet"></i> Snap to grid
+                                </button>
+                                <button id="aid-showGrid" type="button" onclick="toggleDrawAid('showGrid')" title="Show or hide the grid"
+                                        class="mode-btn map-action-btn">
+                                    <i class="fa-solid fa-border-all"></i> Show the grid
+                                </button>
+                            </div>
+                        </div>
+
+                        {# Canvas menu. #}
+                        <div class="map-menu-wrap">
+                            <button type="button" class="map-tool-btn" onclick="toggleMapMenu('canvasMenu')">
+                                <i class="fa-solid fa-crop-simple"></i> Canvas <i class="fa-solid fa-chevron-down text-[8px]"></i>
+                            </button>
+                            <div id="canvasMenu" class="map-menu hidden">
+                                <p class="map-menu-title">Canvas</p>
+                                <button type="button" class="map-action-btn" onclick="openCanvasSize()">
+                                    <i class="fa-solid fa-vector-square"></i> Change canvas size&hellip;
+                                </button>
+                                <p class="map-menu-title" style="padding-top:8px">Size of this box</p>
+                                <button type="button" class="map-action-btn" onclick="setMapHeight(440)"><i class="fa-solid fa-compress"></i> Short</button>
+                                <button type="button" class="map-action-btn" onclick="setMapHeight(560)"><i class="fa-solid fa-equals"></i> Standard</button>
+                                <button type="button" class="map-action-btn" onclick="setMapHeight(820)"><i class="fa-solid fa-expand"></i> Tall</button>
+                                <button type="button" class="map-action-btn" onclick="toggleMapFullscreen()"><i class="fa-solid fa-up-right-and-down-left-from-center"></i> Fill the window</button>
+                                <p class="insp-note" style="padding:6px 6px 2px">Or drag the bottom-right corner of the map.</p>
+                            </div>
+                        </div>
+
                         <button id="btnGenerateRoute" type="button" onclick="generateRoute()" title="Lay a walkable network from the rooms, doors and shelves"
-                                class="mode-btn bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-emerald-300 text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
-                            <i class="fa-solid fa-wand-magic-sparkles text-[10px]"></i> Generate Route
-                        </button>
-                        <button id="btnWaypoint" type="button" onclick="setMode('waypoint')" class="mode-btn bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-emerald-400 text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
-                            <i class="fa-solid fa-circle-nodes text-[10px]"></i> Place Waypoint
+                                class="map-tool-btn" style="color:var(--success)">
+                            <i class="fa-solid fa-wand-magic-sparkles"></i> Generate Route
                         </button>
                     </div>
                 </div>
-                <div class="px-5 pt-4">
-                    <!-- What still stops this plan working. Everything it lists
-                         fails silently otherwise, which is why it is on screen
-                         rather than behind a menu. -->
+                <div class="map-scroll px-5 pt-4">
+                    <!-- What still stops this plan working. -->
                     <div id="readinessPanel" class="readiness mb-3">
                         <button type="button" class="readiness-head" onclick="toggleReadiness()">
                             <span id="readinessSummary" class="readiness-summary">Checking this floor plan&hellip;</span>
@@ -558,14 +663,7 @@
                         <strong class="text-slate-400">Edit Rooms</strong> lets you drag a room's corners to reshape it; each room is independent, so reshaping one never disturbs the others.
                         For shelves, beacons and waypoints, pick a placement mode then click the map. Left-click two waypoints in turn to connect them. Click anything on the map to open it in the properties panel on the right, where you can set its position, size and rotation — changes save as you make them.
                     </div>
-                    <div class="flex flex-wrap items-center gap-4 mb-3 text-[10px] text-slate-400">
-                        <span class="flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded-full" style="background:var(--info)"></span> Beacon</span>
-                        <span class="flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded-full" style="background:var(--success)"></span> Waypoint</span>
-                        <span class="flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded-full" style="background:var(--warning)"></span> Selected</span>
-                        <span class="flex items-center gap-1.5"><span class="inline-block w-4 h-0.5" style="background:var(--accent)"></span> Connection</span>
-                    </div>
-                    <!-- Rooms added from Shelf Manager have no shape yet, so they
-                         cannot appear on the map until one is drawn for them. -->
+                    <!-- Rooms without a drawn shape yet. -->
                     <div id="unmappedRooms" class="hidden mb-3 p-3 rounded-lg border border-amber-500/20 bg-amber-500/5">
                         <p class="text-[10px] uppercase font-bold tracking-wider text-amber-500 mb-2">
                             <i class="fa-solid fa-triangle-exclamation text-[10px]"></i> Rooms not yet drawn
@@ -582,15 +680,56 @@
                     </div>
                 </div>
                 <div class="px-5 pb-5">
-                    <!-- Map on the left, properties panel docked on the right.
-                         The panel replaces the old click-anchored popups: it
-                         never covers the canvas and stays open while dragging. -->
+                    <!-- Map on the left, properties panel docked on the right. -->
                     <div class="map-workspace">
+                        {# What you are drawing, beside what you are drawing it on. #}
+                        <nav class="map-rail" aria-label="Drawing tools">
+                            <p class="rail-head">Draw</p>
+                            <button id="btnRoom" type="button" onclick="setMode('room')" class="mode-btn rail-btn" title="Trace a room, corner by corner">
+                                <i class="fa-solid fa-draw-polygon"></i><span>Room</span>
+                            </button>
+                            <button id="btnStairs" type="button" onclick="setMode('stairs')" class="mode-btn rail-btn" title="Trace a stairway or lift">
+                                <i class="fa-solid fa-stairs"></i><span>Stairs</span>
+                            </button>
+                            <button id="btnObstacle" type="button" onclick="setMode('obstacle')" class="mode-btn rail-btn" title="Trace a table, counter or pillar">
+                                <i class="fa-solid fa-chair"></i><span>Furniture</span>
+                            </button>
+                            <button id="btnShelfDraw" type="button" onclick="setMode('shelfdraw')" class="mode-btn rail-btn" title="Trace a shelf that is not a rectangle">
+                                <i class="fa-solid fa-pen-nib"></i><span>Shelf shape</span>
+                            </button>
+                            <div class="rail-sep"></div>
+                            <p class="rail-head">Place</p>
+                            <button id="btnShelf" type="button" onclick="setMode('shelf')" class="mode-btn rail-btn" title="Put a rectangular shelf where you click">
+                                <i class="fa-solid fa-box"></i><span>Shelf</span>
+                            </button>
+                            <button id="btnBeacon" type="button" onclick="setMode('beacon')" class="mode-btn rail-btn" title="Put a BLE beacon where you click">
+                                <i class="fa-solid fa-tower-broadcast"></i><span>Beacon</span>
+                            </button>
+                            <button id="btnWaypoint" type="button" onclick="setMode('waypoint')" class="mode-btn rail-btn" title="Put a waypoint where you click">
+                                <i class="fa-solid fa-circle-nodes"></i><span>Waypoint</span>
+                            </button>
+                            <div class="rail-sep"></div>
+                            {# Only ever useful mid-shape, so it is only ever shown then. #}
+                            <button id="btnUndoVertex" type="button" onclick="undoLastVertex()" class="mode-btn rail-btn hidden" title="Remove the last corner you placed (Ctrl+Z or Backspace)" style="color:var(--warning)">
+                                <i class="fa-solid fa-rotate-left"></i><span>Undo point</span>
+                            </button>
+                            <button type="button" onclick="setMode(null)" class="rail-btn" title="Stop drawing and go back to selecting (Esc)">
+                                <i class="fa-solid fa-arrow-pointer"></i><span>Select</span>
+                            </button>
+                        </nav>
+                        <div class="map-canvas-col">
                         <div id="mapConfig"></div>
-                        {# Length and corner angle while dragging, so a right   #}
-                        {# angle is confirmed before the click rather than      #}
-                        {# discovered afterwards. #}
+                        {# Live length and angle while drawing. #}
                         <div id="drawReadout" class="hidden"></div>
+                        {# Legend. #}
+                        <div class="map-foot">
+                            <span class="flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded-full" style="background:var(--info)"></span> Beacon</span>
+                            <span class="flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded-full" style="background:var(--success)"></span> Waypoint</span>
+                            <span class="flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded-full" style="background:var(--warning)"></span> Selected</span>
+                            <span class="flex items-center gap-1.5"><span class="inline-block w-4 h-0.5" style="background:var(--accent)"></span> Connection</span>
+                            <span class="ml-auto" id="canvasSizeNote"></span>
+                        </div>
+                        </div>
                         <aside id="mapInspector" class="map-inspector">
                             <div class="map-inspector-head">
                                 <span id="inspectorKind" class="map-inspector-kind">Nothing selected</span>
@@ -624,7 +763,7 @@
                     </div>
                     <div class="space-y-2">
                         {% for room in floorplan.room_set.all %}
-                        <div class="flex items-center justify-between p-3 rounded-lg border border-slate-800/60 bg-slate-900/20" data-room-id="{{ room.room_id }}" data-name="{{ room.name }}" data-map-x="{{ room.map_x }}" data-map-y="{{ room.map_y }}" data-description="{{ room.description|default:"" }}">
+                        <div class="flex items-center justify-between p-3 rounded-lg border border-slate-800/60 bg-slate-900/20" data-room-id="{{ room.room_id }}" data-name="{{ room.name }}" data-map-x="{{ room.map_x }}" data-map-y="{{ room.map_y }}" data-description="{{ room.description|default:"" }}" data-patron-access="{{ room.patron_access|yesno:"1,0" }}">
                             <div class="flex items-center gap-3">
                                 <i class="fa-solid fa-door-open text-slate-500 text-xs"></i>
                                 <span class="text-xs font-medium text-slate-300">{{ room.name }}</span>
@@ -775,7 +914,7 @@
                     <i class="fa-solid fa-xmark text-sm"></i>
                 </button>
             </div>
-            <form method="post" action="{% url 'edit_room' %}" class="space-y-4 text-xs">
+            <form method="post" action="{% url 'edit_room' %}" id="editRoomForm" class="space-y-4 text-xs">
                 {% csrf_token %}
                 <input type="hidden" name="room_id" id="editRoomId">
                 <div class="space-y-1.5">
@@ -785,16 +924,32 @@
                 <div class="grid grid-cols-2 gap-4">
                     <div class="space-y-1.5">
                         <label for="editRoomMapX" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Map X</label>
-                        <input type="number" step="0.1" name="map_x" id="editRoomMapX" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                        {# step="any", not step="0.1". #}
+                        <input type="number" step="any" name="map_x" id="editRoomMapX" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
                     </div>
                     <div class="space-y-1.5">
                         <label for="editRoomMapY" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Map Y</label>
-                        <input type="number" step="0.1" name="map_y" id="editRoomMapY" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                        <input type="number" step="any" name="map_y" id="editRoomMapY" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
                     </div>
                 </div>
                 <div class="space-y-1.5">
                     <label for="editRoomDescription" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Description</label>
                     <textarea name="description" id="editRoomDescription" rows="2" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);"></textarea>
+                </div>
+                {# Always send the value, checked or not. #}
+                <input type="hidden" name="patron_access" id="editRoomAccessValue" value="1">
+                <div class="rounded-lg border border-slate-800/60 p-3.5 flex items-start gap-3" style="background-color: var(--bg-input);">
+                    <input type="checkbox" id="editRoomAccess" checked
+                           onchange="document.getElementById('editRoomAccessValue').value = this.checked ? '1' : '0';"
+                           class="mt-0.5 w-4 h-4 accent-cyan-600 flex-none">
+                    <label for="editRoomAccess" class="cursor-pointer">
+                        <span class="block text-xs font-bold text-slate-300">Patrons may enter this room</span>
+                        <span class="block text-[10px] text-slate-500 mt-1 leading-relaxed">
+                            Clear this for a staff-only room. It stays drawn and named on the
+                            patron map, but no route is sent through it and a patron's position
+                            is never shown inside it. Regenerate the waypoints afterwards.
+                        </span>
+                    </label>
                 </div>
                 <div class="pt-4 flex items-center justify-end gap-3">
                     <button type="button" onclick="closeEditRoomModal()" class="px-5 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:text-slate-100 hover:bg-slate-800/40 font-semibold tracking-wide transition-colors min-w-[100px]">
@@ -865,10 +1020,7 @@
                         <option value="DeviceName">Match on device name</option>
                     </select>
                     <p class="text-[10px] text-slate-500 leading-relaxed">
-                        Pick the wrong one and the beacon is never matched, so no position is ever computed.
-                        Not sure? Open <a href="/static/tools/beacon-probe.html" target="_blank" class="text-cyan-400 font-semibold underline">the beacon probe</a>
-                        beside the hardware &mdash; it prints what each beacon actually broadcasts,
-                        which is what belongs in these fields.
+                        Choose the type your beacon broadcasts. If it does not match, the beacon will not be detected.
                     </p>
                 </div>
                 <div id="beaconIBeaconFields" class="grid grid-cols-2 gap-3">
@@ -892,9 +1044,7 @@
                         <input type="text" id="beaconInstance" maxlength="12" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" placeholder="12 hex chars">
                     </div>
                 </div>
-                {# Every one of these has a working default, so none of them #}
-                {# has to be answered to place a beacon. Folded away so the     #}
-                {# form reads as the two things that actually differ per unit.  #}
+                {# Optional beacon settings. #}
                 <details id="beaconAdvanced" class="rounded-lg border border-slate-800" style="background-color: var(--bg-input);">
                     <summary class="cursor-pointer select-none px-3 py-2.5 text-[11px] font-bold text-slate-300 hover:text-slate-100">
                         <i class="fa-solid fa-sliders mr-1.5 text-slate-500"></i> Calibration &amp; mounting
@@ -976,12 +1126,16 @@
             document.body.style.overflow = 'auto';
         }
 
-        function openEditRoomModal(roomId, name, mapX, mapY, description) {
+        function openEditRoomModal(roomId, name, mapX, mapY, description, patronAccess) {
             document.getElementById('editRoomId').value = roomId;
             document.getElementById('editRoomName').value = name;
             document.getElementById('editRoomMapX').value = mapX;
             document.getElementById('editRoomMapY').value = mapY;
             document.getElementById('editRoomDescription').value = description || '';
+            // Treat unknown access as open.
+            const open = patronAccess !== '0' && patronAccess !== false;
+            document.getElementById('editRoomAccess').checked = open;
+            document.getElementById('editRoomAccessValue').value = open ? '1' : '0';
             document.getElementById('editRoomModal').classList.remove('hidden');
             document.body.style.overflow = 'hidden';
         }
@@ -992,8 +1146,30 @@
             const mapX = button.getAttribute('data-map-x');
             const mapY = button.getAttribute('data-map-y');
             const description = button.getAttribute('data-description');
-            openEditRoomModal(roomId, name, mapX, mapY, description);
+            openEditRoomModal(roomId, name, mapX, mapY, description,
+                              button.getAttribute('data-patron-access'));
         }
+
+        {# Submit with fetch; edit_room returns JSON. #}
+        document.addEventListener('DOMContentLoaded', function () {
+            const form = document.getElementById('editRoomForm');
+            if (!form) return;
+            form.addEventListener('submit', async function (ev) {
+                ev.preventDefault();
+                const btn = form.querySelector('button[type="submit"]');
+                if (btn) btn.disabled = true;
+                try {
+                    const res = await fetch(form.action, { method: 'POST', body: new FormData(form) });
+                    const data = await res.json();
+                    if (!data.success) throw new Error(data.error || 'Could not save the room.');
+                    // Reload so the map and readiness panel update.
+                    window.location.reload();
+                } catch (err) {
+                    if (btn) btn.disabled = false;
+                    alert(err.message || 'Could not save the room.');
+                }
+            });
+        });
 
         function closeEditRoomModal() {
             document.getElementById('editRoomModal').classList.add('hidden');
@@ -1020,8 +1196,7 @@
             document.body.style.overflow = 'auto';
         }
 
-        // Map scale: canvas units per real-world metre. BLE trilateration is
-        // disabled until this is set, so it lives next to the plan itself.
+        // Map scale: canvas units per real-world metre.
         async function saveScale(planId) {
             const input = document.getElementById('scale-' + planId);
             const body = new URLSearchParams({ floorplan_id: planId, pixels_per_meter: input.value.trim() });
@@ -1136,10 +1311,31 @@
                     <select id="placeStairsTo" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-rose-700 font-medium" style="background-color: var(--bg-input);"></select>
                     <p class="text-[10px] text-slate-500">This is what lets the map walk a patron to the right stairs when their book is on another floor.</p>
                 </div>
+                {# Shape, not a second traced outline per flight. #}
                 <div class="space-y-1.5">
-                    <label for="placeStairsBearing" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Which way do the steps run? (degrees)</label>
-                    <input type="number" id="placeStairsBearing" min="0" max="359" step="15" value="0" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-rose-700 font-medium" style="background-color: var(--bg-input);">
-                    <p class="text-[10px] text-slate-500">0 = climbing towards the top of the map, 90 = towards the right. The treads are drawn across this.</p>
+                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Shape</label>
+                    <div class="grid grid-cols-3 gap-2" id="placeStairsShape">
+                        <button type="button" data-shape="straight" onclick="pickStairShape('straight')" class="stair-shape on"><i class="fa-solid fa-arrow-up-long"></i><span>Straight</span></button>
+                        <button type="button" data-shape="quarter" onclick="pickStairShape('quarter')" class="stair-shape"><i class="fa-solid fa-arrow-turn-up"></i><span>Quarter turn</span></button>
+                        <button type="button" data-shape="half" onclick="pickStairShape('half')" class="stair-shape"><i class="fa-solid fa-rotate-left"></i><span>Half turn</span></button>
+                    </div>
+                    <p class="text-[10px] text-slate-500" id="placeStairsShapeNote">One straight run of steps.</p>
+                </div>
+
+                {# The direction, read off the shape rather than typed in degrees. #}
+                <div class="space-y-1.5">
+                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Which way do the steps climb?</label>
+                    <div class="flex items-center gap-2">
+                        <div class="flex-1 rounded-lg px-3 py-2.5 border border-slate-700/60 flex items-center gap-2.5" style="background-color: var(--bg-input);">
+                            <i id="placeStairsArrow" class="fa-solid fa-arrow-up text-rose-400"></i>
+                            <span id="placeStairsDirWords" class="text-slate-300 font-medium">Towards the top of the map</span>
+                        </div>
+                        <button type="button" onclick="flipStairBearing()" class="px-3 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:text-slate-100 hover:bg-slate-800/40 font-semibold text-[11px] flex items-center gap-1.5">
+                            <i class="fa-solid fa-arrows-up-down text-[10px]"></i> Flip
+                        </button>
+                    </div>
+                    <input type="hidden" id="placeStairsBearing" value="0">
+                    <p class="text-[10px] text-slate-500">Taken from the shape you drew. The treads run across it, and a turn puts the landing at the far end.</p>
                 </div>
                 <div class="space-y-1.5">
                     <label for="placeStairsName" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Label (optional)</label>
@@ -1289,12 +1485,14 @@
         const CSRF = "{{ csrf_token }}";
         const URLS = {
             mapData: "{% url 'get_map_data' %}",
+            setCanvas: "{% url 'set_floorplan_canvas' %}",
             addRoom: "{% url 'add_room' %}",
             addObstacle: "{% url 'add_obstacle' %}",
             addStairway: "{% url 'add_stairway' %}",
             editStairway: "{% url 'edit_stairway' %}",
             deleteStairway: "{% url 'delete_stairway' %}",
             editObstacle: "{% url 'edit_obstacle' %}",
+            editWaypoint: "{% url 'edit_waypoint' %}",
             deleteObstacle: "{% url 'delete_obstacle' %}",
             editRoom: "{% url 'edit_room' %}",
             deleteRoom: "{% url 'delete_room' %}",
@@ -1328,24 +1526,31 @@
 
         let lmap = null;
         let imgW = 0, imgH = 0, floorPlanId = null;
+        let mapShelves = [];       // every shelf on this plan, for the link picker
+
+        // Choice lists matching the server.
+        const OBSTACLE_KINDS = [
+            ['Table', 'Table'], ['Counter', 'Counter'], ['Seating', 'Seating'],
+            ['Pillar', 'Pillar'], ['Partition', 'Partition'],
+            ['Equipment', 'Equipment'], ['Other', 'Other'],
+        ];
+        const SHELF_KINDS = [
+            ['Shelf', 'Shelf'], ['Table', 'Table'], ['Display', 'Display stand'],
+            ['Cart', 'Trolley / cart'], ['Ledge', 'Ledge'],
+        ];
+        const SHELF_MOUNTS = [
+            ['Floor', 'Stands on the floor'], ['Wall', 'Fixed to a wall'],
+            ['Ceiling', 'Hung from the ceiling'],
+        ];
         const roomAngleMarks = {};
-        // Canvas units per metre for this plan, when the Administrator has
-        // measured it. Lets the grid and the drawing readout speak in metres
-        // instead of arbitrary canvas units.
+        // Canvas units per metre for this plan, when the Administrator has measured it.
         let planScale = null;
         let mode = null;            // 'room' | 'shelf' | 'beacon' | 'waypoint' | null
         let placingShelfId = null;  // set while positioning an unplaced shelf (Fig. 48)
         let resizeShelfId = null;   // shelf open in the resize modal
         let doorRoomId = null;      // room awaiting a door click
 
-        // True while the next map click is meant to PLACE something rather than
-        // select something. Every shape on the map ends its click handler with
-        // L.DomEvent.stop(), which is right for selection -- but it also meant
-        // the placing click never reached the map at all. Clicking the wall to
-        // put a door on it just re-selected the room, and a door only appeared
-        // when the click happened to miss every shape, landing on whichever
-        // wall was nearest to that stray point: the "door goes to a random
-        // side" behaviour. Placement now takes precedence over selection.
+        // True while the next map click is meant to PLACE something rather than select something.
         function pendingPlacement() {
             return doorRoomId !== null || placingShelfId !== null;
         }
@@ -1361,20 +1566,14 @@
         function toLatLng(x, y) { return [imgH - y, x]; }
         function canvasXY(latlng) { return { x: latlng.lng, y: imgH - latlng.lat }; }
 
-        // Whether the modifier that switches a shelf's rotate handle from
-        // 90°-snapped to free-angle is currently held. Tracked globally
-        // because Leaflet drag events don't reliably forward key state.
+        // Whether Shift is held for free rotation.
         let freeRotateHeld = false;
         document.addEventListener('keydown', function (e) { if (e.key === 'Shift') freeRotateHeld = true; });
         document.addEventListener('keyup', function (e) { if (e.key === 'Shift') freeRotateHeld = false; });
         window.addEventListener('blur', function () { freeRotateHeld = false; });
 
 
-        // ── Copy and paste on the canvas ────────────────────────────────
-        // Laying out a row of identical shelves by hand means retyping the
-        // same size and angle for each one. Ctrl+C / Ctrl+V duplicates the
-        // selected element beside itself, already selected, so it can be
-        // dragged straight into place.
+        // Copy and paste (Ctrl+C / Ctrl+V).
         let mapSelection = { kind: null, id: null };
         let mapClipboard = null;
 
@@ -1429,10 +1628,7 @@
                                  width: d.data.width, swing: d.data.swing };
                 mapToast('Copied door. Ctrl+V to paste.');
             } else if (sel.kind === 'beacon') {
-                // Deliberately not copyable. Every beacon is matched by the ID
-                // its hardware broadcasts, so a duplicate would either collide
-                // with the original or match nothing at all — and it would look
-                // like faulty hardware rather than a bad paste.
+                // Deliberately not copyable.
                 mapClipboard = null;
                 mapToast('Beacons carry a unique hardware ID, so each one is added, not copied.', 'error');
             }
@@ -1476,16 +1672,14 @@
                     return;
                 }
                 mapToast('Pasted. Drag it where you want it.');
-                // Reloading is how every other change on this canvas lands, so
-                // the copy is drawn by exactly the same path as the original.
+                // Reload to draw the pasted copy.
                 setTimeout(function () { window.location.reload(); }, 350);
             } catch (err) {
                 mapToast('Paste failed', 'error');
             }
         }
 
-        // "Aisle 3" pastes as "Aisle 3 copy", then "Aisle 3 copy 2" — a shelf
-        // called the same as its neighbour is worse than no copy at all.
+        // Give the copy a unique name.
         function nextCopyName(name) {
             const base = (name || 'Untitled').replace(/ copy( \d+)?$/, '');
             const taken = new Set();
@@ -1511,12 +1705,7 @@
             else if (key === 'v') { e.preventDefault(); pasteClipboard(); }
         });
 
-        // ---- Shared "drag the body of a shape" helper ----------------------
-        // Leaflet only makes L.Marker natively draggable; polygons and
-        // polylines are not, so every body-drag (move a room, move a shelf,
-        // slide a door along its wall) goes through this. A short click/drag
-        // threshold means a plain click still behaves like a click — nothing
-        // moves — and only a real drag triggers onMove/onEnd.
+        // Drag helper for shapes.
         const DRAG_PX_THRESHOLD = 4;
 
         function makeBodyDraggable(layer, handlers) {
@@ -1549,11 +1738,7 @@
                 lmap.on('mousemove', move);
                 lmap.on('mouseup', up);
             });
-            // A plain click (mousedown+mouseup with no real movement) still
-            // fires the browser's native 'click' afterwards, which Leaflet
-            // bubbles to the map. Swallow it here so clicking the shape
-            // itself is never mistaken for the "clicked empty canvas"
-            // gesture the map uses to deselect whatever is selected.
+            // Stop a plain click from deselecting the shape.
             layer.on('click', function (e) {
                 if (handlers.enabled && !handlers.enabled()) return;
                 if (pendingPlacement()) return;   // let the placing click through
@@ -1572,14 +1757,10 @@
                 body: new URLSearchParams(data).toString(),
             });
             const payload = await res.json();
-            // Anything posted from this page changes the plan, so the readiness
-            // panel is re-checked centrally rather than at forty call sites --
-            // one of which would inevitably be forgotten and leave the panel
-            // confidently describing a plan that no longer exists.
+            // Refresh the readiness panel after any change.
             if (payload && payload.success) {
                 scheduleReadiness();
-                // A newly drawn shape is added to the map by its own code path,
-                // which knows nothing about what is currently hidden.
+                // Apply hidden layers to new shapes.
                 if (typeof window.applyLayerVisibility === 'function') {
                     setTimeout(window.applyLayerVisibility, 0);
                 }
@@ -1608,8 +1789,7 @@
             });
         }
 
-        // Explicitly stand every mode down. Used after a draw completes, where
-        // toggling would re-arm the tool instead of releasing it.
+        // Explicitly stand every mode down.
         function clearMode() {
             mode = null;
             drawTargetRoomId = null;
@@ -1648,13 +1828,11 @@
                         + ' — trace a table, counter or pillar: click each corner, then double-click to finish.';
             }
 
-            // 'room' is a Geoman polygon draw, not a click-to-place mode. Both
-            // listen for map clicks, so only one may ever be armed at a time.
+            // 'room' is a Geoman polygon draw, not a click-to-place mode.
             stopRoomEdit();
             if (lmap && lmap.pm) lmap.pm.disableDraw();
 
-            // Both trace a polygon, so both arm Geoman the same way. Which one
-            // is armed decides only what the finished shape is saved as.
+            // Both trace a polygon, so both arm Geoman the same way.
             if (mode === 'room' || mode === 'obstacle' || mode === 'stairs' || mode === 'shelfdraw') {
                 if (!lmap || !lmap.pm) { alert('Drawing tools are still loading — try again in a moment.'); mode = null; }
                 else lmap.pm.enableDraw('Polygon', { snappable: true, snapDistance: 12, finishOn: 'dblclick' });
@@ -1685,8 +1863,7 @@
                     room_id: roomId, map_x: pos.x, map_y: pos.y,
                 });
                 if (r.success) {
-                    // The server has already looked for a room on the far side;
-                    // the inspector offers it rather than assuming it.
+                    // Suggested room on the other side of the door.
                     r.door.suggested_room_b = r.suggested_room_b || null;
                     addDoorShape(r.door);
                     showDoorInspector(r.door.door_id);
@@ -1708,9 +1885,7 @@
                 return;
             }
 
-            // A click on open canvas — not on any shape — clears whatever is
-            // currently selected, the same way clicking empty space in a
-            // design tool deselects the shape you were editing.
+            // Click empty canvas to deselect.
             if (selectedShelfId !== null) { deselectShelf(); return; }
             if (resizeRoomId !== null) { stopRoomResize(); return; }
 
@@ -1722,10 +1897,7 @@
             else if (mode === 'shelf') openShelfPlace();
         }
 
-        // ---- beacons ----
-        // L.Marker (not circleMarker) so dragging is native — Leaflet's own
-        // marker-drag machinery already suppresses the click event that
-        // would otherwise fire on drop, no hand-rolled helper needed here.
+        // Beacons.
         function addBeaconMarker(b) {
             const m = L.marker(toLatLng(b.map_x, b.map_y), {
                 draggable: true,
@@ -1746,10 +1918,7 @@
             beaconMarkers[b.beacon_id] = { marker: m, data: b };
         }
 
-        // ================= Docked properties panel =========================
-        // Everything that used to open a click-anchored popup now renders here.
-        // The panel is modeless: it stays put while a shape is dragged, so the
-        // numbers update live instead of the canvas being covered by a bubble.
+        // Properties panel.
         let inspectorSel = null;   // { kind: 'room'|'shelf'|'waypoint'|'beacon'|'door', id }
 
         function setInspectorHead(label, showClose) {
@@ -1782,8 +1951,7 @@
         }
         window.clearInspector = clearInspector;
 
-        // Replaces the old confirm() on every drag: the save already happened,
-        // this just says so without interrupting the next drag.
+        // Show a short saved message.
         function inspectorSaved(text) {
             const el = document.getElementById('inspSaved');
             if (!el) return;
@@ -1853,14 +2021,13 @@
             } else alert(r.error || 'Failed to delete beacon');
         };
 
-        // ---- waypoints ----
+        // Waypoints
         function waypointLatLng(id) {
             const w = waypointMarkers[id];
             return w ? w.marker.getLatLng() : null;
         }
 
-        // Connected lines follow the marker live while it's being dragged,
-        // reading its actual current position rather than a cached x/y.
+        // Move connected lines while dragging.
         function redrawConnectionsFor(id) {
             Object.keys(connections).forEach(function (cid) {
                 const c = connections[cid];
@@ -1881,8 +2048,7 @@
                 : '🟢 ' + (w.label || 'Waypoint');
             m.bindTooltip(tip, { direction: 'top' });
             m.on('click', function (e) { if (pendingPlacement()) return; L.DomEvent.stop(e); onWaypointClick(w.waypoint_id); });
-            // Left-click on a waypoint is reserved for connecting two of them,
-            // so only right-click opens it in the panel.
+            // Right-click opens a waypoint in the panel.
             m.on('contextmenu', function (e) { L.DomEvent.stop(e); showWaypointInspector(w.waypoint_id); });
 
             let dragStartLatLng = null;
@@ -1895,7 +2061,9 @@
                 else { alert(r.error || 'Failed to move the waypoint'); m.setLatLng(dragStartLatLng); }
                 redrawConnectionsFor(w.waypoint_id);
             });
-            waypointMarkers[w.waypoint_id] = { marker: m, x: w.map_x, y: w.map_y, label: w.label, shelf: w.linked_shelf_name };
+            waypointMarkers[w.waypoint_id] = { marker: m, x: w.map_x, y: w.map_y,
+                                               label: w.label, shelf: w.linked_shelf_name,
+                                               shelfId: w.linked_shelf_id };
         }
 
         function highlightWaypoint(id, on) {
@@ -1935,17 +2103,43 @@
                         + '<i class="fa-solid fa-link-slash"></i> ' + esc(oname) + '</button>';
                 }
             });
+            const shelfOptions = [['', 'Not in front of a shelf']].concat(
+                (mapShelves || []).map(function (sh) { return [sh.shelf_id, sh.name]; }));
             renderInspector('waypoint', 'Waypoint', id, esc(w.label || 'Waypoint'),
-                (w.shelf ? '<p class="insp-note">Linked shelf: ' + esc(w.shelf) + '</p>' : '')
+                propsHead()
+                + textField('Label', 'inspWpLabel', w.label || '', 'e.g. Corridor corner')
+                + selectField('Stands in front of', 'inspWpShelf', shelfOptions, w.shelfId || '')
                 + '<div class="map-actions">'
+                + '<button class="map-action-btn" onclick="applyWaypointInspector(' + id + ')"><i class="fa-solid fa-check"></i> Apply changes</button>'
                 + '<button class="map-action-btn danger" onclick="mapDeleteWaypoint(' + id + ')"><i class="fa-solid fa-trash"></i> Delete waypoint</button>'
                 + '</div>'
+                + '<p class="insp-note">A linked waypoint is where a route to that shelf ends. '
+                + 'Unlabelled ones are corners of the walking graph and need no name.</p>'
                 + '<p class="insp-note" style="margin-top:12px;text-transform:uppercase;letter-spacing:.07em;font-weight:700">Connections</p>'
                 + (connHtml
                     ? '<div class="map-actions">' + connHtml + '</div>'
                     : '<p class="insp-note">None yet — left-click this waypoint then another to connect them.</p>'));
         }
         window.showWaypointInspector = showWaypointInspector;
+
+        window.applyWaypointInspector = async function (id) {
+            const w = waypointMarkers[id]; if (!w) return;
+            const r = await postData(URLS.editWaypoint, {
+                waypoint_id: id,
+                label: txtVal('inspWpLabel'),
+                linked_shelf_id: selVal('inspWpShelf'),
+            });
+            if (!r.success) { alert(r.error || 'Failed to save the waypoint'); return; }
+            w.label = r.waypoint.label;
+            w.shelf = r.waypoint.linked_shelf_name;
+            w.shelfId = r.waypoint.linked_shelf_id;
+            // Update the tooltip.
+            w.marker.setTooltipContent(r.waypoint.linked_shelf_name
+                ? '\ud83d\udfe2 ' + (r.waypoint.label || 'Waypoint') + ' \u2192 ' + r.waypoint.linked_shelf_name
+                : '\ud83d\udfe2 ' + (r.waypoint.label || 'Waypoint'));
+            showWaypointInspector(id);
+            inspectorSaved('Saved.');
+        };
 
                 window.mapDeleteWaypoint = async function (id) {
             if (!await AylaDialog.confirm('Delete this waypoint and all its connections?')) return;
@@ -1970,7 +2164,7 @@
             } else alert(r.error || 'Failed to disconnect');
         };
 
-        // ---- connections ----
+        // Connections
         function addConnectionLine(c) {
             const a = waypointLatLng(c.waypoint_from_id);
             const b = waypointLatLng(c.waypoint_to_id);
@@ -1981,12 +2175,7 @@
             connections[c.connection_id] = { from: c.waypoint_from_id, to: c.waypoint_to_id, polyline: pl };
         }
 
-        // ---- modals ----
-        // The most recently added beacon on this floor. A deployment is one
-        // batch of identical hardware, so it is very nearly the settings the
-        // next one needs -- and the page reloads after every save, so this is
-        // read back off the map rather than remembered in a variable that
-        // would not survive.
+        // Modals. New beacons start from the last beacon added on this floor.
         function lastBeaconPlaced() {
             let newest = null;
             Object.keys(beaconMarkers).forEach(function (id) {
@@ -2001,8 +2190,7 @@
             editingBeaconId = null;
             const title = document.getElementById('beaconModalTitle');
             if (title) title.textContent = 'Place Beacon';
-            // Every field, not just the two: leftovers from an edit would
-            // otherwise be saved against the new beacon being placed.
+            // Clear every field.
             ['beaconUuid', 'beaconLabel', 'beaconMajor', 'beaconMinor',
              'beaconNamespace', 'beaconInstance', 'beaconTxPower', 'beaconPathLoss',
              'beaconHeight']
@@ -2010,18 +2198,13 @@
                     const el = document.getElementById(id);
                     if (el) el.value = '';
                 });
-            // The fold goes back to closed, so the next beacon does not open
-            // with the last one's calibration showing.
+            // Collapse the optional section again.
             const advFold = document.getElementById('beaconAdvanced');
             if (advFold) advFold.open = false;
             const type = document.getElementById('beaconAdvType');
             if (type) { type.value = 'iBeacon'; syncBeaconFields(); }
 
-            // ── Carry the batch forward ────────────────────────────────────
-            // Everything except what physically differs between two units of
-            // the same batch: the minor tells them apart and the label says
-            // where this one is, so those two stay blank and everything else
-            // is inherited. Fifteen beacons then cost one number each.
+            // Keep settings from the previous beacon.
             const prev = lastBeaconPlaced();
             const note = document.getElementById('beaconInheritNote');
             if (prev) {
@@ -2082,8 +2265,7 @@
             document.getElementById('beaconEddystoneFields').classList.toggle('hidden', t !== 'Eddystone');
         };
 
-        // Editing reuses the add form rather than a second one, so the fields a
-        // beacon is created with are exactly the fields it can be corrected with.
+        // Edit uses the add form.
         let editingBeaconId = null;
 
         window.mapEditBeacon = function (id) {
@@ -2131,8 +2313,7 @@
                 const r = await postData(URLS.updateBeacon,
                                          Object.assign({ beacon_id: id }, fields));
                 if (!r.success) { alert(r.error || 'Failed to save beacon'); return; }
-                // Redraw from the server's own payload so the inspector never
-                // shows something the database did not accept.
+                // Redraw from the server response.
                 if (beaconMarkers[id] && beaconMarkers[id].marker) {
                     lmap.removeLayer(beaconMarkers[id].marker);
                 }
@@ -2163,7 +2344,7 @@
             else alert(r.error || 'Failed to save waypoint');
         };
 
-        // ---- rooms (drawn vector shapes) ----------------------------------
+        // Rooms (drawn vector shapes)
         const roomShapes = {};      // room_id -> L.Polygon
         let roomEditingId = null;   // room currently open for reshaping
 
@@ -2181,11 +2362,7 @@
             return ring.map(function (ll) { return [ll.lng, imgH - ll.lat]; });
         }
 
-        // Obstacles are drawn plainer than rooms on purpose: they are context,
-        // not something to click into. Amber separates them at a glance from the
-        // rooms (accent) and the shelves (purple), and a pillar is filled more
-        // solidly than a table because you cannot walk through either but one
-        // of them is structural.
+        // Obstacle styles.
         const OBSTACLE_STYLE = {
             Pillar:    { fill: 0.55, dash: null },
             Partition: { fill: 0.40, dash: '6,4' },
@@ -2193,15 +2370,7 @@
             Seating:   { fill: 0.18, dash: '4,4' },
         };
 
-        // The conventional stair symbol: footprint, treads across the
-        // direction of travel, and an arrow at the top end. Drawn from the
-        // treads the server computed, so the editor, both indoor maps and the
-        // printed sheet all show the same steps in the same places.
-        // Every layer this draws is kept, not just the outline. Editing a
-        // stairway changes its treads and its arrow as well as its shape, so
-        // redrawing means removing all of them -- and the treads and the arrow
-        // were previously added to the map and then forgotten, with no handle
-        // to remove them by.
+        // Stair symbol: outline, treads and arrow.
         function addStairwayShape(st) {
             if (!st.geometry || st.geometry.length < 3) return;
             const rose = '#be123c';
@@ -2220,11 +2389,7 @@
                 L.DomEvent.stop(e);
                 removeStairway(st.stairway_id, st.label);
             });
-            // Left-click opens it in the properties panel, like every other
-            // shape on this map. Without this a stairway could be drawn and
-            // deleted but never configured: its type, direction, the floor it
-            // reaches and its bearing were all fixed at the moment it was
-            // drawn, with no way back to any of them.
+            // Left-click opens it in the properties panel.
             poly.on('click', function (e) {
                 if (mode || pendingPlacement()) return;
                 L.DomEvent.stop(e);
@@ -2237,22 +2402,40 @@
                  .addTo(lmap));
             });
 
-            // Which way is up, drawn along the bearing through the middle.
+            // Draw landings without treads.
+            (st.parts || []).forEach(function (p) {
+                if (p.kind !== 'landing' || !p.geometry || p.geometry.length < 3) return;
+                layers.push(L.polygon(geometryToLatLngs(p.geometry), {
+                    color: rose, weight: 1, dashArray: '3 3', fill: false,
+                    opacity: 0.6, interactive: false,
+                }).addTo(lmap));
+            });
+
+            // Which way is up, once per flight.
             if (st.direction !== 'both') {
-                const rad = (st.bearing || 0) * Math.PI / 180;
-                const ux = Math.sin(rad), uy = -Math.cos(rad);
-                const sign = (st.direction === 'down') ? -1 : 1;
-                const reach = 22;
-                const x1 = st.map_x - ux * reach * sign, y1 = st.map_y - uy * reach * sign;
-                const x2 = st.map_x + ux * reach * sign, y2 = st.map_y + uy * reach * sign;
-                layers.push(L.polyline([toLatLng(x1, y1), toLatLng(x2, y2)],
-                           { color: rose, weight: 2, opacity: 0.95, interactive: false }).addTo(lmap));
-                // Arrowhead as two short strokes back from the tip.
-                [1, -1].forEach(function (side) {
-                    const a = rad + side * 2.6;
-                    layers.push(L.polyline([toLatLng(x2, y2),
-                                toLatLng(x2 - Math.sin(a) * 8, y2 + Math.cos(a) * 8)],
+                const runs = (st.parts || []).filter(function (p) { return p.kind === 'flight'; });
+                (runs.length ? runs
+                             : [{ bearing: st.bearing || 0, geometry: st.geometry }]
+                ).forEach(function (run) {
+                    const xs = run.geometry.map(function (p) { return p[0]; });
+                    const ys = run.geometry.map(function (p) { return p[1]; });
+                    const cx = (Math.min.apply(null, xs) + Math.max.apply(null, xs)) / 2;
+                    const cy = (Math.min.apply(null, ys) + Math.max.apply(null, ys)) / 2;
+                    const rad = (run.bearing || 0) * Math.PI / 180;
+                    const ux = Math.sin(rad), uy = -Math.cos(rad);
+                    const sign = (st.direction === 'down') ? -1 : 1;
+                    const reach = 18;
+                    const x1 = cx - ux * reach * sign, y1 = cy - uy * reach * sign;
+                    const x2 = cx + ux * reach * sign, y2 = cy + uy * reach * sign;
+                    layers.push(L.polyline([toLatLng(x1, y1), toLatLng(x2, y2)],
                                { color: rose, weight: 2, opacity: 0.95, interactive: false }).addTo(lmap));
+                    // Arrowhead as two short strokes back from the tip.
+                    [1, -1].forEach(function (side) {
+                        const a = rad * sign + side * 2.6;
+                        layers.push(L.polyline([toLatLng(x2, y2),
+                                    toLatLng(x2 - Math.sin(a) * 8, y2 + Math.cos(a) * 8)],
+                                   { color: rose, weight: 2, opacity: 0.95, interactive: false }).addTo(lmap));
+                    });
                 });
             }
             stairwayShapes[st.stairway_id] = { layers: layers, poly: poly, data: st };
@@ -2265,8 +2448,7 @@
             delete stairwayShapes[id];
         }
 
-        // A <select> built from a list of [value, label] pairs, with the
-        // current value preselected.
+        // A <select> built from a list of [value, label] pairs, with the current value preselected.
         function selectField(label, id, options, current) {
             return '<div class="insp-field" style="margin-bottom:6px">'
                 + '<label for="' + id + '">' + label + '</label>'
@@ -2277,6 +2459,41 @@
                         + '>' + esc(o[1]) + '</option>';
                   }).join('')
                 + '</select></div>';
+        }
+
+        function textField(label, id, value, placeholder) {
+            return '<div class="insp-field" style="margin-bottom:6px">'
+                + '<label for="' + id + '">' + label + '</label>'
+                + '<input id="' + id + '" type="text" value="' + esc(value || '') + '"'
+                + (placeholder ? ' placeholder="' + esc(placeholder) + '"' : '') + '></div>';
+        }
+
+        function areaField(label, id, value, placeholder) {
+            return '<div class="insp-field" style="margin-bottom:6px">'
+                + '<label for="' + id + '">' + label + '</label>'
+                + '<textarea id="' + id + '" rows="2"'
+                + (placeholder ? ' placeholder="' + esc(placeholder) + '"' : '')
+                + '>' + esc(value || '') + '</textarea></div>';
+        }
+
+        // Yes/no select with clear labels.
+        function toggleField(label, id, on, onText, offText) {
+            return selectField(label, id, [['1', onText], ['0', offText]], on === false ? '0' : '1');
+        }
+
+        function txtVal(id) {
+            const el = document.getElementById(id);
+            return el ? el.value.trim() : '';
+        }
+        function selVal(id) {
+            const el = document.getElementById(id);
+            return el ? el.value : '';
+        }
+
+        // Properties heading.
+        function propsHead() {
+            return '<p class="insp-note" style="margin-top:2px;text-transform:uppercase;'
+                 + 'letter-spacing:.07em;font-weight:700">Properties</p>';
         }
 
         function showStairsInspector(id) {
@@ -2300,6 +2517,13 @@
                 + '<label for="inspStairBearing">Which way the steps run (degrees)</label>'
                 + '<input id="inspStairBearing" type="number" min="0" max="359" step="15" value="'
                 + Math.round(st.bearing || 0) + '"></div>'
+                + selectField('How it turns', 'inspStairShape',
+                              [['straight', 'Straight flight'],
+                               ['quarter', 'Quarter turn (one landing)'],
+                               ['half', 'Half turn (switchback)']],
+                              st.shape || 'straight')
+                + toggleField('On the patron map', 'inspStairShown', st.is_active !== false,
+                              'Shown \u2014 routes may use it', 'Closed off')
                 + '<div class="insp-field" style="margin-bottom:6px">'
                 + '<label for="inspStairName">Label</label>'
                 + '<input id="inspStairName" type="text" value="' + esc(st.name || '') + '" placeholder="e.g. North Stairs"></div>'
@@ -2317,9 +2541,7 @@
         }
         window.showStairsInspector = showStairsInspector;
 
-        // Looking the label up here rather than baking it into the onclick
-        // attribute: a stairway named with an apostrophe would otherwise end
-        // the JavaScript string early and break the whole panel.
+        // Look up the label to avoid quote issues.
         window.removeStairwayById = function (id) {
             const entry = stairwayShapes[id];
             removeStairway(id, (entry && entry.data && entry.data.label) || 'this stairway');
@@ -2333,11 +2555,13 @@
                 direction: document.getElementById('inspStairDir').value,
                 connects_to: document.getElementById('inspStairTo').value,
                 bearing: document.getElementById('inspStairBearing').value || 0,
+                // Straight, quarter turn or switchback.
+                shape: selVal('inspStairShape'),
+                is_active: selVal('inspStairShown'),
                 name: document.getElementById('inspStairName').value.trim(),
             });
             if (!r.success) { alert(r.error || 'Failed to save the stairway'); return; }
-            // The server recomputes the treads from the new bearing and kind,
-            // so the shape is redrawn from what came back rather than patched.
+            // Redraw with the updated treads.
             removeStairwayShape(id);
             addStairwayShape(r.stairway);
             showStairsInspector(id);
@@ -2363,9 +2587,7 @@
                 L.DomEvent.stop(e);
                 removeObstacle(o.obstacle_id, o.label);
             });
-            // Furniture could be drawn and deleted and nothing else: no click
-            // handler, no panel, no way to rename it or fix a corner short of
-            // deleting it and drawing it again.
+            // Click to open furniture in the panel.
             poly.on('click', function (e) {
                 if (mode || pendingPlacement()) return;
                 L.DomEvent.stop(e);
@@ -2375,37 +2597,39 @@
             obstacleData[o.obstacle_id] = o;
         }
 
+        const roomData = {};       // room_id -> its payload, for the panel
+
         function addRoomShape(r) {
             if (!r.geometry || r.geometry.length < 3) return;
+            // Staff-only rooms are drawn dashed.
+            const closed = r.patron_access === false;
             const poly = L.polygon(geometryToLatLngs(r.geometry), {
-                color: AylaTheme.color('--accent-strong'),
+                color: AylaTheme.color(closed ? '--text-muted' : '--accent-strong'),
                 weight: 2,
-                fillColor: AylaTheme.color('--accent'),
-                fillOpacity: 0.15,
-            }).bindTooltip('🚪 ' + (r.name || 'Room'), { direction: 'top', sticky: true }).addTo(lmap);
+                dashArray: closed ? '6,4' : null,
+                fillColor: AylaTheme.color(closed ? '--text-muted' : '--accent'),
+                fillOpacity: closed ? 0.08 : 0.15,
+            }).bindTooltip((r.name || 'Room') + (closed ? ' · staff only' : ''),
+                           { direction: 'top', sticky: true }).addTo(lmap);
 
             poly._aylaRoomId = r.room_id;
             poly._aylaRoomName = r.name;
+            // Keep room data for the panel.
+            roomData[r.room_id] = r;
             // Persist a reshape only after the Administrator confirms it.
             poly.on('pm:update', function (e) { confirmRoomReshape(e.target); });
             poly.on('contextmenu', function (e) { L.DomEvent.stop(e); showRoomInspector(r.room_id); });
             poly.on('click', function (e) { if (mode || pendingPlacement()) return; L.DomEvent.stop(e); showRoomInspector(r.room_id); });
             roomShapes[r.room_id] = poly;
-            // The square-corner marks, so which corners are already right is
-            // visible on the plan rather than something to measure by eye.
+            // Right-angle marks.
             if (roomAngleMarks[r.room_id]) lmap.removeLayer(roomAngleMarks[r.room_id]);
             const marks = rightAngleMarks(r.geometry);
             if (marks.length) roomAngleMarks[r.room_id] = L.layerGroup(marks).addTo(lmap);
 
-            // Drag the body to move the whole room. Only live while this
-            // room's own resize handles are showing (the "selected" state) —
-            // dragging is how you move it, the handles are how you resize it,
-            // exactly like a shape selected in a design tool.
+            // Drag the body to move the whole room.
             let dragStartBox = null;
             makeBodyDraggable(poly, {
-                // Selecting a room is enough to move it. Requiring resize mode
-                // first meant three clicks to nudge a room two pixels, and the
-                // handles are for reshaping, which is a different intention.
+                // Selecting a room is enough to move it.
                 enabled: function () {
                     return resizeRoomId === r.room_id
                         || (mapSelection.kind === 'room' && mapSelection.id === r.room_id);
@@ -2429,8 +2653,20 @@
             const editingPoints = roomEditingId === id;
             const resizing = resizeRoomId === id;
             const name = esc(poly._aylaRoomName || 'Room');
+            const d = roomData[id] || {};
             renderInspector('room', 'Room', id, name,
-                '<p class="insp-note">Room #' + id + '</p>'
+                propsHead()
+                + textField('Name', 'inspRoomName', poly._aylaRoomName || '', 'e.g. Reading Area')
+                + areaField('Description', 'inspRoomDesc', d.description || '',
+                            'What this space is for')
+                + toggleField('Who may go in', 'inspRoomAccess', d.patron_access !== false,
+                              'Open to patrons', 'Staff only')
+                + toggleField('On the patron map', 'inspRoomShown', d.is_active !== false,
+                              'Shown', 'Hidden')
+                + '<div class="map-actions">'
+                + '<button class="map-action-btn" onclick="applyRoomInspector(' + id + ')"><i class="fa-solid fa-check"></i> Apply changes</button>'
+                + '</div>'
+                + '<p class="insp-note">Room #' + id + '</p>'
                 + '<div class="map-actions">'
                 + (resizing
                     ? '<button class="map-action-btn" onclick="stopRoomResize()"><i class="fa-solid fa-check"></i> Done resizing</button>'
@@ -2439,22 +2675,31 @@
                     ? '<button class="map-action-btn" onclick="stopRoomEdit()"><i class="fa-solid fa-check"></i> Done editing points</button>'
                     : '<button class="map-action-btn" onclick="startReshapeRoom(' + id + ')"><i class="fa-solid fa-draw-polygon"></i> Edit points</button>')
                 + '<button class="map-action-btn" onclick="startAddDoor(' + id + ', \'' + name.replace(/'/g, '') + '\')"><i class="fa-solid fa-door-open"></i> Add door</button>'
-                + '<button class="map-action-btn" onclick="renameRoom(' + id + ')"><i class="fa-solid fa-pen"></i> Rename</button>'
                 + '<button class="map-action-btn danger" onclick="deleteRoomShape(' + id + ')"><i class="fa-solid fa-trash"></i> Delete room</button>'
-                + '</div>');
+                + '</div>'
+                + '<p class="insp-note">A staff-only room is drawn in dashes and is never routed '
+                + 'through. Hiding a room takes it off the patron map without touching the '
+                + 'shelves in it.</p>');
         }
         window.showRoomInspector = showRoomInspector;
 
-                window.renameRoom = async function (id) {
+        window.applyRoomInspector = async function (id) {
             const poly = roomShapes[id]; if (!poly) return;
-            const name = await AylaDialog.prompt('Room name', poly._aylaRoomName || '',
-                                                { title: 'Rename room' });
-            if (name === null) return;                       // cancelled
-            if (!name.trim()) { alert('Room name cannot be empty'); return; }
-            const r = await postData(URLS.editRoom, { room_id: id, name: name.trim() });
-            if (r.success) window.location.reload();
-            else alert(r.error || 'Failed to rename the room');
+            const name = txtVal('inspRoomName');
+            if (!name) { alert('Room name cannot be empty'); return; }
+            const r = await postData(URLS.editRoom, {
+                room_id: id,
+                name: name,
+                description: txtVal('inspRoomDesc'),
+                patron_access: selVal('inspRoomAccess'),
+                is_active: selVal('inspRoomShown'),
+            });
+            if (!r.success) { alert(r.error || 'Failed to save the room'); return; }
+            // Reload to redraw the room.
+            window.location.reload();
         };
+
+        // Rename is done in the panel.
 
         window.deleteRoomShape = async function (id) {
             const poly = roomShapes[id]; if (!poly) return;
@@ -2478,8 +2723,7 @@
             }
         }
 
-        // Reshape one room at a time, chosen from its own context menu, so the
-        // other rooms cannot be disturbed while dragging a corner.
+        // Reshape one room at a time.
         window.startReshapeRoom = function (id) {
             const poly = roomShapes[id]; if (!poly) return;
             lmap.closePopup();
@@ -2502,10 +2746,7 @@
         }
         window.stopRoomEdit = stopRoomEdit;
 
-        // ---- Corner dragging ------------------------------------------------
-        // Geoman's vertex editing, the same tool the rooms already use. One
-        // shape at a time, chosen deliberately, so a stray drag cannot pull a
-        // corner off something the Administrator was not editing.
+        // Corner dragging.
         let cornerEdit = null;   // { kind: 'shelf'|'obstacle', id, layer, original }
 
         function startCornerEdit(kind, id, layer, label) {
@@ -2539,9 +2780,7 @@
                       && String(cornerEdit.id) === String(id));
         }
 
-        // Saved on drop rather than on a Save button: a shape half-dragged and
-        // then navigated away from would otherwise keep its old outline while
-        // showing the new one.
+        // Save on drop.
         async function saveCorners(kind, id, layer) {
             const geometry = latLngsToGeometry(layer.getLatLngs());
             const url = (kind === 'shelf') ? URLS.editShelf : URLS.editObstacle;
@@ -2566,7 +2805,7 @@
             inspectorSaved('Shape saved.');
         }
 
-        // ---- Furniture panel -------------------------------------------------
+        // Furniture panel
         function showObstacleInspector(id) {
             const poly = obstacleShapes[id];
             const o = obstacleData[id];
@@ -2574,9 +2813,17 @@
             mapSelection = { kind: 'obstacle', id: id };
             const editing = isCornerEditing('obstacle', id);
             renderInspector('obstacle', 'Furniture', id, esc(o.label || 'Furniture'),
-                '<p class="insp-note">' + esc(o.kind || 'Object')
-                + ((o.geometry && o.geometry.length) ? ' \u00b7 ' + o.geometry.length + ' corners' : '')
-                + (o.is_active === false ? ' \u00b7 hidden from patrons' : '') + '</p>'
+                propsHead()
+                + selectField('Type', 'inspObsKind', OBSTACLE_KINDS, o.kind)
+                + textField('Name', 'inspObsName', o.name || '', 'e.g. Study table 3')
+                + toggleField('On the patron map', 'inspObsShown', o.is_active !== false,
+                              'Shown', 'Hidden')
+                + '<div class="map-actions">'
+                + '<button class="map-action-btn" onclick="applyObstacleInspector(' + id + ')"><i class="fa-solid fa-check"></i> Apply changes</button>'
+                + '</div>'
+                + '<p class="insp-note">'
+                + ((o.geometry && o.geometry.length) ? o.geometry.length + ' corners' : 'No shape')
+                + '</p>'
                 + '<div class="map-actions">'
                 + (editing
                     ? '<button class="map-action-btn" onclick="stopCornerEdit()"><i class="fa-solid fa-check"></i> Done reshaping</button>'
@@ -2587,6 +2834,23 @@
                 + 'is catalogued on it. A table that holds books is a shelf instead.</p>');
         }
         window.showObstacleInspector = showObstacleInspector;
+
+        window.applyObstacleInspector = async function (id) {
+            const poly = obstacleShapes[id]; if (!poly) return;
+            const r = await postData(URLS.editObstacle, {
+                obstacle_id: id,
+                kind: selVal('inspObsKind'),
+                name: txtVal('inspObsName'),
+                is_active: selVal('inspObsShown'),
+            });
+            if (!r.success) { alert(r.error || 'Failed to save this furniture'); return; }
+            // Redraw from the server response.
+            lmap.removeLayer(obstacleShapes[id]);
+            delete obstacleShapes[id];
+            addObstacleShape(r.obstacle);
+            showObstacleInspector(id);
+            inspectorSaved('Saved.');
+        };
 
         window.removeObstacleById = function (id) {
             const o = obstacleData[id];
@@ -2608,15 +2872,10 @@
             startCornerEdit('shelf', id, entry.poly, entry.data.name || 'shelf');
         };
 
-        // ---- Doors ---------------------------------------------------------
-        // Drawn as a floor-plan symbol: the opening across the wall plus a
-        // quarter-circle swing arc, so the way into a room is obvious.
+        // Doors.
         const doorShapes = {};       // door_id -> { layers: [], data }
 
-        // Mirrors the server's bounds in library/views.py. A door narrower than
-        // DOOR_MIN_W is not a doorway; one wider than DOOR_MAX_W is a missing
-        // wall. Clamping here as well means a drag stops at the limit rather
-        // than travelling on and being rejected on release.
+        // Mirrors the server's bounds in library/views.py.
         const DOOR_MIN_W = 6, DOOR_MAX_W = 400, DOOR_DEFAULT_W = 28;
         let selectedDoorId = null;
         let doorHandles = [];
@@ -2678,8 +2937,7 @@
             });
             doorShapes[d.door_id] = { layers: [opening, jamb, sweep], data: d };
 
-            // Drag along the wall only — a door can't float off into the
-            // room, so the drag is constrained to the wall's own direction.
+            // Drag along the wall only.
             let dragOrigin = null, wallUx = 0, wallUy = 0;
             makeBodyDraggable(jamb, {
                 onDragStart: function () {
@@ -2709,8 +2967,7 @@
             delete doorShapes[id];
         }
 
-        // After a room changes shape its doors no longer sit on a wall, so they
-        // are re-snapped server-side on next load; clear them from the canvas.
+        // Clear doors; they are re-snapped on reload.
         function redrawDoorsForRoom(roomId) {
             Object.keys(doorShapes).forEach(function (id) {
                 if (doorShapes[id].data.room_id === roomId) removeDoorShape(id);
@@ -2718,11 +2975,6 @@
         }
 
         // Which rooms this doorway joins, and the offer to link the far one.
-        //
-        // A door is a hole in a wall, and a wall usually has a room on each
-        // side. Recording only one meant a shared doorway had to be drawn
-        // twice, and left nothing able to say which rooms connect -- which is
-        // the question a route is made of.
         function roomOptionsFor(door) {
             const opts = [['', 'Nothing (exterior door)']];
             Object.keys(roomShapes).forEach(function (rid) {
@@ -2739,8 +2991,7 @@
                 : '<p class="insp-note">Opens from <strong>' + esc(d.room_name || 'this room')
                   + '</strong> only \u2014 nothing recorded on the far side.</p>';
 
-            // Shown only while the far side is still unset: once it is linked,
-            // the select below is the way to change it.
+            // Only shown while the far side is unset.
             const suggestion = (!d.room_b && d.suggested_room_b)
                 ? '<div class="insp-suggest">'
                   + '<span><strong>' + esc(d.suggested_room_b.name) + '</strong>\'s wall runs '
@@ -2768,11 +3019,7 @@
             inspectorSaved(r.door.room_b ? 'Rooms linked.' : 'Link removed.');
         };
 
-        // ---- Door resizing -------------------------------------------------
-        // A door is a segment lying along its wall, so the only free dimension
-        // is its length. Dragging one end holds the OTHER end still, which is
-        // what "make this doorway wider" means when standing in the building:
-        // the far jamb does not move, so the centre shifts by half.
+        // Door resizing.
         function doorEnds(d) {
             const rad = (d.rotation || 0) * Math.PI / 180;
             const ux = Math.cos(rad), uy = Math.sin(rad);
@@ -2793,9 +3040,7 @@
             });
         }
 
-        // `quiet` is for the case where the door is on its way out: re-rendering
-        // its panel there would redraw the details of something about to stop
-        // existing.
+        // Skip redrawing the panel when the door is being removed.
         window.deselectDoor = function (quiet) {
             doorHandles.forEach(function (h) { lmap.removeLayer(h.marker); });
             doorHandles = [];
@@ -2830,8 +3075,7 @@
                 marker.on('drag', function (e) {
                     const d = doorShapes[id].data;
                     const p = canvasXY(e.target.getLatLng());
-                    // Only movement along the wall counts; across it is ignored,
-                    // because a door cannot leave the wall it is cut into.
+                    // Only movement along the wall counts.
                     const t = (p.x - fixed.x) * ux + (p.y - fixed.y) * uy;
                     let mag = t * sign;
                     if (!(mag > 0)) mag = DOOR_MIN_W;
@@ -2875,7 +3119,12 @@
                 return;
             }
             const sel = document.getElementById('inspDoorRoomB');
-            const payload = { door_id: id, width: Math.round(raw) };
+            const payload = {
+                door_id: id,
+                width: Math.round(raw),
+                label: txtVal('inspDoorLabel'),
+                is_active: selVal('inspDoorShown'),
+            };
             if (sel) payload.room_b = sel.value || '';
             const r = await postData(URLS.editDoor, payload);
             if (!r.success) { alert(r.error || 'Failed to save the door'); return; }
@@ -2885,7 +3134,7 @@
             redrawDoorShape(entry);
             if (selectedDoorId === id) positionDoorHandles(id);
             showDoorInspector(id);
-            inspectorSaved('Door resized.');
+            inspectorSaved('Saved.');
         };
 
         function showDoorInspector(id) {
@@ -2893,10 +3142,14 @@
             const entry = doorShapes[id]; if (!entry) return;
             const d = entry.data;
             renderInspector('door', 'Door', id, esc(d.label || 'Door'),
-                '<div class="insp-grid">'
+                propsHead()
+                + textField('Label', 'inspDoorLabel', d.label || '', 'e.g. Main entrance')
+                + '<div class="insp-grid">'
                 + field('Width', 'inspDoorW', Math.round(d.width || DOOR_DEFAULT_W))
                 + field('Angle', 'inspDoorRot', Math.round(d.rotation || 0), { readonly: true })
                 + '</div>'
+                + toggleField('Can it be used', 'inspDoorShown', d.is_active !== false,
+                              'Open \u2014 routes may use it', 'Closed off')
                 + doorRoomsBlock(d)
                 + '<div class="map-actions">'
                 + '<button class="map-action-btn" onclick="applyDoorInspector(' + id + ')"><i class="fa-solid fa-check"></i> Apply changes</button>'
@@ -2943,9 +3196,7 @@
             if (el) el.style.cursor = 'crosshair';
         };
 
-        // ---- Bounding-box resize (drag a side or corner to scale) ----------
-        // Vertex editing is precise but tedious for a simple "make this room
-        // wider" change, so this scales every vertex proportionally instead.
+        // Bounding-box resize.
         const HANDLES = [
             { id: 'nw', fx: 0, fy: 0, minX: 1, minY: 1, corner: 1 },
             { id: 'n', fx: 0.5, fy: 0, minY: 1 },
@@ -3096,10 +3347,7 @@
             resetModeHint();
         }
         window.stopRoomResize = stopRoomResize;
-        // ---- shelves (placed, rotatable) ----------------------------------
-        // Shelves render at a fixed footprint so their rotation is visible;
-        // the size is a drawing constant, not stored per shelf.
-        // Fallbacks only — each shelf carries its own footprint.
+        // Shelves.
         const SHELF_W = 46, SHELF_D = 14;
         const shelfShapes = {};    // shelf_id -> { poly, data }
 
@@ -3113,9 +3361,7 @@
             });
         }
 
-        // A shelf set into a corner is traced rather than sized, so it
-        // carries its own outline and the width/depth/rotation trio no longer
-        // describes it. Both shapes resolve here.
+        // Traced or rectangular shelf outline.
         function isTraced(s) {
             return !!(s.geometry && s.geometry.length >= 3);
         }
@@ -3144,11 +3390,7 @@
             entry.poly.setTooltipContent(shelfTooltip(s));
         }
 
-        // A table with books on it is stored as a Shelf, because that is what
-        // lets a book be found on one -- but it is not a bookcase, and drawing
-        // both in the same purple made a room of furniture unreadable. Three
-        // families, three colours: bookcases, furniture that holds books, and
-        // furniture that holds none.
+        // Colours for bookcases, book tables and other furniture.
         const SHELF_KIND_COLOUR = {
             Shelf: '--cover-3',       // a bookcase: the purple shelves have always been
             Table: '--cover-6',
@@ -3172,8 +3414,7 @@
             poly.on('click', function (e) { if (mode || pendingPlacement()) return; L.DomEvent.stop(e); showShelfInspector(s.shelf_id); });
             shelfShapes[s.shelf_id] = { poly: poly, data: s };
 
-            // Drag the body to move the shelf — live only while selected
-            // (handles showing), exactly like the room's body-drag.
+            // Drag to move a selected shelf.
             let moveStart = null;
             makeBodyDraggable(poly, {
                 enabled: function () { return selectedShelfId === s.shelf_id; },
@@ -3186,9 +3427,7 @@
                 onMove: function (dx, dy) {
                     shelfLive.map_x = moveStart.x + dx;
                     shelfLive.map_y = moveStart.y + dy;
-                    // Translated from the outline as it was when the drag began,
-                    // not from the last frame -- accumulating the offset would
-                    // drift the shape a little further on every mouse move.
+                    // Offset from the starting outline.
                     if (moveStart.geometry) {
                         shelfLive.geometry = translateGeometry(moveStart.geometry, dx, dy);
                     }
@@ -3198,8 +3437,7 @@
                     const r = await postData(URLS.moveShelf, { shelf_id: s.shelf_id, map_x: shelfLive.map_x, map_y: shelfLive.map_y });
                     if (r.success) {
                         Object.assign(s, { map_x: r.map_x, map_y: r.map_y });
-                        // The server slides the outline by the same offset; take
-                        // its answer so the two can never drift apart.
+                        // Use the outline returned by the server.
                         if (r.geometry) s.geometry = r.geometry;
                         commitShelfEdit(s.shelf_id);
                     }
@@ -3220,7 +3458,22 @@
             }).join('');
 
             renderInspector('shelf', 'Shelf', id, esc(s.name || 'Shelf'),
-                '<div class="insp-grid">'
+                propsHead()
+                + textField('Name', 'inspShelfName', s.name || '', 'e.g. Fiction A')
+                + selectField('Type', 'inspShelfKind', SHELF_KINDS, s.kind)
+                + selectField('How it is fixed', 'inspShelfMount', SHELF_MOUNTS, s.mount)
+                + '<div class="insp-field" style="margin-bottom:6px">'
+                + '<label for="inspShelfHeight">Height above the floor (metres)</label>'
+                + '<input id="inspShelfHeight" type="number" min="0" max="10" step="0.1" value="'
+                + (s.mount_height_m == null ? '' : s.mount_height_m) + '" placeholder="Leave blank if it stands on the floor">'
+                + '</div>'
+                + areaField('Description', 'inspShelfDesc', s.description || '',
+                            'What is kept here')
+                + toggleField('On the patron map', 'inspShelfShown', s.is_active !== false,
+                              'Shown', 'Hidden')
+                + '<p class="insp-note" style="margin-top:10px;text-transform:uppercase;'
+                + 'letter-spacing:.07em;font-weight:700">Position &amp; size</p>'
+                + '<div class="insp-grid">'
                 + field('X', 'inspShelfX', Math.round(s.map_x))
                 + field('Y', 'inspShelfY', Math.round(s.map_y))
                 + field('Width', 'inspShelfW', Math.round(s.width || SHELF_W))
@@ -3240,7 +3493,6 @@
                     ? '<button class="map-action-btn" onclick="stopCornerEdit()"><i class="fa-solid fa-check"></i> Done reshaping</button>'
                     : '<button class="map-action-btn" onclick="reshapeShelf(' + id + ')"><i class="fa-solid fa-draw-polygon"></i> Drag corners</button>')
                 + '<button class="map-action-btn" onclick="editShelfGrid(' + id + ')"><i class="fa-solid fa-table-cells"></i> Levels &amp; columns</button>'
-                + '<button class="map-action-btn" onclick="renameShelf(' + id + ')"><i class="fa-solid fa-pen"></i> Rename</button>'
                 + '<button class="map-action-btn danger" onclick="unplaceShelf(' + id + ')"><i class="fa-solid fa-eye-slash"></i> Unplace</button>'
                 + '</div>'
                 + (isTraced(s)
@@ -3252,7 +3504,7 @@
         }
         window.showShelfInspector = showShelfInspector;
 
-        // Quick 0/90/180/270 buttons — the common case, one click.
+        // Quick 0/90/180/270 buttons.
         window.setShelfRotation = async function (id, deg) {
             const entry = shelfShapes[id]; if (!entry) return;
             const r = await postData(URLS.rotateShelf, { shelf_id: id, rotation: deg });
@@ -3278,6 +3530,35 @@
 
             const changes = [];
             const cur = entry.data;
+
+            // Save details before position and size.
+            const props = {
+                shelf_id: id,
+                name: txtVal('inspShelfName') || cur.name,
+                kind: selVal('inspShelfKind'),
+                mount: selVal('inspShelfMount'),
+                mount_height_m: txtVal('inspShelfHeight'),
+                description: txtVal('inspShelfDesc'),
+                is_active: selVal('inspShelfShown'),
+            };
+            const changedProps = props.name !== (cur.name || '')
+                || props.kind !== (cur.kind || '')
+                || props.mount !== (cur.mount || '')
+                || props.description !== (cur.description || '')
+                || props.mount_height_m !== (cur.mount_height_m == null ? '' : String(cur.mount_height_m))
+                || (props.is_active === '1') !== (cur.is_active !== false);
+            if (changedProps) {
+                const rp = await postData(URLS.editShelf, props);
+                if (!rp.success) { alert(rp.error || 'Failed to save the shelf'); return; }
+                Object.assign(cur, {
+                    name: props.name, kind: props.kind, mount: props.mount,
+                    description: props.description,
+                    mount_height_m: props.mount_height_m === '' ? null : parseFloat(props.mount_height_m),
+                    is_active: props.is_active === '1',
+                });
+                changes.push('details');
+            }
+
             if (Math.round(x) !== Math.round(cur.map_x) || Math.round(y) !== Math.round(cur.map_y)
                 || Math.round(w) !== Math.round(cur.width) || Math.round(d) !== Math.round(cur.depth)) {
                 const r = await postData(URLS.resizeShelf,
@@ -3298,18 +3579,14 @@
             inspectorSaved(changes.length ? 'Saved ' + changes.join(' and ') + '.' : 'Nothing changed.');
         };
 
-                // ---- Unified "selected" editing: resize handles + rotate handle +
-        // body-drag all live at once, like a shape selected in a design tool.
+                // Selected shelf editing.
         let selectedShelfId = null;
         let shelfLive = null;          // working copy of {map_x,map_y,rotation,width,depth}
         let shelfResizeHandles = [];   // 8 markers, positioned in the shelf's own rotated frame
         let shelfRotateHandleMarker = null;
         const ROTATE_HANDLE_GAP = 22;  // canvas units above the shelf's top edge
 
-        // Local frame = centred on the shelf, unrotated. Canvas frame = the
-        // floor-plan coordinate space. These convert between the two so
-        // handle drags (which happen in canvas space) can be interpreted as
-        // "how much wider" or "what angle" regardless of current rotation.
+        // Local frame = centred on the shelf, unrotated.
         function localToCanvas(lx, ly, cx, cy, rotationDeg) {
             const rad = rotationDeg * Math.PI / 180, cos = Math.cos(rad), sin = Math.sin(rad);
             return { x: cx + lx * cos - ly * sin, y: cy + lx * sin + ly * cos };
@@ -3332,8 +3609,7 @@
         ];
         const MIN_SHELF_SIZE = 6;
 
-        // Slide or turn an outline without changing its shape. The same two
-        // transforms the server applies, so what is dragged is what is saved.
+        // Slide or turn an outline without changing its shape.
         function translateGeometry(geometry, dx, dy) {
             return geometry.map(function (p) { return [p[0] + dx, p[1] + dy]; });
         }
@@ -3349,9 +3625,7 @@
 
         function redrawShelfLive() {
             const entry = shelfShapes[selectedShelfId]; if (!entry) return;
-            // shelfOutline() prefers a traced outline; going straight to
-            // shelfCorners() here is what collapsed a traced shelf into the
-            // default rectangle the instant anybody dragged it.
+            // Use the traced outline if there is one.
             entry.poly.setLatLngs(shelfOutline(shelfLive));
             entry.poly.setTooltipContent(shelfTooltip(shelfLive));
             positionShelfHandles();
@@ -3365,9 +3639,7 @@
                 entry.marker.setLatLng(toLatLng(local.x, local.y));
             });
             if (shelfRotateHandleMarker) {
-                // A traced shelf's stored depth says nothing about how far the
-                // outline actually reaches, so the handle would end up sitting
-                // inside the shape it is meant to turn. Measure the outline.
+                // Measure the outline for the rotate handle.
                 let reach = hd;
                 if (isTraced(shelfLive)) {
                     reach = 0;
@@ -3394,11 +3666,7 @@
 
         function drawShelfHandles(id) {
             clearShelfHandles();
-            // Width and depth describe a rectangle. They say nothing about a
-            // shelf that was traced corner by corner, and dragging them only
-            // changed two numbers nothing reads back -- so the resize grips
-            // are not offered on one. Moving and turning still work, and
-            // reshaping means redrawing it.
+            // Width and depth describe a rectangle.
             const traced = isTraced(shelfShapes[id] && shelfShapes[id].data);
             (traced ? [] : SHELF_RESIZE_HANDLES).forEach(function (spec) {
                 const size = spec.corner ? 12 : 10;
@@ -3453,8 +3721,7 @@
                 shelfResizeHandles.push({ spec: spec, marker: marker });
             });
 
-            // Rotate handle: snaps to 0/90/180/270° by default; hold Shift
-            // for free rotation, matching the confirmed design.
+            // Rotate handle snaps to 90 degrees; hold Shift for free rotation.
             const rotMarker = L.marker([0, 0], {
                 draggable: true, zIndexOffset: 1001,
                 icon: L.divIcon({ className: 'geo-handle rotate', iconSize: [14, 14], iconAnchor: [7, 7] }),
@@ -3474,9 +3741,7 @@
                 if (!freeRotateHeld) rotation = Math.round(rotation / 90) * 90;
                 rotation = ((rotation % 360) + 360) % 360;
                 shelfLive.rotation = rotation;
-                // A traced outline is not derived from the rotation, so turning
-                // the shelf has to turn the outline itself or nothing moves on
-                // screen until the save comes back and it jumps.
+                // Rotate the traced outline too.
                 if (rotOriginGeom) {
                     shelfLive.geometry = rotateGeometry(rotOriginGeom, rotation - rotOriginDeg,
                                                         rotOriginCx, rotOriginCy);
@@ -3505,8 +3770,7 @@
             if (shelfRotateHandleMarker) { lmap.removeLayer(shelfRotateHandleMarker); shelfRotateHandleMarker = null; }
         }
 
-        // Re-sync the working copy with the saved state and keep editing —
-        // used after every successful save so the next drag starts clean.
+        // Sync with the saved state.
         function commitShelfEdit(id) {
             shelfLive = Object.assign({}, shelfShapes[id].data);
             redrawShelfLive();
@@ -3545,8 +3809,7 @@
         }
         window.deselectShelf = deselectShelf;
 
-        // Shelves are not all one size — the exact-value fallback for when a
-        // precise number matters more than a quick drag.
+        // Exact size inputs.
         window.startResizeShelf = function (id) {
             const entry = shelfShapes[id]; if (!entry) return;
             lmap.closePopup();
@@ -3586,10 +3849,7 @@
             window.closeResizeShelfModal();
         };
 
-        // Adding boards after the fact. Only ever adds: a level carries books,
-        // and losing a shelf full of them to a mistyped number is not a
-        // mistake worth making easy, so anything surplus is reported and left
-        // for the Administrator to delete on purpose.
+        // Adding boards after the fact.
         window.editShelfGrid = async function (id) {
             const entry = shelfShapes[id]; if (!entry) return;
             const levels = await AylaDialog.prompt(
@@ -3620,19 +3880,9 @@
             inspectorSaved('Levels updated.');
         };
 
-        window.renameShelf = async function (id) {
-            const entry = shelfShapes[id]; if (!entry) return;
-            lmap.closePopup();
-            const name = await AylaDialog.prompt('Shelf name', entry.data.name || '',
-                                                { title: 'Rename shelf' });
-            if (name === null) return;                       // cancelled
-            if (!name.trim()) { alert('Shelf name cannot be empty'); return; }
-            const r = await postData(URLS.editShelf, { shelf_id: id, name: name.trim() });
-            if (r.success) window.location.reload();
-            else alert(r.error || 'Failed to rename the shelf');
-        };
+        // Rename is done in the panel.
 
-        // Fig. 51 — Unplace Shelf
+        // Unplace shelf
         window.unplaceShelf = async function (id) {
             const entry = shelfShapes[id]; if (!entry) return;
             lmap.closePopup();
@@ -3642,45 +3892,23 @@
             else alert(r.error || 'Failed to unplace the shelf');
         };
 
-        // Geoman finished a polygon. If the Administrator was tracing an
-        // existing room, attach the shape to it; otherwise ask for a new name.
+        // Geoman finished a polygon.
         let drawnRoomLayer = null;
         let pendingGeometry = null;
         let drawTargetRoomId = null;      // set when tracing an already-created room
 
 
-        // ── Drawing aids ──────────────────────────────────────────────────
-        // Drawing a room freehand gives you corners that are 89 or 92 degrees
-        // and a plan that looks subtly wrong for ever. Three things fix that,
-        // and they are what any CAD tool gives you:
-        //
-        //   Right angles  each new segment snaps to square with the one before
-        //                 it when it is close, so a corner is exactly 90.
-        //   Grid          vertices land on a grid, so walls line up with each
-        //                 other rather than being a few units out.
-        //   Readout       length and corner angle shown while you drag, so you
-        //                 can see 90.0 before committing rather than after.
-        //
-        // All three are toggles: a room that genuinely is not rectangular has
-        // to remain drawable.
-        // Snap-to-grid starts OFF. It quantises every click to gridStepUnits(),
-        // which on a 1400x1000 plan is 50 canvas units and on a scaled plan is
-        // a whole metre -- so the length beside the cursor climbed in 50s and
-        // no exact size could be drawn at all. The grid is still drawn, and the
-        // Snap button turns the behaviour back on when it is wanted.
+        // Drawing aids: right angles, grid and readout.
         const drawAids = { rightAngles: true, grid: false, showGrid: true };
         const ORTHO_TOLERANCE_DEG = 12;   // how far off square still counts as "meant to be square"
         let gridLayer = null;
         let guideLayer = null;
         let drawVertices = [];
-        // Declared here, beside the vertex list it belongs with, and above
-        // everything that reads it -- a `let` read before its declaration runs
-        // throws, and the throw is silent inside an event handler.
+        // Declared before use.
         let drawing = false;
 
         function gridStepUnits() {
-            // A metre is the useful spacing when the scale is known; without it
-            // fall back to something that divides the canvas sensibly.
+            // Grid step: one metre if the scale is set.
             const ppm = mapScale();
             if (ppm && ppm > 0) return ppm;
             return Math.max(10, Math.round(Math.min(imgW, imgH) / 20));
@@ -3696,9 +3924,7 @@
             return { x: Math.round(pt.x / g) * g, y: Math.round(pt.y / g) * g };
         }
 
-        // Square the new segment against the previous one. Projecting onto the
-        // nearest axis (rather than nudging the angle) is what makes the corner
-        // exactly 90 rather than merely closer to it.
+        // Square the new segment against the previous one.
         function snapRightAngle(pt, prev) {
             if (!drawAids.rightAngles || !prev) return pt;
             const dx = pt.x - prev.x, dy = pt.y - prev.y;
@@ -3713,27 +3939,17 @@
         }
 
         function constrainPoint(pt, prev) {
-            // Right angle first, then grid: squaring a gridded point can pull it
-            // back off the grid, whereas gridding a squared point keeps both.
+            // Square first, then snap to grid.
             return snapToGrid(snapRightAngle(pt, prev));
         }
 
-        // Snapping each segment as it is drawn cannot square the *closing*
-        // segment -- that one is whatever gap is left between the last corner
-        // and the first, so a four-click rectangle came out with two square
-        // corners and two a degree or so off. Squaring the finished shape is
-        // the only thing that fixes the last corner.
-        //
-        // Each edge is classified as horizontal or vertical, then both its
-        // endpoints are pulled onto a shared y (or x). Repeating that converges
-        // on a shape whose every corner is exactly 90.
+        // Square the finished shape.
         function orthogonalise(geometry) {
             const n = geometry.length;
             if (n < 4) return geometry;
             const pts = geometry.map(function (g) { return { x: g[0], y: g[1] }; });
 
-            // Only for shapes that were clearly meant to be rectilinear: a room
-            // with a genuinely angled wall must survive being drawn.
+            // Only for mostly rectangular shapes.
             const tol = ORTHO_TOLERANCE_DEG * Math.PI / 180;
             for (let i = 0; i < n; i++) {
                 const a = pts[i], b = pts[(i + 1) % n];
@@ -3779,10 +3995,7 @@
             if (gridLayer.bringToBack) gridLayer.bringToBack();
         }
 
-        // Pixels first, always. The plan is traced against a drawing whose
-        // units the librarian already thinks in -- one canvas pixel per
-        // centimetre here -- so the raw number is the one being aimed at, and
-        // the metric conversion is the cross-check rather than the headline.
+        // Pixels first, always.
         function unitsToLabel(units) {
             const ppm = mapScale();
             const px = (units < 100 ? units.toFixed(1).replace(/\.0$/, '')
@@ -3791,8 +4004,7 @@
                        + (units / ppm).toFixed(2) + ' m</span>' : px;
         }
 
-        // Keeps the badge next to the pointer without letting it fall off the
-        // edge -- it flips to the left once there is no room on the right.
+        // Keep the readout on screen.
         function placeReadout(box, containerPoint) {
             const wrap = document.querySelector('.map-workspace');
             if (!wrap || !containerPoint) return;
@@ -3813,8 +4025,7 @@
             if (box) box.classList.add('hidden');
         }
 
-        // Dashed rays along the two square directions from the last corner, so
-        // alignment is visible before the click rather than inferred after it.
+        // Alignment guides.
         function showGuides(prev, cursor) {
             clearGuides();
             if (!prev) return;
@@ -3856,9 +4067,7 @@
         function updateReadout(prev, cursor, containerPoint) {
             const box = document.getElementById('drawReadout');
             if (!box) return;
-            // Before the first corner is placed there is no edge to measure, so
-            // the badge reports where the pointer actually is instead -- which
-            // is what you want when lining the first vertex up with a wall.
+            // Show the pointer position before the first corner.
             if (!prev) {
                 box.innerHTML = '<span class="text-slate-400">At</span> <b>'
                               + Math.round(cursor.x) + ', ' + Math.round(cursor.y) + '</b>'
@@ -3878,8 +4087,7 @@
                               + ang.toFixed(1) + '&deg;' + (square ? ' &#9633;' : '') + '</span>';
                 }
             }
-            // The running total matters for a room: it is the figure that has
-            // to match the tape measure once the shape closes.
+            // Running perimeter.
             let totalText = '';
             if (drawVertices.length >= 2) {
                 totalText = '<br><span class="text-slate-400">Total</span> '
@@ -3900,22 +4108,13 @@
             updateReadout(prev, pt, e.containerPoint);
         }
 
-        // Undoing one corner, rather than the whole shape. Escape cancels the
-        // entire outline, which is the only thing that existed before: a single
-        // misplaced corner meant tracing the room again from scratch.
-        //
-        // Geoman's own toolbar drives its "Remove Last Vertex" action through
-        // this method, so it is the supported path even though the name is
-        // underscored. It disables the draw outright when only one corner is
-        // left, which is the right behaviour -- a one-corner shape is nothing.
+        // Undoing one corner, rather than the whole shape.
         window.undoLastVertex = function () {
             if (!lmap || !lmap.pm || !drawing) return;
             const draw = lmap.pm.Draw && lmap.pm.Draw.Polygon;
             if (!draw || typeof draw._removeLastVertex !== 'function') return;
             draw._removeLastVertex();
-            // Our own vertex list feeds the readout, the right-angle snap and
-            // the alignment guides; leaving it a corner ahead of the shape
-            // would measure and snap against a corner no longer there.
+            // Remove the last corner from our list too.
             if (drawVertices.length) drawVertices.pop();
             clearGuides();
             const box = document.getElementById('drawReadout');
@@ -3927,9 +4126,7 @@
             if (btn) btn.classList.toggle('hidden', !on);
         }
 
-        // Backspace and Ctrl+Z both mean "take that corner back" to different
-        // people, so both are accepted. Ignored while typing, or the width box
-        // in the properties panel could not be corrected with Backspace.
+        // Backspace or Ctrl+Z removes the last corner.
         function onDrawKeydown(e) {
             if (!drawing) return;
             const t = e.target;
@@ -3941,10 +4138,6 @@
         }
 
         // Deriving the walkable network instead of clicking it out by hand.
-        //
-        // Only generated waypoints are replaced, so this stays safe to press a
-        // second time after correcting the first result -- which is the whole
-        // reason the marker exists on the model.
         window.generateRoute = async function () {
             const existing = Object.keys(waypointMarkers).length;
             const warning = existing
@@ -3979,19 +4172,12 @@
         };
 
         // Showing and hiding whole kinds of thing while drawing.
-        //
-        // A finished floor plan is a dense drawing -- rooms under shelves under
-        // furniture, with waypoints and their connections over the top -- and
-        // tracing one more wall through all of it is guesswork. Hiding is only
-        // ever about what is on screen: nothing here changes a single record,
-        // and what a patron sees is unaffected.
         const LAYER_KINDS = ['rooms', 'doors', 'shelves', 'obstacles', 'stairs',
                              'beacons', 'waypoints'];
         const layerShown = {};
         LAYER_KINDS.forEach(function (k) { layerShown[k] = true; });
 
-        // Every Leaflet layer belonging to one kind, whatever shape its
-        // registry happens to take.
+        // Every Leaflet layer belonging to one kind, whatever shape its registry happens to take.
         function layersOfKind(kind) {
             const out = [];
             const push = function (l) { if (l) out.push(l); };
@@ -4013,15 +4199,13 @@
                 Object.keys(beaconMarkers).forEach(function (k) { push(beaconMarkers[k].marker); });
             } else if (kind === 'waypoints') {
                 Object.keys(waypointMarkers).forEach(function (k) { push(waypointMarkers[k].marker); });
-                // The lines go with the points: connections between waypoints
-                // nobody can see are just clutter with no anchor.
+                // Hide connections with waypoints.
                 Object.keys(connections).forEach(function (k) { push(connections[k].polyline); });
             }
             return out;
         }
 
-        // Re-applied after anything is added, so a shelf drawn while shelves
-        // are hidden does not pop back into view on its own.
+        // Reapply layer visibility after adding shapes.
         function applyLayerVisibility() {
             LAYER_KINDS.forEach(function (kind) {
                 const on = layerShown[kind];
@@ -4038,8 +4222,7 @@
 
         window.toggleLayer = function (kind) {
             layerShown[kind] = !layerShown[kind];
-            // Something hidden cannot stay selected: the panel would be editing
-            // a shape that is no longer on screen to check against.
+            // Deselect hidden shapes.
             if (!layerShown[kind] && inspectorSel) {
                 const owner = { rooms: 'room', doors: 'door', shelves: 'shelf',
                                 stairs: 'stairs', beacons: 'beacon',
@@ -4062,9 +4245,7 @@
             applyLayerVisibility();
         }
 
-        // ---- Readiness -----------------------------------------------------
-        // Re-run after anything that could change the answer, so the panel is
-        // never quietly out of date about the plan in front of you.
+        // Readiness checks.
         let readinessOpen = false;
 
         window.toggleReadiness = function () {
@@ -4118,11 +4299,7 @@
         window.refreshReadiness = refreshReadiness;
 
         function wireDrawingAids() {
-            // Geoman fires vertex events on the shape being drawn, not on the
-            // map. Listening on the map therefore received nothing at all, and
-            // because every aid keys off the vertex list, all three of them --
-            // the right-angle snap, the alignment rays and the measurement
-            // readout -- sat silently idle while looking perfectly wired up.
+            // Geoman fires vertex events on the shape being drawn, not on the map.
             lmap.on('pm:drawstart', function (e) {
                 drawVertices = [];
                 drawing = true;
@@ -4138,9 +4315,7 @@
                 const prev = drawVertices.length ? drawVertices[drawVertices.length - 1] : null;
                 const pt = constrainPoint(canvasXY(e.latlng), prev);
                 const ll = L.latLng(toLatLng(pt.x, pt.y));
-                // Move both the vertex marker and the working polyline's last
-                // point: Geoman has already placed them at the raw position, and
-                // leaving either behind draws a shape that is not the one saved.
+                // Move the snapped vertex and line point.
                 if (e.marker && e.marker.setLatLng) e.marker.setLatLng(ll);
                 if (e.workingLayer && e.workingLayer.getLatLngs) {
                     const lls = e.workingLayer.getLatLngs();
@@ -4162,6 +4337,15 @@
             });
         }
 
+        // Set the aid buttons from drawAids.
+        function syncDrawAidButtons() {
+            Object.keys(drawAids).forEach(function (key) {
+                const btn = document.getElementById('aid-' + key);
+                if (btn) btn.classList.toggle('mode-active', !!drawAids[key]);
+            });
+        }
+        document.addEventListener('DOMContentLoaded', syncDrawAidButtons);
+
         window.toggleDrawAid = function (key) {
             drawAids[key] = !drawAids[key];
             if (key === 'showGrid') drawGrid();
@@ -4170,9 +4354,7 @@
             if (key === 'rightAngles' && !drawAids.rightAngles) clearGuides();
         };
 
-        // Small square drawn inside any corner that is already square, which is
-        // the convention on a floor plan and answers "is that corner right?"
-        // for shapes that already exist.
+        // Mark square corners.
         function rightAngleMarks(geometry) {
             const marks = [];
             const n = geometry.length;
@@ -4189,9 +4371,7 @@
                     toLatLng(b.x + u1.x * size, b.y + u1.y * size),
                     toLatLng(b.x + (u1.x + u2.x) * size, b.y + (u1.y + u2.y) * size),
                     toLatLng(b.x + u2.x * size, b.y + u2.y * size),
-                // Fixed green, not a theme token: this mark means "this corner
-                // is square", and --accent2 resolves to grey here, which reads
-                // as decoration rather than confirmation.
+                // Fixed green colour.
                 ], { color: '#10b981', weight: 1.6, opacity: 0.9, interactive: false }));
             }
             return marks;
@@ -4213,9 +4393,7 @@
             let geom = latLngsToGeometry(e.layer.getLatLngs());
             if (drawAids.rightAngles) {
                 geom = orthogonalise(geom);
-                // Redraw at the squared coordinates so what is saved is what is
-                // shown -- otherwise the confirmation dialog describes a shape
-                // the Administrator is not looking at.
+                // Redraw at the squared position.
                 e.layer.setLatLngs(geometryToLatLngs(geom));
             }
             pendingGeometry = geom;
@@ -4284,7 +4462,7 @@
             });
         }
 
-        // Fig. 48 — Place Shelf: the next map click positions this shelf.
+        // Place shelf: the next map click positions it.
         function startPlacingShelf(shelfId, name) {
             clearMode();
             placingShelfId = shelfId;
@@ -4325,16 +4503,61 @@
             else alert(r.error || 'Failed to save room');
         };
 
-        // ── Stairways ────────────────────────────────────────────────
-        // Bearing is asked for rather than inferred. The footprint alone cannot
-        // say which end is the bottom -- a rectangle is the same rectangle
-        // whichever way you climb it -- and the treads and the arrow both hang
-        // off that answer.
+        // Stairways.
+        let stairShape = 'straight';
+
+        const STAIR_SHAPE_NOTES = {
+            straight: 'One straight run of steps.',
+            quarter: 'Up to a landing, then a quarter turn and out sideways.',
+            half: 'Up one flight, about turn on a half-landing, and back over it — '
+                + 'the shape your existing staircase is.',
+        };
+
+        window.pickStairShape = function (shape) {
+            stairShape = shape;
+            document.querySelectorAll('#placeStairsShape .stair-shape').forEach(function (b) {
+                b.classList.toggle('on', b.dataset.shape === shape);
+            });
+            document.getElementById('placeStairsShapeNote').textContent =
+                STAIR_SHAPE_NOTES[shape] || '';
+        };
+
+        // The long axis of what was drawn is the direction of travel.
+        function inferStairBearing(geom) {
+            if (!geom || geom.length < 3) return 0;
+            const xs = geom.map(function (p) { return p[0]; });
+            const ys = geom.map(function (p) { return p[1]; });
+            const w = Math.max.apply(null, xs) - Math.min.apply(null, xs);
+            const h = Math.max.apply(null, ys) - Math.min.apply(null, ys);
+            return h >= w ? 0 : 90;
+        }
+
+        const STAIR_WORDS = { 0: 'Towards the top of the map', 90: 'Towards the right',
+                              180: 'Towards the bottom of the map', 270: 'Towards the left' };
+        const STAIR_ICONS = { 0: 'fa-arrow-up', 90: 'fa-arrow-right',
+                              180: 'fa-arrow-down', 270: 'fa-arrow-left' };
+
+        function paintStairBearing() {
+            const b = Number(document.getElementById('placeStairsBearing').value) || 0;
+            document.getElementById('placeStairsDirWords').textContent = STAIR_WORDS[b] || '';
+            document.getElementById('placeStairsArrow').className =
+                'fa-solid ' + (STAIR_ICONS[b] || 'fa-arrow-up') + ' text-rose-400';
+        }
+
+        window.flipStairBearing = function () {
+            const box = document.getElementById('placeStairsBearing');
+            box.value = String(((Number(box.value) || 0) + 180) % 360);
+            paintStairBearing();
+        };
+
         window.openStairsPlace = function () {
             document.getElementById('placeStairsName').value = '';
             document.getElementById('placeStairsKind').value = 'Stairs';
             document.getElementById('placeStairsDir').value = 'both';
-            document.getElementById('placeStairsBearing').value = '0';
+            pickStairShape('straight');
+            document.getElementById('placeStairsBearing').value =
+                String(inferStairBearing(pendingGeometry));
+            paintStairBearing();
             const sel = document.getElementById('placeStairsTo');
             sel.innerHTML = '<option value="">Not linked yet</option>';
             (otherFloors || []).forEach(function (f) {
@@ -4357,6 +4580,7 @@
                 kind: document.getElementById('placeStairsKind').value,
                 direction: document.getElementById('placeStairsDir').value,
                 bearing: document.getElementById('placeStairsBearing').value || 0,
+                shape: stairShape,
                 connects_to: document.getElementById('placeStairsTo').value,
                 name: document.getElementById('placeStairsName').value.trim(),
                 geometry: JSON.stringify(pendingGeometry),
@@ -4371,10 +4595,7 @@
             else alert(r.error || 'Failed to remove it');
         };
 
-        // ── Obstacles ────────────────────────────────────────────────
-        // Deliberately lighter than the room dialog: a pillar needs no name and
-        // no description, so the only required choice is what kind of thing it
-        // is, and the name is there for the cases worth labelling.
+        // Obstacles.
         window.openObstaclePlace = function () {
             document.getElementById('placeObstacleHoldsBooks').checked = false;
             document.getElementById('placeObstacleName').value = '';
@@ -4406,9 +4627,7 @@
             else alert(r.error || 'Failed to remove it');
         };
 
-        // `traced` distinguishes the two ways in: Place Shelf clicks a point
-        // and the server builds a rectangle from width/depth; Draw Shelf hands
-        // over an outline that has already been drawn.
+        // Traced shelf or point placement.
         let shelfIsTraced = false;
         window.openShelfPlace = function (traced) {
             shelfIsTraced = !!traced;
@@ -4455,6 +4674,8 @@
         };
 
         function populateShelves(shelves) {
+            // Keep the shelf list for the waypoint panel.
+            mapShelves = shelves || [];
             const sel = document.getElementById('waypointShelf');
             if (!sel) return;
             sel.innerHTML = '<option value="">No shelf</option>';
@@ -4465,10 +4686,136 @@
             });
         }
 
+        // Header menus.
+        window.toggleMapMenu = function (id) {
+            const target = document.getElementById(id);
+            ['layersMenu', 'aidsMenu', 'canvasMenu'].forEach(function (other) {
+                const el = document.getElementById(other);
+                if (el && el !== target) el.classList.add('hidden');
+            });
+            if (target) target.classList.toggle('hidden');
+        };
+        document.addEventListener('click', function (e) {
+            if (e.target.closest('.map-menu-wrap')) return;
+            ['layersMenu', 'aidsMenu', 'canvasMenu'].forEach(function (id) {
+                const el = document.getElementById(id);
+                if (el) el.classList.add('hidden');
+            });
+        });
+
+        // Map height, saved per browser.
+        const MAP_HEIGHT_KEY = 'ayla.floorplan.mapHeight';
+
+        window.setMapHeight = function (px) {
+            const el = document.getElementById('mapConfig');
+            if (!el) return;
+            el.style.height = px + 'px';
+            try { localStorage.setItem(MAP_HEIGHT_KEY, String(px)); } catch (e) { /* storage off */ }
+            if (lmap) setTimeout(function () { lmap.invalidateSize(); }, 60);
+        };
+
+        function restoreMapHeight() {
+            let saved = null;
+            try { saved = localStorage.getItem(MAP_HEIGHT_KEY); } catch (e) { /* storage off */ }
+            const px = parseInt(saved, 10);
+            if (px >= 320 && px <= 2000) {
+                const el = document.getElementById('mapConfig');
+                if (el) el.style.height = px + 'px';
+            }
+        }
+
+        window.toggleMapFullscreen = function () {
+            document.body.classList.toggle('map-full');
+            if (lmap) setTimeout(function () { lmap.invalidateSize(); }, 80);
+        };
+
+        // Esc leaves the filled-window view.
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape' && document.body.classList.contains('map-full')) {
+                window.toggleMapFullscreen();
+            }
+        });
+
+        // Resize Leaflet when the box is resized.
+        function watchMapResize() {
+            const el = document.getElementById('mapConfig');
+            if (!el || typeof ResizeObserver === 'undefined') return;
+            let pending = null;
+            new ResizeObserver(function () {
+                clearTimeout(pending);
+                pending = setTimeout(function () {
+                    if (lmap) lmap.invalidateSize();
+                    try {
+                        localStorage.setItem(MAP_HEIGHT_KEY, String(Math.round(el.clientHeight)));
+                    } catch (e) { /* storage off */ }
+                }, 120);
+            }).observe(el);
+        }
+
+        // Canvas size.
+        let canvasTarget = null;
+
+        window.openCanvasSize = function (planId, width, height) {
+            canvasTarget = planId || floorPlanId;
+            document.getElementById('canvasW').value = Math.round(width || imgW || 0);
+            document.getElementById('canvasH').value = Math.round(height || imgH || 0);
+            document.getElementById('canvasScale').checked = false;
+            const err = document.getElementById('canvasSizeError');
+            err.textContent = ''; err.classList.add('hidden');
+            const modal = document.getElementById('canvasSizeModal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        };
+
+        window.closeCanvasSize = function () {
+            const modal = document.getElementById('canvasSizeModal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        };
+
+        window.saveCanvasSize = async function () {
+            const err = document.getElementById('canvasSizeError');
+            const btn = document.getElementById('canvasSaveBtn');
+            const width = parseFloat(document.getElementById('canvasW').value);
+            const height = parseFloat(document.getElementById('canvasH').value);
+            if (!isFinite(width) || !isFinite(height)) {
+                err.textContent = 'Type a width and a height.';
+                err.classList.remove('hidden');
+                return;
+            }
+            btn.disabled = true;
+            const r = await postData(URLS.setCanvas, {
+                floorplan_id: canvasTarget || floorPlanId,
+                canvas_width: width,
+                canvas_height: height,
+                scale_contents: document.getElementById('canvasScale').checked ? '1' : '0',
+            });
+            btn.disabled = false;
+            if (!r.success) {
+                // Show the full error.
+                err.textContent = r.error || 'Could not change the canvas size.';
+                err.classList.remove('hidden');
+                return;
+            }
+            // Reload after changing the canvas.
+            window.location.reload();
+        };
+
+        function showCanvasNote() {
+            const note = document.getElementById('canvasSizeNote');
+            if (note) note.textContent = 'Canvas ' + Math.round(imgW) + ' × ' + Math.round(imgH)
+                + (planScale ? ' · ' + planScale + ' units/m' : ' · no scale set');
+        }
+
         window.switchPlan = function (planId) {
             if (!planId) return;
             window.location.href = '?plan=' + encodeURIComponent(planId);
         };
+
+        // Started once the map exists, so the first invalidateSize has something to resize.
+        document.addEventListener('DOMContentLoaded', function () {
+            setTimeout(watchMapResize, 400);
+        });
 
         async function initMapConfig() {
             const picker = document.getElementById('planPicker');
@@ -4490,14 +4837,15 @@
             planScale = (typeof data.pixels_per_meter === 'number') ? data.pixels_per_meter : null;
             populateShelves(data.shelves);
             rooms = data.rooms || [];
+            restoreMapHeight();
+            showCanvasNote();
 
             lmap = L.map('mapConfig', {
                 crs: L.CRS.Simple, minZoom: -5, maxZoom: 4,
                 zoomControl: true, attributionControl: false,
             });
             const bounds = [[0, 0], [imgH, imgW]];
-            // The canvas is blank — this outline shows its extent so the
-            // Administrator knows where the drawable area ends.
+            // Outline of the canvas area.
             L.rectangle(bounds, {
                 color: AylaTheme.color('--border-color'), weight: 1,
                 fillColor: AylaTheme.color('--bg-card'), fillOpacity: 1, interactive: false,
@@ -4528,9 +4876,7 @@
             (data.waypoints || []).forEach(addWaypointMarker);
             (data.connections || []).forEach(addConnectionLine);
 
-            // Last, once every layer exists: applying the saved preferences to
-            // a map that has not drawn anything yet would hide nothing and then
-            // let it all appear anyway.
+            // Apply saved layer settings last.
             restoreLayerVisibility();
         }
 
@@ -4548,12 +4894,48 @@
     })();
     </script>
 
+    <!-- Canvas size. -->
+    <div id="canvasSizeModal" class="hidden fixed inset-0 z-50 items-center justify-center bg-black/70 p-4">
+        <div class="w-full max-w-md rounded-2xl border shadow-2xl" style="background-color: var(--bg-modal); border-color: var(--border-modal);">
+            <div class="px-6 py-5 border-b border-slate-800 flex items-center justify-between">
+                <h3 class="text-sm font-bold text-slate-100 tracking-wide">Canvas size</h3>
+                <button type="button" onclick="closeCanvasSize()" class="w-7 h-7 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40" aria-label="Close">
+                    <i class="fa-solid fa-xmark text-sm"></i>
+                </button>
+            </div>
+            <div class="px-6 py-5 space-y-4">
+                <p class="text-[11px] text-slate-400 leading-relaxed">
+                    How much room there is to draw on, in canvas units. Everything already drawn
+                    keeps its coordinates unless you ask for it to be resized too.
+                </p>
+                <div class="grid grid-cols-2 gap-3">
+                    <div class="insp-field">
+                        <label for="canvasW">Width</label>
+                        <input id="canvasW" type="number" min="100" max="10000" step="10">
+                    </div>
+                    <div class="insp-field">
+                        <label for="canvasH">Height</label>
+                        <input id="canvasH" type="number" min="100" max="10000" step="10">
+                    </div>
+                </div>
+                <label class="flex items-start gap-2.5 text-[11px] text-slate-300 leading-relaxed cursor-pointer">
+                    <input id="canvasScale" type="checkbox" class="mt-0.5">
+                    <span>Resize everything drawn to fit, keeping its proportions. The map scale in
+                          units per metre is adjusted with it, so real distances stay right.</span>
+                </label>
+                <p id="canvasSizeError" class="hidden text-[11px] font-semibold text-rose-400 leading-relaxed"></p>
+                <div class="flex items-center justify-end gap-2 pt-1">
+                    <button type="button" onclick="closeCanvasSize()" class="text-xs font-semibold px-4 py-2.5 rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800/50">Cancel</button>
+                    <button type="button" id="canvasSaveBtn" onclick="saveCanvasSize()" class="bg-cyan-700 hover:bg-cyan-600 text-white text-xs font-bold px-4 py-2.5 rounded-lg">Save size</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="{% static 'js/admin-enhance.js' %}" defer></script>
 
 <script>
-  /* Leaflet paints marker colours into SVG attributes when the map is built,
-     so they cannot follow a live theme switch. Re-initialise the page instead
-     — the map is rebuilt from the server and comes back correctly themed. */
+  /* Reload on theme change so map colours update. */
   document.addEventListener('ayla:themechange', function () { location.reload(); });
 </script>
 </body>

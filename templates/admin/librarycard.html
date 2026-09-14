@@ -7,9 +7,7 @@
 <title>Library Card — {{ patron.fullname }}</title>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Syne:wght@700;800&display=swap" rel="stylesheet">
 <style>
-  /* The card is a physical object, so it is sized in millimetres and its
-     colours are fixed rather than theme-driven — it must look the same on
-     screen, on a colour printer, and photocopied in black and white. */
+  /* Card sized in millimetres, fixed colours. */
   :root {
     --card-w: 153mm;          /* 85.6 x 54 mm CR80 proportions, scaled 1.8x  */
     --card-h: 96.5mm;         /* so the QR is large enough to scan reliably  */
@@ -46,7 +44,7 @@
   .btn.secondary { background: #fff; color: var(--ink); border-color: var(--line); }
   .hint { font-size: 12px; color: var(--muted); text-align: center; max-width: 560px; line-height: 1.6; }
 
-  /* ── the card ─────────────────────────────────────────────────────── */
+  /* The card */
   .card {
     width: var(--card-w);
     height: var(--card-h);
@@ -108,7 +106,7 @@
   .fields dt { color: var(--muted); font-weight: 600; white-space: nowrap; }
   .fields dd { font-weight: 600; word-break: break-word; }
 
-  /* ── QR panel ─────────────────────────────────────────────────────── */
+  /* QR panel */
   .qr-panel {
     width: 56mm;
     background: #f7fbfc;
@@ -123,6 +121,10 @@
   }
   .qr-box img { display: block; width: 42mm; height: 42mm; image-rendering: pixelated; }
   .qr-caption { font-size: 2.5mm; color: var(--muted); margin-top: 2.5mm; line-height: 1.5; }
+  .qr-number {
+    font-family: monospace; font-size: 4.2mm; font-weight: 700;
+    letter-spacing: .4mm; color: #0f172a; margin-top: 1.8mm;
+  }
   .qr-id {
     font-family: monospace; font-size: 2.1mm; line-height: 1.35;
     color: var(--muted); margin-top: 1.2mm;
@@ -134,6 +136,63 @@
     border: 1px dashed #f59e0b; border-radius: 2mm; padding: 3mm; line-height: 1.5;
   }
 
+  /* Back of the card. */
+  .card.back {
+    grid-template-columns: 1fr;
+    padding: 7mm 9mm 6mm;
+    gap: 0;
+  }
+  .card.back::before { left: auto; right: 0; }
+
+  .back-head {
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: 4mm; border-bottom: 1px solid var(--line); padding-bottom: 2.5mm;
+  }
+  .back-title {
+    font-family: 'Syne', sans-serif; font-weight: 800; font-size: 3.4mm;
+    letter-spacing: .16em; text-transform: uppercase; color: var(--accent);
+  }
+  .back-card-no { font-size: 3mm; font-weight: 700; font-family: monospace; }
+
+  .back-body { display: grid; grid-template-columns: 1fr 52mm; gap: 6mm; margin-top: 3.5mm; }
+
+  .rules { font-size: 2.75mm; line-height: 1.65; }
+  .rules-head {
+    font-size: 2.4mm; font-weight: 800; letter-spacing: .16em;
+    text-transform: uppercase; color: var(--muted); margin-bottom: 1.6mm;
+  }
+  .rules ol { padding-left: 4mm; }
+  .rules li { margin-bottom: 1.2mm; }
+
+  .back-side { display: flex; flex-direction: column; gap: 3.5mm; }
+
+  /* Signature strip. */
+  .sign-box { margin-top: auto; }
+  .sign-line { border-bottom: .4mm solid var(--ink); height: 7mm; }
+  .sign-label {
+    font-size: 2.3mm; color: var(--muted); margin-top: 1.2mm;
+    letter-spacing: .06em; text-transform: uppercase; font-weight: 700;
+  }
+
+  .found-box {
+    border: .4mm dashed var(--line); border-radius: 2mm; padding: 3mm;
+    font-size: 2.6mm; line-height: 1.55;
+  }
+  .found-head {
+    font-size: 2.3mm; font-weight: 800; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--accent); margin-bottom: 1.2mm;
+  }
+
+  .back-foot {
+    margin-top: 3mm; padding-top: 2.5mm; border-top: 1px solid var(--line);
+    display: flex; justify-content: space-between; gap: 4mm;
+    font-size: 2.4mm; color: var(--muted);
+  }
+
+  /* Which face to print. */
+  body.only-front .card.back,
+  body.only-back .card.front { display: none; }
+
   .footer-strip {
     grid-column: 1 / -1;
     border-top: 1px solid var(--line);
@@ -142,8 +201,7 @@
     display: flex; justify-content: space-between; gap: 4mm;
   }
 
-  /* ── print ────────────────────────────────────────────────────────────
-     Landscape, card centred, everything else hidden. */
+  /* Print. */
   @page { size: A4 landscape; margin: 12mm; }
 
   @media print {
@@ -154,6 +212,10 @@
       border: 1px solid #94a3b8;   /* a cut line that survives printing */
       page-break-inside: avoid;
     }
+    /* One card face per page. */
+    .card.front { page-break-after: always; }
+    body.only-front .card.front,
+    body.only-back .card.back { page-break-after: auto; }
     /* Chrome drops backgrounds by default; these carry meaning here. */
     * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   }
@@ -163,10 +225,14 @@
 
   <div class="toolbar">
     <button type="button" class="btn" onclick="window.print()">🖨 Print card</button>
+    <select id="sideSelect" class="btn secondary" onchange="pickSide(this.value)" aria-label="Which side to print">
+      <option value="both">Both sides</option>
+      <option value="front">Front only</option>
+      <option value="back">Back only</option>
+    </select>
     <a class="btn secondary" id="downloadQr" download="ayla_qr_{{ patron.patron_id }}.png">⬇ Save QR only</a>
     {% if printed_by_staff %}
-      {# Whoever printed this may not hold the patrons module -- a card can be #}
-      {# printed from elsewhere -- and a back link that bounces is worse than none. #}
+      {# Only show the back link with patrons access. #}
       {% if 'patrons' in allowed_modules %}
         <a class="btn secondary" href="{% url 'admin_manage_patron' %}">← Back to Manage Patrons</a>
       {% endif %}
@@ -175,7 +241,7 @@
     {% endif %}
   </div>
 
-  <div class="card">
+  <div class="card front">
     <div class="details">
       <div class="brand">
         <img src="{% static 'images/ayla-logo.png' %}" alt="AYLA">
@@ -190,21 +256,22 @@
       <div class="holder-type">{{ patron.patron_type }}</div>
 
       <dl class="fields">
-        <dt>Card No.</dt><dd>AYLA-{{ patron.patron_id|stringformat:"05d" }}</dd>
+        {# The issued card number, not the database key. #}
+        <dt>Card No.</dt><dd>AYLA-{{ patron.card_display|default:"—" }}</dd>
         <dt>Email</dt><dd>{{ patron.email }}</dd>
         {% if patron.contact_number %}<dt>Contact</dt><dd>{{ patron.contact_number }}</dd>{% endif %}
         {% if patron.address %}<dt>Address</dt><dd>{{ patron.address }}</dd>{% endif %}
         <dt>Member since</dt><dd>{{ patron.registration_date|date:"F Y" }}</dd>
       </dl>
-      {# Account status is deliberately left off: it changes over an account's #}
-      {# life, and a printed card cannot follow it. The desk reads the live #}
-      {# status from the scan instead. #}
+      {# Account status is not printed. #}
     </div>
 
     <div class="qr-panel">
       {% if qr_data_uri %}
         <div class="qr-box"><img id="qrImage" src="{{ qr_data_uri }}" alt="Patron QR code"></div>
         <div class="qr-caption">Present this at the library desk</div>
+        {# Card number under the QR code. #}
+        {% if patron.card_number %}<div class="qr-number">{{ patron.card_display }}</div>{% endif %}
         <div class="qr-id">{{ patron.qr_code }}</div>
       {% else %}
         <div class="qr-missing">
@@ -219,15 +286,61 @@
     </div>
   </div>
 
+  {# The reverse. #}
+  <div class="card back">
+    <div class="back-head">
+      <span class="back-title">Conditions of use</span>
+      {% if patron.card_number %}<span class="back-card-no">AYLA-{{ patron.card_display }}</span>{% endif %}
+    </div>
+
+    <div class="back-body">
+      <div class="rules">
+        <p class="rules-head">Please remember</p>
+        <ol>
+          <li>This card belongs to {{ library_name }} and may be used only by the person named on the front.</li>
+          {# From the current borrowing rule. #}
+          <li>Up to {{ rule.max_books_per_patron }} book{{ rule.max_books_per_patron|pluralize }} may be borrowed at a time, for {{ rule.loan_period_days }} days.</li>
+          {% if rule.fine_per_day %}<li>Books returned late are charged ₱{{ rule.fine_per_day|floatformat:2 }} per day{% if rule.grace_period_days %}, after {{ rule.grace_period_days }} day{{ rule.grace_period_days|pluralize }} of grace{% endif %}.</li>{% endif %}
+          <li>Report a lost or damaged card at the desk at once. Until it is reported, borrowing on it is the holder's responsibility.</li>
+          <li>Present this card when borrowing, returning, or entering the library.</li>
+        </ol>
+      </div>
+
+      <div class="back-side">
+        <div class="found-box">
+          <p class="found-head">If found, please return to</p>
+          {{ library_name }}<br>
+          {{ library_location }}
+        </div>
+
+        <div class="sign-box">
+          <div class="sign-line"></div>
+          <p class="sign-label">Signature of holder</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="back-foot">
+      <span>Issued {{ issued_on|date:"F d, Y" }}</span>
+      <span>Non-transferable</span>
+    </div>
+  </div>
+
   <p class="hint">
     Print at <strong>100% scale</strong> on A4 landscape — the card measures 153 × 96.5 mm,
     the proportions of a standard ID card enlarged so the QR scans reliably from a phone.
-    Cut along the border.
+    Cut along the border. The two faces print on separate sheets; set the printer to
+    double-sided, flip on the long edge, or print them one at a time and glue them back to back.
   </p>
 
   <script>
-    // The "Save QR only" link points at the same image the card shows, so what
-    // is downloaded and what is printed can never disagree.
+    // Which face goes to the printer.
+    function pickSide(which) {
+      document.body.classList.toggle('only-front', which === 'front');
+      document.body.classList.toggle('only-back', which === 'back');
+    }
+
+    // Download link uses the same QR image.
     (function () {
       const img = document.getElementById('qrImage');
       const link = document.getElementById('downloadQr');

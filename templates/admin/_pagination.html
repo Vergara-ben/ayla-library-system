@@ -1,0 +1,93 @@
+{% load pagination %}
+{# The page links under a table. #}
+{% if page.paginator.num_pages > 1 %}
+{% elided_pages page as pages %}{% page_ellipsis as gap %}{% with p=param|default:'page' %}
+<nav class="ayla-pager flex items-center gap-1" aria-label="Pages">
+    {% if page.has_previous %}
+        <a href="?{{ p }}={{ page.previous_page_number }}{% if qs %}&{{ qs }}{% endif %}"
+           class="ayla-pager-step" aria-label="Previous page">
+            <i class="fa-solid fa-chevron-left text-[9px]"></i><span class="hidden sm:inline">Prev</span>
+        </a>
+    {% else %}
+        <span class="ayla-pager-step is-off" aria-disabled="true">
+            <i class="fa-solid fa-chevron-left text-[9px]"></i><span class="hidden sm:inline">Prev</span>
+        </span>
+    {% endif %}
+
+    {# Page numbers on wider screens. #}
+    <div class="hidden md:flex items-center gap-1">
+        {% for n in pages %}
+            {% if n == gap %}
+                <span class="ayla-pager-gap" aria-hidden="true">&hellip;</span>
+            {% elif n == page.number %}
+                <span class="ayla-pager-num is-current bg-{{ accent|default:'cyan' }}-700/30 text-{{ accent|default:'cyan' }}-400 border-{{ accent|default:'cyan' }}-800/50"
+                      aria-current="page">{{ n }}</span>
+            {% else %}
+                <a href="?{{ p }}={{ n }}{% if qs %}&{{ qs }}{% endif %}" class="ayla-pager-num">{{ n }}</a>
+            {% endif %}
+        {% endfor %}
+    </div>
+    <span class="md:hidden px-2 text-slate-400 font-medium whitespace-nowrap">
+        Page {{ page.number }} of {{ page.paginator.num_pages }}
+    </span>
+
+    {% if page.has_next %}
+        <a href="?{{ p }}={{ page.next_page_number }}{% if qs %}&{{ qs }}{% endif %}"
+           class="ayla-pager-step" aria-label="Next page">
+            <span class="hidden sm:inline">Next</span><i class="fa-solid fa-chevron-right text-[9px]"></i>
+        </a>
+    {% else %}
+        <span class="ayla-pager-step is-off" aria-disabled="true">
+            <span class="hidden sm:inline">Next</span><i class="fa-solid fa-chevron-right text-[9px]"></i>
+        </span>
+    {% endif %}
+
+    {# Only worth a box once the ellipsis is hiding something. #}
+    {% if page.paginator.num_pages > 7 %}
+    <form class="ayla-pager-jump hidden lg:flex items-center gap-1.5 ml-2 pl-3 border-l border-slate-800"
+          data-qs="{{ qs|default:'' }}" data-param="{{ p }}" data-max="{{ page.paginator.num_pages }}"
+          onsubmit="return aylaJumpToPage(this)">
+        <label class="text-slate-500 whitespace-nowrap" for="pager-jump-{{ page.number }}">Go to</label>
+        <input id="pager-jump-{{ page.number }}" type="number" min="1" max="{{ page.paginator.num_pages }}"
+               inputmode="numeric" placeholder="{{ page.number }}"
+               class="w-14 rounded border border-slate-800 px-2 py-1 text-slate-300 focus:outline-none focus:border-{{ accent|default:'cyan' }}-700"
+               style="background-color: var(--bg-input);">
+    </form>
+    {% endif %}
+</nav>
+
+{# Styled here once rather than in every page's <style>. #}
+<style id="ayla-pager-style">
+    .ayla-pager-step, .ayla-pager-num {
+        display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+        min-width: 30px; height: 30px; padding: 0 10px; border-radius: 7px;
+        border: 1px solid var(--border-color, #1e293b);
+        color: var(--text-muted, #94a3b8); font-weight: 600;
+        transition: color .12s ease, background-color .12s ease;
+        font-variant-numeric: tabular-nums;
+    }
+    .ayla-pager-num { padding: 0 6px; }
+    a.ayla-pager-step:hover, a.ayla-pager-num:hover {
+        color: var(--text-primary, #e2e8f0); background-color: rgba(100, 116, 139, .12);
+    }
+    .ayla-pager-num.is-current { font-weight: 800; border-width: 1px; }
+    .ayla-pager-step.is-off { opacity: .4; cursor: not-allowed; }
+    .ayla-pager-gap { min-width: 18px; text-align: center; color: var(--text-muted, #64748b); }
+</style>
+<script>
+    // Go to page, keeping the filters.
+    window.aylaJumpToPage = window.aylaJumpToPage || function (form) {
+        var input = form.querySelector('input');
+        var max = parseInt(form.getAttribute('data-max'), 10) || 1;
+        var n = parseInt(input.value, 10);
+        if (!n) return false;
+        n = Math.min(Math.max(n, 1), max);
+        var qs = form.getAttribute('data-qs');
+        // Read the page parameter from the form.
+        var param = form.getAttribute('data-param') || 'page';
+        window.location.search = '?' + param + '=' + n + (qs ? '&' + qs : '');
+        return false;
+    };
+</script>
+{% endwith %}
+{% endif %}

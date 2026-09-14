@@ -306,9 +306,7 @@
             border-color: var(--border-color);
         }
 
-        /* Primary action: a real accent fill. It previously used
-           --border-color (a boundary tone) as its background, which left the
-           label at 4.3:1 and gave it a hover state that changed nothing. */
+        /* Primary action: a real accent fill. */
         .btn-filled {
             background-color: var(--accent);
             border: 1px solid var(--accent);
@@ -721,8 +719,7 @@
                             <h3 class="panel-title">⚡ Quick Actions</h3>
                         </div>
                         <div class="quick-actions-grid">
-                            {# Administration first: these are the role's own work and are #}
-                            {# always present. Desk shortcuts follow only where granted. #}
+                            {# Administration first: these are the role's own work and are always present. #}
                             <a href="{% url 'user_management' %}" class="action-card">
                                 <span class="action-icon">🧑‍💼</span>
                                 <span class="action-label">Users</span>

@@ -1,13 +1,4 @@
-"""Per-account module access for Library Staff.
-
-An Administrator picks which modules a Staff account may use when the account is
-created (and can change them later from User Management). Administrators always
-have every module; the Dashboard is always available to everyone, so it is not
-listed here.
-
-Each entry is (key, label, description, font-awesome icon). The keys double as
-the `active=` values used by templates/library_staff/_sidebar.html.
-"""
+"""Per-account module access for Library Staff."""
 
 STAFF_MODULES = [
     ('transactions', 'Transaction Module',
@@ -22,17 +13,13 @@ STAFF_MODULES = [
      'Maintain rooms, shelves, and shelf levels', 'fa-folder-tree'),
     ('indoor_map', 'Floor Plan Module',
      'Edit the floor plan, waypoints, and beacons', 'fa-map'),
-    # Ch.1 ¶268 gives Library Staff the stock-receiving functions only — audits,
-    # deaccession, condition changes and movement history stay Administrator-only.
+    # Staff get stock receiving only.
     ('inventory', 'Stock Receiving',
      'Receive shipments and donations into inventory', 'fa-truck-ramp-box'),
-    # The desk half of patron management: registering the walk-in in front of
-    # you and reviewing the IDs uploaded by online applicants. Editing and
-    # deleting patron records stay Administrator-only.
+    # Patron desk tasks for staff.
     ('patrons', 'Patron Registration & Review',
      'Register walk-ins and review online sign-ups', 'fa-user-check'),
-    # Answering patron enquiries. Kept a module of its own because a reply
-    # from the library carries the library's authority, whoever typed it.
+    # Answering patron enquiries.
     ('chat', 'Messages',
      'Answer questions patrons send to the library', 'fa-comments'),
 ]
@@ -42,12 +29,7 @@ MODULE_LABELS = {key: label for key, label, _desc, _icon in STAFF_MODULES}
 
 
 def clean_module_keys(raw):
-    """Normalise submitted module keys into an ordered, de-duplicated list.
-
-    Accepts either a comma-separated string (how the field is stored and how the
-    picker posts it) or a list. Anything unrecognised is dropped, so a tampered
-    form cannot grant access to a module that does not exist.
-    """
+    """Normalise submitted module keys into an ordered, de-duplicated list."""
     if isinstance(raw, str):
         raw = raw.split(',')
     seen = set()

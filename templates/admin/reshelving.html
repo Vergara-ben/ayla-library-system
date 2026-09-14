@@ -73,8 +73,7 @@
                     <i class="fa-solid fa-boxes-packing text-cyan-600 text-xs"></i>
                     <h4 class="text-sm font-bold text-slate-200 tracking-wide">Waiting to be shelved</h4>
                     <div class="flex items-center gap-2">
-                        {# The queue arrives sorted by shelf, so a trolley is #}
-                        {# usually a contiguous run of ticks.                 #}
+                        {# The queue arrives sorted by shelf, so a trolley is usually a contiguous run of ticks. #}
                         <button type="button" id="shelveSelectedBtn" onclick="shelveSelected()" disabled
                                 class="bg-slate-800/40 text-slate-600 border border-slate-800 text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors cursor-not-allowed">
                             <i class="fa-solid fa-check-double text-[10px]"></i>
@@ -139,10 +138,7 @@
     <script>
         function toggleSidebar() { document.querySelector('aside').classList.toggle('open'); }
 
-        // One request whether it is one book or thirty. Someone walking a
-        // trolley back from the aisles shelves a run of them at once, and
-        // thirty separate round trips is thirty chances to lose track of which
-        // ones actually went back.
+        // One request whether it is one book or thirty.
         async function shelve(ids, buttons) {
             (buttons || []).forEach(function (b) { b.disabled = true; });
             const body = new URLSearchParams();
@@ -175,9 +171,7 @@
                 return;
             }
 
-            // Only the rows the server confirmed. A book somebody else shelved
-            // first comes back in skipped_count, and its row is left alone
-            // rather than disappearing as though this action had done it.
+            // Only the rows the server confirmed.
             const done = data.shelved_ids || ids;
             done.forEach(function (id) {
                 const row = document.querySelector('tr[data-book-id="' + id + '"]');

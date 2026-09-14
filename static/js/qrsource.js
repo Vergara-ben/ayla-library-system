@@ -1,38 +1,8 @@
-/* Two ways to read a QR code, on every screen that reads one.
- *
- * A desk may have a handheld QR scanner plugged into it, or it may have nothing
- * but the computer's own camera, and which one is sitting in front of the staff
- * member changes from desk to desk and from shift to shift. Every scanning
- * screen therefore offers both rather than assuming one: the camera, and the
- * handheld -- which, to a computer, is a keyboard that types the code very fast
- * and presses Enter.
- *
- * The pages keep their own cameras. Each already had one, with its own start and
- * stop, and rewriting four working scanners to share a fifth would risk all of
- * them to save a little duplication. What lives here is only the part that was
- * missing everywhere: the choice between the two inputs, and the handheld's
- * keystroke capture.
- *
- * Usage:
- *
- *     var src = AylaQRSource.attach({
- *         panel: '#book-scan-panel',   // the toggle is inserted at the top of this
- *         camera: '#book-cam-box',     // shown for Camera, hidden for Scanner device
- *         startCamera: startCamera,
- *         stopCamera: stopCamera,
- *         onCode: handleQRCode,
- *         hint: 'Scan the label on the book.',
- *     });
- *
- *     src.activate();     // opening the scan panel
- *     src.deactivate();   // leaving it -- always call this, it frees the camera
- */
+/* Two ways to read a QR code, on every screen that reads one. */
 (function () {
     'use strict';
 
-    // A handheld scanner types a whole code in well under a tenth of a second;
-    // a person cannot. Anything slower than this between keystrokes is treated
-    // as someone typing, and the buffer starts again.
+    // A handheld scanner types a whole code in well under a tenth of a second; a person cannot.
     var SCANNER_GAP_MS = 120;
     var MIN_CODE_LENGTH = 3;
     // One card held a moment too long must not scan twice.
@@ -70,11 +40,7 @@
         return typeof ref === 'string' ? document.querySelector(ref) : ref;
     }
 
-    // The desk's preference, not the session's: a library with a handheld wants
-    // it every time, and re-picking on every transaction is the kind of friction
-    // that gets a feature abandoned. Storage can throw (private windows, blocked
-    // site data), and a scanner that will not open because of that would be a
-    // poor trade, so every access is guarded.
+    // Remember the scanner choice per browser.
     function readPref() {
         try {
             var v = window.localStorage.getItem(PREF_KEY);
@@ -93,10 +59,7 @@
 
         var panel = pick(opts.panel);
         var cameraBox = pick(opts.camera);
-        // The page's own status line, if it has one. It is written by the camera
-        // ("Starting camera...", "Please allow camera access"), and leaving that
-        // standing under a handheld prompt tells the reader to fix a camera they
-        // have just chosen not to use.
+        // The page's own status line, if it has one.
         var statusLine = pick(opts.status);
         if (!panel) return null;
 
@@ -106,7 +69,7 @@
         var lastKeyAt = 0;
         var lockedUntil = 0;
 
-        // ---- the toggle -------------------------------------------------
+        // The toggle
         var bar = document.createElement('div');
         bar.className = 'qrsrc';
         bar.setAttribute('role', 'group');
@@ -124,7 +87,7 @@
         bar.appendChild(devBtn);
         panel.insertBefore(bar, panel.firstChild);
 
-        // ---- what the handheld shows instead of a camera ----------------
+        // Handheld scanner view
         var wait = document.createElement('div');
         wait.className = 'qrsrc-wait';
         wait.style.display = 'none';
@@ -158,11 +121,7 @@
             if (typeof opts.onCode === 'function') opts.onCode(code);
         }
 
-        // A wedge scanner types into whatever holds focus. Capturing at the
-        // document means nothing has to be focused first -- no invisible input
-        // stealing the cursor back from a staff member trying to type. When a
-        // real field does hold focus the scan lands there instead and the page's
-        // own Enter handling applies, so this stays out of the way.
+        // A wedge scanner types into whatever holds focus.
         function onKey(e) {
             if (!live || mode !== 'device') return;
             var t = e.target;
@@ -217,9 +176,7 @@
                 if (mode === 'camera' && typeof opts.startCamera === 'function') opts.startCamera();
             },
 
-            // Always stops the camera, whichever mode is showing: leaving the
-            // device held open is what keeps the light on and blocks the next
-            // page from opening it.
+            // Always stop the camera.
             deactivate: function () {
                 live = false;
                 buffer = '';

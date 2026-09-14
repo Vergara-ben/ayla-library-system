@@ -1,6 +1,6 @@
 from django.shortcuts import redirect, render, get_object_or_404
 from django.contrib import messages
-from django.db.models import (Count, F, IntegerField, Max, OuterRef, Q,
+from django.db.models import (Count, F, IntegerField, Max, Min, OuterRef, Q,
                               Subquery)
 from django.db import transaction
 from django.utils import timezone
@@ -40,14 +40,14 @@ from .auth_utils import (
     staff_only_required,
     module_required,
     admin_or_module_required,
+    admin_or_any_module_required,
     password_length_error,
 )
 from .modules import STAFF_MODULES, clean_module_keys
 from .names import compose_name, parse_name
 from .desk import PURPOSE_CHOICES, close_stale_visits, desk_is_armed, desk_viewer_id
 
-# Map admin page-URL names to their Library Staff equivalents so that shared
-# action endpoints can return whichever portal the current user belongs to.
+# Admin page names mapped to their Library Staff equivalents.
 STAFF_PORTAL_MAP = {
     'admin_management': 'staff_manage_books',
     'admin_book_detail': 'staff_book_detail',
@@ -82,25 +82,14 @@ from .emails import (
     registration_rejected_email,
 )
 from . import labels
+from . import analytics
 from .reports import (REPORT_TYPES, SNAPSHOT_REPORTS, parse_date_range, build_report,
                       render_report_pdf, render_report_excel)
 from .models import Book, Patron, PatronLog, Transaction, User, ShelfLevel, Donation, Announcement, FloorPlan, Shelf, Room, Door, Waypoint, BLEBeacon, WaypointConnection, SystemLog, BorrowingRule, Obstacle, Stairway, PasswordResetOTP, InventoryRecord, StockMovement, StockAudit, DueDateExtension, ReactivationRequest
 
 # Patron views
 def patron_login(request):
-    """Patron sign-in.
-
-    The order here matters and is not the obvious one. Status used to be checked
-    before the password, so anyone could type an address with any password and
-    learn from the reply whether it belonged to a pending applicant, a
-    deactivated member, or nobody at all.
-
-    Those messages are worth keeping -- an applicant genuinely needs to be told
-    their registration is still waiting, and a deactivated member needs the way
-    back. So the password is verified first and the status is only explained to
-    someone who has just proved the account is theirs. A guesser sees one
-    sentence, always the same one.
-    """
+    """Patron sign-in."""
     if request.method == 'POST':
         email = (request.POST.get('email') or '').strip()
         password = request.POST.get('password') or ''
@@ -119,8 +108,7 @@ def patron_login(request):
         if not password_ok:
             remaining = record_login_failure('patron', email)
             if patron is not None:
-                # Logged against the account whose password was missed, which is
-                # what makes a run of them legible as an attack on that account.
+                # Log the failed attempt against the account.
                 log_patron_action(request, 'Login failed', 'Patron', patron.patron_id,
                                   'Incorrect password', patron=patron)
             else:
@@ -131,8 +119,7 @@ def patron_login(request):
                 error += f' {remaining} attempt(s) left before this account is locked.'
             return render(request, 'patron/patronlogin.html', {'error': error})
 
-        # Password correct: from here the account is demonstrably theirs, so the
-        # real reason they cannot get in is safe -- and necessary -- to give.
+        # Password is correct, so it is safe to show the real reason.
         clear_login_failures('patron', email)
 
         if patron.account_status == 'Pending':
@@ -146,9 +133,7 @@ def patron_login(request):
         if patron.account_status != 'Active':
             return render(request, 'patron/patronlogin.html', {'error': 'Your account is suspended or inactive'})
 
-        # Session fixation: the id the browser arrived holding must not be the
-        # one it leaves authenticated with. flush() rather than cycle_key() so
-        # nothing seeded into the pre-login session survives the sign-in either.
+        # Start a fresh session on sign-in.
         request.session.flush()
         request.session['patron_id'] = patron.patron_id
         request.session['patron_fullname'] = patron.fullname
@@ -168,8 +153,7 @@ def patron_logout(request):
 
 
 def patron_dashboard(request):
-    # Home is the borrowing summary, which a guest does not have. Search is
-    # what they came for, so that is where Home takes them.
+    # Home is the borrowing summary, which a guest does not have.
     if 'patron_id' not in request.session:
         return redirect('/patron/catalog/')
     patron_id = request.session.get('patron_id')
@@ -214,12 +198,7 @@ def patron_dashboard(request):
 
 
 def _name_from_post(request):
-    """Read first / middle / surname off a form, in that shape or the old one.
-
-    Older forms (and the odd script) still post a single `fullname`; it is
-    split rather than refused, so nothing that used to work stops working.
-    Returns (first, middle, last, error).
-    """
+    """Read first, middle and last name from a form. Returns (first, middle, last, error)."""
     first = ' '.join((request.POST.get('first_name') or '').split())
     middle = ' '.join((request.POST.get('middle_name') or '').split())
     last = ' '.join((request.POST.get('last_name') or '').split())
@@ -237,30 +216,18 @@ def _name_from_post(request):
 
 
 def _new_otp():
-    """6-digit numeric one-time password.
-
-    Drawn from `secrets`, not `random`: the latter is a Mersenne Twister whose
-    future output is derivable from enough observed values, and these codes
-    stand between an attacker and someone's account.
-    """
+    """6-digit numeric one-time password."""
     return f'{secrets.randbelow(1000000):06d}'
 
 
 def _otp_matches(supplied, stored):
-    """Constant-time comparison of a supplied code against the stored one.
-
-    Both sides are encoded to bytes first: compare_digest rejects non-ASCII
-    str outright, and a patron typing an accented character into the code box
-    should get "incorrect code", not a 500.
-    """
+    """Constant-time comparison of a supplied code against the stored one."""
     if not stored or not supplied:
         return False
     return secrets.compare_digest(supplied.encode('utf-8'), stored.encode('utf-8'))
 
 
-# How long to wait between sending one code and the next, for the same
-# account. Without it "send code" mails someone's inbox as fast as it can be
-# clicked -- by anyone who knows the address, on the flows that need no login.
+# How long to wait between sending one code and the next, for the same account.
 OTP_RESEND_COOLDOWN = timedelta(seconds=60)
 
 
@@ -280,17 +247,10 @@ def _reset_cooldown_left(account_type, email):
     return _otp_cooldown_left(last.created_at if last else None)
 
 
-# ─── Self-service account-action OTPs ─────────────────────────────────────
-# Deactivation, reactivation and password changes all confirm by emailed code.
-# They share Patron.otp_code, so every code carries the purpose it was issued
-# for and is checked against it -- see Patron.otp_purpose.
+# Account action codes (deactivate, reactivate, change password).
 
 def _issue_account_otp(patron, purpose, action_label):
-    """Mint a purpose-scoped code on the patron and email it. True if sent.
-
-    Callers are expected to have cleared _otp_cooldown_left() first; how a
-    refusal is worded differs by flow, so it is not decided here.
-    """
+    """Mint a purpose-scoped code on the patron and email it."""
     patron.otp_code = _new_otp()
     patron.otp_purpose = purpose
     patron.otp_expires_at = timezone.now() + timedelta(minutes=10)
@@ -303,12 +263,7 @@ def _issue_account_otp(patron, purpose, action_label):
 
 
 def _count_failed_otp(patron):
-    """Record one wrong guess and return the message to show for it.
-
-    The code is burnt once the ceiling is reached rather than merely refused,
-    so the limit actually costs the guesser their code instead of letting them
-    keep hammering the same one.
-    """
+    """Record one wrong guess and return the message to show for it."""
     patron.otp_attempts += 1
     remaining = Patron.MAX_OTP_ATTEMPTS - patron.otp_attempts
     if remaining <= 0:
@@ -322,15 +277,9 @@ def _count_failed_otp(patron):
 
 
 def _check_account_otp(patron, purpose, code):
-    """Return an error message for a bad code, or None if it is good.
-
-    A code issued without a purpose (registration's) has otp_purpose '', which
-    matches no caller here -- so those can never be spent on an account action.
-    """
+    """Return an error message for a bad code, or None if it is good."""
     if not patron.otp_code or not patron.otp_expires_at or timezone.now() > patron.otp_expires_at:
-        # Covers never-requested, already-spent and timed-out alike: from the
-        # patron's side the fix is the same, and saying which it was would tell
-        # anyone holding the session more than they need to know.
+        # Same message for a missing, used or expired code.
         return 'That code is no longer valid. Request a new one.'
     if patron.otp_purpose != purpose:
         return 'That code was issued for a different request. Request a new one.'
@@ -349,11 +298,7 @@ def _clear_account_otp(patron, extra_fields=()):
                                'otp_attempts', *extra_fields])
 
 
-# What each accepted format actually starts with. Checked because the
-# extension is chosen by whoever uploads the file and means nothing on its own:
-# naming something .png does not make it a PNG. Low risk while these files are
-# only ever served as a download, but the check costs three lines and stops the
-# store filling with things that are not what they claim.
+# What each accepted format actually starts with.
 _CREDENTIAL_MAGIC = {
     '.jpg': (b'\xff\xd8\xff',),
     '.jpeg': (b'\xff\xd8\xff',),
@@ -363,9 +308,7 @@ _CREDENTIAL_MAGIC = {
 
 
 def _save_credential_document(uploaded, patron_email):
-    """Store an uploaded ID / proof-of-residency file under media/credentials/.
-
-    Returns the media-relative path, or None when nothing was uploaded."""
+    """Store an uploaded ID / proof-of-residency file under media/credentials/."""
     if not uploaded:
         return None
     ext = os.path.splitext(uploaded.name)[1].lower()
@@ -389,17 +332,14 @@ def _save_credential_document(uploaded, patron_email):
 
 
 def patron_register(request):
-    """Online registration: form → email OTP → pending Administrator approval.
-
-    The account stays 'Pending' (no login possible) until an Administrator
-    approves it in Manage Patrons, at which point the identity QR is
-    generated and the patron is emailed."""
+    """Online registration: form → email OTP → pending Administrator approval."""
     if request.method != 'POST':
-        return render(request, 'patron/patronregister.html', {'stage': 'form'})
+        return render(request, 'patron/patronregister.html',
+                      {'stage': 'form', 'known_schools': known_schools()})
 
     action = request.POST.get('action', 'register')
 
-    # ── Step 2: OTP verification ─────────────────────────────
+    # Step 2: OTP verification
     if action == 'verify_otp':
         email = (request.POST.get('email') or '').strip()
         code = (request.POST.get('otp') or '').strip()
@@ -424,7 +364,7 @@ def patron_register(request):
         patron.save(update_fields=['otp_verified', 'otp_code', 'otp_expires_at', 'otp_attempts'])
         return render(request, 'patron/patronregister.html', {'stage': 'pending'})
 
-    # ── Resend OTP ───────────────────────────────────────────
+    # Resend OTP
     if action == 'resend_otp':
         email = (request.POST.get('email') or '').strip()
         patron = Patron.objects.filter(
@@ -433,8 +373,7 @@ def patron_register(request):
         if patron is None:
             return render(request, 'patron/patronregister.html',
                           {'stage': 'form', 'error': 'No pending registration found for that email. Please register again.'})
-        # This flow already tells the visitor whether a pending registration
-        # exists, so a real countdown reveals nothing further.
+        # Safe to show the cooldown here.
         wait = _otp_cooldown_left(patron.otp_last_sent_at)
         if wait:
             return render(request, 'patron/patronregister.html',
@@ -454,7 +393,7 @@ def patron_register(request):
                       {'stage': 'otp', 'otp_email': email,
                        'info': 'A new code has been sent to your email.'})
 
-    # ── Step 1: submit the registration form ────────────────
+    # Step 1: submit the registration form
     first_name, middle_name, last_name, name_error = _name_from_post(request)
     fullname = compose_name(first_name, middle_name, last_name)
     email = (request.POST.get('email') or '').strip()
@@ -463,16 +402,18 @@ def patron_register(request):
     patron_type = request.POST.get('patron_type')
     contact_number = (request.POST.get('contact_number') or '').strip()
     address = (request.POST.get('address') or '').strip()
+    # Optional, always.
+    school = (request.POST.get('school') or '').strip()
 
     def _form_error(msg):
-        return render(request, 'patron/patronregister.html', {'stage': 'form', 'error': msg})
+        return render(request, 'patron/patronregister.html',
+                      {'stage': 'form', 'error': msg, 'known_schools': known_schools()})
 
     if name_error:
         return _form_error(name_error)
     if not all([fullname, email, password, confirm_password, patron_type, contact_number, address]):
         return _form_error('All fields are required')
-    # Registration checked no length at all before this, so a one-character
-    # password was accepted at sign-up.
+    # Check the password rules at registration.
     length_error = password_length_error(password)
     if length_error:
         return _form_error(length_error)
@@ -487,9 +428,7 @@ def patron_register(request):
         else:
             return _form_error('Email already exists')
 
-    # Nobody sees an online applicant, so the uploaded ID is the whole identity
-    # check. The form marks the field required, but that is only a browser hint
-    # - a request that skips it must be refused here too.
+    # Nobody sees an online applicant, so the uploaded ID is the whole identity check.
     uploaded_id = request.FILES.get('credential_document')
     if uploaded_id is None:
         return _form_error('Please attach a photo or scan of your valid ID. '
@@ -507,6 +446,7 @@ def patron_register(request):
         email=email,
         password_hash=hash_password(password),
         patron_type=patron_type,
+        school=school or None,
         contact_number=contact_number,
         address=address,
         account_status='Pending',
@@ -518,8 +458,7 @@ def patron_register(request):
         otp_verified=False,
     )
     if not otp_email(patron.email, patron.fullname, patron.otp_code):
-        # The account exists but the code never left the building — say so
-        # instead of parking the applicant on a code screen forever.
+        # The code email failed to send.
         return render(request, 'patron/patronregister.html',
                       {'stage': 'otp', 'otp_email': patron.email,
                        'error': 'Your details were saved, but we could not email your '
@@ -529,34 +468,232 @@ def patron_register(request):
 
 
 
-# ─── Open to visitors who have not registered ─────────────────────────────
-# Looking a book up and being walked to its shelf is the library's public
-# service; an account is only needed to take a book home. That is already the
-# rule at the desk -- desk.py logs a walk-in as a Visitor and tells them to see
-# a librarian with an ID before borrowing -- so the online catalogue follows it
-# rather than inventing a stricter one. Nothing below reads the patron session.
+# Public pages (no account needed).
+CATALOGUE_HIDDEN_STATUSES = ('Lost', 'Donated')
+
+CATALOGUE_PAGE_SIZE = 20
+
+# (key, label, ordering).
+CATALOGUE_SORTS = [
+    ('title', 'Title A\u2013Z', ('title', 'author')),
+    ('title_desc', 'Title Z\u2013A', ('-title', 'author')),
+    ('author', 'Author A\u2013Z', ('author', 'title')),
+    ('newest', 'Newest first', (F('year').desc(nulls_last=True), 'title')),
+    ('oldest', 'Oldest first', (F('year').asc(nulls_last=True), 'title')),
+]
+
+CATALOGUE_AVAILABILITY = [
+    ('available', 'Available now'),
+    ('on_loan', 'All copies out'),
+]
+
+
+def _catalogue_query(params):
+    """The catalogue's filters, read once, for every screen that searches it."""
+    search_query = (params.get('search') or '').strip()
+    genre = (params.get('genre') or '').strip()
+    material = (params.get('material') or '').strip()
+    availability = (params.get('availability') or '').strip()
+    shelf = (params.get('shelf') or '').strip()
+    sort = (params.get('sort') or 'title').strip()
+
+    visible = Book.objects.exclude(status__in=CATALOGUE_HIDDEN_STATUSES)
+    copies = visible
+    if search_query:
+        copies = copies.filter(_book_search_q(search_query))
+    if genre:
+        copies = copies.filter(genre=genre)
+    if material in dict(Book.MATERIAL_TYPE_CHOICES):
+        copies = copies.filter(material_type=material)
+    else:
+        material = ''
+    # "Not yet shelved" is a place too.
+    if shelf == 'none':
+        copies = copies.filter(shelf_level__isnull=True)
+    elif shelf.isdigit():
+        copies = copies.filter(shelf_level__shelf_id=int(shelf))
+    else:
+        shelf = ''
+
+    titles = (copies.order_by().values('title', 'author').annotate(
+        copies=Count('book_id'),
+        available=Count('book_id', filter=Q(status='Available')),
+        year=Max('publication_year'),
+        genre_name=Max('genre'),
+        # Prefer an available, shelved copy.
+        shelved_available_id=Min('book_id', filter=Q(status='Available',
+                                                     shelf_level__isnull=False)),
+        shelved_id=Min('book_id', filter=Q(shelf_level__isnull=False)),
+        available_id=Min('book_id', filter=Q(status='Available')),
+        any_id=Min('book_id'),
+    ))
+    if availability == 'available':
+        titles = titles.filter(available__gt=0)
+    elif availability == 'on_loan':
+        titles = titles.filter(available=0)
+    else:
+        availability = ''
+
+    sorts = {key: ordering for key, _label, ordering in CATALOGUE_SORTS}
+    if sort not in sorts:
+        sort = 'title'
+    titles = titles.order_by(*sorts[sort])
+
+    filters = {'search': search_query, 'genre': genre, 'material': material,
+               'availability': availability, 'shelf': shelf,
+               'sort': sort if sort != 'title' else ''}
+    return {
+        'visible': visible,
+        'titles': titles,
+        'search_query': search_query, 'genre': genre, 'material': material,
+        'availability': availability, 'shelf': shelf, 'sort': sort,
+        'params': {k: v for k, v in filters.items() if v},
+    }
+
+
+def _catalogue_rows(rows):
+    """Attach to each title row the one copy it should open, with its shelf."""
+    pick = [r['shelved_available_id'] or r['available_id'] or r['shelved_id'] or r['any_id']
+            for r in rows]
+    by_id = {b.book_id: b for b in Book.objects.filter(book_id__in=pick)
+             .select_related('shelf_level', 'shelf_level__shelf')}
+    for row, book_id in zip(rows, pick):
+        row['book'] = by_id.get(book_id)
+    return rows
+
+
+def _catalogue_options(visible):
+    """Only the choices that would find something."""
+    genres = list(visible.exclude(genre__isnull=True).exclude(genre='')
+                  .order_by('genre').values_list('genre', flat=True).distinct())
+    materials_in_use = set(visible.values_list('material_type', flat=True).distinct())
+    materials = [(k, v) for k, v in Book.MATERIAL_TYPE_CHOICES if k in materials_in_use]
+    shelves = list(Shelf.objects.filter(is_active=True,
+                                        shelflevel__book__status__isnull=False)
+                   .exclude(shelflevel__book__status__in=CATALOGUE_HIDDEN_STATUSES)
+                   .distinct().order_by('name').values_list('shelf_id', 'name'))
+    return {
+        'genres': genres,
+        # A material select with one option in it is a label, not a filter.
+        'materials': materials if len(materials) > 1 else [],
+        'shelves': shelves,
+        'has_unshelved': visible.filter(shelf_level__isnull=True).exists(),
+    }
+
+
 def patron_catalog(request):
-    search_query = request.GET.get('search', '').strip()
+    """The book catalogue a patron browses."""
+    from urllib.parse import urlencode
 
-    books = Book.objects.filter(status='Available').select_related(
-        'shelf_level', 'shelf_level__shelf'
-    ).order_by('title')
+    query = _catalogue_query(request.GET)
+    paginator = Paginator(query['titles'], CATALOGUE_PAGE_SIZE)
+    page = paginator.get_page(request.GET.get('page'))
+    page.object_list = _catalogue_rows(list(page.object_list))
 
-    if search_query:
-        books = books.filter(_book_search_q(search_query))
-
-    if search_query:
-        # Only real searches, never plain browsing -- a log entry per page view
-        # would bury everything else and answer no question worth asking.
+    if query['search_query']:
+        # Only log actual searches.
         log_patron_action(request, 'Search', 'Book', None,
-                          f'Searched the catalogue for "{search_query[:80]}" '
-                          f'({books.count()} result(s))')
+                          f'Searched the catalogue for "{query["search_query"][:80]}" '
+                          f'({paginator.count} title(s))')
+
+    params = query['params']
+    # Build a removable chip for each active filter.
+    shelf_names = dict(Shelf.objects.filter(is_active=True).values_list('shelf_id', 'name'))
+    labels = {
+        'search': lambda v: '\u201c%s\u201d' % v,
+        'genre': lambda v: v,
+        'material': lambda v: dict(Book.MATERIAL_TYPE_CHOICES).get(v, v),
+        'availability': lambda v: dict(CATALOGUE_AVAILABILITY).get(v, v),
+        'shelf': lambda v: 'Not yet shelved' if v == 'none' else shelf_names.get(int(v), 'Shelf'),
+    }
+    active_filters = [
+        {'label': labels[key](value),
+         'remove': '?' + urlencode({k: v for k, v in params.items() if k != key})}
+        for key, value in params.items() if key in labels
+    ]
 
     context = {
-        'books': books,
-        'search_query': search_query,
+        'page': page,
+        'paginator': paginator,
+        'search_query': query['search_query'],
+        'genre': query['genre'],
+        'material': query['material'],
+        'availability': query['availability'],
+        'shelf': query['shelf'],
+        'sort': query['sort'],
+        'availability_choices': CATALOGUE_AVAILABILITY,
+        'sort_choices': [(key, label) for key, label, _o in CATALOGUE_SORTS],
+        'active_filters': active_filters,
+        'querystring': urlencode(params),
+        'filter_count': len(active_filters),
     }
+    context.update(_catalogue_options(query['visible']))
     return render(request, 'patron/patroncatalog.html', context)
+
+
+# Fewer results per page for the map search.
+MAP_SEARCH_PAGE_SIZE = 12
+
+
+def patron_catalog_search(request):
+    """The catalogue search, answered as JSON for the map's Find a book sheet."""
+    query = _catalogue_query(request.GET)
+    paginator = Paginator(query['titles'], MAP_SEARCH_PAGE_SIZE)
+    page = paginator.get_page(request.GET.get('page'))
+
+    results = []
+    for row in _catalogue_rows(list(page.object_list)):
+        book = row.get('book')
+        if book is None:
+            continue
+        level = book.shelf_level
+        shelf = level.shelf if level else None
+        placed = bool(shelf and shelf.map_x is not None and shelf.map_y is not None)
+        results.append({
+            'book_id': book.book_id,
+            'title': row['title'],
+            'author': row['author'] or '',
+            'year': row['year'],
+            'genre': row['genre_name'] or '',
+            'copies': row['copies'],
+            'available': row['available'],
+            'status': book.get_status_display(),
+            'shelved': shelf is not None,
+            # Used by the staff and admin maps.
+            'shelf_id': shelf.shelf_id if shelf else None,
+            'location': (shelf.name + ' \u00b7 ' + level.label) if shelf else '',
+            'navigable': placed,
+        })
+
+    payload = {
+        'success': True,
+        'results': results,
+        'count': paginator.count,
+        'page': page.number,
+        'has_next': page.has_next(),
+    }
+    # Send the filter options only on the first request.
+    if request.GET.get('options'):
+        options = _catalogue_options(query['visible'])
+        payload['options'] = {
+            'genres': options['genres'],
+            'shelves': [{'id': sid, 'name': name} for sid, name in options['shelves']],
+            'has_unshelved': options['has_unshelved'],
+            'availability': [{'value': v, 'label': l} for v, l in CATALOGUE_AVAILABILITY],
+        }
+    return JsonResponse(payload)
+
+
+# Where Chrome keeps the switch that turns Bluetooth scanning on.
+CHROME_BLE_FLAG = 'chrome://flags/#enable-experimental-web-platform-features'
+
+
+def live_position_guide(request):
+    """How to switch on live positioning in Chrome, with a check that it worked."""
+    return render(request, 'patron/livepositionguide.html', {
+        'flag_url': CHROME_BLE_FLAG,
+        'back_url': request.GET.get('next') or '',
+    })
 
 
 def patron_book_details(request, book_id):
@@ -599,10 +736,7 @@ def patron_map(request):
             if shelf:
                 target['shelf_id'] = shelf.shelf_id
                 target['shelf_name'] = shelf.name
-                # Which board, and how far along it. Sent as words rather than
-                # as a second set of coordinates: a floor plan is flat, so the
-                # level is height and can only ever be described, while the
-                # slot and column are a real place along the shelf's face.
+                # Which board, and how far along it.
                 target['level_label'] = level.label
                 target['level_number'] = level.level_number
                 target['column_number'] = level.column_number
@@ -610,9 +744,7 @@ def patron_map(request):
                 target['is_under'] = level.is_under
                 target['shelf_slot'] = book.shelf_slot
                 target['location'] = book_location_words(book)
-                # Everything positional is computed from the copies actually on
-                # the shelf, so a book borrowed an hour ago does not still push
-                # the count -- and the marker -- one space to the right.
+                # Position is based on the copies currently on the shelf.
                 layout = level_layout(level, book) or {}
                 focus = layout.get('focus') or {}
                 target['position'] = focus.get('position')
@@ -622,10 +754,7 @@ def patron_map(request):
                 target['before'] = focus.get('before', '')
                 target['after'] = focus.get('after', '')
                 target['layout'] = layout.get('rows', [])
-            # The navigation route is recomputed roughly once a second while the
-            # map is open, so logging that would produce thousands of rows saying
-            # the same thing. This records the patron asking to be taken to a
-            # book, which is the event with any meaning in it.
+            # Log when a patron opens the map to a book.
             log_patron_action(request, 'Navigate', 'Book', book.book_id,
                               f'Opened the map to "{book.title[:60]}"'
                               + (f' at {target["shelf_name"]}' if target.get('shelf_name')
@@ -645,18 +774,7 @@ def patron_announcements(request):
 
 
 def _patron_search_q(term):
-    """One definition of "search for a patron", used by every patron search box.
-
-    Four boxes had grown their own version and all four looked for the name and
-    the email only -- while the Manage Patrons box promised "name, student ID,
-    email" in its own placeholder. Most patrons have neither an email nor a
-    contact number recorded, so in practice only the name worked and searching
-    by the ID printed on a library card silently found nothing.
-
-    The ID is matched exactly rather than as a substring: typing 18 should not
-    return patrons 18, 180 and 1802 when the librarian is reading one number off
-    a card.
-    """
+    """One definition of "search for a patron", used by every patron search box."""
     term = (term or '').strip()
     if not term:
         return Q()
@@ -665,17 +783,16 @@ def _patron_search_q(term):
          | Q(contact_number__icontains=term))
     if term.isdigit():
         q |= Q(patron_id=int(term))
+    # The number printed on the card, which is what a librarian is holding when they search.
+    from .cardnumbers import normalise
+    digits = normalise(term)
+    if len(digits) == 7:
+        q |= Q(card_number=digits)
     return q
 
 
 def _book_search_q(term):
-    """One definition of "search for a book", used by every book search box.
-
-    ISBNs are read off a back cover, where they are printed with hyphens, and
-    stored here without them. Matching only the raw string means a correctly
-    typed ISBN finds nothing, so the punctuation is stripped from the query and
-    both forms are tried.
-    """
+    """One definition of "search for a book", used by every book search box."""
     term = (term or '').strip()
     if not term:
         return Q()
@@ -690,14 +807,7 @@ def _book_search_q(term):
 
 
 def _floor_for_request(request, target_shelf=None):
-    """Which floor's map to draw.
-
-    Three questions in priority order, because they answer each other's gaps:
-    an explicit ?floor= wins (the patron used the switcher); otherwise the
-    floor the target book sits on (they asked to be taken to a book, so show
-    the floor it is on); otherwise the lowest floor in service, which is where
-    someone walking in from the street starts.
-    """
+    """Which floor's map to draw."""
     live = FloorPlan.objects.filter(is_active=True).order_by('floor_number', 'floor_plan_id')
 
     raw = (request.GET.get('floor') or '').strip()
@@ -757,8 +867,7 @@ def patron_account(request):
     ))
     history = transactions.filter(return_date__isnull=False)
 
-    # A loan can have at most one open request at a time (enforced in
-    # patron_request_extension), so this is a lookup, not a list.
+    # A loan has at most one open request.
     pending_by_tx = {
         e.transaction_id: e
         for e in DueDateExtension.objects.filter(
@@ -799,10 +908,7 @@ def patron_request_extension(request):
     reason = (request.POST.get('reason') or '').strip()[:255]
     rule = BorrowingRule.current()
     today = timezone.localdate()
-    # A fresh full loan period from today, not from the old due date: an
-    # overdue book extended from its own (past) due date could still land in
-    # the past or barely in the future, which answers "extended" with a date
-    # that does not actually buy the patron more time.
+    # Extend from today, not from the old due date.
     requested_due = today + timedelta(days=rule.loan_period_days)
 
     extension = DueDateExtension.objects.create(
@@ -854,12 +960,7 @@ def patron_update_profile(request):
 
 @patron_login_required
 def patron_change_password(request):
-    """Change the login password: current password, then an emailed OTP.
-
-    Both passwords are revalidated at the verify step rather than trusted from
-    the request that sent the code, so the change that lands is checked against
-    the account as it stands when it is actually applied.
-    """
+    """Change the login password: current password, then an emailed OTP."""
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
     patron = get_object_or_404(Patron, patron_id=request.session.get('patron_id'))
@@ -869,8 +970,7 @@ def patron_change_password(request):
     new = request.POST.get('new_password') or ''
     if not check_password(current, patron.password_hash):
         return JsonResponse({'success': False, 'error': 'Current password is incorrect.'})
-    # Checked after the current password, so a stranger poking at this endpoint
-    # never learns anything about the password already set.
+    # Checked after the current password.
     policy_error = password_length_error(new, current_hash=patron.password_hash)
     if policy_error:
         return JsonResponse({'success': False, 'error': policy_error})
@@ -902,12 +1002,7 @@ def patron_change_password(request):
 
 @patron_login_required
 def patron_deactivate_account(request):
-    """Self-service account deactivation (Figure 20): OTP-verified, immediate.
-
-    A patron with any unreturned book is refused -- the library's own
-    definition of the diagram's "account status check... not ready for
-    deactivation" step.
-    """
+    """Self-service account deactivation (Figure 20): OTP-verified, immediate."""
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
     patron = get_object_or_404(Patron, patron_id=request.session.get('patron_id'))
@@ -924,8 +1019,7 @@ def patron_deactivate_account(request):
         })
 
     if action in ('request', 'resend'):
-        # Signed in, so the account plainly exists -- a real countdown here
-        # gives nothing away and beats a silent no-op.
+        # Show the cooldown for signed-in users.
         wait = _otp_cooldown_left(patron.otp_last_sent_at)
         if wait:
             return JsonResponse({'success': False,
@@ -951,26 +1045,7 @@ def patron_deactivate_account(request):
 
 # Admin views
 def _portal_login(request, template, scope, expected_role, home, wrong_portal_text):
-    """One sign-in implementation for the Administrator and Library Staff doors.
-
-    Three things it does that the two hand-written copies did not.
-
-    Throttling: the run of failures is counted per email address, and five
-    misses inside half an hour close the door for fifteen minutes. A miss
-    against an address with no account is counted too -- if those were free, the
-    throttle would answer "does this address exist?" all by itself.
-
-    Session rotation: cycle_key() before anything is written into the session.
-    Without it the ID the browser arrived with is the ID it keeps, so anyone able
-    to plant a cookie on a shared desk machine -- and desk mode means these
-    machines are shared by design -- holds a valid staff session the moment a
-    librarian signs in on it.
-
-    One error message: the old code answered "suspended or inactive" for a real
-    account and "invalid email or password" for an unknown one, and it checked
-    status *before* the password. Any address could therefore be tested for
-    existence without knowing its password at all.
-    """
+    """One sign-in implementation for the Administrator and Library Staff doors."""
     if request.method != 'POST':
         return render(request, template)
 
@@ -983,9 +1058,7 @@ def _portal_login(request, template, scope, expected_role, home, wrong_portal_te
 
     user = User.objects.filter(email__iexact=email).first()
 
-    # The password is verified before anything else is looked at, and a missing
-    # account still pays for a hash, so the two cases cost the same and look the
-    # same from outside.
+    # Check the password before anything else.
     if user is None:
         waste_password_time()
         password_ok = False
@@ -995,19 +1068,14 @@ def _portal_login(request, template, scope, expected_role, home, wrong_portal_te
     if user is None or not password_ok or user.account_status != 'Active' or user.role != expected_role:
         remaining = record_login_failure(scope, email)
 
-        # Failed staff and Administrator sign-ins were not recorded anywhere,
-        # while patron ones were -- so the accounts worth attacking had the
-        # weaker trail. They are recorded now, without the password and without
-        # saying which part was wrong.
+        # Record failed staff and admin sign-ins.
         log_system_action(
             'Login failed', 'Auth',
             getattr(user, 'admin_id', None),
             f'Failed {scope} sign-in for "{email[:120]}"',
         )
 
-        # A wrong portal is worth naming: it is only reachable with a correct
-        # password, so it discloses nothing an attacker does not already hold,
-        # and staff do land on the wrong page.
+        # Tell the user if they used the wrong portal.
         if user is not None and password_ok and user.account_status == 'Active' and user.role != expected_role:
             return render(request, template, {'error': wrong_portal_text})
 
@@ -1017,10 +1085,7 @@ def _portal_login(request, template, scope, expected_role, home, wrong_portal_te
         return render(request, template, {'error': error})
 
     clear_login_failures(scope, email)
-    # flush(), not cycle_key(). Both give the browser a new session id, which is
-    # what defeats fixation -- but cycle_key keeps the *data* that was in the old
-    # session, so anything an attacker managed to seed there (a desk-mode flag, a
-    # stale patron_id) would ride across the login. flush() starts empty.
+    # flush(), not cycle_key().
     request.session.flush()
     request.session['admin_id'] = user.admin_id
     request.session['admin_fullname'] = user.fullname
@@ -1055,10 +1120,7 @@ def staff_logout(request):
     return redirect('/library-staff/login/')
 
 
-# ─── FORGOT PASSWORD (OTP) — all three portals ────────────────────────────
-# One implementation, three thin entry points. The portal decides which table
-# and which role the email is resolved against, so a code issued at the staff
-# login cannot be spent at the admin login or vice versa.
+# Forgot password (OTP) for all portals.
 
 PASSWORD_RESET_PORTALS = {
     'patron': {
@@ -1084,8 +1146,7 @@ PASSWORD_RESET_PORTALS = {
     },
 }
 
-# Deliberately identical whether or not the email matched an account, so the
-# form cannot be used to discover which addresses are registered.
+# Same response whether or not the email exists.
 _RESET_SENT_NOTE = ('If an account exists for that email, a 6-digit code is on its way. '
                     'The code expires in 10 minutes.')
 
@@ -1115,16 +1176,7 @@ def _issue_reset_code(account_type, email, fullname, role_label):
 
 
 def _redeem_reset_code(account_type, email, code):
-    """Check a reset code, counting the attempt against its limit.
-
-    Returns (reset, error, exhausted). `reset` is the row to mark used once the
-    caller has actually applied the change; `exhausted` says the code is burnt
-    and the patron/staff has to request a new one rather than retype this one.
-
-    Shared by the forgot-password flow and the signed-in change-password flow,
-    so both get the same expiry and the same MAX_ATTEMPTS ceiling instead of one
-    of them quietly allowing unlimited guesses.
-    """
+    """Check a reset code, counting the attempt against its limit."""
     reset = (PasswordResetOTP.objects
              .filter(account_type=account_type, email__iexact=email, used_at__isnull=True)
              .order_by('-created_at').first())
@@ -1159,15 +1211,13 @@ def _password_reset_view(request, portal):
     action = (request.POST.get('action') or '').strip()
     email = (request.POST.get('email') or '').strip()
 
-    # ── Ask for a code ───────────────────────────────────────
+    # Ask for a code
     if action in ('request', 'resend'):
         if not email:
             return _render('request', error='Enter the email address on your account.')
 
         account = _find_reset_account(account_type, email)
-        # Applied silently, like the account lookup itself: a visible "wait 40
-        # seconds" would fire only for addresses that exist, which is exactly
-        # what answering every address identically is meant to hide.
+        # Apply the cooldown without telling the user.
         cooling = _reset_cooldown_left(account_type, email)
         if account is not None and not cooling:
             fullname = getattr(account, 'fullname', '') or 'there'
@@ -1183,7 +1233,7 @@ def _password_reset_view(request, portal):
                  f'{int(OTP_RESEND_COOLDOWN.total_seconds())} seconds.')
         return _render('otp', email=email, info=note)
 
-    # ── Submit the code and the new password ─────────────────
+    # Submit the code and the new password
     if action == 'reset':
         code = (request.POST.get('code') or '').strip()
         new_password = request.POST.get('new_password') or ''
@@ -1193,11 +1243,7 @@ def _password_reset_view(request, portal):
             return _render('otp', email=email, error='Enter the 6-digit code from your email.')
         if new_password != confirm_password:
             return _render('otp', email=email, error='The two passwords do not match.')
-        # The full policy, not just the length. This path had drifted back to a
-        # bare length check, which meant the one flow an attacker reaches after
-        # compromising an inbox was also the flow with the weakest rules --
-        # "password" and "aaaaaaaa" both passed here while being refused
-        # everywhere else.
+        # The full policy, not just the length.
         policy_error = password_length_error(new_password)
         if policy_error:
             return _render('otp', email=email, error=policy_error)
@@ -1218,10 +1264,7 @@ def _password_reset_view(request, portal):
         reset.used_at = timezone.now()
         reset.save(update_fields=['used_at'])
 
-        # A password reset happens with nobody signed in, so there is no session
-        # to name the actor. Attributing it to the account being reset is the
-        # only truthful option -- and the account is exactly what an auditor
-        # would search for.
+        # A password reset happens with nobody signed in, so there is no session to name the actor.
         if account_type == 'Patron':
             log_patron_action(request, 'Password reset', 'Patron', account.patron_id,
                               f'Reset their password by emailed code ({account.email})',
@@ -1241,22 +1284,13 @@ def patron_forgot_password(request):
 
 
 def patron_reactivate_request(request):
-    """Self-service reactivation (Figure 19): OTP, then forwarded to an Admin.
-
-    Unlike deactivation, a verified OTP here does not reactivate the account
-    by itself -- it only creates a Pending ReactivationRequest for an Admin
-    to approve or reject, matching the diagram's admin-review step. An
-    Inactive patron cannot log in, so this view is reached from the login
-    page rather than the (authenticated) Account page.
-    """
+    """Self-service reactivation (Figure 19): OTP, then forwarded to an Admin."""
     def _render(stage, **extra):
         context = {'stage': stage}
         context.update(extra)
         return render(request, 'patron/patronreactivate.html', context)
 
-    # Deliberately identical whether or not the email matches an eligible
-    # account, so the form cannot be used to discover account status --
-    # mirrors the same rule in _password_reset_view above.
+    # Same response whether or not the account is eligible.
     note = 'If that account is eligible for reactivation, a verification code has been sent.'
 
     if request.method != 'POST':
@@ -1268,12 +1302,9 @@ def patron_reactivate_request(request):
     if action in ('request', 'resend'):
         if not email:
             return _render('request', error='Enter the email address on your account.')
-        # Only Inactive accounts are eligible -- Suspended is a separate,
-        # Admin-only status this self-service flow does not touch.
+        # Only inactive accounts can be reactivated here.
         patron = Patron.objects.filter(email__iexact=email, account_status='Inactive').first()
-        # The cooldown is applied silently: surfacing "wait 40 seconds" only
-        # for real accounts would undo the whole point of answering every
-        # address identically. The reply below is the same either way.
+        # Apply the cooldown without telling the user.
         if patron is not None and not _otp_cooldown_left(patron.otp_last_sent_at):
             _issue_account_otp(patron, 'reactivate', 'reactivate')
         return _render('otp', email=email, info=note)
@@ -1306,17 +1337,7 @@ def admin_forgot_password(request):
 
 @admin_login_required
 def portal_change_password(request):
-    """Signed-in Library Staff / Administrator changes their own password.
-
-    Confirmed by an emailed code, the same as the patron flow. The code rides
-    on PasswordResetOTP rather than new columns on User: that model already
-    scopes codes by account_type, expires them, and caps guesses at
-    MAX_ATTEMPTS, all of which this needs. A code minted here and one minted by
-    "forgot password" grant the same thing -- set a new password on this
-    account, having proved control of its inbox -- so there is nothing to
-    separate them for, and this path additionally demands the session and the
-    current password on top.
-    """
+    """Signed-in Library Staff / Administrator changes their own password."""
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
     user = get_object_or_404(User, admin_id=request.session.get('admin_id'))
@@ -1326,8 +1347,7 @@ def portal_change_password(request):
     new = request.POST.get('new_password') or ''
     if not check_password(current, user.password_hash):
         return JsonResponse({'success': False, 'error': 'Current password is incorrect.'})
-    # Checked after the current password, so a stranger poking at this endpoint
-    # never learns anything about the password already set.
+    # Checked after the current password.
     policy_error = password_length_error(new, current_hash=user.password_hash)
     if policy_error:
         return JsonResponse({'success': False, 'error': policy_error})
@@ -1444,8 +1464,7 @@ def admin_signin(request):
     return render(request, 'admin/signin.html')
 
 
-# What the Copies dropdown offers. '+' means "or more"; parse_copies_filter
-# reads both forms, so a hand-typed ?copies=7 works as well.
+# What the Copies dropdown offers.
 COPIES_FILTER_CHOICES = [
     ('1', 'Single copy only'),
     ('2', 'Exactly 2'),
@@ -1456,15 +1475,35 @@ COPIES_FILTER_CHOICES = [
 ]
 
 
-def _copies_annotation():
-    """How many copies of this book the library holds, per row.
+def _shelf_filter_choices():
+    """Every shelf with its boards, for the two location selects."""
+    boards = {}
+    for level in (ShelfLevel.objects
+                  .select_related('shelf')
+                  .annotate(books=Count('book'))
+                  .order_by('shelf__name', 'level_number', 'column_number')):
+        if level.shelf_id is None:
+            continue
+        boards.setdefault(level.shelf_id, []).append({
+            'id': level.shelf_level_id,
+            'label': level.label,
+            'books': level.books,
+        })
 
-    A copy is its own Book row -- each has its own QR code and its own loan
-    history -- so 'copies' is the number of rows sharing a title and author.
-    The same definition as the book detail panel, deliberately: two places
-    answering 'how many do we have' with different numbers is worse than
-    either answer being arguable.
-    """
+    out = []
+    for shelf in (Shelf.objects.annotate(books=Count('shelflevel__book'))
+                  .order_by('name')):
+        out.append({
+            'id': shelf.shelf_id,
+            'name': shelf.name,
+            'books': shelf.books,
+            'levels': boards.get(shelf.shelf_id, []),
+        })
+    return out
+
+
+def _copies_annotation():
+    """How many copies of this book the library holds, per row."""
     same_book = (
         Book.objects
         .filter(title=OuterRef('title'), author=OuterRef('author'))
@@ -1494,6 +1533,9 @@ def _books_page(request, template):
     genre = (request.GET.get('genre') or '').strip()
     material = (request.GET.get('material') or '').strip()
     copies = (request.GET.get('copies') or '').strip()
+    # Where the book is.
+    shelf = (request.GET.get('shelf') or '').strip()
+    level = (request.GET.get('level') or '').strip()
 
     books_queryset = (
         Book.objects.select_related('shelf_level', 'shelf_level__shelf')
@@ -1506,14 +1548,22 @@ def _books_page(request, template):
         books_queryset = books_queryset.filter(status=status)
     if genre:
         books_queryset = books_queryset.filter(genre=genre)
-    # What kind of material it is, as opposed to what it is about -- a separate
-    # question from genre, and the one a librarian filters on to find the
-    # magazines or the bound journals.
+    # Filter by material type.
     valid_material = [choice[0] for choice in Book.MATERIAL_TYPE_CHOICES]
     if material in valid_material:
         books_queryset = books_queryset.filter(material_type=material)
-    # 'Which titles do we hold four of' is a stock-taking question, and until
-    # now the only way to answer it was to scroll.
+    # Filter by number of copies, shelf and level.
+    if level.isdigit():
+        books_queryset = books_queryset.filter(shelf_level_id=int(level))
+    elif shelf == 'none':
+        books_queryset = books_queryset.filter(shelf_level__isnull=True)
+    elif shelf.isdigit():
+        books_queryset = books_queryset.filter(shelf_level__shelf_id=int(shelf))
+    else:
+        shelf = ''
+    if not level.isdigit():
+        level = ''
+
     copies_filter = parse_copies_filter(copies)
     if copies_filter:
         books_queryset = books_queryset.filter(**copies_filter)
@@ -1523,9 +1573,7 @@ def _books_page(request, template):
 
     # Global stats (independent of the filters above).
     total_copies = Book.objects.count()
-    # The card above this one is headed "Unique books", so it has to count
-    # books rather than rows: seven copies of one encyclopaedia are seven
-    # copies, and saying otherwise contradicts the Copies column beneath it.
+    # Count unique titles, not copies.
     total_books = (Book.objects.order_by()
                    .values('title', 'author').distinct().count())
     available_count = Book.objects.filter(status='Available').count()
@@ -1542,7 +1590,8 @@ def _books_page(request, template):
 
     params = {}
     for key, value in (('q', q), ('status', status), ('genre', genre),
-                       ('material', material), ('copies', copies)):
+                       ('material', material), ('copies', copies),
+                       ('shelf', shelf), ('level', level)):
         if value:
             params[key] = value
 
@@ -1562,6 +1611,10 @@ def _books_page(request, template):
         'genre': genre,
         'copies': copies,
         'copies_choices': COPIES_FILTER_CHOICES,
+        'shelf': shelf,
+        'level': level,
+        'shelf_choices': _shelf_filter_choices(),
+        'unshelved_count': Book.objects.filter(shelf_level__isnull=True).count(),
         'querystring': urlencode(params),
         'paginator': paginator,
     }
@@ -1587,9 +1640,7 @@ def admin_add_book(request):
         author = request.POST.get('author', '').strip()
         isbn = request.POST.get('ISBN', '').strip()
         genre = request.POST.get('genre', '').strip()
-        # Unknown or missing falls back to Book rather than being rejected: the
-        # type is a convenience for filtering, not something worth blocking a
-        # catalogue entry over.
+        # Default to Book if the material type is missing.
         material_type = request.POST.get('material_type', 'Book').strip()
         if material_type not in {c[0] for c in Book.MATERIAL_TYPE_CHOICES}:
             material_type = 'Book'
@@ -1683,11 +1734,10 @@ def admin_add_patron(request):
         email = request.POST.get('email', '').strip()
         contact_number = request.POST.get('contact_number', '').strip()
         address = request.POST.get('address', '').strip()
+        school = (request.POST.get('school') or '').strip()
         password = request.POST.get('password', '').strip()
         account_status = request.POST.get('account_status', 'Active').strip()
-        # On-site identity validation (Ch.1 ¶242, Fig. 5). The patron presents
-        # a physical ID across the desk; nothing about the document is stored,
-        # only the fact that a named staff member checked it at a given time.
+        # Staff check the physical ID on the spot.
         id_confirmed = request.POST.get('id_confirmed', '').strip() in ('1', 'true', 'on', 'yes')
 
         initial = {
@@ -1696,6 +1746,7 @@ def admin_add_patron(request):
             'middle_name': middle_name,
             'last_name': last_name,
             'patron_type': patron_type,
+            'school': school,
             'email': email,
             'contact_number': contact_number,
             'address': address,
@@ -1722,6 +1773,7 @@ def admin_add_patron(request):
                 email=email,
                 password_hash=hashed_password,
                 patron_type=patron_type,
+                school=school or None,
                 contact_number=contact_number,
                 address=address,
                 account_status=account_status or 'Active',
@@ -1772,16 +1824,7 @@ def admin_add_patron(request):
 
 @admin_or_module_required('patrons')
 def approve_patron(request, patron_id):
-    """Approve a pending registration once its uploaded ID has been reviewed.
-
-    An online applicant is never seen in person, so the ID they uploaded is the
-    only identity evidence the library has: approval requires both that a
-    document is on file and that the reviewer confirms having opened it.
-
-    Someone handed over by the desk screen is standing right there instead, so
-    there is no upload to open and the reviewer checks the physical ID the same
-    way they would for any walk-in. Either way the account is only activated by
-    a person who has looked at an ID and said so."""
+    """Approve a pending registration once its uploaded ID has been reviewed."""
     if request.method != 'POST':
         return _patron_page_redirect(request)
     patron = Patron.objects.filter(patron_id=patron_id, account_status='Pending').first()
@@ -1818,13 +1861,7 @@ def approve_patron(request, patron_id):
 
 @admin_or_module_required('patrons')
 def promote_visitor(request, patron_id):
-    """Turn a visitor into a membership application.
-
-    The same row is reused rather than a fresh one created, so every visit they
-    already made stays attached to them. It becomes a pending on-site
-    registration, which puts it through exactly the same ID check as any other
-    walk-in instead of quietly granting borrowing rights.
-    """
+    """Turn a visitor into a membership application."""
     if request.method != 'POST':
         return _patron_page_redirect(request)
     visitor = Patron.objects.filter(patron_id=patron_id, account_status='Visitor').first()
@@ -1870,20 +1907,13 @@ def reject_patron(request, patron_id):
 
 @admin_or_module_required('patrons')
 def respond_to_reactivation(request, request_id):
-    """Admin approves or rejects a patron's OTP-verified reactivation request.
-
-    The approval step Figure 19 puts between OTP verification and the
-    account actually going live again.
-    """
+    """Admin approves or rejects a patron's OTP-verified reactivation request."""
     if request.method != 'POST':
         return _patron_page_redirect(request)
     action = request.POST.get('action')
     admin = User.objects.filter(admin_id=request.session.get('admin_id')).first()
 
-    # Locked for the whole decision, like the extension queue: two
-    # administrators resolving the same request both used to pass the Pending
-    # check, and the patron got two emails about one decision. Emails are sent
-    # after the block so nothing is announced that a rollback would undo.
+    # Lock the request while deciding, and email after saving.
     notify = None
     try:
         with transaction.atomic():
@@ -1935,14 +1965,7 @@ def respond_to_reactivation(request, request_id):
 
 
 @admin_login_required
-# Deliberately admin_login_required rather than the 'patrons' module, for the
-# same reason get_books_for_placement is: the Transactions page has to look a
-# patron up to process a loan, and an account can hold 'transactions' without
-# holding 'patrons'. Gated the other way, the search box received a login
-# redirect where it expected JSON, so results silently never appeared -- which
-# reads as a broken search rather than a permission being missing. It discloses
-# only the name and email of active patrons, which whoever is standing at the
-# desk processing their loan is already looking at.
+# Any signed-in portal user can search patrons for a transaction.
 def patron_search_json(request):
     """Name/email lookup for the Transactions page's patron picker."""
     q = (request.GET.get('search') or '').strip()
@@ -1962,6 +1985,25 @@ def patron_search_json(request):
     ]})
 
 
+def known_schools():
+    """Every school already recorded, on a patron or on a visit, deduplicated."""
+    from collections import Counter
+    seen = Counter()
+    for value in Patron.objects.exclude(school__isnull=True).exclude(
+            school='').values_list('school', flat=True):
+        seen[value.strip()] += 1
+    for value in PatronLog.objects.exclude(school__isnull=True).exclude(
+            school='').values_list('school', flat=True):
+        seen[value.strip()] += 1
+
+    best = {}
+    for name, count in seen.most_common():
+        key = name.casefold()
+        if key not in best:
+            best[key] = name
+    return sorted(best.values(), key=lambda n: n.casefold())
+
+
 @admin_module_required('patrons')
 def admin_manage_patron(request):
     return _patrons_page(request, 'admin/managepatron.html')
@@ -1969,18 +2011,12 @@ def admin_manage_patron(request):
 
 @module_required('patrons')
 def staff_manage_patron(request):
-    """The Library Staff patron desk.
-
-    Deliberately not the full module: the same list and the same review of
-    pending sign-ups, but editing, deleting and bulk import stay with the
-    Administrator, who owns the record itself.
-    """
+    """The Library Staff patron desk."""
     return _patrons_page(request, 'library_staff/managepatron.html')
 
 
 def _patrons_page(request, template):
-    # Visits left open on earlier days are closed before any count is shown,
-    # so "currently inside" never accumulates people who simply went home.
+    # Close visits left open from earlier days first.
     close_stale_visits()
     search_query = request.GET.get('search', '').strip()
     
@@ -2001,9 +2037,7 @@ def _patrons_page(request, template):
         
         return JsonResponse({'patrons': patron_list})
     
-    # Regular page load. Visitors used the library without joining it, so they
-    # are kept out of the member directory and counted on their own tab —
-    # mixing the two would make every membership figure wrong.
+    # Regular page load.
     show_visitors = request.GET.get('view') == 'visitors'
     base_patrons = (Patron.objects.filter(account_status='Visitor') if show_visitors
                     else Patron.objects.exclude(account_status='Visitor'))
@@ -2029,7 +2063,7 @@ def _patrons_page(request, template):
     patrons_overdue = patrons_queryset.filter(overdue_count__gt=0).count()
     visitor_count = Patron.objects.filter(account_status='Visitor').count()
 
-    # Registrations awaiting review — online sign-ups and desk hand-offs alike.
+    # Registrations awaiting review, online and from the desk.
     pending_patrons = Patron.objects.filter(account_status='Pending').order_by('-registration_date')
 
     # Self-service reactivation requests awaiting Admin approval (Figure 19).
@@ -2055,6 +2089,8 @@ def _patrons_page(request, template):
         'pending_patrons': pending_patrons,
         'pending_reactivations': pending_reactivations,
         'visitor_count': visitor_count,
+        # Schools already on file, offered as a picker beside the free-text box.
+        'known_schools': known_schools(),
         'show_visitors': show_visitors,
         'paginator': paginator,
         'search_query': search_query,
@@ -2090,6 +2126,7 @@ def admin_edit_patron(request, patron_id):
         email = request.POST.get('email', '').strip()
         contact_number = request.POST.get('contact_number', '').strip()
         address = request.POST.get('address', '').strip()
+        school = (request.POST.get('school') or '').strip()
         password = request.POST.get('password', '').strip()
         account_status = request.POST.get('account_status', 'Active').strip()
 
@@ -2108,6 +2145,7 @@ def admin_edit_patron(request, patron_id):
             patron.email = email
             patron.contact_number = contact_number
             patron.address = address
+            patron.school = school or None
             patron.account_status = account_status or 'Active'
             if password:
                 patron.password_hash = hash_password(password)
@@ -2220,8 +2258,7 @@ def admin_edit_book(request, book_id):
             book.status = status or book.status
             if shelf_level_id:
                 book.shelf_level = ShelfLevel.objects.filter(shelf_level_id=shelf_level_id).first()
-            # Present-but-blank clears it; absent leaves it alone, so a form
-            # that does not carry the field cannot wipe a recorded position.
+            # Blank clears the slot; a missing field leaves it.
             if 'shelf_slot' in request.POST:
                 book.shelf_slot = parse_shelf_slot(request.POST.get('shelf_slot'))
             if 'condition' in request.POST:
@@ -2285,11 +2322,7 @@ def admin_delete_book(request, book_id):
 
 @granted_module_required('transactions')
 def transaction_action_preview(request, transaction_id):
-    """What Mark Returned / Mark Lost would do, for the confirmation modal.
-
-    Read-only: the figures shown are computed the same way the action computes
-    them, so the modal cannot promise one fine and charge another.
-    """
+    """What Mark Returned / Mark Lost would do, for the confirmation modal."""
     tx = (Transaction.objects.select_related('book', 'patron')
           .filter(transaction_id=transaction_id).first())
     if tx is None:
@@ -2332,9 +2365,7 @@ def admin_transaction_action(request, transaction_id):
             tx.fine_amount = BorrowingRule.current().compute_fine(tx.due_date, tx.return_date)
             tx.save()
             if tx.book and tx.transaction_type == 'Borrow':
-                # Back at the desk, not back on the shelf. Sending the next
-                # patron to its shelf now would waste their walk, so it waits in
-                # the reshelving queue until someone physically puts it back.
+                # Back at the desk, not back on the shelf.
                 tx.book.status = 'For Reshelving'
                 tx.book.save()
             log_admin_action(request, 'Process', 'Transaction', tx.transaction_id,
@@ -2353,8 +2384,7 @@ def admin_transaction_action(request, transaction_id):
             if tx.book:
                 tx.book.status = 'Lost'
                 tx.book.save()
-            # A copy written off at the desk is a stock movement too, so the
-            # inventory follows automatically rather than by a second manual step.
+            # Record the write-off in inventory too.
             flagged = flag_inventory_copy_lost(
                 request, tx.book,
                 f'Marked lost on transaction #{tx.transaction_id}'
@@ -2389,24 +2419,11 @@ def respond_to_extension(request):
     action = request.POST.get('action')
     admin = User.objects.filter(admin_id=request.session.get('admin_id')).first()
 
-    # The row is locked for as long as it takes to read it and resolve it. Two
-    # librarians clicking Approve at the same moment both used to pass the
-    # Pending check, which resolved one request twice -- two audit entries for
-    # one decision, and two emails to the patron about it. The second request
-    # now waits for the first to commit, finds the row no longer Pending, and
-    # says so.
-    #
-    # Emails are sent after the block, never inside it: a message posted from
-    # within a transaction that later rolls back cannot be recalled.
+    # The row is locked for as long as it takes to read it and resolve it.
     notify = None
     try:
         with transaction.atomic():
-            # No select_related on the locked query. transaction__book and
-            # transaction__patron are nullable, so joining them makes a LEFT
-            # OUTER JOIN, and "FOR UPDATE cannot be applied to the nullable
-            # side of an outer join" -- Postgres refuses it outright. Lock the
-            # one row that needs locking; the related rows are read afterwards
-            # and are not what two clicks are racing over.
+            # No select_related on the locked query.
             extension = (DueDateExtension.objects.select_for_update()
                          .filter(extension_id=request.POST.get('extension_id'),
                                  status='Pending').first())
@@ -2419,9 +2436,7 @@ def respond_to_extension(request):
                 raise _AlreadyResolved('That loan no longer exists.')
 
             if action == 'approve':
-                # tx.return_date could have been set between the request and
-                # this click -- the book already came back, so there is nothing
-                # left to extend.
+                # The book was already returned.
                 if tx.return_date is not None:
                     raise _AlreadyResolved('This book has already been returned.')
                 tx.due_date = extension.requested_due_date
@@ -2467,9 +2482,7 @@ def respond_to_extension(request):
 
 @granted_module_required('transactions')
 def adjust_due_date(request):
-    """Staff sets a due date directly -- the desk case: a patron asks in person
-    rather than through their account, so there is no request to review, only
-    a change to make and log."""
+    """Staff sets a new due date for a loan directly."""
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
 
@@ -2489,9 +2502,7 @@ def adjust_due_date(request):
     admin = User.objects.filter(admin_id=request.session.get('admin_id')).first()
     old_due = tx.due_date
 
-    # Logged as an already-approved, staff-initiated extension so it shows up
-    # in the same history as patron requests -- one record of every due-date
-    # change on this loan, however it happened.
+    # Log it as an approved staff extension.
     DueDateExtension.objects.create(
         transaction=tx, requested_by_patron=False,
         previous_due_date=old_due or new_due, requested_due_date=new_due,
@@ -2574,9 +2585,7 @@ def _transaction_page(request, template):
     transactions_queryset = transactions_queryset.order_by('-transaction_date')
 
     total_borrowed = Transaction.objects.filter(transaction_type='Borrow').count()
-    # A return is recorded by stamping return_date on the original Borrow row —
-    # nothing in the system ever writes a row of type 'Return'. Counting that
-    # type reported zero returns no matter how many books came back.
+    # Returns are counted from return_date on borrow rows.
     total_returned = Transaction.objects.filter(return_date__isnull=False).count()
     currently_out = Transaction.objects.filter(transaction_type='Borrow', return_date__isnull=True).count()
     overdue_count = Transaction.objects.filter(overdue_flag=True).count()
@@ -2585,9 +2594,7 @@ def _transaction_page(request, template):
     paginator = Paginator(transactions_queryset, 20)
     transactions = paginator.get_page(request.GET.get('page', 1))
 
-    # Shown above the table regardless of the current filter/search/page --
-    # a request waiting on staff is not something a search term should be
-    # able to hide.
+    # Always show pending requests.
     pending_extensions = (DueDateExtension.objects
                           .filter(status='Pending')
                           .select_related('transaction', 'transaction__book', 'transaction__patron')
@@ -2627,13 +2634,10 @@ def staff_transaction(request):
 
 
 def _indoor_map_page(request, template, is_admin_view=False):
-    # Every floor, lowest first. The switcher on the map is a lift panel, and a
-    # lift panel whose buttons are not in storey order is unreadable -- the old
-    # "-uploaded_at" order listed them by whenever someone happened to draw them.
+    # Every floor, lowest first.
     floorplans = FloorPlan.objects.all().order_by('floor_number', 'floor_plan_id')
 
-    # Which shelf, if any, the visitor came here looking for. Read before the
-    # floor is chosen, because it is one of the things that chooses it.
+    # Which shelf, if any, the visitor came here looking for.
     shelf_param = (request.GET.get('shelf') or '').strip()
 
     # Determine which floor plan to display
@@ -2649,9 +2653,7 @@ def _indoor_map_page(request, template, is_admin_view=False):
             except (ValueError, TypeError):
                 pass
 
-        # Otherwise, arriving from "Locate on Map" for a shelf upstairs: open the
-        # floor that shelf is on. Opening the ground floor with nothing
-        # highlighted is the one answer that is never what was asked for.
+        # Open the floor the requested shelf is on.
         if not floorplan and shelf_param.isdigit():
             floorplan = floorplans.filter(room__shelf__shelf_id=int(shelf_param)).first()
 
@@ -2688,12 +2690,11 @@ def _indoor_map_page(request, template, is_admin_view=False):
                     ],
                     'x': room.map_x,
                     'y': room.map_y,
+                    'patron_access': room.patron_access,
                     'description': room.description or ''
                 })
         
-        # Furniture and obstacles. Only the active ones: an inactive shape is a
-        # partition that has come down, and drawing it would send a patron
-        # around something that is no longer there.
+        # Furniture and obstacles.
         for o in Obstacle.objects.filter(floor_plan=floorplan, is_active=True):
             if o.geometry:
                 obstacles_data.append({
@@ -2713,8 +2714,11 @@ def _indoor_map_page(request, template, is_admin_view=False):
                     'geometry': st.geometry, 'x': st.map_x, 'y': st.map_y,
                     'bearing': st.bearing or 0, 'direction': st.direction,
                     'destination': st.destination_label,
-                    'treads': ([] if st.kind == 'Elevator'
-                               else _stair_treads(st.geometry, st.bearing)),
+                    'shape': _stair_shape_of(st),
+                    # Parts of each flight.
+                    'parts': _stair_parts(st),
+                    # All treads, for maps that draw the stair as one shape.
+                    'treads': [t for p in _stair_parts(st) for t in p['treads']],
                 })
 
         # Serialize shelves with coordinates (through room relationship)
@@ -2748,9 +2752,7 @@ def _indoor_map_page(request, template, is_admin_view=False):
                     'linked_shelf_id': waypoint.linked_shelf.shelf_id if waypoint.linked_shelf else None
                 })
 
-        # Beacon positions are infrastructure, not patron-facing: they are only
-        # serialised for the Administrator's map (see `show_beacons` below) and
-        # never reach patron/patronmap.html.
+        # Beacons are only sent to the admin map.
         if is_admin_view:
             for beacon in BLEBeacon.objects.filter(floor_plan=floorplan):
                 if beacon.map_x is not None and beacon.map_y is not None:
@@ -2791,8 +2793,7 @@ def _indoor_map_page(request, template, is_admin_view=False):
         })
     
 
-    # A specific shelf to land on, e.g. arriving from "Locate on Map" on a
-    # book's detail modal. `book` is a display label only (not looked up).
+    # A specific shelf to land on, e.g.
     target_shelf = None
     target_elsewhere = None
     if shelf_param.isdigit():
@@ -2807,9 +2808,7 @@ def _indoor_map_page(request, template, is_admin_view=False):
                 'book': request.GET.get('book') or '',
             }
         elif on_plan:
-            # The shelf exists, just not on the floor being drawn. Saying which
-            # floor it is on, with a way to get there, beats an empty panel that
-            # reads as a bug.
+            # The shelf exists, just not on the floor being drawn.
             target_elsewhere = {
                 'id': shelf.shelf_id,
                 'name': shelf.name,
@@ -2831,6 +2830,8 @@ def _indoor_map_page(request, template, is_admin_view=False):
         'target_shelf': json.dumps(target_shelf) if target_shelf else 'null',
         'target_elsewhere': json.dumps(target_elsewhere) if target_elsewhere else 'null',
         'current_floor_id': floorplan.floor_plan_id if floorplan else None,
+        # Number of floors.
+        'floor_count': floorplans.count(),
     }
 
     return render(request, template, context)
@@ -2871,14 +2872,18 @@ def _logs_page(request, template):
     # Needed before the queryset below, not only for the template further down.
     desk_mode = desk_is_armed(request)
 
+    # Desk mode shows the kiosk instead of the log page.
+    if desk_mode:
+        return render(request, 'desk/kiosk.html', {
+            'purpose_choices': PURPOSE_CHOICES,
+            'patron_type_choices': Patron.PATRON_TYPE_CHOICES,
+            'known_schools': known_schools(),
+            'today': today,
+        })
+
     logs_qs = PatronLog.objects.select_related('patron').filter(entry_time__date=sel_date)
     if desk_mode:
         # Desk mode puts this table in front of whoever is standing at the PC.
-        # Showing them every other patron's name, school and visit times is the
-        # data-privacy problem the professor raised, so the table is narrowed to
-        # the person who just identified themselves -- and shows nothing at all
-        # until someone does. The counts above stay aggregate, which names
-        # nobody.
         viewer_id = desk_viewer_id(request)
         logs_qs = logs_qs.filter(patron_id=viewer_id) if viewer_id else logs_qs.none()
     if q:
@@ -2896,9 +2901,7 @@ def _logs_page(request, template):
     logs = paginator.get_page(request.GET.get('page', 1))
     log_count = paginator.count
 
-    # In desk mode the person reading this table is whoever just walked in, so
-    # the contact details of everyone who visited today are masked. The log is
-    # theirs to add to, not to mine.
+    # Mask emails in desk mode.
     for entry in logs:
         entry.display_email = (_mask_email(entry.patron.email) if desk_mode
                                else entry.patron.email)
@@ -2907,8 +2910,7 @@ def _logs_page(request, template):
     todays_entries = PatronLog.objects.filter(entry_time__date=today).count()
     todays_exits = PatronLog.objects.filter(exit_time__date=today).count()
     currently_inside = PatronLog.objects.filter(exit_time__isnull=True).count()
-    # "How many members used the library" and "how many people came in" are
-    # different questions, and the answer to one should not stand in for the other.
+    # Member and visitor counts.
     todays_member_visits = PatronLog.objects.filter(
         entry_time__date=today).exclude(patron__account_status='Visitor').count()
     todays_visitor_visits = PatronLog.objects.filter(
@@ -2924,6 +2926,8 @@ def _logs_page(request, template):
 
     context = {
         'logs': logs,
+        # Known schools for the input suggestions.
+        'known_schools': known_schools(),
         'paginator': paginator,
         'log_count': log_count,
         'desk_mode': desk_mode,
@@ -2940,24 +2944,18 @@ def _logs_page(request, template):
         'status': status,
         'querystring': urlencode(params),
         'patron_types': [choice[0] for choice in Patron.PATRON_TYPE_CHOICES],
+        # Peak hours, on the page where the visits are recorded.
+        'hours_chart': analytics.visits_by_hour(
+            today - timedelta(days=30), today)['chart'],
     }
     return render(request, template, context)
 
 
 @admin_or_module_required('books')
 def reshelving_queue(request):
-    """Books returned to the desk but not yet put back on their shelf.
-
-    GET lists them; POST with a book_id marks one shelved and returns it to
-    Available. Deliberately a separate step from processing the return: the
-    person at the desk taking books back is rarely the person walking them to
-    the aisles, and the catalogue should not claim a book is at its shelf until
-    someone has actually taken it there.
-    """
+    """Books returned to the desk but not yet put back on their shelf."""
     if request.method == 'POST':
-        # One id or many. A trolley coming back from the aisles is thirty books,
-        # and thirty round trips is thirty chances to lose count of which ones
-        # were actually put away.
+        # One id or many.
         raw_ids = request.POST.getlist('book_id') or request.POST.getlist('book_ids')
         ids = []
         for chunk in raw_ids:
@@ -2987,8 +2985,7 @@ def reshelving_queue(request):
                                  f'Shelved "{shelved[0].title[:60]}" - back on the '
                                  'shelf and borrowable')
             else:
-                # One entry for the trolley rather than thirty near-identical
-                # ones, which is what makes the log readable afterwards.
+                # One log entry for the whole batch.
                 log_admin_action(request, 'Update', 'Book', None,
                                  f'Shelved {len(shelved)} book(s) from the reshelving '
                                  f'queue: ' + ', '.join(b.title[:40] for b in shelved[:5])
@@ -3019,23 +3016,8 @@ def reshelving_queue(request):
     })
 
 
-@admin_or_module_required('indoor_map')
-def floorplan_print(request):
-    """A printable wayfinding map of one floor.
-
-    Rooms and shelves with their names and sections, drawn as plain SVG rather
-    than Leaflet: a tiled, scripted map does not survive a print dialog, and
-    this has to come out of a printer and go on a wall. Waypoints and beacons
-    are left off deliberately -- this is for a patron looking for the Fiction
-    aisle, not for whoever installs the hardware. Stairs are on, and say where
-    they lead: a printed map is the one a patron reads when the phone is in
-    their pocket, and "2nd floor" is the whole answer for half the shelves.
-    """
-    floor_plan, live_plans = _floor_for_request(request)
-    if floor_plan is None:
-        messages.error(request, 'No floor plan is in service.')
-        return portal_redirect(request, 'admin_indoor_map')
-
+def _floorplan_sheet(floor_plan):
+    """One floor, as one printed page."""
     width, height = _floorplan_canvas_size(floor_plan)
     rooms = [
         {
@@ -3044,6 +3026,8 @@ def floorplan_print(request):
             'label_x': r.map_x,
             'label_y': r.map_y,
             'has_shape': bool(r.geometry and len(r.geometry) >= 3),
+            # Mark staff-only rooms on the printed plan.
+            'restricted': not r.patron_access,
         }
         for r in Room.objects.filter(floor_plan=floor_plan, is_active=True)
     ]
@@ -3059,12 +3043,10 @@ def floorplan_print(request):
         shelves.append({
             'name': sh.name,
             'kind': sh.kind,
-            # A traced shelf prints as its outline; a rectangular one keeps the
-            # transform, which is what lets its label ride along with it.
+            # Traced shelves print as outlines.
             'points': (' '.join('%s,%s' % (x, y) for x, y in sh.footprint())
                        if sh.geometry else ''),
-            # Rotated rectangles are drawn with a transform rather than four
-            # computed corners, so the label can ride along with the shape.
+            # Draw rotated rectangles with a transform.
             'x': sh.map_x - w / 2,
             'y': sh.map_y - d / 2,
             'w': w,
@@ -3082,28 +3064,23 @@ def floorplan_print(request):
             'points': ' '.join(f'{x},{y}' for x, y in (o.geometry or [])),
             'label_x': o.map_x,
             'label_y': o.map_y,
-            # A pillar is a structural fact worth showing on a wall map; a
-            # named table earns its label, an unnamed one would just be noise.
+            # Label pillars and named tables only.
             'show_label': bool((o.name or '').strip()),
         }
         for o in Obstacle.objects.filter(floor_plan=floor_plan, is_active=True)
         if o.geometry and len(o.geometry) >= 3
     ]
 
-    # A wall map without the stairs on it is a map of one floor pretending to
-    # be the whole building, and now that a route can send somebody up them,
-    # the printed copy has to agree with the one on the phone.
+    # Include stairs on the printed plan.
     stairways = [
         {
             'label': st.label,
             'kind': st.kind,
             'points': ' '.join(f'{x},{y}' for x, y in (st.geometry or [])),
-            'treads': ([] if st.kind == 'Elevator'
-                       else _stair_treads(st.geometry, st.bearing)),
+            'treads': [t for p in _stair_parts(st) for t in p['treads']],
             'label_x': st.map_x,
             'label_y': st.map_y,
-            # The offset is computed here, not with |add: -- that filter casts
-            # through int and drops the fraction on the way.
+            # Compute the offset here; the add filter drops decimals.
             'dest_y': st.map_y + 9,
             'destination': st.destination_label if st.connects_to_id else '',
         }
@@ -3113,32 +3090,53 @@ def floorplan_print(request):
         if st.geometry and len(st.geometry) >= 3
     ]
 
-    return render(request, 'admin/floorplanprint.html', {
+    return {
         'plan': floor_plan,
-        'obstacles': obstacles,
-        'stairways': stairways,
-        'floors': _floor_payload(live_plans, floor_plan),
         'canvas_width': width,
         'canvas_height': height,
         'rooms': rooms,
         'shelves': shelves,
+        'obstacles': obstacles,
+        'stairways': stairways,
+    }
+
+
+@admin_or_module_required('indoor_map')
+def floorplan_print(request):
+    """A printable wayfinding map, of one floor or of the whole building."""
+    live_plans = FloorPlan.objects.filter(is_active=True).order_by(
+        'floor_number', 'floor_plan_id')
+    if not live_plans.exists():
+        messages.error(request, 'No floor plan is in service.')
+        return portal_redirect(request, 'admin_indoor_map')
+
+    raw = [v.strip() for v in request.GET.getlist('floor') if v.strip()]
+    if any(v.lower() == 'all' for v in raw):
+        chosen = list(live_plans)
+    else:
+        wanted = {int(v) for v in raw if v.isdigit()}
+        chosen = [p for p in live_plans if p.floor_plan_id in wanted]
+
+    if not chosen:
+        # No usable selection: the floor the rest of the portal would show.
+        one, _ = _floor_for_request(request)
+        chosen = [one] if one is not None else [live_plans.first()]
+
+    sheets = [_floorplan_sheet(p) for p in chosen]
+    return render(request, 'admin/floorplanprint.html', {
+        'sheets': sheets,
+        # The first sheet drives the page title and the switcher's idea of where it is.
+        'plan': sheets[0]['plan'],
+        'many': len(sheets) > 1,
+        'floors': _floor_payload(live_plans, chosen[0]),
+        'chosen_ids': [p.floor_plan_id for p in chosen],
         'printed_on': timezone.localdate(),
     })
 
 
 @admin_only_required
 def activity_logs(request):
-    """The Activity Logs viewer (ERD, Figure 87).
-
-    Every write into SystemLog already existed -- 58 call sites across the
-    admin, staff and now patron portals -- with nothing anywhere that read it
-    back. This is that missing half.
-
-    Deliberately read-only: an audit trail with an edit button answers nothing,
-    because any entry could then have been changed by the person it accuses.
-    Rows are never deleted from here either; retention is a database decision,
-    not a button.
-    """
+    """The Activity Logs viewer (ERD, Figure 87)."""
     from urllib.parse import urlencode
     from datetime import datetime
 
@@ -3152,9 +3150,7 @@ def activity_logs(request):
     date_to = (request.GET.get('to') or '').strip()
 
     if q:
-        # Searches the actor, the affected patron and the detail line together,
-        # because "what happened to this patron" and "what did this person do"
-        # are the same question asked from two ends.
+        # Search the actor, patron and details.
         logs = logs.filter(
             Q(admin_name__icontains=q)
             | Q(detail__icontains=q)
@@ -3183,9 +3179,7 @@ def activity_logs(request):
 
     logs = logs.order_by('-timestamp')
 
-    # Filter menus are built from what is actually in the table rather than a
-    # hardcoded list, so a new action verb appears without anyone remembering
-    # to add it here.
+    # Build filter options from the data.
     all_actions = list(
         SystemLog.objects.order_by('action').values_list('action', flat=True).distinct()
     )
@@ -3194,9 +3188,7 @@ def activity_logs(request):
     )
 
     total = SystemLog.objects.count()
-    # Built as a list of triples rather than a dict: a Django template cannot
-    # look a dict up by a loop variable, so a dict here would need a custom
-    # filter to display at all.
+    # List of (key, label, count) for the template.
     counts = dict(
         SystemLog.objects.values_list('actor_role')
         .annotate(n=Count('actor_role')).values_list('actor_role', 'n')
@@ -3240,34 +3232,18 @@ def staff_logs(request):
     return _logs_page(request, 'library_staff/logmanagement.html')
 
 
-# How many past loans the details panel carries. Enough to see the pattern
-# of a book's use without turning one modal into the transactions page.
+# How many past loans the details panel carries.
 BOOK_HISTORY_LIMIT = 25
 
 
-# Only a copy marked Available is actually standing on the shelf. Borrowed
-# and Overdue are with a patron, Being Read is on a table somewhere in the
-# building, and For Reshelving is behind the desk waiting to be put back --
-# none of them are a spine the patron can count.
+# Only a copy marked Available is actually standing on the shelf.
 ON_SHELF_STATUS = 'Available'
-# How wide the strip drawn in the details panel may get before it stops being
-# readable. A level holding more than this is shown around the book instead.
+# How wide the strip drawn in the details panel may get before it stops being readable.
 LAYOUT_WINDOW = 24
 
 
 def level_layout(level, focus_book=None):
-    """Every copy on a level, in shelf order, with what is really there.
-
-    A stored slot says where a book was last shelved. It cannot say what a
-    patron will see, because two things move underneath it: a borrowed book
-    leaves a gap, and a tidy-up pushes the rest together. So the number shown
-    is never the stored one -- it is recomputed here from the copies actually
-    on the shelf, every time anybody asks.
-
-    `shelf_slot` is therefore an ordering key rather than a physical space. It
-    only has to sort; it need not be dense, and renumbering after a reorder
-    costs nothing.
-    """
+    """Every copy on a level, in shelf order, with what is really there."""
     if level is None:
         return None
 
@@ -3313,24 +3289,17 @@ def _focus_position(book, books, present):
         # What a patron counting spines will actually arrive at.
         'position': index + 1,
         'of': len(present),
-        # And where it sits in the recorded order, gaps included, so the two
-        # numbers disagreeing is visible rather than mysterious.
+        # Position in the recorded order, including gaps.
         'space': books.index(book) + 1,
         'spaces': len(books),
-        # Neighbours are how people really find a book: recognising the titles
-        # either side survives a miscount, which a number never does.
+        # Neighbouring titles on the shelf.
         'before': present[index - 1].title if index > 0 else '',
         'after': present[index + 1].title if index + 1 < len(present) else '',
     }
 
 
 def book_location_words(book):
-    """Where this copy is, in the order somebody walks to it.
-
-    Shelf, then which board, then how far along. Each part is dropped when it
-    is not recorded, so a book with only a shelf still reads sensibly instead
-    of claiming a precision nobody entered.
-    """
+    """Where this copy is, in the order somebody walks to it."""
     level = book.shelf_level
     if level is None:
         return ''
@@ -3341,18 +3310,14 @@ def book_location_words(book):
 
     focus = (level_layout(level, book) or {}).get('focus')
     if focus and focus.get('on_shelf'):
-        # Counted among the copies actually there, not from the stored slot:
-        # with two of its neighbours out on loan, "9th" sends a patron two
-        # books past the one they came for.
+        # Count only the copies currently on the shelf.
         parts.append('%s book along' % _ordinal(focus['position']))
     elif focus:
         parts.append('not on the shelf (%s)' % focus['status'].lower())
     return ' \u00b7 '.join(p for p in parts if p)
 
 
-# Real sheets do not write "Worn". They write "GOOD CONDITION", "bad",
-# "fair", "needs repair" -- and a value nobody recognises used to become Good,
-# so a shelf of books marked BAD CONDITION imported as though it were fine.
+# Real sheets do not write "Worn".
 CONDITION_WORDS = {
     'good': 'Good', 'goodcondition': 'Good', 'new': 'Good', 'fine': 'Good',
     'excellent': 'Good', 'ok': 'Good', 'okay': 'Good', 'usable': 'Good',
@@ -3369,11 +3334,7 @@ CONDITION_WORDS = {
 
 
 def parse_condition(raw):
-    """The condition a sheet means, or None when it says nothing recognisable.
-
-    None rather than Good, so the caller can tell "the column was blank" from
-    "the column said something I could not read" and report the second.
-    """
+    """The condition a sheet means, or None when it says nothing recognisable."""
     text = ''.join(ch for ch in str(raw or '').lower() if ch.isalnum())
     if not text:
         return None
@@ -3381,14 +3342,7 @@ def parse_condition(raw):
 
 
 def parse_shelf_slot(raw):
-    """The slot number as typed, or None.
-
-    Blank means "not recorded", which is different from position 1 and has to
-    stay different: a book nobody has placed yet should not claim the first
-    space on the shelf. Anything that is not a positive whole number is treated
-    as blank rather than rejected, because a slot is a convenience and losing
-    it must never be a reason a book cannot be catalogued.
-    """
+    """The slot number as typed, or None."""
     raw = (raw or '').strip()
     if not raw:
         return None
@@ -3435,8 +3389,7 @@ def book_history(book, limit=BOOK_HISTORY_LIMIT):
     return out
 
 
-# Deliberately admin_login_required rather than one module: shared by Manage Books and Shelf Manager,
-# and it only reads data the calling page already gated.
+# Shared by Manage Books and Shelf Manager.
 @admin_login_required
 def admin_book_details_ajax(request, book_id):
     from django.http import JsonResponse
@@ -3468,8 +3421,7 @@ def admin_book_details_ajax(request, book_id):
         # The strip of the level, so the gaps are visible rather than implied.
         'layout': level_layout(book.shelf_level, book),
         'copies': Book.objects.filter(title=book.title, author=book.author).count(),
-        # Admin and library staff only. The patron endpoint is separate and
-        # deliberately says nothing about who has had a book.
+        # Admin and library staff only.
         'history': book_history(book),
         'history_limit': BOOK_HISTORY_LIMIT,
         'history_total': Transaction.objects.filter(book=book).count(),
@@ -3479,23 +3431,7 @@ def admin_book_details_ajax(request, book_id):
 
 @admin_login_required
 def book_qr_png(request, book_id):
-    """Serve a book's QR as a PNG, inline for display or as a download.
-
-    The modal used to point an <img> at api.qrserver.com. Three problems with
-    that, and the third is why this exists at all:
-
-    1. It needs the internet. `_qr_data_uri` already exists in this file and
-       its docstring says why -- a library front desk mid-brownout still has to
-       print a card. Book QRs are no different.
-    2. It sends every book's QR payload to a third party to render.
-    3. A cross-origin image cannot be downloaded. `<a download>` is ignored
-       across origins and a canvas that has drawn one is tainted, so no button
-       pointed at that URL could ever have produced a file.
-
-    ?download=1 sets the attachment disposition; without it the same URL is
-    the inline <img> source, so the picture on screen and the file saved are
-    byte-identical rather than two separate renderings.
-    """
+    """Serve a book's QR as a PNG, inline for display or as a download."""
     book = Book.objects.filter(book_id=book_id).first()
     if book is None:
         raise Http404('Book not found')
@@ -3515,9 +3451,7 @@ def book_qr_png(request, book_id):
 
     response = HttpResponse(buffer.getvalue(), content_type='image/png')
     if request.GET.get('download'):
-        # Whoever opens the file later needs to know which book it belongs to,
-        # so the title goes in the filename -- reduced to characters that are
-        # safe on every filesystem, since titles carry colons and slashes.
+        # Put a safe version of the title in the filename.
         safe = re.sub(r'[^A-Za-z0-9]+', '-', book.title or 'book').strip('-')[:60] or 'book'
         filename = f'QR-{safe}-BOOK-{book.book_id}.png'
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
@@ -3530,17 +3464,7 @@ def book_qr_png(request, book_id):
 
 @admin_or_module_required('books')
 def book_label_picker_data(request):
-    """Every book, with where it sits, for the QR label picker.
-
-    Sent in one go rather than searched over the wire: the picker filters as you
-    type, and a round trip per keystroke would make choosing forty books out of
-    three hundred feel like work. The whole catalogue at this shape is a few
-    hundred kilobytes, and the cap below keeps that true for a library that
-    grows past what one person would ever select by hand.
-
-    Separate from get_books_for_placement, which caps at 300 and reports a bare
-    level name -- neither is any use for picking labels off a shelf list.
-    """
+    """Every book, with where it sits, for the QR label picker."""
     books = (Book.objects
              .select_related('shelf_level', 'shelf_level__shelf')
              .order_by('title', 'book_id'))
@@ -3576,18 +3500,7 @@ def book_label_picker_data(request):
 
 @admin_or_module_required('books')
 def book_qr_labels(request):
-    """A printable sheet of QR labels for the selected books.
-
-    Answers the job that actually has to be done once a delivery is catalogued:
-    print the stickers, cut them, put them on the books. That is a batch
-    operation, so this takes a list of ids rather than one -- downloading
-    eighty PNGs one at a time and pasting them into Word is not a workflow.
-
-    Books are emitted in shelf order, not in the order the ids arrive, so two
-    people printing the same selection get the same sheet and a reprint lines up
-    with the first run. The sheet stays packed edge to edge -- see
-    labels.sort_for_printing for why the groups are not given their own rows.
-    """
+    """A printable sheet of QR labels for the selected books."""
     raw_ids = request.GET.get('ids') or request.POST.get('ids') or ''
     ids = []
     for chunk in raw_ids.replace('\n', ',').split(','):
@@ -3604,18 +3517,18 @@ def book_qr_labels(request):
 
     books = list(Book.objects.filter(book_id__in=ids)
                  .select_related('shelf_level', 'shelf_level__shelf'))
-    # Shelf order by default, so the cut pile is already in the order you walk
-    # the room. ?sort=id falls back to catalogue order for anyone who wants it.
-    if (request.GET.get('sort') or 'location').lower() == 'location':
-        books = labels.sort_for_printing(books)
-    else:
+    # Sort by shelf location by default, or by title.
+    order = (request.GET.get('sort') or 'location').lower()
+    if order in ('title', 'alphabetical', 'az'):
+        books = labels.sort_alphabetically(books)
+    elif order == 'id':
         books.sort(key=lambda b: b.book_id)
+    else:
+        books = labels.sort_for_printing(books)
     if not books:
         return JsonResponse({'success': False, 'error': 'None of those books exist.'})
 
-    # A book with no QR cannot be labelled, and the label sheet is exactly when
-    # anyone notices. Minting it here beats sending someone back to fix each
-    # one by hand -- the value is a fresh UUID either way.
+    # A book with no QR cannot be labelled, and the label sheet is exactly when anyone notices.
     missing = [b for b in books if not b.qr_code]
     if missing:
         with transaction.atomic():
@@ -3633,8 +3546,7 @@ def book_qr_labels(request):
 
     show = {
         'title': _flag('show_title', True),
-        # On by default, and the id is not: the spine number is what somebody
-        # holding the book reads to put it back, which a database id never was.
+        # Call number shown by default, book id hidden.
         'call_number': _flag('show_call_number', True),
         'copy': _flag('show_copy', True),
         'book_id': _flag('show_id', False),
@@ -3669,8 +3581,68 @@ def book_qr_labels(request):
     return response
 
 
-# Deliberately admin_login_required rather than one module: shared by Manage Books and Transactions,
-# and it only reads data the calling page already gated.
+def _book_qr_payload(book):
+    """What the desk needs about a scanned copy, wherever it was scanned."""
+    return {
+        'book_id': book.book_id,
+        'title': book.title,
+        'author': book.author,
+        'ISBN': book.ISBN or 'N/A',
+        'genre': book.genre or 'General',
+        'publication_year': book.publication_year or 'N/A',
+        'status': book.status,
+        'cover_img_url': book.cover_img_url,
+        'qr_code': book.qr_code,
+        'category': book.shelf_level.category if book.shelf_level else 'N/A',
+        'shelf_level': (book.shelf_level.label if book.shelf_level else 'N/A'),
+    }
+
+
+def _patron_qr_payload(patron):
+    """Same, for a scanned library card -- including whether they may borrow."""
+    active_borrows = Transaction.objects.filter(
+        patron=patron, transaction_type='Borrow', return_date__isnull=True
+    ).count()
+    eligible, violations = check_patron_eligibility(patron)
+    return {
+        'patron_id': patron.patron_id,
+        'fullname': patron.fullname,
+        'email': patron.email,
+        'patron_type': patron.patron_type,
+        'account_status': patron.account_status,
+        'card_number': patron.card_display,
+        'active_borrows': active_borrows,
+        'eligible': eligible,
+        'violations': violations,
+    }
+
+
+@granted_module_required('transactions')
+def resolve_transaction_qr(request):
+    """One lookup for one scanner: is this a library card or a book label?"""
+    code = (request.GET.get('qr_code') or '').strip()
+    if not code:
+        return JsonResponse({'success': False, 'kind': 'unknown',
+                             'error': 'QR code is required'})
+
+    patron = Patron.objects.filter(qr_code=code).first()
+    if patron is not None:
+        return JsonResponse({'success': True, 'kind': 'patron',
+                             'patron': _patron_qr_payload(patron)})
+
+    book = (Book.objects.filter(qr_code=code)
+            .select_related('shelf_level', 'shelf_level__shelf').first())
+    if book is not None:
+        return JsonResponse({'success': True, 'kind': 'book',
+                             'book': _book_qr_payload(book)})
+
+    # Not a card or a book label.
+    return JsonResponse({
+        'success': False, 'kind': 'unknown',
+        'error': 'That code is not a library card or a book label.'})
+
+
+# Shared by Manage Books and Transactions.
 @admin_login_required
 def search_book_by_qr(request):
     qr_code = request.GET.get('qr_code', '').strip()
@@ -3681,34 +3653,12 @@ def search_book_by_qr(request):
     if book is None:
         return JsonResponse({'success': False, 'error': 'Book not found'})
 
-    book_data = {
-        'success': True,
-        'book': {
-            'book_id': book.book_id,
-            'title': book.title,
-            'author': book.author,
-            'ISBN': book.ISBN or 'N/A',
-            'genre': book.genre or 'General',
-            'publication_year': book.publication_year or 'N/A',
-            'status': book.status,
-            'cover_img_url': book.cover_img_url,
-            'qr_code': book.qr_code,
-            'category': book.shelf_level.category if book.shelf_level else 'N/A',
-            'shelf_level': (book.shelf_level.label if book.shelf_level else 'N/A'),
-        }
-    }
-    return JsonResponse(book_data)
+    return JsonResponse({'success': True, 'book': _book_qr_payload(book)})
 
 
 @granted_module_required('transactions')
 def search_patron_by_qr(request):
-    """Resolve a scanned patron identity QR to a patron record.
-
-    Desk-side counterpart of search_book_by_qr: Library Staff / the Administrator
-    scan the QR printed on the patron's card, never the patron themselves. The
-    payload is the Patron.qr_code UUID minted on approval (approve_patron) — the
-    same value patronaccount.html renders as the patron's QR image.
-    """
+    """Resolve a scanned patron identity QR to a patron record."""
     qr_code = request.GET.get('qr_code', '').strip()
     if not qr_code:
         return JsonResponse({'success': False, 'error': 'QR code is required'})
@@ -3717,24 +3667,7 @@ def search_patron_by_qr(request):
     if patron is None:
         return JsonResponse({'success': False, 'error': 'No patron matches that QR code'})
 
-    active_borrows = Transaction.objects.filter(
-        patron=patron, transaction_type='Borrow', return_date__isnull=True
-    ).count()
-    eligible, violations = check_patron_eligibility(patron)
-
-    return JsonResponse({
-        'success': True,
-        'patron': {
-            'patron_id': patron.patron_id,
-            'fullname': patron.fullname,
-            'email': patron.email,
-            'patron_type': patron.patron_type,
-            'account_status': patron.account_status,
-            'active_borrows': active_borrows,
-            'eligible': eligible,
-            'violations': violations,
-        }
-    })
+    return JsonResponse({'success': True, 'patron': _patron_qr_payload(patron)})
 
 
 @granted_module_required('books')
@@ -3745,16 +3678,13 @@ def download_book_template(request):
     
     # Matched by name, so order does not matter and extra columns are ignored.
     headers = ['Title', 'Author', 'Publication Year', 'ISBN', 'Genre',
-               'Condition', 'Code Label', 'Quantity', 'Location']
+               'Condition', 'Code Label', 'Quantity', 'Location', 'Slot']
     ws.append(headers)
-    # Condition and Code Label may both be left empty: the first defaults to
-    # Good, and the second is worked out from the other columns.
-    # Two rows, showing both ways of writing a location: the long form and
-    # the short one. Either is read back the same.
+    # Condition, Code Label and Slot may all be left empty.
     ws.append(['Example Book Title', 'Surname, First', 2019, '9780000000000',
-               'Fiction', 'Good', '', 2, 'Shelf A Column 1 Level 2'])
+               'Fiction', 'Good', '', 2, 'Shelf A Column 1 Level 2', ''])
     ws.append(['Pride and Prejudice', 'Austen, Jane', 1963, '', 'Fiction',
-               'Worn', 'FIC A31p 1963', 1, 'A C1 L2'])
+               'Worn', 'FIC A31p 1963', 1, 'A C1 L2', ''])
     
     response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     response['Content-Disposition'] = 'attachment; filename=book_import_template.xlsx'
@@ -3762,50 +3692,33 @@ def download_book_template(request):
     return response
 
 
-# An uploaded workbook is attacker-controllable input even when the attacker is
-# a staff member with a mistyped file. openpyxl will happily allocate for a sheet
-# claiming a million rows, and a spreadsheet that expands enormously when parsed
-# is the oldest denial-of-service in the format. Both are capped before parsing.
+# Limit upload size before parsing the workbook.
 MAX_IMPORT_BYTES = 5 * 1024 * 1024
 MAX_IMPORT_ROWS = 5000
 
-# One sheet of labels is a printing job, not a data export. Past a few hundred
-# the PDF gets slow to build and nobody is cutting that many out in one sitting
-# anyway -- and an unbounded id list is a free way to tie up the server.
+# One sheet of labels is a printing job, not a data export.
 MAX_LABELS_PER_SHEET = 500
 
-# How many books the picker will hold in the browser at once. Far above the
-# print cap on purpose -- you browse the whole catalogue to choose from it, and
-# only the chosen few end up on a sheet.
+# Maximum duplicates listed in the import preview.
+MAX_CLASH_ROWS = 200
+
+# How many books the picker will hold in the browser at once.
 MAX_PICKER_BOOKS = 5000
 
-# One sweep of a room. Past this the progress call stops being cheap, and a
-# stock-take that large should be filed in stages anyway.
+# One sweep of a room.
 MAX_AUDIT_SCANS = 3000
+
+# One move.
+MAX_BOOKS_PER_MOVE = 1000
 
 
 logger = logging.getLogger(__name__)
 
 
 def import_failed(what, exc):
-    """Log a genuine fault, and answer with a reference instead of its guts.
-
-    Every error these import views mean to show a person is returned explicitly
-    as JSON on the way through, so anything reaching their `except` is a fault
-    nobody anticipated -- a driver error, a corrupt workbook, a bug. str(exc) on
-    one of those is a stack of internals: table names, absolute paths, driver
-    text. Returning it put that on a librarian's screen, where it tells them
-    nothing they can act on, and tells anyone else rather more about the system
-    than they ought to know.
-
-    The log keeps the whole traceback. The browser gets a short reference, so
-    the two can be tied back together when somebody reports it.
-    """
+    """Log a genuine fault, and answer with a reference instead of its guts."""
     reference = uuid4().hex[:8]
-    # exc is passed explicitly rather than left to logger.exception's ambient
-    # sys.exc_info(): that only carries a traceback while an except block is
-    # actually running, so a caller one refactor away from calling this outside
-    # one would silently log the reference and nothing else.
+    # Pass the exception explicitly so the traceback is logged.
     logger.exception('[%s] %s failed: %r', reference, what, exc)
     return JsonResponse({
         'success': False,
@@ -3841,8 +3754,7 @@ def check_import_size(worksheet):
     return None
 
 
-# "Shelf A Column 1 Level 2" and "A C1 L2" are the same place said at two
-# lengths, and a sheet will carry whichever the person typing it preferred.
+# Accept both long and short location formats.
 LOCATION_COLUMN_RE = re.compile(r'\b(?:c|col|column)\s*\.?\s*(\d+)\b', re.I)
 LOCATION_LEVEL_RE = re.compile(r'\b(?:l|lvl|level)\s*\.?\s*(\d+)\b', re.I)
 LOCATION_TOP_RE = re.compile(r'\btop\b', re.I)
@@ -3850,12 +3762,7 @@ LOCATION_UNDER_RE = re.compile(r'\bunder(?:neath)?\b', re.I)
 
 
 def parse_location(text):
-    """Pull a shelf name, column and board out of a written location.
-
-    Returns (shelf_name, level_number, column_number, is_top, is_under), any of
-    which may be None. Deliberately forgiving: separators vary, people write
-    "L2" or "Level 2", and a sheet that only names the bay is still useful.
-    """
+    """Pull a shelf name, column and board out of a written location."""
     raw = (text or '').strip()
     if not raw:
         return ('', None, None, False, False)
@@ -3899,13 +3806,24 @@ def _shelf_by_written_name(name):
     return None
 
 
-def _resolve_written_location(text):
-    """The exact board a written location names, created if it is missing.
+def _next_slot(counter, level):
+    """The next free position on a board, numbering what is already there once."""
+    key = level.shelf_level_id
+    if key not in counter:
+        existing = list(Book.objects.filter(shelf_level=level)
+                        .order_by(F('shelf_slot').asc(nulls_last=True),
+                                  'title', 'book_id'))
+        for position, book in enumerate(existing, start=1):
+            if book.shelf_slot != position:
+                Book.objects.filter(pk=book.pk).update(shelf_slot=position)
+        counter[key] = len(existing) + 1
+    slot = counter[key]
+    counter[key] += 1
+    return slot
 
-    Returns None when the text says nothing about a position, so the caller can
-    fall back to the older "storage area" matching that treats the whole string
-    as a category name.
-    """
+
+def _resolve_written_location(text):
+    """The exact board a written location names, created if it is missing."""
     name, level_no, column_no, is_top, is_under = parse_location(text)
     if not (level_no or column_no or is_top or is_under):
         return None
@@ -3915,24 +3833,21 @@ def _resolve_written_location(text):
         return None
 
     levels = ShelfLevel.objects.filter(shelf=shelf)
+
     if is_top:
         found = levels.filter(is_top=True).first()
+        if found is not None:
+            return found
     elif is_under:
         found = levels.filter(is_under=True).first()
+        if found is not None:
+            return found
     else:
-        found = levels.filter(level_number=level_no or 1,
-                              is_top=False, is_under=False).first()
-    if found is not None and column_no:
-        # The board is right but the bay across it may not be.
-        exact = levels.filter(level_number=found.level_number,
-                              column_number=column_no).first()
-        if exact is not None:
-            return exact
-    if found is not None and not column_no:
-        return found
+        found = _matching_board(levels, level_no or 1, column_no)
+        if found is not None:
+            return found
 
-    # Nothing matching: make it, so the location travels with the import
-    # rather than being quietly dropped on the floor.
+    # Create the location if it does not exist.
     return ShelfLevel.objects.create(
         shelf=shelf,
         level_number=level_no or (levels.aggregate(n=Max('level_number'))['n'] or 0) + 1,
@@ -3941,20 +3856,29 @@ def _resolve_written_location(text):
         is_under=is_under)
 
 
-def _resolve_storage_area(name):
-    """Find the shelf level a sheet's "Storage Area" refers to, creating it once.
+def _matching_board(levels, level_no, column_no):
+    """The existing board a sheet means, allowing for how columns get written."""
+    boards = levels.filter(level_number=level_no, is_top=False, is_under=False)
 
-    Sheets record a human label ("Zone 3"), not a database id. Match an existing
-    level or shelf by that label; failing that create the level so the location
-    travels with the import instead of being silently dropped. Returns None only
-    when there is no shelf at all to hang it from.
-    """
+    exact = boards.filter(column_number=column_no).first()
+    if exact is not None:
+        return exact
+
+    if column_no in (None, 1):
+        # Either spelling of "the only bay", against either storage of it.
+        return (boards.filter(column_number__isnull=True).first()
+                or boards.filter(column_number=1).first())
+
+    return None
+
+
+def _resolve_storage_area(name):
+    """Find the shelf level a sheet's "Storage Area" refers to, creating it once."""
     label = (name or '').strip()
     if not label:
         return None
 
-    # A written position wins: "Shelf A Column 1 Level 2" names one board, and
-    # matching it against category names would file it by accident.
+    # A written position takes priority over category names.
     precise = _resolve_written_location(label)
     if precise is not None:
         return precise
@@ -3978,26 +3902,140 @@ def _resolve_storage_area(name):
 
 
 class _PreviewOnly(Exception):
-    """Raised to unwind a preview run once its summary has been taken.
-
-    The alternative -- a second code path that predicts what the real one would
-    do -- is a copy that drifts, and a preview that lies about the import is
-    worse than no preview. So the import genuinely runs and is then rolled
-    back, which means what is shown is what happened.
-    """
+    """Raised to unwind a preview run once its summary has been taken."""
 
     def __init__(self, payload):
         self.payload = payload
 
 
 @granted_module_required('books')
-def import_books(request):
-    """Import a sheet, or say what importing it would do.
+def delete_books(request):
+    """Delete the ticked books."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
 
-    A preview runs the real import inside a transaction and rolls it back, so
-    what the confirmation box reports is what actually happened rather than a
-    second implementation's guess at it.
-    """
+    raw = request.POST.get('ids', '')
+    ids = [int(x) for x in raw.replace('\n', ',').split(',') if x.strip().isdigit()]
+    if not ids:
+        return JsonResponse({'success': False, 'error': 'Select at least one book first.'})
+    if len(ids) > MAX_BOOKS_PER_MOVE:
+        return JsonResponse({
+            'success': False,
+            'error': f'That is {len(ids)} books. Delete at most '
+                     f'{MAX_BOOKS_PER_MOVE} at a time.'})
+
+    books = list(Book.objects.filter(book_id__in=ids))
+    if not books:
+        return JsonResponse({'success': False, 'error': 'Those books no longer exist.'})
+
+    on_loan = [b for b in books if b.status in ('Borrowed', 'Overdue')]
+    deletable = [b for b in books if b not in on_loan]
+    deletable_ids = [b.book_id for b in deletable]
+
+    loans = Transaction.objects.filter(book_id__in=deletable_ids).count()
+    gifts = Donation.objects.filter(book_id__in=deletable_ids).count()
+
+    summary = {
+        'success': True,
+        'selected': len(books),
+        'deletable': len(deletable),
+        'on_loan': [{'id': b.book_id, 'title': b.title} for b in on_loan[:10]],
+        'on_loan_count': len(on_loan),
+        'loan_records': loans,
+        'donation_records': gifts,
+    }
+
+    if request.POST.get('confirm') not in ('1', 'true', 'True', 'on'):
+        summary['preview'] = True
+        return JsonResponse(summary)
+
+    if not deletable:
+        return JsonResponse({
+            'success': False,
+            'error': 'Every book selected is out on loan. Return them first.'})
+
+    titles = [b.title for b in deletable[:5]]
+    with transaction.atomic():
+        Book.objects.filter(book_id__in=deletable_ids).delete()
+        log_admin_action(
+            request, 'Delete', 'Book',
+            detail='Deleted %d book(s)%s%s' % (
+                len(deletable_ids),
+                ' incl. ' + ', '.join(titles) if titles else '',
+                ' (%d loan record(s) removed)' % loans if loans else ''))
+
+    summary['preview'] = False
+    summary['deleted'] = len(deletable_ids)
+    summary['message'] = '%d book%s deleted.' % (
+        len(deletable_ids), '' if len(deletable_ids) == 1 else 's')
+    return JsonResponse(summary)
+
+
+@admin_or_any_module_required('books', 'shelf')
+def move_books(request):
+    """Move the selected books onto another board, or off the shelves."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
+
+    raw = request.POST.get('ids', '')
+    ids = [int(x) for x in raw.replace('\n', ',').split(',') if x.strip().isdigit()]
+    if not ids:
+        return JsonResponse({'success': False, 'error': 'Select at least one book first.'})
+    if len(ids) > MAX_BOOKS_PER_MOVE:
+        return JsonResponse({
+            'success': False,
+            'error': f'That is {len(ids)} books. Move at most '
+                     f'{MAX_BOOKS_PER_MOVE} at a time.'})
+
+    target = (request.POST.get('level') or '').strip()
+    level = None
+    if target != 'none':
+        if not target.isdigit():
+            return JsonResponse({'success': False,
+                                 'error': 'Choose where the books should go.'})
+        level = (ShelfLevel.objects.select_related('shelf')
+                 .filter(shelf_level_id=int(target)).first())
+        if level is None:
+            return JsonResponse({'success': False, 'error': 'That board no longer exists.'})
+
+    # Keep the current order.
+    books = list(Book.objects.filter(book_id__in=ids)
+                 .order_by(F('shelf_slot').asc(nulls_last=True), 'title', 'book_id'))
+    if not books:
+        return JsonResponse({'success': False, 'error': 'Those books no longer exist.'})
+
+    with transaction.atomic():
+        if level is None:
+            Book.objects.filter(book_id__in=[b.book_id for b in books]).update(
+                shelf_level=None, shelf_slot=None)
+            where = 'off the shelves'
+        else:
+            counter = {}
+            for book in books:
+                Book.objects.filter(pk=book.pk).update(
+                    shelf_level=level, shelf_slot=_next_slot(counter, level))
+            where = '%s %s' % (level.shelf.name if level.shelf else '', level.label)
+
+        log_admin_action(
+            request, 'Moved books', 'Book',
+            detail='%d book(s) moved to %s' % (len(books), where.strip()))
+
+    # "moved to off the shelves" is not a sentence.
+    count = '%d book%s' % (len(books), '' if len(books) == 1 else 's')
+    message = ('%s taken off the shelves.' % count if level is None
+               else '%s moved to %s.' % (count, where.strip()))
+
+    return JsonResponse({
+        'success': True,
+        'moved': len(books),
+        'where': where.strip(),
+        'message': message,
+    })
+
+
+@granted_module_required('books')
+def import_books(request):
+    """Import a sheet, or say what importing it would do."""
     if request.POST.get('preview') in ('1', 'true', 'True', 'on'):
         try:
             with transaction.atomic():
@@ -4008,21 +4046,7 @@ def import_books(request):
 
 
 def _import_books_body(request):
-    """Bulk-import books from a spreadsheet.
-
-    Columns are matched by *header name*, not position, so a sheet recorded in
-    a different order still imports. Aliases cover what libraries actually
-    write in their own sheets ("Barcode" for the ISBN, "Year Publish" for the
-    publication year, and so on).
-
-    Quantity creates that many physical copies — the catalogue stores one row
-    per copy — and Storage Area is resolved to a shelf level by name so a sheet
-    can carry its own locations.
-
-    The ids of everything created come back in `created_ids`, because the next
-    thing anyone does after importing a delivery is print the QR stickers for
-    it — see book_qr_labels.
-    """
+    """Bulk-import books from a spreadsheet."""
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
 
@@ -4030,15 +4054,20 @@ def _import_books_body(request):
         return JsonResponse({'success': False, 'error': 'No file uploaded'})
 
     excel_file = request.FILES['excel_file']
-    # Name, size and magic bytes, not just the extension: openpyxl allocates for
-    # whatever a workbook claims to hold, and a renamed file is not a workbook.
+    # Check the file name, size and contents.
     upload_error = check_import_upload(excel_file)
     if upload_error:
         return JsonResponse({'success': False, 'error': upload_error})
 
-    # A preview does the real work and throws it away, so the numbers shown are
-    # measured rather than predicted.
+    # Preview runs the import and rolls it back.
     preview = request.POST.get('preview') in ('1', 'true', 'True', 'on')
+
+    # Rows confirmed as extra copies, by sheet row number.
+    copy_rows = set()
+    for raw in (request.POST.get('copy_rows') or '').split(','):
+        raw = raw.strip()
+        if raw.isdigit():
+            copy_rows.add(int(raw))
 
     # header text (normalised) -> field. Several spellings map to one field.
     HEADER_ALIASES = {
@@ -4058,12 +4087,15 @@ def _import_books_body(request):
         'quantity': 'quantity', 'qty': 'quantity', 'copies': 'quantity',
         'numberofcopies': 'quantity',
         'condition': 'condition', 'bookcondition': 'condition', 'state': 'condition',
-        # The spine number. Left blank it is worked out from the genre, author,
-        # title and year, so a sheet that never had a column for it still comes
-        # out with every book numbered.
+        # The spine number.
         'codelabel': 'call_number', 'callnumber': 'call_number',
         'callno': 'call_number', 'spinelabel': 'call_number',
         'classification': 'call_number',
+        # Where the book sits along its board, counted from the left.
+        'slot': 'shelf_slot', 'shelfslot': 'shelf_slot',
+        'slotnumber': 'shelf_slot', 'slotno': 'shelf_slot',
+        'order': 'shelf_slot', 'sortorder': 'shelf_slot',
+        'sequence': 'shelf_slot', 'seq': 'shelf_slot',
     }
 
     def norm(text):
@@ -4103,27 +4135,36 @@ def _import_books_body(request):
 
         imported = skipped_dup = skipped_blank = copies_created = 0
         # Collected so the caller can print labels for exactly this delivery.
-        # Filtering the table by hand afterwards to find "the ones I just added"
-        # is guesswork the moment two imports happen on the same day.
         created_ids = []
         unmatched_areas = set()
         unreadable_conditions = set()
+
+        # The next free position on each board this import touches.
+        next_slot = {}
         skipped_repeat = 0
 
-        # What was already on the shelves before this file was opened. A row
-        # with no ISBN has nothing else to be recognised by, so re-importing a
-        # sheet used to add every one of its books again -- and most of a real
-        # catalogue has no ISBN at all.
-        #
-        # Snapshotted up front, deliberately: copies created by this very
-        # import must not block each other, or a Quantity of 3 would import one
-        # book and skip two.
-        already_here = set(
-            (str(t or '').strip().lower(), str(a or '').strip().lower(), lvl)
-            for t, a, lvl in Book.objects.values_list('title', 'author', 'shelf_level_id')
-        )
+        # Books already in the catalogue before this import.
+        already_here = {}
+        for t, a, shelf_name in Book.objects.values_list(
+                'title', 'author', 'shelf_level__shelf__name'):
+            entry = already_here.setdefault(
+                (str(t or '').strip().lower(), str(a or '').strip().lower()),
+                {'copies': 0, 'shelves': set()})
+            entry['copies'] += 1
+            if shelf_name:
+                entry['shelves'].add(shelf_name)
 
-        for row in ws.iter_rows(min_row=2, values_only=True):
+        existing_isbns = set(
+            str(v).strip().lower()
+            for v in Book.objects.exclude(ISBN__isnull=True).exclude(ISBN='')
+                                 .values_list('ISBN', flat=True))
+
+        # Rows that match existing books.
+        clashes = []
+        clashes_total = 0          # including any past the listing cap
+        copies_of_existing = 0
+
+        for row_no, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
             title = field(row, 'title')
             author = field(row, 'author')
             if not title or not author:
@@ -4135,9 +4176,35 @@ def _import_books_body(request):
                 continue
 
             isbn = field(row, 'ISBN')
-            if isbn and Book.objects.filter(ISBN=isbn).exists():
-                skipped_dup += 1
+
+            # Is this book already catalogued?
+            seen = already_here.get((title.strip().lower(), author.strip().lower()))
+            clash = None
+            if isbn and isbn.strip().lower() in existing_isbns:
+                clash = 'isbn'
+            elif seen:
+                clash = 'title'
+
+            if clash and row_no not in copy_rows:
+                if clash == 'isbn':
+                    skipped_dup += 1
+                else:
+                    skipped_repeat += 1
+                clashes_total += 1
+                if len(clashes) < MAX_CLASH_ROWS:
+                    clashes.append({
+                        'row': row_no,
+                        'title': title,
+                        'author': author,
+                        'isbn': isbn or '',
+                        'reason': clash,
+                        'have': (seen or {}).get('copies', 1),
+                        'where': ', '.join(sorted((seen or {}).get('shelves', ()))),
+                    })
                 continue
+
+            if clash:
+                copies_of_existing += 1
 
             raw_year = field(row, 'publication_year')
             publication_year = None
@@ -4150,10 +4217,7 @@ def _import_books_body(request):
                 except (TypeError, ValueError):
                     publication_year = None
 
-            # Unreadable still becomes Good rather than failing the row -- a
-            # word nobody anticipated is not a reason to refuse a book -- but it
-            # is counted and reported, because silently calling a damaged book
-            # Good is how a shelf of them goes unnoticed.
+            # Unknown conditions default to Good but are reported.
             raw_condition = field(row, 'condition')
             condition = parse_condition(raw_condition)
             if condition is None:
@@ -4180,30 +4244,24 @@ def _import_books_body(request):
                     if shelf_level is None:
                         unmatched_areas.add(area)
 
-            # With no ISBN there is nothing else to recognise a row by, so this
-            # is what stops a second run of the same sheet adding every one of
-            # its books again.
-            #
-            # Compared only against the snapshot taken before the import began,
-            # and deliberately not added to as rows are created: two rows for
-            # one book *within a sheet* are two physical copies, and the sheet
-            # listing them separately is how a library says so. It is the same
-            # book turning up in a later import that means nothing new.
-            if not isbn:
-                identity = (title.strip().lower(), author.strip().lower(),
-                            shelf_level.shelf_level_id if shelf_level else None)
-                if identity in already_here:
-                    skipped_repeat += 1
-                    continue
+            # An explicit Slot column wins; otherwise the row's turn on its board.
+            written_slot = parse_shelf_slot(field(row, 'shelf_slot'))
 
             for copy_no in range(quantity):
-                # Only the first copy carries the ISBN: it is unique to the
-                # title, and the duplicate check above relies on that.
+                slot = None
+                if shelf_level is not None:
+                    if written_slot is not None:
+                        slot = written_slot + copy_no
+                    else:
+                        slot = _next_slot(next_slot, shelf_level)
+
+                # Only the first copy keeps the ISBN.
                 book = Book.objects.create(
+                    shelf_slot=slot,
                     title=title,
                     author=author,
                     publication_year=publication_year,
-                    ISBN=isbn if copy_no == 0 else None,
+                    ISBN=isbn if (copy_no == 0 and not clash) else None,
                     genre=field(row, 'genre') or None,
                     condition=condition,
                     # Blank is the normal case: Book.save() derives it.
@@ -4217,9 +4275,7 @@ def _import_books_body(request):
                 if copy_no > 0:
                     copies_created += 1
 
-        # A preview describes what will happen, not what has. A confirmation
-        # box that reads "Imported 46 books" invites the reader to think the
-        # job is already done and close it.
+        # A preview describes what will happen, not what has.
         if preview:
             parts = [f'{imported} book record(s) will be imported']
             skipped_word = 'will skip'
@@ -4228,16 +4284,17 @@ def _import_books_body(request):
             skipped_word = 'skipped'
         if copies_created:
             parts.append(f'including {copies_created} extra copy/copies from Quantity')
+        if copies_of_existing:
+            parts.append(f'{"will add" if preview else "added"} {copies_of_existing} '
+                         f'row(s) as extra copies of books already catalogued')
         if skipped_dup:
             parts.append(f'{skipped_word} {skipped_dup} row(s) whose ISBN already exists')
         if skipped_repeat:
-            parts.append(f'{skipped_word} {skipped_repeat} row(s) already on the same shelf '
-                         f'(no ISBN to tell copies apart)')
+            parts.append(f'{skipped_word} {skipped_repeat} row(s) already in the catalogue')
         if skipped_blank:
             parts.append(f'{skipped_word} {skipped_blank} row(s) with no title or author')
         if unreadable_conditions:
-            # Named, not just counted: "BAD CONDITION" filed as Good is the kind
-            # of thing nobody notices until a shelf of damaged books is found.
+            # List unreadable conditions by name.
             parts.append('could not read the condition "'
                          + '", "'.join(sorted(unreadable_conditions)[:5])
                          + '" — filed as Good')
@@ -4249,11 +4306,7 @@ def _import_books_body(request):
             'message': '. '.join(parts) + '.',
             'imported': imported,
             'matched_columns': sorted(columns),
-            # Capped at the label sheet's own limit: past that the follow-up
-            # offer is not something anyone would accept anyway. Empty for a
-            # preview: those rows are about to be rolled back, and handing out
-            # ids that will not exist a moment later is a trap for whatever
-            # tries to use them.
+            # Created ids for the label sheet (none for a preview).
             'created_ids': [] if preview else created_ids[:MAX_LABELS_PER_SHEET],
             'created_truncated': len(created_ids) > MAX_LABELS_PER_SHEET,
             'preview': preview,
@@ -4261,6 +4314,10 @@ def _import_books_body(request):
             'skipped_repeat': skipped_repeat,
             'skipped_blank': skipped_blank,
             'copies_created': copies_created,
+            # The rows that need a decision, listed so the box can ask about them by name.
+            'clashes': clashes if preview else [],
+            'clashes_truncated': clashes_total > len(clashes),
+            'copies_of_existing': copies_of_existing,
         }
         return JsonResponse(payload)
 
@@ -4310,9 +4367,7 @@ def import_patrons(request):
         skipped_count = 0
         
         for row in ws.iter_rows(min_row=2):
-            # Three name columns now; a file made with the old single-column
-            # template still imports, since a lone name splits the same way a
-            # walk-in typed at the desk does.
+            # Old single-name templates still import.
             first_name = (row[0].value or '') if row[0].value else ''
             middle_name = (row[1].value or '') if len(row) > 1 and row[1].value else ''
             last_name = (row[2].value or '') if len(row) > 2 and row[2].value else ''
@@ -4433,8 +4488,7 @@ def import_donations(request):
                 status='Received'
             )
 
-            # A bulk import is still an intake, so it lands in Inventory like
-            # any other donation — otherwise it would be a second way in.
+            # Record imported books in inventory.
             record = InventoryRecord.objects.create(
                 book=book,
                 source='Donation',
@@ -4525,8 +4579,7 @@ def import_announcements(request):
         return import_failed('Announcement import', exc)
 
 
-# Deliberately admin_login_required rather than one module: shared by Manage Books and Transactions,
-# and it only reads data the calling page already gated.
+# Shared by Manage Books and Transactions.
 @admin_login_required
 def get_book_by_id(request):
     book_id = request.GET.get('book_id', '').strip()
@@ -4557,13 +4610,7 @@ class _AlreadyResolved(Exception):
 
 
 class _BasketAborted(Exception):
-    """Raised inside the transaction to roll the whole basket back.
-
-    Processing used to validate and write one book at a time in the same loop,
-    so a basket of five where the third was already on loan left the first two
-    committed as borrowed -- while the staff member saw an error and reasonably
-    assumed nothing had happened.
-    """
+    """Raised inside the transaction to roll the whole basket back."""
 
     def __init__(self, errors):
         super().__init__('; '.join(errors))
@@ -4571,16 +4618,7 @@ class _BasketAborted(Exception):
 
 
 def _apply_basket(request, transaction_type, book_ids, patron, admin, rule):
-    """Do the whole basket inside one locked transaction, or do none of it.
-
-    Split out of process_transaction so the atomic block is a function boundary
-    rather than an extra level of indentation wrapped around a hundred lines --
-    and so the emails and the audit line, which must not fire for a basket that
-    rolled back, are plainly outside it.
-
-    Returns (processed_titles, borrowed_books, borrow_due_date, returned_books,
-    returned_overdue). Raises _BasketAborted if anything in the basket fails.
-    """
+    """Do the whole basket inside one locked transaction, or do none of it."""
     errors = []
     processed_books = []
     borrowed_books = []
@@ -4595,9 +4633,7 @@ def _apply_basket(request, transaction_type, book_ids, patron, admin, rule):
             if not eligible:
                 raise _BasketAborted(violations)
 
-            # Counted inside the transaction so two baskets processed at the same
-            # moment cannot each see the patron under the limit and together push
-            # them over it.
+            # Count inside the transaction to enforce the limit.
             active_borrows = Transaction.objects.filter(
                 patron=patron, transaction_type='Borrow', return_date__isnull=True
             ).count()
@@ -4607,9 +4643,7 @@ def _apply_basket(request, transaction_type, book_ids, patron, admin, rule):
                     f'This patron already has {active_borrows} active borrow(s).'
                 ])
 
-        # Ids are resolved and sorted before any lock is taken: two staff
-        # processing {A, B} and {B, A} at the same time would otherwise each hold
-        # the row the other is waiting for, and deadlock.
+        # Sort ids before locking to avoid deadlocks.
         wanted = []
         for raw in book_ids:
             try:
@@ -4619,10 +4653,7 @@ def _apply_basket(request, transaction_type, book_ids, patron, admin, rule):
         wanted = sorted(set(wanted))
 
         for book_id_int in wanted:
-            # select_for_update holds this row until the transaction ends, which
-            # is what turns the status check below from a guess into a decision.
-            # Without it two terminals could both read "Available" for the same
-            # copy and both write "Borrowed" -- two open loans, one physical book.
+            # Lock the book row until the transaction ends.
             book = Book.objects.select_for_update().filter(book_id=book_id_int).first()
             if book is None:
                 errors.append(f'Book not found: {book_id_int}')
@@ -4683,8 +4714,7 @@ def _apply_basket(request, transaction_type, book_ids, patron, admin, rule):
 
             processed_books.append(book.title)
 
-        # Raised rather than returned: the exception is what unwinds the atomic
-        # block, and unwinding it is what undoes the books already written above.
+        # Raise to roll back the whole basket.
         if errors:
             raise _BasketAborted(errors)
 
@@ -4716,8 +4746,7 @@ def process_transaction(request):
     verification = ''
     if transaction_type in ['Borrow', 'Return']:
         if patron_qr:
-            # Scanned identity: the QR is re-resolved here rather than trusting the
-            # patron_id the browser sent, so the scan is what actually commits.
+            # Look the patron up again from the scanned QR.
             patron = Patron.objects.filter(qr_code=patron_qr).first()
             if patron is None:
                 return JsonResponse({'success': False, 'error': 'No patron matches that QR code'})
@@ -4740,16 +4769,14 @@ def process_transaction(request):
     # Active borrowing rule (loan period, limit, penalties).
     rule = BorrowingRule.current()
 
-    # 3-point patron eligibility check before borrowing (overdue items,
-    # account suspension, outstanding lost-book penalty).
+    # Check the patron can borrow.
 
     try:
         (processed_books, borrowed_books, borrow_due_date,
          returned_books, returned_overdue) = _apply_basket(
             request, transaction_type, book_ids, patron, admin, rule)
     except _BasketAborted as aborted:
-        # Nothing was written: the transaction rolled back on the way out, so
-        # there is no partial basket to report.
+        # Rolled back, nothing was saved.
         return JsonResponse({
             'success': False,
             'error': 'Transaction validation failed',
@@ -4781,16 +4808,8 @@ def process_transaction(request):
 
 # Donation Management Views
 def _donations_page(request, template):
-    """The donation accessioning queue (Ch.1 ¶258, Fig. 7).
-
-    Intake itself lives in Inventory — ¶268, Fig. 9 and Fig. 78 all place
-    "receive books / process donations" there — so this page no longer creates
-    donations. It tracks copies received in Inventory through
-    Received → Processing → Shelved.
-    """
-    # Ordered so the title-lines of one intake sit together: a donor who brings
-    # five titles created five rows, and reading them as five separate
-    # donations is the thing that makes this page misleading.
+    """The donation accessioning queue."""
+    # Keep titles from the same donation together.
     donations_queryset = (Donation.objects
                           .select_related('book')
                           .prefetch_related('inventory_copies')
@@ -4803,8 +4822,6 @@ def _donations_page(request, template):
         return portal_redirect(request, 'donation_management')
 
     # One donation is one donor on one day, however many titles came with it.
-    # A library acknowledges the gift, not each title inside it, so the page is
-    # grouped that way and paginated by donation rather than by line.
     groups = []
     total_titles = 0
     total_copies = 0
@@ -4829,8 +4846,7 @@ def _donations_page(request, template):
 
     for group in groups:
         stages = group['stages']
-        # One label for the gift as a whole. "Mixed" is the honest answer when
-        # its titles are at different points, rather than picking one of them.
+        # One label for the gift as a whole.
         group['stage'] = stages.pop() if len(stages) == 1 else 'Mixed'
         group['title_count'] = len(group['lines'])
 
@@ -4838,13 +4854,7 @@ def _donations_page(request, template):
     paginator = Paginator(groups, 10)   # 10 donations per page
     donations = paginator.get_page(page_number)
 
-    # Counted here rather than in the template, and counted over the whole
-    # queryset rather than the page being shown: a stage total that only
-    # described page one would quietly disagree with itself as you paged.
-    # order_by() is cleared deliberately: an ordering field joins the GROUP BY
-    # of a values().annotate(), so grouping by status alone requires dropping
-    # the date ordering first. Left in, it counts one group per date and every
-    # stage reports 1.
+    # Count stages over all donations, not just this page.
     stage_counts = {row['status']: row['n'] for row in
                     donations_queryset.order_by().values('status').annotate(n=Count('status'))}
 
@@ -4852,7 +4862,7 @@ def _donations_page(request, template):
     return render(request, template, {
         'donations': donations,
         'paginator': paginator,
-        # Three different numbers that were all previously called "donations".
+        # Three separate donation counts.
         'total_donations': paginator.count,     # gifts received
         'total_titles': total_titles,           # accessioning lines
         'total_copies': total_copies,           # physical books
@@ -4883,19 +4893,13 @@ def update_donation_status(request):
             donation.status = status
             donation.save()
 
-            # Shelving the last stage of accessioning normally makes the title
-            # available — but only if nothing else already has a claim on it.
-            # A copy out on loan, marked lost, or being read in the library is
-            # a fact about the physical book, and an accessioning step must not
-            # overwrite it: the catalogue would advertise a book that is in
-            # somebody's bag.
+            # Only mark the book Available if nothing else claims it.
             if status == 'Shelved' and donation.book:
                 claimed = donation.book.status in ('Borrowed', 'Overdue', 'Being Read', 'Lost')
                 if not claimed:
                     donation.book.status = 'Available'
                     donation.book.save()
-            # Carry the stage back to the inventory copies this row tracks, so
-            # the two never disagree about where a donation has got to.
+            # Update the matching inventory copies.
             donation.inventory_copies.update(processing_stage=status)
             log_admin_action(request, 'Update', 'Donation', donation.donation_id,
                              f'Status set to {status}')
@@ -4910,8 +4914,7 @@ def delete_donation(request):
         donation = Donation.objects.filter(donation_id=donation_id).first()
         if donation:
             detail = f'"{donation.book.title}" from {donation.donor_name}' if donation.book else donation.donor_name
-            # Copies still tracked by this accessioning row would be left with
-            # no record of where they came from, so they are dealt with first.
+            # Handle linked inventory copies first.
             held = donation.inventory_copies.exclude(status='Removed').count()
             if held:
                 messages.error(
@@ -4921,11 +4924,7 @@ def delete_donation(request):
                 )
                 return portal_redirect(request, 'donation_management')
 
-            # Only the accessioning row goes. Deleting the catalogue record here
-            # took its loan history with it -- Transaction.book cascades -- so
-            # removing a mis-keyed donation could erase who had borrowed the
-            # book and when. A catalogue record that should not exist is removed
-            # in Manage Books, where that is the visible, intended consequence.
+            # Only the accessioning row goes.
             donation.delete()
             log_admin_action(request, 'Delete', 'Donation', donation_id, detail)
             messages.success(
@@ -4939,15 +4938,7 @@ def delete_donation(request):
 
 # Announcement Management Views
 def _announcement_stats(queryset):
-    """The four figures above the table.
-
-    Counted here rather than in the template. The template was reaching for
-    `|dictsort:"is_active"|slice:":1"`, which does not count anything -- it sorts
-    the page and hands back a one-item *list*, so all three cards rendered as
-    `[<Announcement: Announcement object (1)>]` instead of a number. Two of them
-    were the same expression as well, so Active and Inactive could never have
-    disagreed even had it worked.
-    """
+    """The four figures above the table."""
     active = queryset.filter(is_active=True).count()
     total = queryset.count()
     return {
@@ -4983,9 +4974,7 @@ def announcement_management(request):
         )
         log_admin_action(request, 'Create', 'Announcement', announcement.announcement_id, f'Posted "{title}"')
 
-        # Optionally email the announcement to all active patrons. One SMTP
-        # connection for the whole broadcast — reconnecting per patron costs
-        # about a second each and would stall the request.
+        # Optionally email the announcement to all active patrons.
         if request.POST.get('email_patrons'):
             recipients = list(
                 Patron.objects.filter(account_status='Active').exclude(email='')
@@ -5069,8 +5058,7 @@ def floorplan_management(request):
     floorplans = FloorPlan.objects.prefetch_related('room_set__shelf_set__shelflevel_set').order_by('-uploaded_at')
 
     if request.method == 'POST':
-        # A floor plan is a blank vector canvas — the Administrator draws the
-        # rooms on it. No image is uploaded.
+        # A floor plan is a blank canvas where the rooms are drawn.
         name = (request.POST.get('name') or '').strip()
         if not name:
             error = 'Floor plan name is required.'
@@ -5110,8 +5098,7 @@ def floorplan_management(request):
 
         return redirect('floorplan_management')
 
-    # Which plan the map editor opens on: ?plan=<id>, else the live one, else
-    # the newest. A draft can be drawn in full before it is made active.
+    # Which plan the map editor opens on: ?plan=<id>, else the live one, else the newest.
     selected = None
     requested = request.GET.get('plan')
     if requested:
@@ -5138,10 +5125,7 @@ def set_active_floorplan(request):
         floorplan_id = request.POST.get('floorplan_id')
         floorplan = FloorPlan.objects.filter(floor_plan_id=floorplan_id).first()
         if floorplan:
-            # A plain toggle. This used to deactivate every other plan, on the
-            # assumption that exactly one floor existed -- which meant putting an
-            # upper floor into service took the ground floor's books out of the
-            # catalogue. Floors are independent now.
+            # A plain toggle.
             floorplan.is_active = not floorplan.is_active
             floorplan.save(update_fields=['is_active'])
 
@@ -5150,12 +5134,7 @@ def set_active_floorplan(request):
 
 @admin_only_required
 def set_floorplan_scale(request):
-    """Set how many canvas units represent one real-world metre.
-
-    BLE path-loss gives distances in metres while every stored coordinate is in
-    canvas units; this is the conversion between them. Without it the client
-    disables trilateration instead of silently misplacing the patron.
-    """
+    """Set how many canvas units represent one real-world metre."""
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
 
@@ -5187,15 +5166,155 @@ def set_floorplan_scale(request):
 
 
 @admin_only_required
-def set_floorplan_floor_number(request):
-    """Which storey a plan represents.
+def set_floorplan_canvas(request):
+    """Resize the canvas a floor plan is drawn on, after it has been drawn on."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
 
-    Backfilled by creation order when multi-floor support landed, which is a
-    guess -- the order plans were drawn in is not the order they are stacked in.
-    This is how an Administrator corrects it. The number orders the patron's
-    floor switcher and names each entry ("2nd floor"), so it is the one thing
-    that has to match the building.
-    """
+    plan = FloorPlan.objects.filter(floor_plan_id=request.POST.get('floorplan_id')).first()
+    if plan is None:
+        return JsonResponse({'success': False, 'error': 'Floor plan not found'})
+
+    try:
+        width = float(request.POST.get('canvas_width'))
+        height = float(request.POST.get('canvas_height'))
+    except (TypeError, ValueError):
+        return JsonResponse({'success': False, 'error': 'Width and height must be numbers'})
+    if not (100 <= width <= 10000) or not (100 <= height <= 10000):
+        return JsonResponse({'success': False,
+                             'error': 'Width and height must each be between 100 and 10000.'})
+
+    old_w = float(plan.canvas_width or 0) or width
+    old_h = float(plan.canvas_height or 0) or height
+    scale_contents = request.POST.get('scale_contents') in ('1', 'true', 'True', 'on')
+
+    if scale_contents:
+        factor = round(min(width / old_w, height / old_h), 6)
+        moved = _scale_floorplan_contents(plan, factor) if factor != 1 else 0
+        plan.canvas_width, plan.canvas_height = width, height
+        fields = ['canvas_width', 'canvas_height']
+        if plan.pixels_per_meter and factor != 1:
+            # Scale the units per metre too.
+            plan.pixels_per_meter = round(plan.pixels_per_meter * factor, 4)
+            fields.append('pixels_per_meter')
+        plan.save(update_fields=fields)
+        log_admin_action(request, 'Update', 'FloorPlan', plan.floor_plan_id,
+                         f'Canvas resized to {width:g} x {height:g}, '
+                         f'{moved} shape(s) scaled by {factor:g}')
+        return JsonResponse({'success': True, 'canvas_width': width,
+                             'canvas_height': height, 'scaled': moved,
+                             'factor': factor,
+                             'pixels_per_meter': plan.pixels_per_meter})
+
+    outside = _content_outside_canvas(plan, width, height)
+    if outside:
+        return JsonResponse({
+            'success': False,
+            'error': ('%d thing(s) would be left outside a %g x %g canvas -- %s. '
+                      'Make it larger, move them in first, or tick "resize everything '
+                      'to fit".' % (len(outside), width, height, ', '.join(outside[:4])
+                                    + (' and more' if len(outside) > 4 else ''))),
+        })
+
+    plan.canvas_width, plan.canvas_height = width, height
+    plan.save(update_fields=['canvas_width', 'canvas_height'])
+    log_admin_action(request, 'Update', 'FloorPlan', plan.floor_plan_id,
+                     f'Canvas resized to {width:g} x {height:g}')
+    return JsonResponse({'success': True, 'canvas_width': width,
+                         'canvas_height': height, 'scaled': 0})
+
+
+def _plan_contents(plan):
+    """Every drawn thing on a plan, as (label, queryset) pairs."""
+    return [
+        ('room', Room.objects.filter(floor_plan=plan)),
+        ('door', Door.objects.filter(room__floor_plan=plan)),
+        ('furniture', Obstacle.objects.filter(floor_plan=plan)),
+        ('stairway', Stairway.objects.filter(floor_plan=plan)),
+        ('shelf', Shelf.objects.filter(room__floor_plan=plan)),
+        ('waypoint', Waypoint.objects.filter(floor_plan=plan)),
+        ('beacon', BLEBeacon.objects.filter(floor_plan=plan)),
+    ]
+
+
+def _extent_of(obj):
+    """The box this thing occupies, as (x0, y0, x1, y1), or None if unplaced."""
+    geometry = getattr(obj, 'geometry', None)
+    if geometry and len(geometry) >= 3:
+        xs = [p[0] for p in geometry]
+        ys = [p[1] for p in geometry]
+        return min(xs), min(ys), max(xs), max(ys)
+
+    x, y = getattr(obj, 'map_x', None), getattr(obj, 'map_y', None)
+    if x is None or y is None:
+        return None
+    # Include half the width and depth.
+    half_w = (getattr(obj, 'width', 0) or 0) / 2
+    half_d = (getattr(obj, 'depth', 0) or 0) / 2
+    reach = max(half_w, half_d)
+    return x - reach, y - reach, x + reach, y + reach
+
+
+def _content_outside_canvas(plan, width, height):
+    """What would fall off the edge at this size, named so it can be found."""
+    outside = []
+    for kind, queryset in _plan_contents(plan):
+        for obj in queryset:
+            extent = _extent_of(obj)
+            if extent is None:
+                continue
+            x0, y0, x1, y1 = extent
+            if x1 > width or y1 > height or x0 < 0 or y0 < 0:
+                name = (getattr(obj, 'name', None) or getattr(obj, 'label', None)
+                        or '').strip()
+                outside.append(f'{kind} "{name}"' if name else f'a {kind}')
+    return outside
+
+
+def _scale_floorplan_contents(plan, factor):
+    """Multiply every coordinate on the plan by one factor."""
+    def scale_geometry(geometry):
+        return [[round(p[0] * factor, 2), round(p[1] * factor, 2)] for p in geometry]
+
+    touched = 0
+    for kind, queryset in _plan_contents(plan):
+        for obj in queryset:
+            fields = []
+            if getattr(obj, 'geometry', None) and len(obj.geometry) >= 3:
+                obj.geometry = scale_geometry(obj.geometry)
+                fields.append('geometry')
+            for attr in ('map_x', 'map_y'):
+                value = getattr(obj, attr, None)
+                if value is not None:
+                    setattr(obj, attr, round(value * factor, 2))
+                    fields.append(attr)
+            # Sizes are distances too.
+            for attr in ('width', 'depth'):
+                value = getattr(obj, attr, None)
+                if value is not None and hasattr(obj, attr):
+                    setattr(obj, attr, round(value * factor, 2))
+                    fields.append(attr)
+            if kind == 'stairway':
+                # Rebuild stair flights from the scaled outline.
+                obj.flights = _stair_flights(obj.geometry, obj.bearing,
+                                             _stair_shape_of(obj)) or None
+                fields.append('flights')
+            if fields:
+                obj.save(update_fields=fields)
+                touched += 1
+
+    # Connection lengths are cached in canvas units, so they scale too.
+    for conn in WaypointConnection.objects.filter(
+            waypoint_from__floor_plan=plan, waypoint_to__floor_plan=plan):
+        if conn.distance is not None:
+            conn.distance = round(conn.distance * factor, 2)
+            conn.save(update_fields=['distance'])
+    return touched
+
+
+@admin_only_required
+def set_floorplan_floor_number(request):
+    """Which storey a plan represents."""
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
 
@@ -5221,13 +5340,7 @@ def set_floorplan_floor_number(request):
 
 @admin_only_required
 def set_floorplan_north(request):
-    """Record how far the plan's "up" is from magnetic north.
-
-    Dead reckoning turns a compass bearing into a direction on this map, so an
-    unmeasured offset does not degrade the result gracefully -- it sends the
-    marker off at a fixed angle to wherever the patron actually walked. Zero is
-    only correct if the plan happens to have been drawn with north at the top.
-    """
+    """Record how far the plan's "up" is from magnetic north."""
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
 
@@ -5465,16 +5578,64 @@ def import_logs(request):
         return import_failed('Log import', exc)
 
 
-# ─── REPORTS VIEWS ───────────────────────────────────────────────
+# Analytics
+@admin_only_required
+def admin_analytics(request):
+    """Charts, as opposed to records."""
+    start, end = parse_date_range(request.GET.get('start'), request.GET.get('end'))
+    period = (request.GET.get('period') or 'day').lower()
+    if period not in ('day', 'week', 'month'):
+        period = 'day'
+    # Which of the three sections is open.
+    view = (request.GET.get('view') or 'visits').lower()
+    if view not in ('visits', 'collection', 'borrowing'):
+        view = 'visits'
+
+    arrivals = analytics.visits_by_hour(start, end)
+    occupancy = analytics.occupancy_by_hour(start, end)
+    conditions = analytics.books_by_condition()
+    unshelved = analytics.unshelved_summary()
+    borrowed_books = analytics.most_borrowed_books(start, end)
+    penalties = analytics.penalties_over_time(start, end, period)
+
+    context = {
+        'start_date': start.strftime('%Y-%m-%d'),
+        'end_date': end.strftime('%Y-%m-%d'),
+        'period_label': f"{start.strftime('%B %d, %Y')} — {end.strftime('%B %d, %Y')}",
+        'period': period,
+        'view': view,
+
+        # The answer, before the evidence for it.
+        'headline': analytics.headline(arrivals, occupancy, unshelved,
+                                       conditions, borrowed_books, penalties),
+
+        # Visits -- the richest data this library has.
+        'arrivals': arrivals,
+        'occupancy': occupancy,
+        'weekday': analytics.visits_by_weekday(start, end),
+        'purpose': analytics.visits_by_purpose(start, end),
+        'visitor_type': analytics.visitors_by_type(start, end),
+        'schools': analytics.visitors_by_school(start, end),
+
+        # The collection -- a snapshot, not a period.
+        'genres': analytics.books_by_genre(),
+        'conditions': conditions,
+        'shelves': analytics.shelf_occupancy(),
+        'unshelved': unshelved,
+
+        # Borrowing and money.
+        'borrowed_books': borrowed_books,
+        'borrowed_genres': analytics.most_borrowed_genres(start, end),
+        'idle_stock': analytics.never_borrowed(),
+        'penalties': penalties,
+    }
+    return render(request, 'admin/analytics.html', context)
+
+
+# Reports
 @admin_only_required
 def admin_reports(request):
-    """Reports hub: builds the selected report only when Generate is pressed.
-
-    Opening the page used to run a report immediately, which meant every visit
-    paid for a query nobody had asked for and the screen filled with a default
-    nobody chose. The report is now built only when the form is submitted, so
-    landing here is free and what you see is always something you asked for.
-    """
+    """Reports hub: builds the selected report only when Generate is pressed."""
     report_type = request.GET.get('type', 'transactions')
     if report_type not in dict(REPORT_TYPES):
         report_type = 'transactions'
@@ -5492,9 +5653,7 @@ def admin_reports(request):
         'selected_type': report_type,
         'start_date': start.strftime('%Y-%m-%d'),
         'end_date': end.strftime('%Y-%m-%d'),
-        # Was a hardcoded {'books', 'patrons'}, which left the date range showing
-        # on Stock Levels -- a point-in-time count that ignores it. reports.py
-        # already names the set; there is no reason for a second, staler copy.
+        # Reports that use a date range.
         'is_snapshot': report_type in SNAPSHOT_REPORTS,
         'snapshot_types_json': json.dumps(sorted(SNAPSHOT_REPORTS)),
     }
@@ -5542,7 +5701,7 @@ def admin_report_excel(request):
     return response
 
 
-# ─── BORROWING RULES (SETTINGS) ──────────────────────────────────
+# Borrowing rules (settings)
 @admin_only_required
 def admin_borrowing_rules(request):
     """View/edit the library-wide borrowing policy."""
@@ -5582,28 +5741,82 @@ def admin_borrowing_rules(request):
     })
 
 
-# ─── SHELF MANAGEMENT VIEWS ──────────────────────────────────────
+# Shelf management
+def _room_drawn_around(shelf, rooms):
+    """The room a shelf is actually standing in, by where it is drawn."""
+    if shelf.map_x is None or shelf.map_y is None:
+        return None
+    for room in rooms:
+        geom = room.geometry or []
+        if len(geom) >= 3 and _point_in_polygon(shelf.map_x, shelf.map_y, geom):
+            return room
+    return None
+
+
+def _shelf_room_mismatches():
+    """Shelves filed under one room and drawn inside another."""
+    rooms = list(Room.objects.select_related('floor_plan').all())
+    out = []
+    for shelf in (Shelf.objects.select_related('room')
+                  .filter(is_active=True).order_by('name')):
+        drawn = _room_drawn_around(shelf, rooms)
+        if drawn is None or shelf.room_id == drawn.room_id:
+            continue
+        out.append({
+            'shelf_id': shelf.shelf_id,
+            'name': shelf.name,
+            'filed': shelf.room.name if shelf.room else 'nowhere',
+            'drawn': drawn.name,
+            'drawn_id': drawn.room_id,
+        })
+    return out
+
+
+@admin_or_module_required('shelf')
+def fix_shelf_rooms(request):
+    """File every mismatched shelf under the room it is drawn in."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
+
+    wrong = _shelf_room_mismatches()
+    if not wrong:
+        return JsonResponse({'success': True, 'fixed': 0,
+                             'message': 'Every shelf is already filed under the room '
+                                        'it is drawn in.'})
+
+    with transaction.atomic():
+        for row in wrong:
+            Shelf.objects.filter(shelf_id=row['shelf_id']).update(room_id=row['drawn_id'])
+
+    log_admin_action(
+        request, 'Update', 'Shelf', None,
+        'Re-filed %d shelf/shelves under the room drawn around them: %s'
+        % (len(wrong), ', '.join('%s to %s' % (r['name'], r['drawn']) for r in wrong)))
+
+    return JsonResponse({
+        'success': True,
+        'fixed': len(wrong),
+        'message': '%d shelf/shelves re-filed: %s.'
+                   % (len(wrong),
+                      ', '.join('%s is now in %s' % (r['name'], r['drawn']) for r in wrong)),
+    })
+
+
 def _shelf_page(request, template):
     """IDE-style hierarchical manager for shelves, sections, levels and books."""
     return render(request, template, {
+        # Books on no board at all.
+        'unshelved_count': (Book.objects
+                            .filter(shelf_level__isnull=True)
+                            .exclude(status__in=WRITTEN_OFF).count()),
+        # Shelves whose recorded room disagrees with where they are drawn.
+        'room_mismatches': _shelf_room_mismatches(),
     })
 
 
 @admin_only_required
 def position_test(request):
-    """Check positioning against the real beacons, from the Administrator's side.
-
-    The patron map only ever scans continuously, because the alternative --
-    admitting each beacon through the browser's device chooser -- means putting
-    library hardware in front of a reader, which is not theirs to handle. That
-    leaves whoever installs the beacons no way to tell a bad calibration from a
-    browser that cannot scan, since both look like a map that never moves.
-
-    This is that missing instrument. It runs the same decoding and the same
-    trilateration as the patron map, but admits beacons the way a setup tool
-    may, so the arithmetic can be verified on hardware the patron map cannot
-    use. Nothing here is reachable from a patron session.
-    """
+    """Check positioning against the real beacons, from the Administrator's side."""
     return render(request, 'admin/positiontest.html')
 
 
@@ -5618,13 +5831,7 @@ def staff_shelf(request):
 
 
 @admin_login_required
-# Deliberately admin_login_required rather than one module: this is a
-# read-only book search shared by the shelf-placement picker and the
-# Transactions page's book search, and it discloses nothing a staff member
-# couldn't already see on Manage Books. Gating it to 'shelf' alone (as it
-# briefly was) broke book search for any account holding 'transactions'
-# without also holding 'shelf' -- the page returned a login redirect where
-# the search box expected JSON, so results silently failed to appear.
+# Book search shared by shelf placement and Transactions.
 def get_books_for_placement(request):
     """Searchable list of books, for the shelf-placement picker and Transactions."""
     q = (request.GET.get('q') or '').strip()
@@ -5648,16 +5855,57 @@ def get_books_for_placement(request):
     return JsonResponse({'success': True, 'books': data})
 
 
+def _board_book(book):
+    """One book as the mover draws it."""
+    return {
+        'book_id': book.book_id,
+        'title': book.title,
+        'author': book.author or '',
+        'status': book.status,
+        'call_number': book.call_number or '',
+        'slot': book.shelf_slot,
+    }
+
+
+@admin_or_any_module_required('books', 'shelf')
+def get_board_books(request):
+    """What is on one board, in the order it stands there."""
+    raw = (request.GET.get('level') or '').strip()
+
+    # The books on no board at all, as a place the mover can open.
+    if raw == 'none':
+        books = (Book.objects.filter(shelf_level__isnull=True)
+                 .exclude(status__in=WRITTEN_OFF)
+                 .order_by('title', 'book_id')[:MAX_BOOKS_PER_MOVE])
+        return JsonResponse({
+            'success': True,
+            'level': 'none',
+            'shelf': 'Not shelved',
+            'label': 'no board',
+            'books': [_board_book(b) for b in books],
+        })
+
+    if not raw.isdigit():
+        return JsonResponse({'success': False, 'error': 'level is required'})
+
+    level = (ShelfLevel.objects.select_related('shelf')
+             .filter(shelf_level_id=int(raw)).first())
+    if level is None:
+        return JsonResponse({'success': False, 'error': 'That board no longer exists.'})
+
+    books = (level.book_set
+             .order_by(F('shelf_slot').asc(nulls_last=True), 'title', 'book_id'))
+    return JsonResponse({
+        'success': True,
+        'level': level.shelf_level_id,
+        'shelf': level.shelf.name if level.shelf else '',
+        'label': level.label,
+        'books': [_board_book(b) for b in books],
+    })
+
+
 def _shelf_capacity():
-    """Every shelf level with how many books already sit on it.
-
-    Shown beside the receiving form so whoever is unpacking a box can see where
-    it can go without leaving the page and losing what they have typed. Emptiest
-    first, because that is the question being asked -- where is there room.
-
-    There is no capacity field on ShelfLevel, so "room" is relative rather than
-    absolute: the counts rank the levels, they do not claim a level is full.
-    """
+    """Every shelf level with how many books already sit on it."""
     levels = (ShelfLevel.objects
               .select_related('shelf', 'shelf__room')
               .annotate(book_count=Count('book'))
@@ -5698,16 +5946,7 @@ def assign_books_to_level(request):
 
 @admin_or_module_required('shelf')
 def reorder_books_on_level(request):
-    """Set the order of the books on one level, moving any that arrived.
-
-    Slots are rewritten as 1..N over the order given, which is what makes them
-    an ordering key rather than a claim about physical spaces: a tidy-up is one
-    drag instead of editing every book, and gaps left by the old numbering stop
-    mattering because nothing reads them as spaces.
-
-    Books dragged in from another level are reassigned on the way, so moving a
-    copy and reordering it are one action rather than two.
-    """
+    """Set the order of the books on one level, moving any that arrived."""
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
 
@@ -5721,8 +5960,7 @@ def reorder_books_on_level(request):
     if not ids:
         return JsonResponse({'success': False, 'error': 'No books in the new order'})
 
-    # One query, then work in memory: an ordering is only meaningful as a whole,
-    # so a half-applied one is worse than none.
+    # Load once, then reorder in memory.
     books = {b.book_id: b for b in Book.objects.filter(book_id__in=ids)}
     missing = [i for i in ids if i not in books]
     if missing:
@@ -5754,9 +5992,7 @@ def reorder_books_on_level(request):
 @admin_or_module_required('shelf')
 def get_shelf_tree(request):
     """Returns full nested hierarchy FloorPlan > Room > Shelf > ShelfLevel > Books"""
-    # Ordered by storey. More than one floor can be in service now, so the tree
-    # has several roots where it used to have one -- ground floor first is the
-    # only order that reads correctly.
+    # Ordered by storey.
     floor_plans = FloorPlan.objects.filter(is_active=True).order_by(
         'floor_number', 'floor_plan_id'
     ).prefetch_related(
@@ -5765,8 +6001,7 @@ def get_shelf_tree(request):
 
     tree_data = []
     for fp in floor_plans:
-        # Named, not numbered. "Floor Plan 16" gave no clue which storey it was
-        # or why it might be empty; "2nd floor - 2nd floor" does.
+        # Named, not numbered.
         label = fp.floor_label
         if fp.name and fp.name.strip().lower() != label.lower():
             label = f'{label} — {fp.name}'
@@ -5803,32 +6038,47 @@ def get_shelf_tree(request):
                     'children': []
                 }
                 
-                for shelf_level in shelf.shelflevel_set.all():
-                    books = shelf_level.book_set.order_by(
-                        F('shelf_slot').asc(nulls_last=True), 'title', 'book_id')
-                    book_count = books.count()
-                    shelf_level_node = {
+                # Structure, not a book list.
+                levels = list(shelf.shelflevel_set.all())
+                columns = sorted({(lv.column_number or 1) for lv in levels})
+
+                for shelf_level in levels:
+                    shelf_level.shelf = shelf
+
+                def _board(shelf_level, name):
+                    return {
                         'type': 'shelflevel',
                         'id': shelf_level.shelf_level_id,
-                        'name': f'Level {shelf_level.level_number}',
+                        'name': name,
                         'category': shelf_level.category or '',
                         'level_number': shelf_level.level_number,
+                        'column_number': shelf_level.column_number,
                         'is_active': shelf_level.is_active,
-                        'book_count': book_count,
-                        'children': []
+                        'book_count': shelf_level.book_set.count(),
+                        'children': [],
                     }
 
-                    for book in books:
-                        book_node = {
-                            'type': 'book',
-                            'id': book.book_id,
-                            'name': book.title,
-                            'author': book.author,
-                            'status': book.status
+                if len(columns) > 1:
+                    # A bay divided into bays.
+                    for column in columns:
+                        mine = [lv for lv in levels if (lv.column_number or 1) == column]
+                        column_node = {
+                            'type': 'shelfcolumn',
+                            # Composite key for a column.
+                            'id': 'c%d-%d' % (shelf.shelf_id, column),
+                            'shelf_id': shelf.shelf_id,
+                            'column_number': column,
+                            'name': 'Column %d' % column,
+                            'is_active': True,
+                            'book_count': sum(lv.book_set.count() for lv in mine),
+                            'children': [_board(lv, lv.board_label) for lv in mine],
                         }
-                        shelf_level_node['children'].append(book_node)
-
-                    shelf_node['children'].append(shelf_level_node)
+                        shelf_node['children'].append(column_node)
+                else:
+                    # Skip the column level when there is only one.
+                    for shelf_level in levels:
+                        shelf_node['children'].append(
+                            _board(shelf_level, shelf_level.board_label))
 
                 room_node['children'].append(shelf_node)
             
@@ -5836,7 +6086,12 @@ def get_shelf_tree(request):
         
         tree_data.append(fp_node)
     
-    return JsonResponse({'tree': tree_data})
+    return JsonResponse({
+        'tree': tree_data,
+        # Count of unshelved books.
+        'unshelved': (Book.objects.filter(shelf_level__isnull=True)
+                      .exclude(status__in=WRITTEN_OFF).count()),
+    })
 
 
 @admin_or_module_required('shelf')
@@ -5891,8 +6146,7 @@ def add_room(request):
     if not floor_plan_id or not name:
         return JsonResponse({'success': False, 'error': 'floor_plan_id and name are required'})
 
-    # Rooms are drawn as polygons on the vector canvas; the centroid becomes the
-    # label anchor so map_x/map_y stay meaningful for everything that reads them.
+    # Use the polygon centroid as the label position.
     geometry, geo_error = _parse_geometry(request.POST.get('geometry'))
     if geo_error:
         return JsonResponse({'success': False, 'error': geo_error})
@@ -5915,10 +6169,6 @@ def add_room(request):
 
 
 # Gated like the rest of the Shelf Manager family rather than Administrator-only.
-# add_room, add/edit/delete_shelf and the shelf-level operations all use
-# admin_or_module_required('shelf'); these two were left behind when the module
-# system came in, which let a Library Staff member create a room and then fail
-# to rename or remove it -- with both buttons sitting right there in their UI.
 @admin_or_module_required('shelf')
 def edit_room(request):
     if request.method != 'POST':
@@ -5933,8 +6183,7 @@ def edit_room(request):
     if not room_id:
         return JsonResponse({'success': False, 'error': 'room_id is required'})
 
-    # Reshaping a room replaces its polygon only — neighbouring rooms are
-    # independent shapes and are never touched.
+    # Reshaping only changes this room.
     geometry, geo_error = _parse_geometry(request.POST.get('geometry'))
     if geo_error:
         return JsonResponse({'success': False, 'error': geo_error})
@@ -5953,12 +6202,14 @@ def edit_room(request):
                 room.map_y = float(map_y)
         if description is not None:
             room.description = description
+        # Only change access if the field was sent.
+        if 'patron_access' in request.POST:
+            room.patron_access = request.POST.get('patron_access') in ('1', 'true', 'on', 'True')
+        # Same reasoning as patron_access: absent is "not on this form".
+        if 'is_active' in request.POST:
+            room.is_active = request.POST.get('is_active') in ('1', 'true', 'on', 'True')
         room.save()
-        # A door is a hole in a particular wall. Move the wall and the door is
-        # no longer in it -- it sits in mid-air, still drawn, still routable,
-        # simply wrong. Nothing used to correct that: the editor claimed the
-        # doors were "re-snapped server-side on next load", but no code ever
-        # did it, so a reshaped room left its doors behind for good.
+        # A door is a hole in a particular wall.
         moved = _resnap_room_doors(room) if geometry else []
         return JsonResponse({'success': True, 'geometry': room.geometry,
                              'doors_moved': moved})
@@ -5967,13 +6218,7 @@ def edit_room(request):
 
 
 def _resnap_room_doors(room):
-    """Pull every door of `room` back onto its (possibly new) outline.
-
-    Returns the ones that actually moved, so the editor can say so rather than
-    silently rearranging the plan. "Nearest edge" is a guess when a room has
-    been reshaped heavily -- a door can land on a different wall than intended
-    -- which is exactly why it is reported instead of done quietly.
-    """
+    """Pull every door of `room` back onto its (possibly new) outline."""
     if not room.geometry or len(room.geometry) < 3:
         return []
     moved = []
@@ -5984,8 +6229,7 @@ def _resnap_room_doors(room):
             continue
         door.map_x, door.map_y, door.rotation = x, y, bearing
         updates = ['map_x', 'map_y', 'rotation']
-        # The far room was true of the old wall. Once the door has moved, that
-        # claim has to be re-earned rather than carried along.
+        # Clear the linked room after moving the door.
         unlinked = ''
         if door.room_b_id:
             still = _facing_room(room.floor_plan, x, y, room.room_id)
@@ -6017,9 +6261,7 @@ def delete_room(request):
     return redirect('floorplan_management')
 
 
-# ─── Stairways / lifts ────────────────────────────────────────────
-# The only objects on a plan that mean something on another floor, so they are
-# also what cross-floor guidance is built on -- see get_navigation_route.
+# Stairways and lifts.
 
 @admin_or_module_required('shelf')
 def add_stairway(request):
@@ -6049,23 +6291,32 @@ def add_stairway(request):
     raw_to = (request.POST.get('connects_to') or '').strip()
     if raw_to.isdigit():
         connects_to = FloorPlan.objects.filter(floor_plan_id=int(raw_to)).first()
-        # A stair that arrives back where it started is a drawing mistake, and
-        # would make the cross-floor hint advise walking to the floor you are on.
+        # A stair cannot connect a floor to itself.
         if connects_to and connects_to.floor_plan_id == floor_plan.floor_plan_id:
             return JsonResponse({'success': False,
                                  'error': 'A stairway cannot connect a floor to itself.'})
 
-    try:
-        bearing = float(request.POST.get('bearing') or 0) % 360
-    except (TypeError, ValueError):
-        bearing = 0
+    # Work out the direction from the shape.
+    raw_bearing = (request.POST.get('bearing') or '').strip()
+    if raw_bearing:
+        try:
+            bearing = float(raw_bearing) % 360
+        except (TypeError, ValueError):
+            bearing = _infer_stair_bearing(geometry)
+    else:
+        bearing = _infer_stair_bearing(geometry)
+
+    shape = (request.POST.get('shape') or 'straight').strip()
+    if shape not in STAIR_SHAPES:
+        shape = 'straight'
+    flights = _stair_flights(geometry, bearing, shape) or None
 
     map_x, map_y = _polygon_centroid(geometry)
     stairway = Stairway.objects.create(
         floor_plan=floor_plan, kind=kind, direction=direction,
         name=(request.POST.get('name') or '').strip()[:255] or None,
         geometry=geometry, map_x=map_x, map_y=map_y,
-        bearing=bearing, connects_to=connects_to,
+        bearing=bearing, connects_to=connects_to, flights=flights,
     )
     log_admin_action(request, 'Create', 'Stairway', stairway.stairway_id,
                      f'Added {stairway.label} on {floor_plan.floor_label}'
@@ -6097,6 +6348,12 @@ def edit_stairway(request):
             fields.append('bearing')
         except (TypeError, ValueError):
             pass
+    # Rebuild flights when the stair is turned or reshaped.
+    raw_shape = (request.POST.get('shape') or '').strip()
+    if raw_shape in STAIR_SHAPES or 'bearing' in request.POST:
+        shape = raw_shape if raw_shape in STAIR_SHAPES else _stair_shape_of(st)
+        st.flights = _stair_flights(st.geometry, st.bearing, shape) or None
+        fields.append('flights')
     if 'connects_to' in request.POST:
         raw = (request.POST.get('connects_to') or '').strip()
         if not raw:
@@ -6131,10 +6388,7 @@ def delete_stairway(request):
     return JsonResponse({'success': True})
 
 
-# ─── Obstacles / furniture ────────────────────────────────────────
-# Same shape as the room endpoints above, because an obstacle is the same kind
-# of thing to the map: a polygon with a centroid. Gated like the rest of the
-# Shelf Manager family so Library Staff holding 'shelf' can maintain the layout.
+# Obstacles and furniture.
 
 @admin_or_module_required('shelf')
 def add_obstacle(request):
@@ -6164,10 +6418,6 @@ def add_obstacle(request):
     map_x, map_y = _polygon_centroid(geometry)
 
     # Something books are kept on is not an obstacle, whatever it looks like.
-    # A book points at a ShelfLevel, so anything that holds one has to be a
-    # Shelf -- the alternative, letting a level hang off either parent, would
-    # put every shelf_level.shelf lookup in the codebase at risk of None.
-    # One drawing tool, two destinations, decided by the tick in the dialog.
     if request.POST.get('holds_books') in ('1', 'true', 'True', 'on'):
         room = (Room.objects.filter(floor_plan=floor_plan, is_active=True)
                 .order_by('room_id').first())
@@ -6181,8 +6431,7 @@ def add_obstacle(request):
             kind='Table' if kind in ('Table', 'Counter') else 'Display',
             geometry=geometry, map_x=map_x, map_y=map_y,
         )
-        # One level, because a table has exactly one surface. Naming it Top
-        # rather than Level 1 is what a patron sent there will actually see.
+        # One level, because a table has exactly one surface.
         ShelfLevel.objects.create(shelf=shelf, level_number=1, is_top=True,
                                   category=(request.POST.get('category') or '').strip() or None)
         log_admin_action(request, 'Create', 'Shelf', shelf.shelf_id,
@@ -6271,17 +6520,14 @@ def add_shelf(request):
     if not room_id or not name:
         return JsonResponse({'success': False, 'error': 'room_id and name are required'})
     
-    # A shelf added from Shelf Manager has no position yet: it stays unplaced
-    # until the Administrator puts it on the floor plan (Fig. 48).
+    # New shelves start unplaced.
     try:
         x = float(map_x) if map_x not in (None, '', '0', 0) else None
         y = float(map_y) if map_y not in (None, '', '0', 0) else None
     except (TypeError, ValueError):
         x = y = None
 
-    # Optional, and only sent when a shelf is pasted: a copy that arrives as a
-    # default-sized rectangle facing north is not a copy, and would have to be
-    # resized and rotated back by hand every time.
+    # Size and rotation when pasting a shelf.
     def _num(field, fallback):
         raw = request.POST.get(field)
         try:
@@ -6327,16 +6573,12 @@ def add_shelf(request):
             mount=mount,
             mount_height_m=mount_height_m,
         )
-        # A traced shelf is positioned by its own outline, not by where the
-        # click happened to land, or the label and the route target would sit
-        # off the shape.
+        # Position a traced shelf by its outline.
         if geometry:
             shelf.map_x, shelf.map_y = _polygon_centroid(geometry)
             shelf.save(update_fields=['map_x', 'map_y'])
 
-        # The boards, said once here rather than one dialog at a time in Shelf
-        # Manager. A shelf asked for with no levels gets none, which is what
-        # placing an empty bay to fill in later means.
+        # The boards, said once here rather than one dialog at a time in Shelf Manager.
         levels, columns = _grid_counts(request)
         made = _build_shelf_grid(shelf, levels, columns) if levels else 0
 
@@ -6348,10 +6590,7 @@ def add_shelf(request):
         return JsonResponse({'success': False, 'error': 'Room not found'})
 
 
-# A bay of shelving is a grid: so many boards up, and sometimes divided into
-# bays across. Bounded because these are physical objects -- nobody has a
-# forty-level bookcase, and a typo that made four hundred rows would be a
-# tedious thing to undo one row at a time.
+# A bay of shelving is a grid: so many boards up, and sometimes divided into bays across.
 MAX_SHELF_LEVELS = 20
 MAX_SHELF_COLUMNS = 12
 
@@ -6367,23 +6606,13 @@ def _grid_counts(request):
         except (TypeError, ValueError):
             return default
         return max(floor, min(cap, value))
-    # Levels may be zero -- that is how an empty bay is placed, to be filled in
-    # once somebody has counted the boards. Columns cannot: a shelf that is not
-    # divided still has one bay across it.
+    # Levels can be zero; columns must be at least one.
     return (count('levels', 1, MAX_SHELF_LEVELS, 0),
             count('columns', 1, MAX_SHELF_COLUMNS, 1))
 
 
 def _build_shelf_grid(shelf, levels, columns):
-    """Fill in the boards a shelf has, skipping any that already exist.
-
-    Creating them one at a time is the single most tedious part of setting up
-    a real bay -- five levels three bays wide is fifteen dialogs. The grid is
-    the same information said once.
-
-    Column 1 of a single-column shelf is left null rather than stored as 1, so
-    a plain bookcase reads "Level 3" and not "Level 3, Column 1".
-    """
+    """Fill in the boards a shelf has, skipping any that already exist."""
     existing = set(
         (lv.level_number, lv.column_number)
         for lv in ShelfLevel.objects.filter(shelf=shelf)
@@ -6403,13 +6632,7 @@ def _build_shelf_grid(shelf, levels, columns):
 
 @admin_or_module_required('shelf')
 def set_shelf_grid(request):
-    """Change how many levels and columns a shelf has, after the fact.
-
-    Only ever adds. Removing a level would take its books with it -- and a
-    board being deleted because somebody mistyped a number is not a mistake
-    worth making easy, so surplus levels are reported and left alone for the
-    Administrator to delete deliberately.
-    """
+    """Change how many levels and columns a shelf has, after the fact."""
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
 
@@ -6420,10 +6643,7 @@ def set_shelf_grid(request):
     levels, columns = _grid_counts(request)
     added = _build_shelf_grid(shelf, levels, columns)
 
-    # Plenty of bays have books stacked on the top surface, which is not one of
-    # the numbered boards and is where the overflow ends up. It is a level like
-    # any other so a book can be shelved and found on it -- just one that reads
-    # "Top" rather than "Level 6".
+    # The top of the shelf counts as a level.
     top_note = ''
     if 'has_top' in request.POST:
         wants_top = request.POST.get('has_top') in ('1', 'true', 'True', 'on')
@@ -6433,9 +6653,7 @@ def set_shelf_grid(request):
             added += 1
             top_note = 'The top surface was added.'
         elif not wants_top and top is not None:
-            # Unticking removes it only while it is empty. A top with books on
-            # it is a board like any other, and the rule everywhere else here is
-            # that a number in a box never deletes books.
+            # Unticking removes it only while it is empty.
             if top.book_set.exists():
                 top_note = ('The top surface holds %d book(s), so it was kept.'
                             % top.book_set.count())
@@ -6477,6 +6695,20 @@ def edit_shelf(request):
     
     try:
         shelf = Shelf.objects.get(shelf_id=shelf_id)
+        # Which room the shelf is filed under.
+        if 'room_id' in request.POST:
+            raw_room = (request.POST.get('room_id') or '').strip()
+            if raw_room.isdigit():
+                room = Room.objects.filter(room_id=int(raw_room)).first()
+                if room is None:
+                    return JsonResponse({'success': False, 'error': 'Room not found'})
+                if (shelf.room_id and shelf.room and room.floor_plan_id
+                        != shelf.room.floor_plan_id):
+                    return JsonResponse({
+                        'success': False,
+                        'error': 'That room is on a different floor. Move the shelf on '
+                                 'the floor plan instead.'})
+                shelf.room = room
         if name:
             shelf.name = name
         if map_x is not None:
@@ -6486,11 +6718,35 @@ def edit_shelf(request):
         if description is not None:
             shelf.description = description
 
-        # Dragging a corner reshapes the outline, which is the one edit that
-        # cannot be expressed as width and depth. A shelf that was a plain
-        # rectangle becomes a traced one the moment its corners are moved --
-        # that is what dragging a corner means, and the alternative is refusing
-        # the gesture on every shelf that was not drawn by hand.
+        # What the thing actually is, and how it is held up.
+        if 'kind' in request.POST:
+            kind = (request.POST.get('kind') or '').strip()
+            if kind not in dict(Shelf.KIND_CHOICES):
+                return JsonResponse({'success': False, 'error': 'Unknown shelf type'})
+            shelf.kind = kind
+        if 'mount' in request.POST:
+            mount = (request.POST.get('mount') or '').strip()
+            if mount not in dict(Shelf.MOUNT_CHOICES):
+                return JsonResponse({'success': False, 'error': 'Unknown mounting'})
+            shelf.mount = mount
+        if 'mount_height_m' in request.POST:
+            raw = (request.POST.get('mount_height_m') or '').strip()
+            if not raw:
+                shelf.mount_height_m = None
+            else:
+                try:
+                    height = float(raw)
+                except (TypeError, ValueError):
+                    return JsonResponse({'success': False,
+                                         'error': 'Height must be a number of metres'})
+                if not (0 <= height <= 10):
+                    return JsonResponse({'success': False,
+                                         'error': 'Height must be between 0 and 10 metres'})
+                shelf.mount_height_m = height
+        if 'is_active' in request.POST:
+            shelf.is_active = request.POST.get('is_active') in ('1', 'true', 'True', 'on')
+
+        # Dragging a corner makes the shelf a traced shape.
         if 'geometry' in request.POST:
             geometry, geo_error = _parse_geometry(request.POST.get('geometry'))
             if geo_error:
@@ -6507,10 +6763,7 @@ def edit_shelf(request):
         return JsonResponse({'success': False, 'error': 'Shelf not found'})
 
 
-# ─── SHELF PLACEMENT ON THE FLOOR PLAN ────────────────────────────────
-# One endpoint per Administrator action so each traces to its activity diagram:
-# Place Shelf (Fig. 48), Move Shelf (Fig. 49), Rotate Shelf (Fig. 50) and
-# Unplace Shelf (Fig. 51). Confirmation happens in the UI before these are hit.
+# Shelf placement on the floor plan.
 
 def _translate_geometry(geometry, dx, dy):
     """Slide an outline across the plan without changing its shape."""
@@ -6548,11 +6801,7 @@ def _set_shelf_position(request, action):
     if shelf is None:
         return JsonResponse({'success': False, 'error': 'Shelf not found'})
 
-    # A traced shelf -- one set into a corner, drawn corner by corner rather
-    # than sized -- carries an outline in absolute canvas coordinates. Moving
-    # only the anchor left that outline exactly where it was, so the shelf
-    # appeared not to move at all once the page was reloaded. The outline is
-    # carried along by the same offset the anchor travelled.
+    # Move a traced shelf's outline with it.
     fields = ['map_x', 'map_y']
     if shelf.geometry and len(shelf.geometry) >= 3 and shelf.map_x is not None:
         shelf.geometry = _translate_geometry(shelf.geometry,
@@ -6598,10 +6847,7 @@ def rotate_shelf(request):
     if shelf is None:
         return JsonResponse({'success': False, 'error': 'Shelf not found'})
 
-    # For a sized shelf the rotation is enough on its own -- the rectangle is
-    # drawn from it. A traced outline is not derived from anything, so turning
-    # the shelf has to turn the outline, about the anchor the rectangle would
-    # have turned about.
+    # For a sized shelf the rotation is enough on its own, the rectangle is drawn from it.
     fields = ['rotation']
     turn = (rotation % 360) - (shelf.rotation or 0)
     if (shelf.geometry and len(shelf.geometry) >= 3
@@ -6617,35 +6863,16 @@ def rotate_shelf(request):
                          'geometry': shelf.geometry})
 
 
-# ─── DOORS ON ROOM WALLS ──────────────────────────────────────────────
-# Walls, and the one legal way through them.
-#
-# A waypoint connection asserts "a person can walk straight between these two
-# points". Nothing used to check that claim, so two waypoints in neighbouring
-# rooms could be joined through the wall between them and A* would route a
-# patron through masonry -- drawn as a confident line, on a map that looks
-# correct.
+# Doors on room walls.
 WALL_EPS = 1e-6
-# How far past a door's own half-width a crossing may sit and still count as
-# going through it. Rooms are traced by hand, so the two sides of one doorway
-# rarely line up to the unit.
+# Tolerance for matching a crossing to a door.
 DOOR_APERTURE_SLACK = 6.0
-# How far another room's wall may sit from a door and still be the far side of
-# it. Rooms are traced by hand: two that look joined on screen are routinely a
-# fraction of a unit apart, and this deployment's own plan has had pairs
-# 0.11 and 0.50 units from touching. Inferring adjacency with no tolerance
-# would silently miss exactly those.
+# How far another room's wall may sit from a door and still be the far side of it.
 ROOM_FACING_TOLERANCE = 2.0
 
 
 def _facing_room(floor_plan, x, y, exclude_room_id):
-    """The other room whose wall passes through (x, y), if there is one.
-
-    A suggestion, never an assertion -- the caller offers it and somebody says
-    yes. Guessing outright would quietly record a connection between two rooms
-    that merely have walls near each other, and a wrong adjacency is worse
-    than a missing one because nothing later questions it.
-    """
+    """The other room whose wall passes through (x, y), if there is one."""
     best, best_gap = None, ROOM_FACING_TOLERANCE
     for room in Room.objects.filter(floor_plan=floor_plan, is_active=True).exclude(
             room_id=exclude_room_id):
@@ -6666,12 +6893,7 @@ def _orient(a, b, c):
 
 
 def _proper_crossing(p1, p2, p3, p4):
-    """Where segments p1p2 and p3p4 properly cross, or None.
-
-    "Properly" excludes touching and running along each other: a waypoint
-    sitting exactly on a wall, or a corridor drawn down the line of one, is not
-    passing through it.
-    """
+    """Where segments p1p2 and p3p4 properly cross, or None."""
     d1, d2 = _orient(p3, p4, p1), _orient(p3, p4, p2)
     d3, d4 = _orient(p1, p2, p3), _orient(p1, p2, p4)
     if not (((d1 > WALL_EPS and d2 < -WALL_EPS) or (d1 < -WALL_EPS and d2 > WALL_EPS))
@@ -6687,12 +6909,7 @@ def _proper_crossing(p1, p2, p3, p4):
 
 
 def _walls_crossed(floor_plan, ax, ay, bx, by):
-    """Rooms whose wall this segment goes through without using a door.
-
-    A door is matched by proximity rather than by which room owns it: in a
-    shared doorway only one of the two rooms holds the Door row, and refusing
-    the crossing from the other side would be wrong.
-    """
+    """Rooms whose wall this segment goes through without using a door."""
     doors = [(d.map_x, d.map_y, (d.width or DOOR_DEFAULT_WIDTH) / 2.0,
               {d.room_id, d.room_b_id} if d.room_b_id else None)
              for d in Door.objects.filter(room__floor_plan=floor_plan, is_active=True)]
@@ -6708,10 +6925,7 @@ def _walls_crossed(floor_plan, ax, ay, bx, by):
             hit = _proper_crossing(seg[0], seg[1], p3, p4)
             if hit is None:
                 continue
-            # A door that names both its rooms only excuses a crossing of one
-            # of those two. One that names a single room is taken at face
-            # value -- it belongs to whatever wall it sits in -- because until
-            # somebody links it we have no better information than the geometry.
+            # A door that names both its rooms only excuses a crossing of one of those two.
             through_door = any(
                 math.hypot(hit[0] - dx, hit[1] - dy) <= half + DOOR_APERTURE_SLACK
                 and (joins is None or room.room_id in joins)
@@ -6722,9 +6936,7 @@ def _walls_crossed(floor_plan, ax, ay, bx, by):
     return blocked
 
 
-# A door narrower than DOOR_MIN_WIDTH is not a doorway, and one wider than
-# DOOR_MAX_WIDTH is a missing wall rather than an opening. Kept as constants
-# because add_door and edit_door both enforce them and must not drift apart.
+# Door width limits.
 DOOR_MIN_WIDTH = 6
 DOOR_MAX_WIDTH = 400
 DOOR_DEFAULT_WIDTH = 28
@@ -6732,12 +6944,7 @@ DOOR_WIDTH_ERROR = (f'Door width must be between {DOOR_MIN_WIDTH} and {DOOR_MAX_
 
 
 def _snap_to_polygon_edge(points, x, y):
-    """Project (x, y) onto the nearest edge of a polygon.
-
-    Returns (snapped_x, snapped_y, bearing_degrees). Doing this server-side
-    keeps a door genuinely on its wall regardless of how imprecisely the
-    Administrator clicked.
-    """
+    """Project (x, y) onto the nearest edge of a polygon."""
     best = None
     count = len(points)
     for i in range(count):
@@ -6812,12 +7019,7 @@ def add_door(request):
 
 @admin_only_required
 def move_door(request):
-    """Reposition an existing door after a drag along its wall.
-
-    Re-snaps to the room's nearest edge server-side, same as placement —
-    the client only constrains the drag to look right in real time; the
-    saved position always comes from the authoritative geometry.
-    """
+    """Reposition an existing door after a drag along its wall."""
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
 
@@ -6843,15 +7045,7 @@ def move_door(request):
 
 @admin_only_required
 def edit_door(request):
-    """Resize or rename a door.
-
-    Width is the opening measured along the wall, in canvas units, so it is
-    the one property that cannot be derived: position and angle both follow
-    from the wall the door was snapped to, but how wide the doorway is is a
-    fact about the building. Until this existed every door stayed at the
-    default width for ever, because add_door was the only place it could be
-    set and the editor never sent one.
-    """
+    """Resize or rename a door."""
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
 
@@ -6870,11 +7064,7 @@ def edit_door(request):
         door.width = width
         fields.append('width')
 
-    # Dragging one end of a door both widens it and shifts its middle, since
-    # the far end stays put. Accepting the new centre here keeps that a single
-    # request: sending the width and the position separately would leave the
-    # door briefly the wrong size on one and in the wrong place on the other,
-    # and a failure between the two would persist exactly that.
+    # Save the new width and centre together.
     if 'map_x' in request.POST and 'map_y' in request.POST:
         try:
             cx = float(request.POST['map_x'])
@@ -6908,6 +7098,11 @@ def edit_door(request):
     if 'label' in request.POST:
         door.label = (request.POST.get('label') or '').strip()[:255] or None
         fields.append('label')
+
+    # A doorway that has been sealed, or is staff-only.
+    if 'is_active' in request.POST:
+        door.is_active = request.POST.get('is_active') in ('1', 'true', 'True', 'on')
+        fields.append('is_active')
 
     if not fields:
         return JsonResponse({'success': False, 'error': 'Nothing to change'})
@@ -6950,14 +7145,7 @@ def flip_door(request):
 
 @admin_only_required
 def resize_shelf(request):
-    """Set a shelf's footprint. Shelves in the library are not all one size.
-
-    Dragging a resize handle on anything but a corner-preserving axis shifts
-    the shelf's centre (e.g. pulling the right edge out while the left edge
-    stays put moves the centre right by half the delta) — map_x/map_y are
-    therefore optional and, when sent, are saved in the same call so the
-    shape never visibly snaps back before the recentred position lands.
-    """
+    """Set a shelf's footprint."""
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
 
@@ -7110,10 +7298,7 @@ def edit_shelf_level(request):
         if category is not None:
             shelf_level.category = category
 
-        # Whether a board is the top surface or the space underneath could be
-        # set when it was created and never afterwards, so a level recorded
-        # wrongly had to be deleted and made again -- taking its books with it.
-        # Only ever one of the two: a shelf top is not also its underside.
+        # A level can be top or underneath, not both.
         if 'is_top' in request.POST or 'is_under' in request.POST:
             top = request.POST.get('is_top') in ('1', 'true', 'True', 'on')
             under = request.POST.get('is_under') in ('1', 'true', 'True', 'on')
@@ -7180,23 +7365,14 @@ def toggle_active(request):
         return JsonResponse({'success': False, 'error': 'Item not found'})
 
 
-# ─── MAP CONFIGURATION: BEACONS & WAYPOINTS ──────────────────────
+# Map configuration: beacons & waypoints
 def _floorplan_canvas_size(floor_plan):
-    """Return the (width, height) of the floor plan's drawing canvas.
-
-    Floor plans are vector canvases, not images: every map_x/map_y stored for
-    rooms, shelves, waypoints and beacons is expressed in this coordinate space.
-    """
+    """Return the (width, height) of the floor plan's drawing canvas."""
     return float(floor_plan.canvas_width or 1000), float(floor_plan.canvas_height or 800)
 
 
 def _door_payload(door, suggest=False):
-    """`suggest` asks whether another room's wall runs through this doorway.
-
-    Only the editor wants that: it is what turns "this door looks shared" into
-    a button. Computed on demand rather than always, so the patron map does not
-    pay for a question it never asks.
-    """
+    """`suggest` asks whether another room's wall runs through this doorway."""
     facing = None
     if suggest and not door.room_b_id and door.room_id:
         found = _facing_room(door.room.floor_plan, door.map_x, door.map_y, door.room_id)
@@ -7213,6 +7389,7 @@ def _door_payload(door, suggest=False):
         'swing': door.swing if door.swing in (1, -1) else 1,
         'label': door.label or '',
         'room_b': door.room_b_id,
+        'is_active': door.is_active,
         'room_name': door.room.name if door.room_id else '',
         'room_b_name': door.room_b.name if door.room_b_id else '',
     }
@@ -7227,6 +7404,11 @@ def _room_payload(room, doors_by_room=None, suggest_doors=False):
         'geometry': room.geometry or None,
         'map_x': room.map_x,
         'map_y': room.map_y,
+        # Used by the patron map to show staff-only rooms.
+        'patron_access': room.patron_access,
+        # For the properties panel.
+        'description': room.description or '',
+        'is_active': room.is_active,
         'doors': [_door_payload(d, suggest=suggest_doors) for d in doors],
     }
 
@@ -7273,9 +7455,7 @@ def _polygon_gap(a, b):
     return best
 
 
-# How far into a room a doorway's waypoint stands. Far enough to be clearly
-# inside rather than in the threshold, close enough that the step through the
-# door is a short straight line.
+# How far into a room a doorway's waypoint stands.
 DOORWAY_STANDOFF = 45.0
 # A shelf is approached from its face, not its middle.
 SHELF_STANDOFF = 55.0
@@ -7288,13 +7468,7 @@ def _polygon_bounds(poly):
 
 
 def _interior_point(poly):
-    """A point comfortably inside a room, even a concave one.
-
-    The centroid of an L-shaped room can land in the notch outside it, so the
-    centroid is only used when it is genuinely inside; otherwise the room is
-    sampled and the point furthest from any wall wins. That point is the middle
-    of the widest open space, which is where somebody would actually stand.
-    """
+    """A point comfortably inside a room, even a concave one."""
     cx, cy = _polygon_centroid(poly)
     if _point_in_polygon(cx, cy, poly):
         return cx, cy
@@ -7318,12 +7492,7 @@ def _interior_point(poly):
 
 
 def _crosses_obstacle(floor_plan, ax, ay, bx, by):
-    """Does this step walk through a table, counter or pillar?
-
-    Walls are refused outright; furniture is merely avoided while generating,
-    because furniture moves and an Administrator may well want to connect
-    across where a trolley happens to be today.
-    """
+    """Does this step walk through a table, counter or pillar?"""
     for o in Obstacle.objects.filter(floor_plan=floor_plan, is_active=True):
         geom = o.geometry or []
         if len(geom) < 3:
@@ -7338,18 +7507,7 @@ def _crosses_obstacle(floor_plan, ax, ay, bx, by):
 
 @admin_or_module_required('shelf')
 def generate_waypoints(request):
-    """Lay a walkable network over the plan, and say what it could not reach.
-
-    Placing every waypoint and drawing every connection by hand is the most
-    laborious part of preparing a floor, and the part most likely to be left
-    half-finished. What can be derived is derived: a pair of points either side
-    of each doorway, one in the open middle of each room, one in front of each
-    shelf, joined wherever the straight line between them is actually walkable.
-
-    Only generated waypoints are replaced. Anything placed or moved by hand
-    survives, so this is safe to run again after correcting it -- the second
-    press being destructive is what would make it untrustworthy.
-    """
+    """Lay a walkable network over the plan, and say what it could not reach."""
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
 
@@ -7357,11 +7515,17 @@ def generate_waypoints(request):
     if plan is None:
         return JsonResponse({'success': False, 'error': 'Floor plan not found'})
 
-    rooms = [r for r in Room.objects.filter(floor_plan=plan, is_active=True)
+    # Skip staff-only rooms so routes never enter them.
+    drawn = [r for r in Room.objects.filter(floor_plan=plan, is_active=True)
              if r.geometry and len(r.geometry) >= 3]
-    if not rooms:
+    rooms = [r for r in drawn if r.patron_access]
+    if not drawn:
         return JsonResponse({'success': False,
                              'error': 'Draw at least one room before generating a route.'})
+    if not rooms:
+        return JsonResponse({'success': False,
+                             'error': 'Every room on this plan is marked staff-only, '
+                                      'so there is nowhere a patron may be routed.'})
 
     with transaction.atomic():
         removed = Waypoint.objects.filter(floor_plan=plan, is_generated=True).count()
@@ -7384,7 +7548,7 @@ def generate_waypoints(request):
             made.append(wp)
             return wp
 
-        # ---- one pair per doorway ---------------------------------------
+        # One pair per doorway
         door_pairs = []
         for door in Door.objects.filter(room__floor_plan=plan, is_active=True):
             rad = math.radians(door.rotation or 0)
@@ -7397,24 +7561,22 @@ def generate_waypoints(request):
                 room = room_at(x, y)
                 if room is not None:
                     sides.append(place(x, y, room, 'Doorway'))
-            # Both sides indoors means this doorway is a way between two rooms,
-            # and the step through it is the one crossing that is allowed.
+            # The door connects two rooms.
             if len(sides) == 2:
                 door_pairs.append((sides[0], sides[1]))
 
-        # ---- one in the open middle of each room ------------------------
+        # One in the open middle of each room
         for room in rooms:
             x, y = _interior_point(room.geometry)
             place(x, y, room, room.name)
 
-        # ---- one in front of each shelf ---------------------------------
+        # One in front of each shelf
         for shelf in Shelf.objects.filter(room__floor_plan=plan).select_related('room'):
             if shelf.map_x is None or shelf.map_y is None:
                 continue
             rad = math.radians(shelf.rotation or 0)
             placed = False
-            # Try the front first, then the back: one of the two long sides
-            # faces into the room, and which one is not recorded anywhere.
+            # Try the front side, then the back.
             for sign in (1, -1):
                 x = shelf.map_x - math.sin(rad) * SHELF_STANDOFF * sign
                 y = shelf.map_y + math.cos(rad) * SHELF_STANDOFF * sign
@@ -7426,7 +7588,7 @@ def generate_waypoints(request):
             if not placed:
                 continue
 
-        # ---- join what can actually be walked between --------------------
+        # Connect walkable points
         links = 0
         seen = set()
 
@@ -7457,8 +7619,7 @@ def generate_waypoints(request):
                         continue
                     join(a, b)
 
-        # Hand-placed waypoints are not rewired, but a room with only
-        # hand-placed ones should still count as reached.
+        # Rooms with hand-placed waypoints count as reached.
         manual = Waypoint.objects.filter(floor_plan=plan, is_generated=False)
         unreachable = []
         for room in rooms:
@@ -7482,12 +7643,7 @@ def generate_waypoints(request):
 
 
 def _room_adjacency(floor_plan):
-    """Which rooms connect to which, according to the doors.
-
-    This is the question the system could not answer at all before doors
-    carried both sides: a floor plan knew its rooms and knew its doors, and
-    nothing joined the two facts together.
-    """
+    """Which rooms connect to which, according to the doors."""
     pairs = set()
     for d in Door.objects.filter(room__floor_plan=floor_plan, is_active=True):
         if d.room_b_id:
@@ -7497,13 +7653,7 @@ def _room_adjacency(floor_plan):
 
 @admin_or_module_required('shelf')
 def floor_plan_readiness(request):
-    """What still stops this floor plan working, in one list.
-
-    Everything checked here fails silently otherwise: a plan with no scale
-    draws perfectly and simply never shows a position, a room with no waypoint
-    in it is unreachable without saying so, and two walls a tenth of a unit
-    apart look joined at every zoom level while refusing to connect.
-    """
+    """What still stops this floor plan working, in one list."""
     plan = FloorPlan.objects.filter(floor_plan_id=request.GET.get('floor_plan_id')).first()
     if plan is None:
         return JsonResponse({'success': False, 'error': 'Floor plan not found'})
@@ -7518,7 +7668,7 @@ def floor_plan_readiness(request):
     beacons = list(BLEBeacon.objects.filter(floor_plan=plan))
     doors = Door.objects.filter(room__floor_plan=plan, is_active=True).count()
 
-    # ---- positioning -----------------------------------------------------
+    # Positioning
     if not plan.pixels_per_meter:
         add('blocker', 'No scale set',
             'Beacon distances are in metres and the plan is drawn in canvas units. '
@@ -7538,14 +7688,24 @@ def floor_plan_readiness(request):
                 'A beacon 2.4 m up reads as over a metre away from someone standing '
                 'directly underneath it. The height is what takes that back out.')
 
-    # ---- the plan itself -------------------------------------------------
+    # The plan
     if not rooms:
         add('blocker', 'No rooms drawn', 'There is nothing to navigate around yet.')
     if not plan.is_active:
         add('warning', 'This plan is a draft',
             'Patrons are not shown a floor plan until it is set live.')
+    restricted = [r for r in rooms if not r.patron_access]
+    if restricted and len(restricted) == len(rooms):
+        add('blocker', 'Every room is staff-only',
+            'There is nowhere left a patron may stand, so no position can be '
+            'shown and no route can be drawn.')
+    elif restricted:
+        # Stated rather than warned about.
+        add('info', '%d room(s) marked staff-only' % len(restricted),
+            'Drawn and named on the patron map, but not walked through: %s.'
+            % ', '.join('"%s"' % r.name for r in restricted))
 
-    # ---- routing ---------------------------------------------------------
+    # Routing
     if not waypoints:
         add('blocker', 'No waypoints placed',
             'Routes are walked along waypoints. Without them the map can show a '
@@ -7586,18 +7746,20 @@ def floor_plan_readiness(request):
             geom = room.geometry or []
             if len(geom) < 3:
                 continue
+            # Staff-only rooms are expected to have no waypoints.
+            if not room.patron_access:
+                continue
             if not any(_point_in_polygon(w.map_x, w.map_y, geom) for w in waypoints):
                 add('warning', 'No waypoint inside "%s"' % room.name,
                     'Nothing in this room can be routed to.')
 
-    # ---- geometry that looks right and is not ----------------------------
+    # Geometry that looks right and is not
     if doors == 0 and len(rooms) > 1:
         add('warning', 'No doors placed',
             'Doors are what say where people may pass between rooms, and a '
             'connection through a wall without one is refused.')
     elif len(rooms) > 1:
-        # Which rooms a door joins is what makes the plan a connected place
-        # rather than a set of unrelated outlines.
+        # Which rooms each door connects.
         pairs = _room_adjacency(plan)
         linked = set()
         for a, b in pairs:
@@ -7638,12 +7800,14 @@ def floor_plan_readiness(request):
                     'are two separate walls, so passing between them needs a door.' % gap)
 
     blockers = sum(1 for i in issues if i['level'] == 'blocker')
+    # Counted by name rather than by subtraction.
+    warnings = sum(1 for i in issues if i['level'] == 'warning')
     return JsonResponse({
         'success': True,
         'plan': plan.name,
         'ready': blockers == 0,
         'blockers': blockers,
-        'warnings': len(issues) - blockers,
+        'warnings': warnings,
         'issues': issues,
         'counts': {'rooms': len(rooms), 'doors': doors,
                    'waypoints': len(waypoints), 'beacons': len(beacons)},
@@ -7651,10 +7815,7 @@ def floor_plan_readiness(request):
 
 
 def _polygon_centroid(points):
-    """Area-weighted centroid of a closed polygon, used as the room label anchor.
-
-    Falls back to the arithmetic mean for degenerate (zero-area) input.
-    """
+    """Area-weighted centroid of a closed polygon, used as the room label anchor."""
     if not points:
         return 0.0, 0.0
     if len(points) < 3:
@@ -7682,10 +7843,7 @@ def _polygon_centroid(points):
 
 
 def _parse_geometry(raw):
-    """Validate a posted polygon: a list of at least three [x, y] pairs.
-
-    Returns (points, error). Points are floats so the centroid maths is safe.
-    """
+    """Validate a posted polygon: a list of at least three [x, y] pairs."""
     if raw in (None, ''):
         return None, None
     try:
@@ -7709,12 +7867,7 @@ def _parse_geometry(raw):
 
 @admin_only_required
 def get_map_data(request):
-    """Return one floor plan plus its beacons, waypoints, connections and the
-    list of shelves (for the waypoint-link dropdown) as JSON.
-
-    Defaults to the active plan, but any plan may be requested by id so the
-    Administrator can draw a new layout before making it live.
-    """
+    """Return a floor plan with its beacons, waypoints, connections and shelves as JSON."""
     requested_id = request.GET.get('floor_plan_id')
     floor_plan = None
     if requested_id:
@@ -7779,10 +7932,12 @@ def get_map_data(request):
             'shelf_id': s.shelf_id, 'name': s.name,
             'kind': s.kind, 'label': s.label,
             'mount': s.mount, 'elevated': s.is_elevated,
+            'mount_height_m': s.mount_height_m,
+            'description': s.description or '',
+            'is_active': s.is_active,
             'map_x': s.map_x, 'map_y': s.map_y, 'rotation': s.rotation or 0,
             'width': s.width or 46, 'depth': s.depth or 14,
-            # The outline to draw. Sent already resolved so no map has to know
-            # the difference between a traced shelf and a rectangular one.
+            # The outline to draw.
             'geometry': s.geometry or None,
             'footprint': s.footprint(),
             'placed': s.map_x is not None and s.map_y is not None,
@@ -7817,17 +7972,125 @@ def get_map_data(request):
     })
 
 
+STAIR_SHAPES = ('straight', 'quarter', 'half')
+# How much of the stair well the landing takes, along the direction of travel.
+LANDING_SHARE = 0.32
+# The gap between two flights of a switchback -- the open well you can see down.
+STAIR_WELL_GAP = 4.0
+
+
+def _rect(x0, y0, x1, y1):
+    return [[x0, y0], [x1, y0], [x1, y1], [x0, y1]]
+
+
+def _infer_stair_bearing(geometry):
+    """Which way the steps run, read off the shape somebody just drew."""
+    if not geometry or len(geometry) < 3:
+        return 0.0
+    xs = [p[0] for p in geometry]
+    ys = [p[1] for p in geometry]
+    return 0.0 if (max(ys) - min(ys)) >= (max(xs) - min(xs)) else 90.0
+
+
+def _stair_flights(geometry, bearing, shape):
+    """Divide a stair well into its flights and landings."""
+    if shape not in STAIR_SHAPES or shape == 'straight':
+        return []
+    if not geometry or len(geometry) < 3:
+        return []
+
+    xs = [p[0] for p in geometry]
+    ys = [p[1] for p in geometry]
+    x0, x1 = min(xs), max(xs)
+    y0, y1 = min(ys), max(ys)
+    if x1 - x0 < 12 or y1 - y0 < 12:
+        return []
+
+    b = (bearing or 0) % 360
+    vertical = b < 45 or b >= 315 or 135 <= b < 225
+    # Does travel run towards increasing coordinates on that axis?
+    forward = (135 <= b < 225) if vertical else (45 <= b < 135)
+
+    along = (y1 - y0) if vertical else (x1 - x0)
+    landing = max(16.0, along * LANDING_SHARE)
+    if along - landing < 16:
+        return []
+
+    def band(lo, hi, across_lo, across_hi):
+        """A rectangle given as (along-range, across-range) on the travel axis."""
+        return (_rect(across_lo, lo, across_hi, hi) if vertical
+                else _rect(lo, across_lo, hi, across_hi))
+
+    a0, a1 = (y0, y1) if vertical else (x0, x1)
+    c0, c1 = (x0, x1) if vertical else (y0, y1)
+
+    # The landing sits at the end the first flight climbs towards.
+    if forward:
+        land_lo, land_hi = a1 - landing, a1
+        run_lo, run_hi = a0, a1 - landing
+    else:
+        land_lo, land_hi = a0, a0 + landing
+        run_lo, run_hi = a0 + landing, a1
+
+    if shape == 'half':
+        mid = (c0 + c1) / 2.0
+        gap = min(STAIR_WELL_GAP, (c1 - c0) / 8.0)
+        return [
+            {'kind': 'flight', 'bearing': b,
+             'geometry': band(run_lo, run_hi, c0, mid - gap / 2.0)},
+            {'kind': 'landing', 'bearing': b,
+             'geometry': band(land_lo, land_hi, c0, c1)},
+            # Back over the first, which is what turning about means.
+            {'kind': 'flight', 'bearing': (b + 180) % 360,
+             'geometry': band(run_lo, run_hi, mid + gap / 2.0, c1)},
+        ]
+
+    # A quarter turn: climb to the landing, then leave it sideways.
+    side = min(landing, c1 - c0)
+    return [
+        {'kind': 'flight', 'bearing': b,
+         'geometry': band(run_lo, run_hi, c0, c0 + side)},
+        {'kind': 'landing', 'bearing': b,
+         'geometry': band(land_lo, land_hi, c0, c0 + side)},
+        {'kind': 'flight', 'bearing': (b + 90) % 360,
+         'geometry': band(land_lo, land_hi, c0 + side, c1)},
+    ]
+
+
+def _stair_shape_of(stairway):
+    """Which of the three shapes a stored stair was built as."""
+    flights = stairway.flights or []
+    if len(flights) < 3:
+        return 'straight'
+    turn = (flights[-1].get('bearing', 0) - flights[0].get('bearing', 0)) % 360
+    return 'half' if abs(turn - 180) < 1 else 'quarter'
+
+
+def _stair_parts(stairway):
+    """What to draw for one stairway: its flights, their treads and arrows."""
+    if stairway.kind == 'Elevator':
+        return []
+    flights = stairway.flights or [
+        {'kind': 'flight', 'bearing': stairway.bearing, 'geometry': stairway.geometry}
+    ]
+    out = []
+    for part in flights:
+        geom = part.get('geometry')
+        if not geom or len(geom) < 3:
+            continue
+        bearing = part.get('bearing', stairway.bearing) or 0
+        out.append({
+            'kind': part.get('kind') or 'flight',
+            'geometry': geom,
+            'bearing': bearing,
+            # A landing is a floor you stand on, not steps.
+            'treads': [] if part.get('kind') == 'landing' else _stair_treads(geom, bearing),
+        })
+    return out
+
+
 def _stair_treads(geometry, bearing, count=None):
-    """The tread lines that make a footprint read as steps.
-
-    Computed here, once, rather than in each of the four maps that draw a stair.
-    The footprint is measured along the direction of travel, the treads are laid
-    across it at right angles, and each one is clipped to the shape's bounding
-    box -- enough for the conventional symbol without pulling in a polygon
-    clipping library for a rectangle that is nearly always a rectangle.
-
-    Returns [[[x1, y1], [x2, y2]], ...] in canvas coordinates.
-    """
+    """The tread lines that make a footprint read as steps."""
     if not geometry or len(geometry) < 3:
         return []
 
@@ -7841,16 +8104,14 @@ def _stair_treads(geometry, bearing, count=None):
     ux, uy = math.sin(rad), -math.cos(rad)
     vx, vy = -uy, ux
 
-    # How far the shape reaches along each axis. A projection of the bounding
-    # box is close enough and cannot fail on a concave shape.
+    # How far the shape reaches along each axis.
     along = abs(width * ux) + abs(height * uy)
     across = abs(width * vx) + abs(height * vy)
     if along <= 0 or across <= 0:
         return []
 
     if count is None:
-        # About one tread every 12 canvas units, kept inside sane bounds so a
-        # long staircase does not turn into a solid block of lines.
+        # About one tread every 12 units, within limits.
         count = int(max(3, min(14, round(along / 12.0))))
 
     treads = []
@@ -7881,10 +8142,10 @@ def _stairway_payload(st):
         'connects_to': st.connects_to_id,
         'destination': st.destination_label,
         'is_active': st.is_active,
-        # A lift has no treads; drawing them on one would be wrong, not merely
-        # decorative.
-        'treads': ([] if st.kind == 'Elevator'
-                   else _stair_treads(st.geometry, st.bearing)),
+        'shape': _stair_shape_of(st),
+        # Per flight, so a stair that turns draws its own steps and its own arrow on each run.
+        'parts': _stair_parts(st),
+        'treads': [t for p in _stair_parts(st) for t in p['treads']],
     }
 
 
@@ -8036,16 +8297,7 @@ def move_beacon(request):
 
 @admin_only_required
 def update_beacon(request):
-    """Change a beacon's identity or calibration after it has been placed.
-
-    Everything here was settable when the beacon was added and nowhere
-    afterwards, which made the most common correction — realising the hardware
-    advertises as iBeacon rather than a service UUID — impossible without
-    deleting the beacon and losing its position. A beacon matched on the wrong
-    scheme produces no readings at all while looking perfectly configured, so
-    being able to fix it is the difference between a working map and an
-    afternoon spent suspecting the hardware.
-    """
+    """Change a beacon's identity or calibration after it has been placed."""
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
 
@@ -8117,14 +8369,7 @@ def update_beacon(request):
 
 @admin_only_required
 def calibrate_beacon(request):
-    """Write back only tx_power and path_loss_n, fitted from measurements.
-
-    Deliberately not update_beacon: that endpoint rewrites the whole identity
-    (UUID, major/minor, namespace) from its POST, so calling it with just two
-    calibration numbers would blank the very fields that decide whether the
-    beacon is ever matched again. Calibration is measured far more often than
-    identity is corrected, so it gets its own narrow endpoint.
-    """
+    """Write back only tx_power and path_loss_n, fitted from measurements."""
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
 
@@ -8199,6 +8444,57 @@ def add_waypoint(request):
             'label': waypoint.label or '',
             'linked_shelf_id': linked_shelf.shelf_id if linked_shelf else None,
             'linked_shelf_name': linked_shelf.name if linked_shelf else None,
+        },
+    })
+
+
+@admin_only_required
+def edit_waypoint(request):
+    """Name a waypoint, or say which shelf it stands in front of."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
+
+    waypoint = Waypoint.objects.filter(
+        waypoint_id=request.POST.get('waypoint_id')).select_related('linked_shelf').first()
+    if waypoint is None:
+        return JsonResponse({'success': False, 'error': 'Waypoint not found'})
+
+    fields = []
+    if 'label' in request.POST:
+        waypoint.label = (request.POST.get('label') or '').strip()[:255] or None
+        fields.append('label')
+
+    if 'linked_shelf_id' in request.POST:
+        raw = (request.POST.get('linked_shelf_id') or '').strip()
+        if not raw:
+            waypoint.linked_shelf = None
+        else:
+            shelf = Shelf.objects.filter(shelf_id=raw).select_related('room').first()
+            if shelf is None:
+                return JsonResponse({'success': False, 'error': 'Shelf not found'})
+            # The shelf must be on the same floor.
+            if shelf.room and shelf.room.floor_plan_id != waypoint.floor_plan_id:
+                return JsonResponse({
+                    'success': False,
+                    'error': 'That shelf is on a different floor.'})
+            waypoint.linked_shelf = shelf
+        fields.append('linked_shelf')
+
+    if not fields:
+        return JsonResponse({'success': False, 'error': 'Nothing to change'})
+
+    waypoint.save(update_fields=fields)
+    log_admin_action(request, 'Update', 'Waypoint', waypoint.waypoint_id,
+                     f'Edited {", ".join(fields)}')
+    return JsonResponse({
+        'success': True,
+        'waypoint': {
+            'waypoint_id': waypoint.waypoint_id,
+            'map_x': waypoint.map_x,
+            'map_y': waypoint.map_y,
+            'label': waypoint.label or '',
+            'linked_shelf_id': waypoint.linked_shelf_id,
+            'linked_shelf_name': waypoint.linked_shelf.name if waypoint.linked_shelf else None,
         },
     })
 
@@ -8317,56 +8613,25 @@ def delete_waypoint_connection(request):
     return JsonResponse({'success': True})
 
 
-# ─── PATRON NAVIGATION: A* PATHFINDING OVER THE WAYPOINT GRAPH ────
-# How much a flight of stairs "costs" compared with walking on the flat.
-#
-# A staircase is not free and is not the same as its own footprint: climbing one
-# takes appreciably longer than crossing the same distance on level ground, and
-# a route that ignored that would happily send someone up and down two floors to
-# save a few metres of corridor. Expressed in metres and converted per plan, so
-# a floor drawn at a different scale still gets a sensible penalty.
+# Patron navigation: A* over the waypoint graph.
 STAIR_TRAVERSAL_METRES = 15.0
 STAIR_TRAVERSAL_FALLBACK = 220.0     # canvas units, when a plan has no scale set
 
-# How many waypoints a stairway hooks into on its own floor. One is enough in
-# principle; two means a single badly-placed waypoint cannot strand the stairs.
+# How many waypoints a stairway hooks into on its own floor.
 STAIR_LINK_NEIGHBOURS = 2
 
-# How far apart the two ends of one staircase may sit in plan before they are
-# taken to be two different staircases. Generous, because two floor plans are
-# separate images and are rarely traced to the same origin -- but far short of
-# the distance between one stairwell and the next.
+# How far apart two ends of one staircase can be.
 PAIR_MAX_OFFSET_METRES = 6.0
 PAIR_MAX_OFFSET_FALLBACK = 90.0      # canvas units, when a plan has no scale set
 
 
 def _stair_node(stairway_id):
-    """Stairways live in the same graph as waypoints, under a string key.
-
-    Keys stay mixed on purpose -- waypoints keep their integer ids so every
-    response field and every client that reads waypoint_id keeps working, and
-    stairways take 'S<id>' so the two can never collide.
-    """
+    """Stairways live in the same graph as waypoints, under a string key."""
     return 'S%d' % stairway_id
 
 
 def _pair_stairways(stairways, scale_by_floor=None):
-    """Match each stairway to the one it meets on the floor above or below.
-
-    A staircase is one object seen from two floors, so the pair is found by
-    position: among the stairways on the destination floor, take the nearest in
-    plan. A staircase sits above itself, so that is nearly always exactly right.
-
-    Two stairways that name each other are unambiguous and always win. Failing
-    that, one that names no floor at all will do, provided it is close enough
-    overhead to be the same staircase -- because the common way to get this
-    wrong is to link the flight going up and forget the one coming down, and a
-    building where the stairs work in one direction only is not worth shipping
-    over a checkbox. Anything further apart than PAIR_MAX_OFFSET_METRES is two
-    different staircases and is left alone.
-
-    Returns [(a, b), ...] with each pair listed once.
-    """
+    """Match each stairway to the one it meets on the floor above or below."""
     scale_by_floor = scale_by_floor or {}
     by_floor = {}
     for st in stairways:
@@ -8401,23 +8666,7 @@ def _pair_stairways(stairways, scale_by_floor=None):
 
 
 def _build_route_graph(floor_plans, include_stairs=True):
-    """One graph over every floor given, joined wherever stairs pair up.
-
-    Returns (coords, adjacency, node_floor, stair_nodes, edges_by_floor).
-
-    `include_stairs=False` leaves the stairways out entirely, giving exactly the
-    per-floor graph an Administrator drew. Hooking a stairway to the waypoints
-    beside it asserts that the gap between them is walkable, which is true at a
-    staircase and needless everywhere else -- so a route that stays on one floor
-    does not pay for the assumption.
-
-    Horizontal edges come from WaypointConnection exactly as before. The new
-    part is vertical: each stairway becomes a node, hooks into the nearest
-    waypoints on its own floor, and joins its partner on the other floor with a
-    single weighted edge. A* then walks the whole building without knowing that
-    floors exist -- which is the point, because a shortest path that has to be
-    stitched together afterwards is not a shortest path.
-    """
+    """One graph over every floor given, joined wherever stairs pair up."""
     floor_ids = [f.floor_plan_id for f in floor_plans]
     scale_by_floor = {f.floor_plan_id: (f.pixels_per_meter or 0) for f in floor_plans}
 
@@ -8432,8 +8681,7 @@ def _build_route_graph(floor_plans, include_stairs=True):
         waypoint_from_id__in=wp_ids, waypoint_to_id__in=wp_ids
     ):
         a, b = c.waypoint_from_id, c.waypoint_to_id
-        # A connection drawn between two floors would be a data error rather
-        # than a shortcut: the vertical links belong to the stairs.
+        # Only stairs link floors.
         if node_floor.get(a) != node_floor.get(b):
             continue
         adjacency[a].append((b, c.distance))
@@ -8471,12 +8719,7 @@ def _build_route_graph(floor_plans, include_stairs=True):
 
 
 def _astar(start_id, goal_id, coords, adjacency):
-    """A* shortest path over the waypoint graph.
-
-    coords: {waypoint_id: (x, y)}; adjacency: {waypoint_id: [(neighbor_id, weight), ...]}.
-    Returns (ordered_waypoint_ids, total_cost) or (None, None) if no path exists.
-    The heuristic is the straight-line (Euclidean) distance to the goal.
-    """
+    """A* shortest path over the waypoint graph."""
     def h(node):
         ax, ay = coords[node]
         gx, gy = coords[goal_id]
@@ -8509,16 +8752,8 @@ def _astar(start_id, goal_id, coords, adjacency):
 
 
 def get_patron_map_data(request):
-    """Read-only map payload for the patron navigation map: one floor's rooms,
-    shelves, waypoints, beacons and connections, plus the list of floors.
-
-    Which floor is decided by ?floor=<id> when the patron used the switcher,
-    and otherwise by the lowest floor in service. The floors list is what the
-    switcher is built from, so a library with one floor simply gets a list of
-    one and the control hides itself.
-    """
-    # ?shelf= lets the map open on the floor the target book is on, without the
-    # client having to know which floor that is -- it only knows the shelf.
+    """Map data for one floor of the patron navigation map."""
+    # Open the map on the floor of the given shelf.
     raw_shelf = (request.GET.get('shelf') or '').strip()
     target_shelf = (Shelf.objects.filter(shelf_id=raw_shelf).first()
                     if raw_shelf.isdigit() else None)
@@ -8590,34 +8825,28 @@ def get_patron_map_data(request):
         'name': floor_plan.name,
         'canvas_width': width,
         'canvas_height': height,
-        # Null until an Administrator measures it; the client refuses to
-        # trilaterate without it rather than mixing metres with canvas units.
+        # Scale is required for positioning.
         'pixels_per_meter': floor_plan.pixels_per_meter,
         'north_offset_deg': floor_plan.north_offset_deg or 0,
         'floor_number': floor_plan.floor_number,
         'floor_label': floor_plan.floor_label,
-        # What the floor switcher is built from. One floor gives a list
-        # of one, and the control hides itself.
+        # What the floor switcher is built from.
         'floors': _floor_payload(live_plans, floor_plan),
-        # Which floor the requested shelf is on, so the map can say "it is on
-        # the 2nd floor" when the patron is looking at a different one.
+        # Floor of the requested shelf.
         'target_floor_id': (
             live_plans.filter(room__shelf=target_shelf).values_list('floor_plan_id', flat=True).first()
             if target_shelf is not None else None
         ),
         'renovation_notice': floor_plan.renovation_notice or '',
         'rooms': rooms,
-        # Tables, counters and pillars. A patron following a route needs to see
-        # what is physically in the way, not an empty room with shelves in it.
+        # Tables, counters and pillars.
         'obstacles': [
             {'obstacle_id': o.obstacle_id, 'kind': o.kind, 'label': o.label,
              'geometry': o.geometry or [], 'map_x': o.map_x, 'map_y': o.map_y}
             for o in Obstacle.objects.filter(floor_plan=floor_plan, is_active=True)
             if o.geometry
         ],
-        # The only objects that mean anything on another floor. Sent even when
-        # the patron is not going anywhere: knowing where the stairs are is
-        # useful on its own.
+        # The only objects that mean anything on another floor.
         'stairways': [
             _stairway_payload(st)
             for st in Stairway.objects.select_related('connects_to').filter(
@@ -8632,33 +8861,12 @@ def get_patron_map_data(request):
 
 
 def get_navigation_route(request):
-    """A* from the patron's position to a target shelf (or waypoint).
-
-    The graph spans the whole building, not one floor. Waypoints carry the
-    corridors an Administrator drew; each stairway is a node in that same graph,
-    hooked into the waypoints beside it and joined to its opposite number on the
-    floor it reaches. A* therefore runs once, over one graph, and the path it
-    returns is genuinely the shortest way to the book -- including which of
-    three staircases to use, which is exactly the question a two-leg route
-    stitched together afterwards cannot answer.
-
-    Floors reappear only when the answer is drawn. A map can only show one, so
-    the path is split at the stairs into `legs`, and `route` stays the leg for
-    the floor the patron is standing on -- the same shape, in the same field,
-    that every existing caller already draws.
-
-    `from_floor` is where the patron is. Without it the target's floor is
-    assumed, which is what a single-floor caller wants and always got.
-    """
+    """A* from the patron's position to a target shelf (or waypoint)."""
     target_shelf_id = request.GET.get('target_shelf_id')
     resolving_shelf = (Shelf.objects.filter(shelf_id=target_shelf_id).first()
                        if target_shelf_id else None)
     target_floor, _live = _floor_for_request(request, target_shelf=resolving_shelf)
-    # Derived from the shelf itself, never from ?floor=. _floor_for_request lets
-    # an explicit ?floor= win -- correct for "which map am I looking at", wrong
-    # for "which floor is the book on", and the patron map always sends one. Read
-    # the other way round, a request from floor 1 for a shelf on floor 2 looked
-    # like a same-floor request and quietly produced no route at all.
+    # Derived from the shelf itself, never from ?floor=.
     if resolving_shelf is not None and resolving_shelf.room_id:
         shelf_floor = FloorPlan.objects.filter(
             room__shelf=resolving_shelf, is_active=True).first()
@@ -8667,8 +8875,7 @@ def get_navigation_route(request):
     if target_floor is None:
         return JsonResponse({'success': False, 'error': 'No floor plan is in service'})
 
-    # Which floor the patron is standing on. Normally the target's; different
-    # only when they say otherwise.
+    # Which floor the patron is standing on.
     floor_plan = target_floor
     raw_from = (request.GET.get('from_floor') or '').strip()
     if raw_from.isdigit() and int(raw_from) != target_floor.floor_plan_id:
@@ -8689,10 +8896,7 @@ def get_navigation_route(request):
     if not target_shelf_id and not target_waypoint_id:
         return JsonResponse({'success': False, 'error': 'A target_shelf_id or target_waypoint_id is required'})
 
-    # Only widen the graph when the walk actually leaves this floor. A same-floor
-    # route then traverses precisely the graph it always did -- the stair links
-    # are an assumption about what is walkable near a staircase, and there is no
-    # reason to let that assumption anywhere near a route that does not need it.
+    # Only widen the graph when the walk actually leaves this floor.
     if crossing_floors:
         floors = list(FloorPlan.objects.filter(is_active=True))
         known = {f.floor_plan_id for f in floors}
@@ -8706,15 +8910,12 @@ def get_navigation_route(request):
     coords, adjacency, node_floor, stair_nodes, edges_by_floor = _build_route_graph(
         floors, include_stairs=crossing_floors)
     edges = edges_by_floor.get(here_id, [])
-    # Waypoints specifically, not nodes: a floor with a staircase drawn on it
-    # but no corridor yet has nowhere for a route to start, and asking A* to
-    # begin at nothing is how this returns a 500 instead of an explanation.
+    # Stop if the floor has no waypoints.
     if not any(isinstance(n, int) and f == here_id for n, f in node_floor.items()):
         return JsonResponse({'success': False, 'error': 'No waypoints configured for this floor plan'})
 
     def nearest_waypoint(x, y, floor_id):
-        """Nearest real waypoint on one floor. Stair nodes and the spliced start
-        node are keyed by string, so the integer keys are exactly the waypoints."""
+        """Nearest real waypoint on one floor."""
         best_id, best_d = None, None
         for wid, (wx, wy) in coords.items():
             if not isinstance(wid, int) or node_floor.get(wid) != floor_id:
@@ -8724,13 +8925,7 @@ def get_navigation_route(request):
                 best_d, best_id = d, wid
         return best_id
 
-    # The corridor the librarian actually drew is a better start than whichever
-    # end of it happens to be nearest: a patron standing mid-corridor snapped to
-    # one endpoint used to route them there first, and as they kept walking the
-    # snap would flip to the other endpoint and the drawn route would visibly
-    # jump between two different paths for what was smooth, continuous motion.
-    # Projecting onto the nearest edge fixes both -- the route starts from
-    # wherever they are actually standing along it.
+    # Start from the nearest point on the nearest corridor.
     START_SENTINEL = '__start__'
     EDGE_SNAP_EPSILON = 1e-6   # a projection this close to an endpoint IS that endpoint
 
@@ -8757,12 +8952,7 @@ def get_navigation_route(request):
     if edge_hit is not None:
         _dist, a, b, px, py, t = edge_hit
         if t > EDGE_SNAP_EPSILON and t < 1 - EDGE_SNAP_EPSILON:
-            # Genuinely mid-edge: splice a start node into the graph at the
-            # projected point. Split distances come from the live coordinates
-            # rather than prorating WaypointConnection.distance, which is set
-            # once when the connection is drawn and never recalculated if a
-            # waypoint is moved afterward -- it can quietly drift from the
-            # true geometry, while re-deriving from coords cannot.
+            # Genuinely mid-edge: splice a start node into the graph at the projected point.
             coords[START_SENTINEL] = (px, py)
             node_floor[START_SENTINEL] = here_id
             ax, ay = coords[a]
@@ -8811,12 +9001,7 @@ def get_navigation_route(request):
 
     path, total = _astar(start_wp, goal_wp, coords, adjacency)
 
-    # No continuous path across the floors, so the two are two islands in the
-    # graph. Usually the staircases were drawn but never linked to each other;
-    # sometimes there is simply no corridor drawn upstairs yet. Either way,
-    # walking the patron to real stairs and telling them what to do at the top
-    # beats refusing to help -- the same guidance this endpoint gave before the
-    # graph spanned floors. `stairs_only` says that is what came back.
+    # No continuous path across the floors, so the two are two islands in the graph.
     stairs_only = False
     fallback_stairway = None
     if path is None and crossing_floors:
@@ -8862,10 +9047,7 @@ def get_navigation_route(request):
 
     points = [point(n) for n in path]
 
-    # One map draws one floor, so the path is cut where it changes floor. Both
-    # ends of a stair link survive the cut: the leg below finishes at the foot of
-    # the stairs and the leg above begins at the landing, which is what somebody
-    # reading either map needs to see.
+    # One map draws one floor, so the path is cut where it changes floor.
     label_of = {f.floor_plan_id: f.floor_label for f in floors}
     legs = []
     for pt in points:
@@ -8890,9 +9072,7 @@ def get_navigation_route(request):
         'success': True,
         # This floor's leg, under the name every existing caller already draws.
         'route': here_leg['points'],
-        # `distance` is the whole walk, and carries the stair-climb allowance
-        # that made A* prefer one staircase over another; `leg_distance` is the
-        # part of it drawn on this map.
+        # Total distance and the distance on this floor.
         'distance': total,
         'leg_distance': here_leg['distance'],
         'legs': legs,
@@ -8934,8 +9114,7 @@ def get_navigation_route(request):
             verb = 'Take the lift' if via_stairway.kind == 'Elevator' else (
                 'Take the ramp' if via_stairway.kind == 'Ramp' else 'Take the stairs')
             arrow = {'up': 'up', 'down': 'down', 'both': ''}.get(via_stairway.direction, '')
-            # Only name it when it has been given a name. An unnamed lift produced
-            # "Take the lift at Lift", because label falls back to the kind.
+            # Only name it when it has been given a name.
             where = ' at %s' % via_stairway.label if (via_stairway.name or '').strip() else ''
             going = ' %s' % arrow if arrow else ''
             response['instruction'] = (
@@ -8944,11 +9123,7 @@ def get_navigation_route(request):
             )
     return JsonResponse(response)
 
-# ─── ENTRY/EXIT LOGGING & PATRON REGISTRATION (Admin Log Management) ──
-# NOTE: The Patron model stores a single `fullname` (no firstname/lastname
-# columns) and requires `password_hash`. The registration form collects a
-# first/last name which are combined into `fullname`, and desk-created
-# patrons get an unusable password (they can set one later via the portal).
+# Entry and exit logging, and patron registration.
 def _patron_brief(patron):
     return {
         'patron_id': patron.patron_id,
@@ -8978,11 +9153,7 @@ def _session_brief(log):
 
 @granted_module_required('logs')
 def entry_log_start(request):
-    """Entry: verify the patron by name + email, then open a visit session.
-
-    Patrons are identified by their (unique) email, so two people with the same
-    name are disambiguated. Unknown emails fall through to registration.
-    """
+    """Entry: verify the patron by name + email, then open a visit session."""
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
 
@@ -9008,7 +9179,8 @@ def entry_log_start(request):
 
     log = PatronLog.objects.create(
         patron=patron,
-        school=school or None,
+        # Left blank, the visit takes the school from the patron.
+        school=school or (patron.school or '').strip() or None,
         purpose_of_visit=purpose or None,
         entry_time=timezone.now(),
     )
@@ -9034,9 +9206,7 @@ def entry_log_register(request):
     school = (request.POST.get('school') or '').strip()
     purpose = (request.POST.get('purpose_of_visit') or '').strip()
 
-    # On-site identity validation (Ch.1 ¶242, Fig. 5): the patron presents a
-    # physical ID and the desk verifies it on the spot. Nothing about the
-    # document is stored - only that a named staff member checked it.
+    # Staff check the physical ID on the spot.
     id_confirmed = (request.POST.get('id_confirmed') or '').strip() in ('1', 'true', 'on', 'yes')
 
     valid_types = [choice[0] for choice in Patron.PATRON_TYPE_CHOICES]
@@ -9068,8 +9238,7 @@ def entry_log_register(request):
         contact_number=contact_number,
         address=address,
         patron_type=patron_type,
-        # Active on the spot because the ID was checked in person, and the
-        # check is now on the record rather than merely assumed.
+        # Active immediately, ID checked at the desk.
         account_status='Active',
         password_hash=hash_password(None),  # unusable until set via the portal
         registration_channel='On-site',
@@ -9143,8 +9312,7 @@ def edit_patron_log(request):
     from datetime import datetime
 
     def _parse_local(value):
-        # <input type="datetime-local"> sends 'YYYY-MM-DDThh:mm' in the admin's
-        # local (PH) wall-clock time; make it timezone-aware.
+        # Make the datetime-local value timezone-aware.
         for fmt in ('%Y-%m-%dT%H:%M', '%Y-%m-%dT%H:%M:%S'):
             try:
                 naive = datetime.strptime(value, fmt)
@@ -9178,7 +9346,7 @@ def delete_patron_log(request):
     return portal_redirect(request, 'admin_log_management')
 
 
-# ─── USER MANAGEMENT (Admin-only: manage Library Staff accounts) ───────────
+# User management (admin only)
 @admin_only_required
 def user_management(request):
     """List all non-patron accounts (Admin + Library Staff)."""
@@ -9233,9 +9401,7 @@ def create_staff(request):
         messages.error(request, 'An account with that email already exists.')
         return redirect('user_management')
 
-    # Both roles carry module grants. Staff need at least one or the account
-    # can do nothing; an Administrator may hold none, which is the default and
-    # leaves them the governing and oversight pages.
+    # Both roles carry module grants.
     module_keys = clean_module_keys(request.POST.get('modules', ''))
     if role == 'Staff' and not module_keys:
         messages.error(request, 'Select at least one module for this staff account.')
@@ -9318,8 +9484,7 @@ def reset_staff_password(request, user_id):
     if request.method != 'POST':
         return redirect('user_management')
     password = request.POST.get('password') or ''
-    # Same policy the account holder would face changing it themselves. A
-    # password set for someone else is not a lesser password.
+    # Same policy the account holder would face changing it themselves.
     policy_error = password_length_error(password, current_hash=user.password_hash)
     if policy_error:
         messages.error(request, policy_error)
@@ -9354,10 +9519,7 @@ def toggle_staff_status(request, user_id):
 
 
 
-# ─── INVENTORY MANAGEMENT (Administrator-only) ─────────────────────────────
-# Copy-level stock control, distinct from the Book catalogue (Ch.1 ¶268). This
-# module never catalogues a title and never assigns a shelf — a received copy
-# may sit in inventory before it is catalogued or shelved.
+# Inventory management (Administrator only).
 
 def _record_movement(record, action, request, reason='', source='',
                      before=None, after=None):
@@ -9394,6 +9556,7 @@ def _inventory_stats():
 @admin_only_required
 def inventory_management(request):
     """Inventory list, stock-audit workspace, and movement history."""
+    from urllib.parse import urlencode
     tab = (request.GET.get('tab') or 'stock').strip()
     q = (request.GET.get('q') or '').strip()
     condition = (request.GET.get('condition') or '').strip()
@@ -9423,8 +9586,7 @@ def inventory_management(request):
     move_paginator = Paginator(movements, 25)
     move_page = move_paginator.get_page(request.GET.get('mpage', 1))
 
-    # Copies a count could not find, oldest absence first — the ones most
-    # likely to be genuinely gone rather than merely mislaid.
+    # Missing copies, oldest first.
     missing_copies = (InventoryRecord.objects
                       .select_related('book', 'book__shelf_level', 'book__shelf_level__shelf')
                       .filter(status='Missing')
@@ -9436,7 +9598,7 @@ def inventory_management(request):
     audits = (StockAudit.objects.select_related('shelf', 'audited_by').all())
     audit_page = Paginator(audits, 15).get_page(request.GET.get('apage', 1))
 
-    # When each shelf was last counted — the question a stock-take exists to answer.
+    # When each shelf was last counted.
     last_audited = {}
     for row in StockAudit.objects.values('shelf_id').annotate(last=Max('audited_at')):
         last_audited[row['shelf_id']] = row['last']
@@ -9444,8 +9606,34 @@ def inventory_management(request):
     for shelf in shelf_list:
         shelf.last_audited = last_audited.get(shelf.shelf_id)
 
+    # Every board that holds something, for the shelf-read picker.
+    audit_boards = []
+    for level in (ShelfLevel.objects.filter(is_active=True)
+                  .select_related('shelf', 'shelf__room')
+                  .annotate(n=Count('book'))
+                  .order_by('shelf__name', 'column_number', 'level_number')):
+        if not level.n or level.shelf is None:
+            continue
+        seen = level.book_set.exclude(status__in=WRITTEN_OFF).aggregate(
+            oldest=Min('last_seen'), never=Count('book_id', filter=Q(last_seen__isnull=True)))
+        audit_boards.append({
+            'id': level.shelf_level_id,
+            'shelf': level.shelf.name,
+            'room': level.shelf.room.name if level.shelf.room else '',
+            'label': level.label,
+            'books': level.n,
+            # One book never confirmed is enough to make the board unread.
+            'last_read': None if seen['never'] else seen['oldest'],
+        })
+
+    # Each table keeps its own page and tab.
+    stock_qs = urlencode({k: v for k, v in {
+        'q': q, 'condition': condition, 'source': source}.items() if v})
+
     context = {
         'tab': tab,
+        'stock_qs': stock_qs,
+        'audit_boards': audit_boards,
         'records': page_obj,
         'paginator': paginator,
         'movements': move_page,
@@ -9467,13 +9655,7 @@ def inventory_management(request):
 
 
 def _sync_donation_row(record):
-    """Keep a donated copy and its accessioning row in step.
-
-    Inventory is the single intake point (Ch.1 ¶268, Fig. 9, Fig. 78); the
-    Donations page then tracks the copy through Received → Processing → Shelved
-    (¶258, Fig. 7). Donation requires a Book, so an uncatalogued donated copy
-    has no row until it is catalogued — this is called again at that point.
-    """
+    """Keep a donated copy and its accessioning row in step."""
     if record.source != 'Donation' or record.book is None:
         return None
     stage = record.processing_stage or 'Received'
@@ -9499,17 +9681,7 @@ def _receiving_redirect(request):
 
 
 def _resolve_intake_book(item, source):
-    """Return the catalogue record a received line belongs to, creating it if new.
-
-    Book details are entered at the receiving desk, so they have to land
-    somewhere usable: the catalogue is the only place that holds title, author,
-    ISBN, year and genre, and putting them there means nobody retypes the
-    delivery note later. An existing title is matched on ISBN first (the only
-    real identifier a book carries) and on title + author otherwise, so a second
-    box of the same book adds copies instead of a duplicate catalogue entry.
-
-    Raises ValueError with a message meant for the operator.
-    """
+    """Return the catalogue record a received line belongs to, creating it if new."""
     book_id = str(item.get('book_id') or '').strip()
     if book_id:
         book = Book.objects.filter(book_id=book_id).first()
@@ -9551,8 +9723,7 @@ def _resolve_intake_book(item, source):
         genre=genre or None,
         material_type=material_type,
         publication_year=year,
-        # A donated title is not lendable until accessioning reaches Shelved,
-        # which is where the Donations page flips it to Available.
+        # Donated books become available once shelved.
         status='Donated' if source == 'Donation' else 'Available',
         qr_code=str(uuid4()),
         shelf_level=None,           # shelving is a separate, deliberate step
@@ -9562,14 +9733,7 @@ def _resolve_intake_book(item, source):
 
 @admin_or_module_required('inventory')
 def receive_stock(request):
-    """Intake a delivery: one source, one or many titles, many copies each.
-
-    A delivery arrives as a box, not as a single book, so the source details are
-    entered once and every title in that box is added to a list before anything
-    is written. Shipments and donations remain separate intakes with their own
-    fields: a shipment records supplier and PO number, a donation records donor
-    and date plus the Received/Processing/Shelved accessioning stage (Ch.1 ¶258).
-    """
+    """Intake a delivery: one source, one or many titles, many copies each."""
     if request.method != 'POST':
         return _receiving_redirect(request)
 
@@ -9589,8 +9753,7 @@ def receive_stock(request):
         messages.error(request, 'That is more than 50 titles — split it into two deliveries.')
         return _receiving_redirect(request)
 
-    # Only the fields belonging to the chosen intake are kept, so a donation
-    # can never carry a PO number and a shipment can never carry a donor.
+    # Keep only the fields for the chosen intake type.
     supplier = po_number = donor_name = processing_stage = None
     donated_date = None
     if source == 'Donation':
@@ -9614,8 +9777,7 @@ def receive_stock(request):
         supplier = (request.POST.get('supplier') or '').strip() or None
         po_number = (request.POST.get('po_number') or '').strip() or None
 
-    # Validate the whole delivery before writing any of it — a bad line halfway
-    # down should not leave the first half already received.
+    # Validate everything before saving.
     parsed = []
     total_copies = 0
     for index, item in enumerate(items, start=1):
@@ -9624,8 +9786,7 @@ def receive_stock(request):
             return _receiving_redirect(request)
         raw_quantity = item.get('quantity')
         try:
-            # Not `or 1`: a submitted 0 is falsy and would silently become one
-            # copy instead of being rejected.
+            # Reject 0 instead of treating it as 1.
             quantity = 1 if raw_quantity in (None, '') else int(raw_quantity)
         except (TypeError, ValueError):
             quantity = 0
@@ -9652,8 +9813,7 @@ def receive_stock(request):
                 book, was_created = _resolve_intake_book(item, source)
                 if was_created:
                     new_titles += 1
-                # Four copies of one donated title are one thing to accession,
-                # not four, so every copy of a title shares its Donation row.
+                # All copies of a donated title share one donation row.
                 donation_row = None
                 for _ in range(quantity):
                     record = InventoryRecord.objects.create(
@@ -9675,8 +9835,7 @@ def receive_stock(request):
                                      reason='Received in ' + condition.lower() + ' condition',
                                      source=record.source_detail or source, after=condition)
                     if source == 'Donation' and donation_row is None:
-                        # Opens the accessioning row on the first copy; the rest
-                        # were created already pointing at it.
+                        # Create the donation row on the first copy.
                         donation_row = _sync_donation_row(record)
                 titles_received.append((book.title, quantity))
     except ValueError as exc:
@@ -9696,11 +9855,7 @@ def receive_stock(request):
 
 @module_required('inventory')
 def staff_inventory_receive(request):
-    """Library Staff receiving desk — intake only, per Ch.1 ¶268.
-
-    Deliberately not the full module: no audit, no deaccession, no condition
-    changes and no movement history, all of which stay with the Administrator.
-    """
+    """Staff receiving desk, intake only."""
     mine = (InventoryRecord.objects
             .select_related('book', 'received_by')
             .filter(received_by__admin_id=request.session.get('admin_id'))
@@ -9783,8 +9938,7 @@ def update_inventory_record(request):
     record.notes = (request.POST.get('notes') or '').strip() or None
     record.save(update_fields=['book', 'title_hint', 'source', 'supplier', 'po_number',
                                'donor_name', 'donated_date', 'processing_stage', 'notes'])
-    # Catalogue a donated copy here and it joins the accessioning queue; change
-    # its stage here and the Donations page follows.
+    # Keep inventory and donations in sync.
     _sync_donation_row(record)
 
     _record_movement(record, 'Correction', request,
@@ -9798,11 +9952,7 @@ def update_inventory_record(request):
 
 @admin_only_required
 def deaccession_copy(request):
-    """Remove a record created in error.
-
-    Reserved for data-entry mistakes — routine stock reduction is a condition
-    change (damaged / lost / withdrawn), not a deaccession.
-    """
+    """Remove a record created in error."""
     if request.method != 'POST':
         return redirect('inventory_management')
 
@@ -9854,13 +10004,160 @@ def search_inventory_by_qr(request):
     }})
 
 
-def _expected_copies_for_shelf(shelf_id):
-    """Copies the shelf should be able to account for.
+# Copies expected to be away from the shelf.
+ACCOUNTED_ELSEWHERE = ('Borrowed', 'Overdue', 'Being Read', 'For Reshelving')
+# Written off. It is not expected on a shelf and its absence is not news.
+WRITTEN_OFF = ('Lost', 'Donated')
 
-    Includes copies already flagged Missing: a stock-take is exactly when a
-    mislaid book turns up again, and leaving them out would mean never
-    recovering one.
-    """
+
+@admin_only_required
+def stock_audit_sheet(request):
+    """The books a board should be holding, in the order they stand there."""
+    raw = (request.GET.get('level') or '').strip()
+    if not raw.isdigit():
+        return JsonResponse({'success': False, 'error': 'level is required'})
+
+    level = (ShelfLevel.objects.select_related('shelf')
+             .filter(shelf_level_id=int(raw)).first())
+    if level is None:
+        return JsonResponse({'success': False, 'error': 'That board no longer exists.'})
+
+    books = (level.book_set.exclude(status__in=WRITTEN_OFF)
+             .order_by(F('shelf_slot').asc(nulls_last=True), 'title', 'book_id'))
+
+    rows = []
+    for b in books:
+        rows.append({
+            'book_id': b.book_id,
+            # QR code, so scans can tick the row.
+            'qr_code': b.qr_code or '',
+            'title': b.title,
+            'author': b.author or '',
+            'call_number': b.call_number or '',
+            'slot': b.shelf_slot,
+            'status': b.status,
+            # Show borrowed copies too.
+            'expected_present': b.status not in ACCOUNTED_ELSEWHERE,
+            'already_missing': b.status == 'Missing',
+            'audit_misses': b.audit_misses or 0,
+            'missing_since': b.missing_since.isoformat() if b.missing_since else None,
+            'last_seen': (timezone.localtime(b.last_seen).strftime('%b %d, %Y')
+                          if b.last_seen else None),
+        })
+
+    present = [r for r in rows if r['expected_present']]
+    return JsonResponse({
+        'success': True,
+        'level': level.shelf_level_id,
+        'shelf': level.shelf.name if level.shelf else '',
+        'shelf_id': level.shelf.shelf_id if level.shelf else None,
+        'label': level.label,
+        'books': rows,
+        'expected_count': len(present),
+        'elsewhere_count': len(rows) - len(present),
+    })
+
+
+@admin_only_required
+def stock_audit_file(request):
+    """Save the results of a shelf count."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
+
+    raw = (request.POST.get('level') or '').strip()
+    level = (ShelfLevel.objects.select_related('shelf')
+             .filter(shelf_level_id=int(raw)).first()) if raw.isdigit() else None
+    if level is None:
+        return JsonResponse({'success': False, 'error': 'That board no longer exists.'})
+
+    def ids(name):
+        return {int(i) for i in request.POST.getlist(name) if str(i).strip().isdigit()}
+
+    found = ids('found_ids')          # confirmed one by one
+    bulk = ids('bulk_ids')            # covered by "the rest are here"
+    missing = ids('missing_ids')
+
+    # A copy cannot be both.
+    bulk -= found
+    found -= missing
+    bulk -= missing
+
+    on_board = set(level.book_set.exclude(status__in=WRITTEN_OFF)
+                   .values_list('book_id', flat=True))
+    found &= on_board
+    bulk &= on_board
+    missing &= on_board
+    seen = found | bulk
+
+    if not seen and not missing:
+        return JsonResponse({'success': False,
+                             'error': 'Mark what you found before filing the count.'})
+
+    now = timezone.now()
+    today = timezone.localdate()
+    flagged = recovered = 0
+
+    with transaction.atomic():
+        for book in Book.objects.filter(book_id__in=missing):
+            if book.status in ACCOUNTED_ELSEWHERE:
+                # Out on loan.
+                continue
+            book.audit_misses = (book.audit_misses or 0) + 1
+            if book.missing_since is None:
+                book.missing_since = today
+            book.status = 'Missing'
+            book.save(update_fields=['status', 'audit_misses', 'missing_since'])
+            flagged += 1
+
+        for book in Book.objects.filter(book_id__in=seen):
+            fields = ['last_seen']
+            book.last_seen = now
+            if book.status == 'Missing':
+                # It turned up.
+                book.status = 'Available'
+                book.missing_since = None
+                book.audit_misses = 0
+                fields += ['status', 'missing_since', 'audit_misses']
+                recovered += 1
+            book.save(update_fields=fields)
+
+        audit = StockAudit.objects.create(
+            shelf=level.shelf,
+            shelf_name='%s %s' % (level.shelf.name if level.shelf else '', level.label),
+            audited_by=User.objects.filter(admin_id=request.session.get('admin_id')).first(),
+            expected_count=len(seen) + len(missing),
+            # What the reader actually confirmed by hand, as opposed to swept.
+            scanned_count=len(found),
+            found_count=len(seen),
+            on_loan_count=level.book_set.filter(status__in=ACCOUNTED_ELSEWHERE).count(),
+            missing_count=flagged,
+            recovered_count=recovered,
+            unexpected_count=0,
+            notes=(request.POST.get('notes') or '').strip() or None,
+        )
+
+    log_admin_action(
+        request, 'Create', 'Inventory', audit.audit_id,
+        'Shelf read of %s: %d confirmed (%d one by one, %d in bulk), '
+        '%d flagged missing, %d recovered'
+        % (audit.shelf_name.strip(), len(seen), len(found), len(bulk), flagged, recovered))
+
+    return JsonResponse({
+        'success': True,
+        'audit_id': audit.audit_id,
+        'confirmed': len(seen),
+        'individually': len(found),
+        'in_bulk': len(bulk),
+        'flagged': flagged,
+        'recovered': recovered,
+        'message': '%s filed. %d confirmed, %d flagged missing%s.'
+                   % (audit.shelf_name.strip(), len(seen), flagged,
+                      ', %d recovered' % recovered if recovered else ''),
+    })
+
+
+def _expected_copies_for_shelf(shelf_id):
+    """Copies the shelf should be able to account for."""
     return (InventoryRecord.objects
             .select_related('book', 'book__shelf_level', 'book__shelf_level__shelf')
             .filter(status__in=['In Stock', 'Missing'],
@@ -9869,14 +10166,7 @@ def _expected_copies_for_shelf(shelf_id):
 
 
 def _open_loans_by_book(book_ids):
-    """How many copies of each title are out on loan right now.
-
-    Loans are recorded against the title, not the individual copy, so the
-    stock-take cannot know *which* copy a patron is holding — only how many are
-    legitimately off the shelf. Without this, every borrowed book is reported
-    missing, and a library with twenty books out would write off twenty books
-    on its first count.
-    """
+    """How many copies of each title are out on loan right now."""
     counts = {}
     rows = (Transaction.objects
             .filter(book_id__in=book_ids, transaction_type='Borrow', return_date__isnull=True)
@@ -9889,20 +10179,7 @@ def _open_loans_by_book(book_ids):
 
 @admin_only_required
 def stock_audit_progress(request):
-    """Group a running list of scans by the shelf each copy belongs to.
-
-    The shelf-at-a-time audit asks which shelf you are on before you scan a
-    single book. That is backwards from how a stock-take is actually done --
-    you walk the room with a scanner and the shelves arrive in whatever order
-    the room is laid out. Every label already identifies its own copy, and the
-    copy knows its shelf, so the grouping is derivable rather than something to
-    be asked for.
-
-    Deliberately cheap: no loan reconciliation, no discrepancy report. It runs
-    after every few scans to keep the progress counts live, and the expensive
-    reasoning stays in stock_audit_compare, which is called once per shelf when
-    the count is done.
-    """
+    """Group a running list of scans by the shelf each copy belongs to."""
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
 
@@ -9966,8 +10243,7 @@ def stock_audit_progress(request):
             'expected_count': expected,
             'found_count': found,
             'scanned': bucket['found'],
-            # A shelf can read over 100% when a book from elsewhere has been
-            # put away here; the count is still the honest one to show.
+            # Can go over 100%.
             'percent': round(100.0 * found / expected) if expected else None,
             'complete': bool(expected) and found >= expected,
         })
@@ -9984,11 +10260,7 @@ def stock_audit_progress(request):
 
 @admin_only_required
 def stock_audit_compare(request):
-    """Compare a shelf's expected holdings against what was physically scanned.
-
-    Produces the discrepancy report only — nothing is written until the
-    Administrator confirms it via stock_audit_apply.
-    """
+    """Compare a shelf's expected holdings against what was physically scanned."""
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
 
@@ -10011,8 +10283,7 @@ def stock_audit_compare(request):
         if record is not None:
             found.append(record)
             if record.status == 'Missing':
-                # Turned up. Worth calling out: it is the good news in a count,
-                # and it is what undoes an earlier miss.
+                # Turned up.
                 recovered.append({
                     'inventory_id': record.inventory_id,
                     'title': record.display_title,
@@ -10070,14 +10341,7 @@ def stock_audit_compare(request):
 
 @admin_only_required
 def stock_audit_apply(request):
-    """Close a stock-take: record it, flag what is missing, recover what turned up.
-
-    Nothing is written off here. A copy that could not be found is flagged
-    Missing and its miss counted; declaring it lost is a separate, later
-    decision made against how long it has been gone (see write_off_missing).
-    A shelf-read finds mislaid books more often than it finds thefts, and a
-    process that goes straight to "lost" on one pass would destroy that.
-    """
+    """Close a stock-take: record it, flag what is missing, recover what turned up."""
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
 
@@ -10155,13 +10419,7 @@ def stock_audit_apply(request):
 
 @admin_only_required
 def write_off_missing(request):
-    """Declare copies that have stayed missing to be lost.
-
-    Deliberately separate from the stock-take. A book absent from one count is
-    usually mislaid; a book absent from several counts over months is gone, and
-    only a person looking at how long it has been missing should be the one to
-    say so.
-    """
+    """Declare copies that have stayed missing to be lost."""
     if request.method != 'POST':
         return redirect('inventory_management')
 
@@ -10196,12 +10454,7 @@ def write_off_missing(request):
 
 
 def flag_inventory_copy_lost(request, book, reason):
-    """Mark one in-stock copy of `book` lost when a loan is written off.
-
-    Called from the Transactions module's Mark Lost action, so a copy lost at
-    the desk shows up in inventory without a second manual step (Ch.1 ¶268).
-    Returns the record it touched, or None when the title has no copy on record.
-    """
+    """Mark one in-stock copy of `book` lost when a loan is written off."""
     if book is None:
         return None
     record = (InventoryRecord.objects
@@ -10218,18 +10471,10 @@ def flag_inventory_copy_lost(request, book, reason):
                      source='Transactions module', before=before, after='Lost')
     return record
 
-# ─── PATRON LIBRARY CARD ──────────────────────────────────────────────────
-# The printable card the patron carries. Its QR is the same Patron.qr_code the
-# desk scans for borrowing, returning and entry logging, so the card is the
-# physical form of the identity check.
+# Patron library card.
 
 def _qr_data_uri(payload, box_size=10, border=2):
-    """Render `payload` as a QR PNG and return it as a data: URI.
-
-    Generated here rather than fetched from an image service so a card still
-    prints correctly with no internet, which is the normal state of a library
-    front desk mid-brownout.
-    """
+    """Render `payload` as a QR PNG and return it as a data: URI."""
     import base64
     qr = qrcode.QRCode(
         version=None,
@@ -10255,23 +10500,14 @@ def _library_card_context(patron):
         'library_location': 'Brgy. Sala, Cabuyao, Laguna',
         'active_borrows': active_borrows,
         'issued_on': timezone.localdate(),
+        # Current borrowing rule for the back of the card.
+        'rule': BorrowingRule.current(),
     }
 
 
 @granted_module_required('patrons')
 def serve_patron_credential(request, path):
-    """A patron's uploaded ID, served only to staff who hold the patrons module.
-
-    These are photographs of government identity documents. They used to sit
-    under /media/, which is served by django.views.static.serve with no
-    authentication at all -- an anonymous request for the file returned it in
-    full. The random filename was the only thing standing in the way, and an
-    unguessable URL is not access control: it leaks through browser history on a
-    shared desk machine, through a referrer header, through any backup.
-
-    Gated on the patrons module rather than on being any logged-in user, because
-    reviewing an applicant's ID is exactly what that module is for.
-    """
+    """A patron's uploaded ID, served only to staff who hold the patrons module."""
     from django.utils._os import safe_join
     from django.views.static import serve as static_serve
 
@@ -10280,8 +10516,7 @@ def serve_patron_credential(request, path):
     if not name:
         raise Http404('No such document.')
     try:
-        # safe_join raises rather than escaping the directory, which is what
-        # stops ../../ from walking out of the credentials folder.
+        # safe_join blocks paths outside the folder.
         safe_join(base, name)
     except (ValueError, SuspiciousFileOperation):
         raise Http404('No such document.')

@@ -67,8 +67,7 @@
 
         <main id="main-content" tabindex="-1" class="flex-1 overflow-y-auto p-8 space-y-6">
 
-            {# Says plainly what this is for, because a page that reads beacons #}
-            {# looks a lot like the patron map and is not one. #}
+            {# Page description. #}
             <div class="rounded-xl border border-slate-800/80 p-4" style="background-color: var(--bg-card);">
                 <div class="flex items-start gap-3">
                     <i class="fa-solid fa-flask text-cyan-500 mt-1"></i>
@@ -232,8 +231,7 @@
 <script>
 const MAP_DATA_URL = "{% url 'get_map_data' %}";
 
-// The only write this page makes is saving a fitted calibration, so it needs a
-// token; there was no form on the page before, hence declaring one here.
+// CSRF token for saving calibration.
 const CSRF = '{{ csrf_token }}';
 
 let mapData = null, lmap = null, imgH = 0;
@@ -247,10 +245,7 @@ const heardDevices = new Map();  // device key -> what it last sent
 const watched = new Set();
 let currentScan = null, tickTimer = null, advCount = 0;
 
-// ── Same arithmetic the patron map uses ─────────────────────────────────
-// Duplicated deliberately rather than shared: if this page ever disagrees
-// with the map, the disagreement should come from a real difference, not
-// from one of them being edited and the other not noticing.
+// Same calculations as the patron map.
 const DEFAULT_TX_POWER = -59;
 const DEFAULT_PATH_LOSS_N = 2.0;
 const APPLE_COMPANY_ID = 0x004C;
@@ -262,21 +257,10 @@ function rssiToDistance(rssi, txPower, n) {
   return Math.pow(10, (p - rssi) / (10 * exp));
 }
 
-// How high a patron holds a phone. Not an administrator setting: it is a
-// property of people rather than of the building, nobody can measure it per
-// beacon, and inviting it to be tuned would be false precision. 1.2 m is the
-// usual figure for a phone carried while walking.
+// How high a patron holds a phone.
 const RECEIVER_HEIGHT_M = 1.2;
 
-// rssiToDistance() measures the straight line through the air; the solver works
-// in the floor plane. A beacon fixed 2.4 m up is 1.2 m above the phone, so
-// someone standing directly beneath it ranges at 1.2 m rather than 0 -- and the
-// error is worst exactly where they are closest to it. Taking the vertical leg
-// back out is Pythagoras.
-//
-// Noise can make the measured slant shorter than the height difference, which
-// has no triangle; the honest horizontal answer there is zero, i.e. directly
-// underneath. A beacon whose height was never measured is left uncorrected.
+// Convert slant distance to horizontal distance using beacon height.
 function horizontalDistance(slantM, beaconHeightM) {
   if (beaconHeightM == null) return slantM;
   const dz = beaconHeightM - RECEIVER_HEIGHT_M;
@@ -302,7 +286,6 @@ function hex(view, from, to) {
 }
 
 // The 0x02 0x15 prefix identifies an iBeacon, not the company ID carrying it.
-// Plenty of hardware ships the frame under 0xFFFF or a chipset vendor's ID.
 function parseIBeacon(e) {
   const md = e.manufacturerData;
   if (!md || typeof md.forEach !== 'function') return null;
@@ -332,23 +315,12 @@ function parseEddystone(e) {
   return { txPower: v.getInt8(1), namespace: hex(v, 2, 12), instance: hex(v, 12, 18) };
 }
 
-// A UUID is the same UUID however it was typed. Vendors print theirs
-// unhyphenated on the sticker, their configuration apps show them hyphenated,
-// and some show them upper case -- so the configured value and the advertised
-// one routinely disagree on punctuation while naming the identical beacon.
-// Comparing the hex digits alone is what lets
-// "FDA50693-A4E2-4FB1-AFCF-C6EB07647825" match
-// "fda50693a4e24fb1afcfc6eb07647825", as it must: a punctuation-sensitive
-// compare rejects every single packet while the configuration looks perfectly
-// correct on screen, and all the map can report is that no beacons were seen.
+// Compare UUIDs by hex digits only.
 function hexOnly(value) {
   return String(value == null ? '' : value).toLowerCase().replace(/[^0-9a-f]/g, '');
 }
 
-// Bluetooth's short UUID forms are the 128-bit UUID with the rest implied, so
-// 'feaa', '0xFEAA' and '0000feaa-0000-1000-8000-00805f9b34fb' all name one
-// service. The browser always reports the long form; an Administrator will
-// usually have typed a short one.
+// Normalise short and long UUID forms.
 const BLUETOOTH_BASE_SUFFIX = '00001000800000805f9b34fb';
 function canonicalServiceUuid(value) {
   const h = hexOnly(value);
@@ -385,7 +357,7 @@ function matchBeacon(e) {
   return null;
 }
 
-// ── Receiving ───────────────────────────────────────────────────────────
+// Receiving
 function onAdvertisement(e) {
   try {
     if (e.rssi == null) return;
@@ -395,9 +367,7 @@ function onAdvertisement(e) {
     const ed = parseEddystone(e);
     const hit = matchBeacon(e);
 
-    // Every device is recorded, matched or not. A beacon that is heard but
-    // does not match is the single most common setup fault, and it is
-    // invisible unless the unmatched ones are shown too.
+    // Every device is recorded, matched or not.
     const key = (e.device && e.device.id) || (e.device && e.device.name) || 'unknown';
     let frame = 'not a beacon frame';
     if (ib) {
@@ -427,16 +397,13 @@ function onAdvertisement(e) {
         advertisedTxPower[hit.beacon.beacon_id] = hit.advertisedTxPower;
       }
       matchedBeacons.add(hit.beacon.beacon_id);
-      // beacon_id, not beacon_uuid: several beacons here share one UUID and
-      // are told apart only by minor. Keying by UUID would collapse them
-      // into one shared buffer, giving every beacon the same distance
-      // regardless of which one actually sent a given packet.
+      // Key readings by beacon id.
       pushRssi(hit.beacon.beacon_id, e.rssi);
     }
   } catch (_) { /* malformed advertisement */ }
 }
 
-// ── Positioning ─────────────────────────────────────────────────────────
+// Positioning
 function trilaterate() {
   if (!mapData) return null;
   const scale = mapData.pixels_per_meter;
@@ -466,13 +433,12 @@ function trilaterate() {
     Sxx += ax * ax; Sxy += ax * ay; Syy += ay * ay; Sxb += ax * bb; Syb += ay * bb;
   }
   const det = Sxx * Syy - Sxy * Sxy;
-  // Beacons in a straight line give no unique solution. Refusing beats
-  // returning a confident-looking point that is somewhere else entirely.
+  // Beacons in a straight line give no unique solution.
   if (Math.abs(det) < 1e-6) return { error: 'Beacons are too close to a straight line to fix a position' };
   return { x: (Sxb * Syy - Syb * Sxy) / det, y: (Sxx * Syb - Sxy * Sxb) / det, used: pts.length };
 }
 
-// ── Drawing ─────────────────────────────────────────────────────────────
+// Drawing
 function toLatLng(x, y) { return [imgH - y, x]; }
 
 async function loadMap() {
@@ -514,8 +480,7 @@ async function loadMap() {
   if (bounds.length) lmap.fitBounds(L.latLngBounds(bounds).pad(0.4));
   else lmap.setView(toLatLng((d.canvas_width || 1000) / 2, imgH / 2), -1);
 
-  // Only listens while armTruth() has armed it: an ordinary pan or a stray
-  // click must not silently move the reference every sample is measured from.
+  // Only active while setting the true position.
   lmap.on('click', function (e) {
     if (!armingTruth) return;
     setTruth(e.latlng.lng, imgH - e.latlng.lat);   // inverse of toLatLng
@@ -533,11 +498,7 @@ function renderConfig() {
       + 'No beacons are configured on the active floor plan.</td></tr>';
     return;
   }
-  // A duplicate identity is worth calling out here rather than leaving it to
-  // show up as a position that will not move: beacons ship with identical
-  // factory defaults, and three of those can never be told apart.
-  // Normalised the same way matching normalises, so two rows that spell one
-  // UUID differently are still recognised as the same beacon twice over.
+  // Warn about duplicate beacon identities.
   const identity = (b) => [b.advertisement_type, hexOnly(b.beacon_uuid), b.major,
                            b.minor, hexOnly(b.namespace_id),
                            hexOnly(b.instance_id)].join('|').toLowerCase();
@@ -565,11 +526,7 @@ function renderConfig() {
   }).join('');
 }
 
-// -- Which way is north on this plan -------------------------------------
-// Dead reckoning on the patron map steers by the compass, so it needs to know
-// how far the plan's "up" sits from magnetic north. Measured from a pair of
-// beacons because their true bearing is already known from the map -- no
-// protractor, no guessing at the building's orientation.
+// North offset.
 const NORTH_URL = "{% url 'set_floorplan_north' %}";
 let liveCompass = null;      // degrees clockwise from magnetic north
 let pendingNorth = null;     // captured but not yet saved
@@ -602,8 +559,7 @@ function startTestCompass() {
   } catch (err) { /* no compass on this machine */ }
 }
 
-// Bearing from one map point to another, in the same convention the patron map
-// uses: 0 is the top of the plan, growing clockwise, and stored y runs downward.
+// Bearing between two map points.
 function mapBearing(ax, ay, bx, by) {
   return (Math.atan2(bx - ax, -(by - ay)) * 180 / Math.PI + 360) % 360;
 }
@@ -672,11 +628,7 @@ window.saveNorth = async function () {
     + r.north_offset_deg.toFixed(1) + '\u00b0</span>';
 };
 
-// -- Calibration against ground truth ------------------------------------
-// The page can already say what it thinks; without somewhere to enter what is
-// actually true, a wrong dot is uninterpretable -- bad calibration, a shadowed
-// beacon and a beacon entered at the wrong spot all look identical. Everything
-// below exists to make those cases distinguishable.
+// Calibration against the true position.
 const CAL_URL = "{% url 'calibrate_beacon' %}";
 let truthPoint = null;        // {x, y} canvas units: where the operator says they are
 let armingTruth = false;
@@ -718,9 +670,7 @@ function medianOf(buf) {
   return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
-// One sample per beacon per press, taken from the median of its recent window
-// rather than a single packet -- a lone reflected packet 15 dB out would
-// otherwise be fitted as though it were the truth.
+// One median sample per beacon.
 window.recordSample = function () {
   if (!truthPoint) { alert('Set your position on the map first.'); return; }
   let taken = 0;
@@ -751,10 +701,7 @@ window.clearSamples = function () {
   renderCalibration();
 };
 
-// rssi = tx - 10n*log10(d) is a straight line in log10(d), so tx and n fall out
-// of an ordinary least-squares fit: the intercept is the 1 m reference and the
-// slope is -10n. R-squared is shown because a fit taken over too narrow a range
-// of distances can look confident and mean nothing.
+// Fit tx power and path loss.
 function fitAll() {
   Object.keys(calSamples).forEach(function (id) {
     const pts = calSamples[id];
@@ -829,8 +776,7 @@ function renderCalibration() {
       measured = horizontalDistance(rssiToDistance(medianOf(buf), cal.txPower, cal.n), b.height);
     }
     const err = (trueD != null && measured != null) ? measured - trueD : null;
-    // Amber past half a metre, red past one: in a room this size a metre of
-    // ranging error is most of the way across it.
+    // Error colours.
     const errColour = err == null ? ''
       : (Math.abs(err) > 1 ? 'color:#ef4444'
       : (Math.abs(err) > 0.5 ? 'color:#f59e0b' : 'color:#10b981'));
@@ -912,9 +858,25 @@ function setStatus(kind, text) {
   el.textContent = text;
 }
 
-// ── Starting ────────────────────────────────────────────────────────────
+// Starting
 function withTimeout(promise, ms) {
   return Promise.race([promise, new Promise((res) => setTimeout(() => res(null), ms))]);
+}
+
+// The guide the patron map links to.
+const LIVE_POSITION_GUIDE = "{% url 'live_position_guide' %}";
+function showGuideHint(text) {
+  const detail = document.getElementById('detail');
+  if (!detail) return;
+  detail.innerHTML = '';
+  detail.appendChild(document.createTextNode(text + ' '));
+  const a = document.createElement('a');
+  a.href = LIVE_POSITION_GUIDE;
+  a.target = '_blank';
+  a.rel = 'noopener';
+  a.textContent = 'View setup steps';
+  a.style.textDecoration = 'underline';
+  detail.appendChild(a);
 }
 
 async function startTest() {
@@ -927,7 +889,12 @@ async function startTest() {
     setStatus('bad', 'No Web Bluetooth');
     alert('This browser has no Web Bluetooth at all. Use Chrome on Android or on a computer, '
         + 'or a Bluetooth-capable browser on iOS.');
+    showGuideHint('No Web Bluetooth in this browser.');
     return;
+  }
+  // Continue with single-device picking.
+  if (!navigator.bluetooth.requestLEScan) {
+    showGuideHint('Continuous scanning is switched off in this Chrome, so only one beacon at a time can be picked.');
   }
 
   document.getElementById('startBtn').disabled = true;
@@ -958,8 +925,7 @@ async function startTest() {
     }
   }
 
-  // Otherwise admit each beacon by hand. Legitimate here in a way it is not on
-  // the patron map: whoever is testing installed the hardware.
+  // Otherwise admit each beacon by hand.
   setStatus('warn', 'Admit beacons one at a time');
   document.getElementById('addBtn').style.display = '';
   document.getElementById('detail').textContent =
@@ -970,8 +936,7 @@ async function admitBeacon() {
   try {
     const device = await navigator.bluetooth.requestDevice({
       acceptAllDevices: true,
-      // Without naming these, the browser strips manufacturer and service data
-      // out of every advertisement and no beacon can be identified.
+      // Request manufacturer and service data.
       optionalManufacturerData: [0xFFFF, 0x004C, 0x0059, 0x00E0, 0x0075, 0x0006, 0x0171, 0x0157, 0x00D2, 0x0499],
       optionalServices: [EDDYSTONE_SERVICE],
     });

@@ -4,12 +4,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ plan.name }} — Library Map</title>
+    <title>{% if many %}Library Maps — all floors{% else %}{{ plan.name }} — Library Map{% endif %}</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
-        /* Deliberately its own stylesheet rather than the portal's: this page
-           exists to come out of a printer, so it is black on white with no
-           theme, no sidebar and no chrome. */
+        /* Print styles. */
         * { box-sizing: border-box; }
         body {
             font-family: 'Inter', sans-serif;
@@ -31,9 +29,12 @@
         .map-wrap { border: 1px solid #d5d9df; border-radius: 8px; padding: 12px; }
         svg { width: 100%; height: auto; display: block; }
         .room-shape { fill: #f4f6f9; stroke: #7b8795; stroke-width: 2; }
+        /* Staff-only, on paper. */
+        .room-shape.restricted { fill: url(#hatch); stroke-dasharray: 7 5; }
+        .room-label.restricted { fill: #5c6675; }
+        .room-note { font-size: 10px; font-weight: 600; fill: #5c6675; letter-spacing: .06em; }
         .shelf-shape { fill: #dbe3ec; stroke: #46546a; stroke-width: 1.5; }
-        /* Furniture prints lighter than shelving: it orients the reader
-           without competing with what they came to find. */
+        /* Furniture prints lighter. */
         .obstacle-shape { fill: #efe3d2; stroke: #a97b41; stroke-width: 1.2; }
         .obstacle-label { font-size: 7.5px; fill: #6b4f28; }
         .stair-shape { fill: #f7dfe3; stroke: #a3364a; stroke-width: 1.4; }
@@ -56,115 +57,141 @@
             .toolbar, .no-print { display: none !important; }
             body { padding: 0; }
             .map-wrap { border: none; padding: 0; }
-            @page { margin: 12mm; }
+                @page { margin: 12mm; }
+            /* One storey per sheet of paper. */
+            .floor-page { break-after: page; page-break-after: always; }
+            .floor-page:last-child { break-after: auto; page-break-after: auto; }
         }
+        .floor-page + .floor-page { margin-top: 34px; border-top: 2px dashed #ccd3dc; padding-top: 26px; }
+        .floorpick { display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .floorpick-label { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: #666; }
+        .floorpick-item { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; }
     </style>
 </head>
 <body>
 <div class="sheet">
 
+    {# Which floors to print, rather than which one to look at. #}
     <div class="toolbar no-print">
-        <button type="button" class="btn btn-primary" onclick="window.print()">Print this map</button>
+        <button type="button" class="btn btn-primary" onclick="window.print()">Print</button>
         <a class="btn" href="{% url 'admin_indoor_map' %}">Back to Indoor Map</a>
         {% if floors|length > 1 %}
-        <select class="btn" onchange="location.search = '?floor=' + this.value">
+        <form method="get" class="floorpick">
+            <span class="floorpick-label">Floors</span>
             {% for f in floors %}
-            <option value="{{ f.floor_plan_id }}" {% if f.is_current %}selected{% endif %}>{{ f.label }}{% if f.name %} — {{ f.name }}{% endif %}</option>
+            <label class="floorpick-item">
+                <input type="checkbox" name="floor" value="{{ f.floor_plan_id }}"
+                       {% if f.floor_plan_id in chosen_ids %}checked{% endif %}>
+                {{ f.label }}{% if f.name and f.name != f.label %} — {{ f.name }}{% endif %}
+            </label>
             {% endfor %}
-        </select>
+            <button type="submit" class="btn">Show these</button>
+            <a class="btn" href="?floor=all">All floors</a>
+        </form>
         {% endif %}
     </div>
 
+    {% for sheet in sheets %}
+    <div class="floor-page">
     <div class="head">
-        <div>
-            <h1 class="title">Ayla Public Library</h1>
-            <p class="sub">{{ plan.floor_label }}{% if plan.name %} · {{ plan.name }}{% endif %} · shelf and section map</p>
+            <div>
+                <h1 class="title">Ayla Public Library</h1>
+                <p class="sub">{{ sheet.plan.floor_label }}{% if sheet.plan.name %} · {{ sheet.plan.name }}{% endif %} · shelf and section map</p>
+            </div>
+            <img class="logo" src="{% static 'images/ayla-logo.png' %}" alt="AYLA">
         </div>
-        <img class="logo" src="{% static 'images/ayla-logo.png' %}" alt="AYLA">
-    </div>
-
-    <div class="map-wrap">
-        <svg viewBox="0 0 {{ canvas_width|floatformat:0 }} {{ canvas_height|floatformat:0 }}"
-             role="img" aria-label="Map of {{ plan.floor_label }} showing rooms and shelves">
-            {% for room in rooms %}
-                {% if room.has_shape %}
-                <polygon class="room-shape" points="{{ room.points }}"></polygon>
-                {% endif %}
-            {% endfor %}
-
-            {% for st in stairways %}
-            <polygon class="stair-shape" points="{{ st.points }}"></polygon>
-            {% for t in st.treads %}
-            <line class="stair-tread" x1="{{ t.0.0|floatformat:2 }}" y1="{{ t.0.1|floatformat:2 }}" x2="{{ t.1.0|floatformat:2 }}" y2="{{ t.1.1|floatformat:2 }}"></line>
-            {% endfor %}
-            {% endfor %}
-            {% for ob in obstacles %}
-            <polygon class="obstacle-shape" points="{{ ob.points }}"></polygon>
-            {% endfor %}
-
-            {% for sh in shelves %}
-            {% if sh.points %}
-            {# Traced: the outline is already in canvas coordinates, so it needs #}
-            {# no rotation transform -- the shape carries its own angle.         #}
-            <polygon class="shelf-shape" points="{{ sh.points }}"></polygon>
-            {% else %}
-            <g transform="rotate({{ sh.rotation|floatformat:2 }} {{ sh.cx|floatformat:2 }} {{ sh.cy|floatformat:2 }})">
-                <rect class="shelf-shape" x="{{ sh.x|floatformat:2 }}" y="{{ sh.y|floatformat:2 }}"
-                      width="{{ sh.w|floatformat:2 }}" height="{{ sh.h|floatformat:2 }}" rx="2"></rect>
-            </g>
-            {% endif %}
-            {% endfor %}
-
-            {# Labels drawn upright, outside the rotation, so a rotated shelf   #}
-            {# does not print its name sideways. #}
-            {% for sh in shelves %}
-            <text class="shelf-label" x="{{ sh.cx|floatformat:2 }}" y="{{ sh.cy|floatformat:2 }}" text-anchor="middle">{{ sh.name }}</text>
-            {% if sh.sections %}
-            <text class="shelf-cat" x="{{ sh.cx|floatformat:2 }}" y="{{ sh.cy|add:9|floatformat:2 }}" text-anchor="middle">{{ sh.sections }}</text>
-            {% endif %}
-            {% endfor %}
-
-            {% for st in stairways %}
-            <text class="stair-label" x="{{ st.label_x|floatformat:2 }}" y="{{ st.label_y|floatformat:2 }}" text-anchor="middle">{{ st.label }}</text>
-            {% if st.destination %}
-            <text class="stair-label" x="{{ st.label_x|floatformat:2 }}" y="{{ st.dest_y|floatformat:2 }}" text-anchor="middle">&#8594; {{ st.destination }}</text>
-            {% endif %}
-            {% endfor %}
-            {% for ob in obstacles %}{% if ob.show_label %}
-            <text class="obstacle-label" x="{{ ob.label_x|floatformat:2 }}" y="{{ ob.label_y|floatformat:2 }}" text-anchor="middle">{{ ob.label }}</text>
-            {% endif %}{% endfor %}
-
-            {% for room in rooms %}
-            <text class="room-label" x="{{ room.label_x|floatformat:2 }}" y="{{ room.label_y|floatformat:2 }}" text-anchor="middle">{{ room.name }}</text>
-            {% endfor %}
-        </svg>
-    </div>
-
-    <div class="legend">
-        <span><span class="swatch" style="background:#f4f6f9;border:1px solid #7b8795"></span>Room</span>
-        <span><span class="swatch" style="background:#dbe3ec;border:1px solid #46546a"></span>Shelf</span>
-        <span><span class="swatch" style="background:#efe3d2;border:1px solid #a97b41"></span>Table / obstacle</span>
-        <span><span class="swatch" style="background:#f7dfe3;border:1px solid #a3364a"></span>Stairs / lift</span>
-    </div>
-
-    {% if shelves %}
-    <div class="sections">
-        <h2>Shelves on this floor</h2>
-        <table>
-            <thead><tr><th>Shelf</th><th>Sections held</th></tr></thead>
-            <tbody>
-                {% for sh in shelves %}
-                <tr>
-                    <td>{{ sh.name }}</td>
-                    <td>{% if sh.sections %}{{ sh.sections }}{% else %}&mdash;{% endif %}</td>
-                </tr>
+    
+        <div class="map-wrap">
+            <svg viewBox="0 0 {{ sheet.canvas_width|floatformat:0 }} {{ sheet.canvas_height|floatformat:0 }}"
+                 role="img" aria-label="Map of {{ sheet.plan.floor_label }} showing rooms and shelves">
+                <defs>
+                    <pattern id="hatch" width="7" height="7" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
+                        <rect width="7" height="7" fill="#f4f6f9"></rect>
+                        <line x1="0" y1="0" x2="0" y2="7" stroke="#b9c2cd" stroke-width="1.6"></line>
+                    </pattern>
+                </defs>
+                {% for room in sheet.rooms %}
+                    {% if room.has_shape %}
+                    <polygon class="room-shape{% if room.restricted %} restricted{% endif %}" points="{{ room.points }}"></polygon>
+                    {% endif %}
                 {% endfor %}
-            </tbody>
-        </table>
+    
+                {% for st in sheet.stairways %}
+                <polygon class="stair-shape" points="{{ st.points }}"></polygon>
+                {% for t in st.treads %}
+                <line class="stair-tread" x1="{{ t.0.0|floatformat:2 }}" y1="{{ t.0.1|floatformat:2 }}" x2="{{ t.1.0|floatformat:2 }}" y2="{{ t.1.1|floatformat:2 }}"></line>
+                {% endfor %}
+                {% endfor %}
+                {% for ob in sheet.obstacles %}
+                <polygon class="obstacle-shape" points="{{ ob.points }}"></polygon>
+                {% endfor %}
+    
+                {% for sh in sheet.shelves %}
+                {% if sh.points %}
+                {# Traced shelves need no rotation. #}
+                <polygon class="shelf-shape" points="{{ sh.points }}"></polygon>
+                {% else %}
+                <g transform="rotate({{ sh.rotation|floatformat:2 }} {{ sh.cx|floatformat:2 }} {{ sh.cy|floatformat:2 }})">
+                    <rect class="shelf-shape" x="{{ sh.x|floatformat:2 }}" y="{{ sh.y|floatformat:2 }}"
+                          width="{{ sh.w|floatformat:2 }}" height="{{ sh.h|floatformat:2 }}" rx="2"></rect>
+                </g>
+                {% endif %}
+                {% endfor %}
+    
+                {# Labels stay upright. #}
+                {% for sh in sheet.shelves %}
+                <text class="shelf-label" x="{{ sh.cx|floatformat:2 }}" y="{{ sh.cy|floatformat:2 }}" text-anchor="middle">{{ sh.name }}</text>
+                {% if sh.sections %}
+                <text class="shelf-cat" x="{{ sh.cx|floatformat:2 }}" y="{{ sh.cy|add:9|floatformat:2 }}" text-anchor="middle">{{ sh.sections }}</text>
+                {% endif %}
+                {% endfor %}
+    
+                {% for st in sheet.stairways %}
+                <text class="stair-label" x="{{ st.label_x|floatformat:2 }}" y="{{ st.label_y|floatformat:2 }}" text-anchor="middle">{{ st.label }}</text>
+                {% if st.destination %}
+                <text class="stair-label" x="{{ st.label_x|floatformat:2 }}" y="{{ st.dest_y|floatformat:2 }}" text-anchor="middle">&#8594; {{ st.destination }}</text>
+                {% endif %}
+                {% endfor %}
+                {% for ob in sheet.obstacles %}{% if ob.show_label %}
+                <text class="obstacle-label" x="{{ ob.label_x|floatformat:2 }}" y="{{ ob.label_y|floatformat:2 }}" text-anchor="middle">{{ ob.label }}</text>
+                {% endif %}{% endfor %}
+    
+                {% for room in sheet.rooms %}
+                <text class="room-label{% if room.restricted %} restricted{% endif %}" x="{{ room.label_x|floatformat:2 }}" y="{{ room.label_y|floatformat:2 }}" text-anchor="middle">{{ room.name }}</text>
+                {% if room.restricted %}
+                <text class="room-note" x="{{ room.label_x|floatformat:2 }}" y="{{ room.label_y|add:15|floatformat:2 }}" text-anchor="middle">STAFF ONLY</text>
+                {% endif %}
+                {% endfor %}
+            </svg>
+        </div>
+    
+        <div class="legend">
+            <span><span class="swatch" style="background:#f4f6f9;border:1px solid #7b8795"></span>Room</span>
+            <span><span class="swatch" style="background:#dbe3ec;border:1px solid #46546a"></span>Shelf</span>
+            <span><span class="swatch" style="background:#efe3d2;border:1px solid #a97b41"></span>Table / obstacle</span>
+            <span><span class="swatch" style="background:#f7dfe3;border:1px solid #a3364a"></span>Stairs / lift</span>
+        </div>
+    
+        {% if sheet.shelves %}
+        <div class="sections">
+            <h2>Shelves on this floor</h2>
+            <table>
+                <thead><tr><th>Shelf</th><th>Sections held</th></tr></thead>
+                <tbody>
+                    {% for sh in sheet.shelves %}
+                    <tr>
+                        <td>{{ sh.name }}</td>
+                        <td>{% if sh.sections %}{{ sh.sections }}{% else %}&mdash;{% endif %}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+    
+        <p class="foot">Printed {{ printed_on|date:"j F Y" }}. Shelf positions change as the collection is reorganised &mdash; reprint after any shelf is moved.</p>
     </div>
-    {% endif %}
-
-    <p class="foot">Printed {{ printed_on|date:"j F Y" }}. Shelf positions change as the collection is reorganised &mdash; reprint after any shelf is moved.</p>
+    {% endfor %}
 </div>
 </body>
 </html>

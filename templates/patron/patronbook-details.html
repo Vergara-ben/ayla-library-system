@@ -83,6 +83,8 @@
     display:flex;align-items:center;justify-content:center;gap:8px;
   }
   .btn-map:hover{background:var(--accent-strong);}
+  .btn-map-alt{display:block;text-align:center;text-decoration:none;}
+  .unshelved-note{margin-top:12px;padding:12px 14px;border-radius:10px;background:var(--tint-info);color:var(--info);font-size:13px;line-height:1.55;}
 
   @keyframes fadeDown{from{opacity:0;transform:translateY(-12px);}to{opacity:1;transform:translateY(0);}}
   @keyframes fadeUp{from{opacity:0;transform:translateY(12px);}to{opacity:1;transform:translateY(0);}}
@@ -156,11 +158,15 @@
           {% if shelf %}<span class="shelf-step">{{ shelf.name }}</span>{% endif %}
           {% if shelf_level %}{% if shelf %}<span class="shelf-arrow">→</span>{% endif %}<span class="shelf-step">{{ shelf_level.category|default:shelf_level.level_number }}</span>{% endif %}
         </div>
-        {% else %}Not assigned{% endif %}
+        {% else %}Not yet shelved{% endif %}
       </div>
     </div>
     {% if room %}<div class="detail-row"><div class="detail-key">Room</div><div class="detail-val">{{ room.name }}</div></div>{% endif %}
     {% if floor_plan %}<div class="detail-row"><div class="detail-key">Floor Plan</div><div class="detail-val">Floor Plan {{ floor_plan.floor_plan_id }}</div></div>{% endif %}
+    {% if not shelf %}
+    {# Unshelved book note. #}
+    <p class="unshelved-note">This book is in the library but has not been put on a shelf yet. Ask at the front desk and staff will get it for you.</p>
+    {% endif %}
   </div>
 
   <!-- Description -->
@@ -174,7 +180,12 @@
 
 <!-- BOTTOM -->
 <div class="bottom-action">
-  <button class="btn-map" onclick="window.location.href='{% url 'patron_map' %}?book_id={{ book.book_id }}'">🗺️ View on Map</button>
+  {% if shelf %}
+  <button class="btn-map" onclick="window.location.href='{% url 'patron_map' %}?book_id={{ book.book_id }}'">Navigate on Map</button>
+  {% else %}
+  {# No shelf, so no route. #}
+  <a class="btn-map btn-map-alt" href="{% url 'patron_catalog' %}">Back to the catalogue</a>
+  {% endif %}
 </div>
 
 <script>

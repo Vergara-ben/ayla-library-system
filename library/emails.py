@@ -1,19 +1,4 @@
-"""Email notifications for the AYLA library system.
-
-Covers the manuscript's automated alerts: overdue reminders and
-announcement emails. All sends are best-effort and never raise to the
-caller; the configured backend is real SMTP when credentials are set,
-otherwise the console backend (see settings).
-
-Failures are logged to the 'library.emails' logger rather than discarded, so a
-bad App Password or a Gmail block shows up in the server log instead of looking
-like a mail that simply never arrived.
-
-For anything that mails more than one person (announcement broadcasts, the
-overdue command), open one connection with bulk_connection() and pass it in —
-Gmail costs roughly a second per connection, so a per-recipient connection turns
-a 100-patron broadcast into a request that times out.
-"""
+"""Email notifications for the AYLA library system."""
 
 import logging
 
@@ -28,16 +13,7 @@ def _library_name():
 
 
 def bulk_connection():
-    """A single reusable mail connection for multi-recipient sends.
-
-    Whatever EMAIL_BACKEND is configured -- SMTP, or one of the HTTP API
-    providers -- get_connection returns the right one, so nothing here or in the
-    callers has to know which transport is in use.
-
-    Returned unopened; use it as a context manager, or pass it to the *_email
-    helpers and close it when done. Returns None if the connection cannot even
-    be constructed, in which case callers fall back to per-message connections.
-    """
+    """A single reusable mail connection for multi-recipient sends."""
     try:
         return get_connection(fail_silently=False)
     except Exception:
@@ -60,7 +36,7 @@ def send_email(subject, message, recipient, connection=None):
         )
         return bool(sent)
     except Exception:
-        # Best-effort by contract — never raise into a request — but never silent.
+        # Never raise into a request, but always log the failure.
         logger.exception('Email to %s failed (subject=%r)', recipient, subject)
         return False
 
@@ -211,12 +187,7 @@ def registration_approved_email(patron):
 
 
 def librarian_reply_email(patron, reply_body):
-    """Tell a patron an answer is waiting for their question.
-
-    The whole point of the enquiry desk: nobody sits watching a chat window, so
-    the reply has to come and find them. A short extract is included so a simple
-    answer needs no trip back to the site at all.
-    """
+    """Tell a patron an answer is waiting for their question."""
     lib = _library_name()
     extract = reply_body.strip()
     if len(extract) > 300:

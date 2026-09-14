@@ -1,8 +1,4 @@
-/* admin-enhance.js — usability & accessibility behaviour for the AYLA admin panel.
- * Included on every admin page. Defensive: every step is wrapped so a failure on
- * one page never breaks the others. It augments existing markup (ARIA, focus
- * management, keyboard handling) without changing page logic.
- */
+/* admin-enhance.js: usability and accessibility helpers for the admin panel. */
 (function () {
     'use strict';
 

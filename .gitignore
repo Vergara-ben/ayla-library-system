@@ -40,4 +40,10 @@ logs/
 # photographs of government IDs. Never commit them.
 backups/
 
-# Local editor/agent tooling config
+# Data exports written by `manage.py export_library`, for moving the library
+# to a deployed host. Same reason as backups/, and worth stating separately
+# because the filename is dated and looks harmless: one of these carries every
+# patron's name, email, address and contact number, and the password hash of
+# every staff and administrator account.
+ayla-data-*.json
+

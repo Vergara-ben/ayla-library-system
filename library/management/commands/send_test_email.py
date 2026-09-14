@@ -1,10 +1,4 @@
-"""Send one test email to prove the SMTP configuration works.
-
-    python manage.py send_test_email you@example.com
-
-Reports which backend is active and, on failure, prints the underlying SMTP
-error instead of swallowing it the way the app's best-effort helpers do.
-"""
+"""Send one test email to prove the SMTP configuration works."""
 
 from django.conf import settings
 from django.core.mail import send_mail

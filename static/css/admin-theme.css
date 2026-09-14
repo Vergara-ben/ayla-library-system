@@ -1,35 +1,6 @@
-/* =====================================================================
-   admin-theme.css — shared visual layer for the AYLA admin and library
-   staff panels.
+/* admin-theme.css: shared styles for the admin and staff panels. */
 
-   PRESENTATION ONLY. It changes no HTML structure, ids, classes or
-   JavaScript, so every existing feature keeps working. It is loaded last
-   (after theme.css, each page's <style>, and admin-enhance.css) so it
-   composes cleanly on top.
-
-   All colour comes from theme.css tokens; this file contains no literal
-   colours, so it follows the light/dark switch automatically. The module
-   accent resolves to cyan for the admin panel and violet for library
-   staff without either module needing its own rules.
-
-   Design direction: flat. Panels are separated by a 1px border instead of
-   by shadow or gradient, buttons are solid fills, and hover states change
-   colour rather than position.
-   ===================================================================== */
-
-/* ---- 0. Border visibility (WCAG 1.4.11 non-text contrast) -------------
-   The ~700 border-slate-700/NN and border-slate-800/NN utility classes in
-   this markup carry opacity suffixes tuned for a dark background (a hairline
-   glow), which dilutes to ~1.1-1.2:1 on a light one — visually a hint of a
-   border, not a boundary. table cells, cards, inputs and buttons all use
-   this pattern, which is the "borders aren't visible enough" problem.
-
-   Fix: force every border-slate-700/800 (and divide-slate-800, which
-   generates a border-top on table rows) to the FULL-strength border tone
-   regardless of its own opacity suffix. --tw-slate-700 is tuned per theme
-   to clear 3:1 against every surface it sits on. Hover/focus states that
-   still declare their own colour (e.g. focus:border-cyan-700) are separate,
-   higher-specificity rules and are unaffected. */
+/* Border visibility (WCAG 1.4.11) */
 [class*="border-slate-700"],
 [class*="border-slate-800"] {
     border-color: rgb(var(--tw-slate-700)) !important;
@@ -38,28 +9,18 @@
 [class*="divide-slate-800"] > :not([hidden]) ~ :not([hidden]) {
     border-color: rgb(var(--tw-slate-700)) !important;
 }
-/* The one deliberate hover-brighten (shelf tree rows) still gets a visible
-   change on hover, now against the accent instead of a barely-there tint. */
+/* Hover state for tree rows. */
 .hover\:border-slate-700:hover,
 .hover\:border-slate-800:hover {
     border-color: var(--accent) !important;
 }
 
-/* Same fix, for every status/accent colour. Shades 700-900 in each ramp are
-   deliberately pale — the FILL a badge or a tinted secondary button sits on
-   (bg-cyan-700/30, bg-rose-800/10, …) — but the pre-existing markup also
-   uses those same shades as borders on cards, alert boxes, avatars and
-   secondary buttons, where a pale wash reads as no border at all. Redirect
-   border/divide usage to each family's own 500 shade, which clears 3:1
-   against every surface in both themes while keeping its hue — a cyan
-   border still reads as "cyan", just strong enough to see. */
+/* Same fix, for every status/accent colour. */
 [class*="border-cyan-8"],    [class*="border-cyan-9"],
 [class*="divide-cyan-8"],    [class*="divide-cyan-9"] {
     border-color: rgb(var(--tw-cyan-500)) !important;
 }
-/* violet/rose/blue also need their 700 shade caught, not just 800-900: it
-   passes in light mode (5.7-7.1:1) but falls short in dark mode (2.5-2.9:1)
-   -- the two themes were tuned independently and this trio didn't line up. */
+/* Include the 700 shades for contrast in dark mode. */
 [class*="border-violet-7"],  [class*="border-violet-8"],  [class*="border-violet-9"],
 [class*="divide-violet-7"],  [class*="divide-violet-8"],  [class*="divide-violet-9"] {
     border-color: rgb(var(--tw-violet-500)) !important;
@@ -85,7 +46,7 @@
     border-color: rgb(var(--tw-teal-500)) !important;
 }
 
-/* ---- 1. Base canvas ---------------------------------------------------- */
+/* Base canvas */
 body {
     background-color: var(--bg-main) !important;
     background-image: none !important;   /* was two ambient radial glows */
@@ -93,7 +54,7 @@ body {
 
 h1, h2, h3, h4 { letter-spacing: -0.012em; }
 
-/* ---- 2. Sidebar -------------------------------------------------------- */
+/* Sidebar */
 aside nav a {
     border-radius: var(--radius);
     transition: background-color .15s ease, color .15s ease;
@@ -112,18 +73,15 @@ aside .bg-cyan-950\/50, aside .bg-violet-950\/50 {
     box-shadow: none;
 }
 
-/* ---- 3. Cards & panels ------------------------------------------------- */
+/* Cards and panels */
 [style*="--bg-card"] {
-    /* !important for the same reason as the modal rule below: the markup says
-       rounded-xl / rounded-2xl and the CDN injects those at runtime. Measured
-       before adding it, every card on Manage Books rendered at 12px from
-       rounded-xl -- this rule had never once taken effect. */
+    /* !important to override Tailwind's runtime classes. */
     border-radius: var(--radius-lg) !important;
     box-shadow: none !important;
     transition: border-color .15s ease;
 }
 
-/* ---- 4. Inputs, selects, textareas — unified focus -------------------- */
+/* Inputs and focus */
 input:not([type=checkbox]):not([type=radio]):not([type=file]):focus,
 select:focus,
 textarea:focus {
@@ -132,7 +90,7 @@ textarea:focus {
 }
 ::placeholder { color: var(--text-muted) !important; opacity: .75; }
 
-/* ---- 5. Primary buttons: solid fill, no gradient or lift -------------- */
+/* Primary buttons */
 .bg-cyan-700, .bg-cyan-600, .bg-violet-700, .bg-violet-600 {
     background-image: none !important;
     box-shadow: none;
@@ -146,27 +104,24 @@ textarea:focus {
 /* Tinted secondary chips */
 .bg-cyan-700\/30, .bg-violet-700\/30 { box-shadow: none; }
 
-/* ---- 6. Tables --------------------------------------------------------- */
+/* Tables */
 table thead tr { background: var(--bg-subtle) !important; }
 table thead th { letter-spacing: 0.08em; }
 table tbody tr { transition: background-color .12s ease; }
 table tbody tr:hover { background: var(--bg-subtle) !important; }
 
-/* ---- 7. Modals — the one place depth is allowed ---------------------- */
+/* Modals */
 [style*="--bg-modal"] {
-    /* !important because the markup carries rounded-2xl and shadow-2xl, which
-       the Tailwind CDN injects at runtime and which therefore beat plain
-       declarations here regardless of file order. Without it this rule has
-       been quietly losing: modal cards rendered at 16px, not the token. */
+    /* !important to override Tailwind's runtime classes. */
     border-radius: var(--radius-lg) !important;
     box-shadow: var(--shadow-pop) !important;
 }
 
-/* ---- 8. Scrollbars ----------------------------------------------------- */
+/* Scrollbars */
 ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
 
-/* ---- 9. Interaction: colour, not motion ------------------------------- */
+/* Hover and focus */
 button, a, .stat-card, [role="button"] {
     transition: background-color .15s ease, border-color .15s ease,
                 color .15s ease;
@@ -180,7 +135,7 @@ button, a, .stat-card, [role="button"] {
 /* Empty-state table rows: a touch more breathing room */
 td[colspan] { padding-top: 2.25rem !important; padding-bottom: 2.25rem !important; }
 
-/* ---- 10. Sidebar theme switch ----------------------------------------- */
+/* Sidebar theme switch */
 aside .theme-toggle.is-wide {
     color: rgb(var(--tw-slate-400));
     border-color: transparent;
@@ -192,26 +147,7 @@ aside .theme-toggle.is-wide:hover {
     border-color: transparent;
 }
 
-/* ---- 11. Page header --------------------------------------------------
-   Two scaffolds grew up in parallel and never met:
-
-     .top-navbar  +  h2.page-title      4 pages  (admin/staff dashboard, indoormap)
-     header.h-16  +  h2.logo-text      26 pages  (everything else)
-
-   They differ in more than layout. .page-title inherits the page font at 14px
-   with 1.5px tracking on a --bg-darker bar; .logo-text is 18px in *Rowdies* --
-   a display face meant for the wordmark, reused for page titles by copy-paste
-   -- on a --bg-main bar with no bottom border. Clicking from Dashboard to
-   Manage Books changed the typeface of the page title, which is the kind of
-   thing nobody can name but everybody sees.
-
-   Both are pinned here to the same bar and the same title. --bg-main and the
-   bottom border win because 26 pages beat 4, and because a header needs an
-   edge for the same reason the sidebar has one.
-
-   !important throughout: the h-16 side carries its background in an inline
-   style attribute, and its geometry comes from Tailwind utilities the CDN
-   injects at runtime. Neither loses to plain source order.               */
+/* Page header */
 
 .top-navbar,
 header.h-16 {
@@ -236,58 +172,22 @@ header h2.logo-text {
     margin: 0 !important;
 }
 
-/* The floating profile menu is the one thing in the header that sits above
-   the page, so it takes the elevation token rather than a bare shadow-2xl. */
+/* Profile menu shadow. */
 #profileMenu {
     box-shadow: var(--shadow-pop) !important;
     border-radius: var(--radius-lg) !important;
 }
 
-/* ---- 12. Control geometry ---------------------------------------------
-   The markup grew four button paddings (px-5 py-2.5, px-4 py-2.5, px-4 py-2,
-   px-3 py-1.5), four micro type sizes, two icon-button radii and three
-   different "Cancel" class strings -- all for controls that read as the same
-   thing. None of that is visible as a decision; it just makes the product look
-   assembled rather than designed.
+/* Control sizes */
 
-   Two tiers, and nothing else:
-
-       medium   40px tall, --radius        primary and secondary actions
-       small    32px square, --radius-sm   icon buttons and row actions
-
-   Geometry only. Colour is left entirely to section 5 and to the accent
-   tokens, so nothing here fights the border-color and background !important
-   rules already in this file.                                            */
-
-/* ---- 12a. Micro type --------------------------------------------------
-   text-[9px], text-[10px] and text-[11px] are used interchangeably for the
-   same tier -- badges, chips, row actions, table headers. Substring matching
-   catches all three wherever Tailwind generated them, which is the same
-   technique section 2 already uses for border opacity. */
+/* Small text */
 [class*="text-[9px]"],
 [class*="text-[10px]"],
 [class*="text-[11px]"] {
     font-size: 10px !important;
 }
 
-/* ---- 12b. Two control tiers -------------------------------------------
-   Measured on Manage Books, the same page carried buttons at 24, 29, 30, 40
-   and 46px -- toolbar actions at 29 sitting directly beside 32px icon
-   buttons, and Prev/Next at 46 for no reason anyone chose.
-
-   The four paddings already in the markup map cleanly onto two tiers, so the
-   tiers are drawn from what the markup meant rather than imposed on it:
-
-       px-3 py-1.5                        -> small,  32px
-       px-4 py-2 / py-2.5 / px-5 py-2.5   -> medium, 40px
-
-   Deliberately not collapsing both into one 40px tier: this is a dense
-   administrative UI, and inflating every toolbar button would cost rows of
-   table on screen to buy nothing. Small matches the 32px icon buttons it sits
-   next to, which is the mismatch that actually reads as sloppy.
-
-   Scoped to button and a throughout, so a chip, a table cell or a layout div
-   sharing a padding class is never caught. */
+/* Two control sizes */
 
 button.px-3.py-1\.5, a.px-3.py-1\.5 {
     min-height: 32px !important;
@@ -306,9 +206,7 @@ button.px-5.py-2\.5, a.px-5.py-2\.5 {
     font-weight: 600 !important;
 }
 
-/* Shared by both tiers: centre the label and its icon on one baseline. The
-   markup already says flex on most of these and forgets to on the rest, which
-   is why a button with an icon sat a pixel or two off its neighbour. */
+/* Shared by both tiers: centre the label and its icon on one baseline. */
 button.px-3.py-1\.5, a.px-3.py-1\.5,
 button.px-4.py-2, a.px-4.py-2,
 button.px-4.py-2\.5, a.px-4.py-2\.5,
@@ -321,11 +219,7 @@ button.px-5.py-2\.5, a.px-5.py-2\.5 {
     letter-spacing: .01em !important;
 }
 
-/* ---- 12c. Small controls: icon buttons and row actions ----------------
-   w-7 h-7 is 28px and splits between `rounded` on row actions and
-   `rounded-lg` on modal close buttons -- the same box, two corners. One
-   square, one radius, and 32px because 28 is below the comfortable minimum
-   for a target you are expected to hit repeatedly down a table. */
+/* Icon buttons and row actions */
 .w-7.h-7 {
     width: 32px !important;
     height: 32px !important;
@@ -336,40 +230,14 @@ button.px-5.py-2\.5, a.px-5.py-2\.5 {
     flex-shrink: 0 !important;
 }
 
-/* ---- 12d. Tags and pills ----------------------------------------------
-   The two badge shapes are a real distinction and both are kept: a squared
-   tag for an intrinsic property (condition), a pill for a changing state
-   (availability). Only the corner is pinned to the scale; 12a has already
-   levelled their type. */
+/* Tags and pills */
 span[class*="text-[9px]"][class*="rounded"]:not([class*="rounded-full"]),
 span[class*="text-[10px]"][class*="rounded"]:not([class*="rounded-full"]),
 span[class*="text-[11px]"][class*="rounded"]:not([class*="rounded-full"]) {
     border-radius: var(--radius-xs) !important;
 }
 
-/* ---- 13. Modal overlays ------------------------------------------------
-   Three things had drifted apart, and only two of them are safe to unify.
-
-   POSITION. 31 overlays are `absolute inset-0`, the rest `fixed`. The
-   absolute ones render correctly today only because <body> never scrolls --
-   the page's scrolling happens inside <main>. That is a coincidence of the
-   current layout, not a decision, and it breaks silently the day any page
-   lets the body scroll. All of them become fixed.
-
-   SCRIM. Three mechanisms for one backdrop: bg-black/60, bg-black/70, and an
-   inline style="background: var(--scrim)". theme.css already redirects the
-   first to the token; the rest join it here so light and dark stay honest.
-
-   Z-INDEX is deliberately NOT flattened. The ladder reads 40, 50, 60, 70, 80,
-   which is ugly, but 70 (transaction modals) and 80 (change password) sit
-   above the base layer on purpose -- they open from inside another modal.
-   Levelling them would let a nested dialog open behind its own parent, which
-   is a far worse bug than an untidy scale. Only the base overlays are pinned
-   together, and only the one real collision is fixed.
-
-   Keyed on the structural signal -- inset-0 plus a backdrop -- never on an id
-   substring: 39 ids in these templates contain "modal", including headings
-   like beaconModalTitle, and position:fixed on an <h3> would be its own bug. */
+/* Modal overlays */
 
 .inset-0.bg-black\/60,
 .inset-0.bg-black\/70,
@@ -379,18 +247,14 @@ span[class*="text-[11px]"][class*="rounded"]:not([class*="rounded-full"]) {
     background: var(--scrim) !important;
 }
 
-/* The base layer. The explicit z-[70] and z-[80] overlays keep their own
-   value and so stay above this, which is what they were written to do. */
+/* The base layer. */
 .inset-0.z-40,
 .inset-0.z-50,
 .inset-0.z-\[60\] {
     z-index: 60 !important;
 }
 
-/* The one genuine collision: the header's profile dropdown carried the same
-   z-[60] as eight modal overlays, so which one won depended on DOM order.
-   A dropdown belongs under a dialog, so it moves down rather than the
-   dialogs moving up. */
+/* Keep the dropdown below modals. */
 #profileMenu {
     z-index: 50 !important;
 }

@@ -1,14 +1,4 @@
-{% comment %}
-The Account tab for someone who has not registered.
-
-The tab deliberately stays where it is rather than disappearing: a visitor who
-cannot see it has no way of learning that an account exists or what it would
-give them. Tapping it explains, and offers the two doors out — sign in, or
-register — instead of dropping them on a login form with no context.
-
-Included by the patron pages that are open to visitors and carry the bottom
-nav. Pages without the nav (map, book details) do not need it.
-{% endcomment %}
+{# The Account tab for someone who has not registered. #}
 
 <div id="guestPrompt" class="guest-prompt" onclick="if(event.target===this)closeGuestPrompt()">
   <div class="guest-card">

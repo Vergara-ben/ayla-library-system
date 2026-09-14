@@ -1,10 +1,6 @@
-/* admin-enhance.css — usability & accessibility layer for the AYLA admin panel.
-   Included on every admin page. Purely additive; does not change the visual design. */
+/* admin-enhance.css: usability and accessibility styles for the admin panel. */
 
-/* 1. Visible keyboard focus.
-   The templates use Tailwind's `focus:outline-none`, which removes the focus ring
-   and makes keyboard navigation invisible. Restore a clear ring for keyboard users
-   only (`:focus-visible`), so mouse clicks stay clean. */
+/* Visible keyboard focus. */
 a:focus-visible,
 button:focus-visible,
 input:focus-visible,
@@ -25,7 +21,7 @@ summary:focus-visible,
     outline-offset: 2px;
 }
 
-/* 2. Screen-reader-only utility (used by labels added at runtime). */
+/* Screen-reader-only text. */
 .sr-only {
     position: absolute !important;
     width: 1px; height: 1px;
@@ -36,18 +32,14 @@ summary:focus-visible,
     border: 0;
 }
 
-/* 3. Skip-to-content link (injected by admin-enhance.js). Hidden until focused. */
-/* The skip link lives in theme.css, which every page loads -- this sheet does
-   not reach four of the pages that have one, and an unstyled skip link is a
-   permanently visible one. */
+/* Skip link styles are in theme.css. */
 
-/* 4. Larger, easier hit targets for small icon buttons (touch + motor accessibility),
-   without changing their visual size. */
+/* Bigger tap targets for small controls. */
 button, a, label, input[type="checkbox"], select {
     touch-action: manipulation;
 }
 
-/* 5. Respect the user's reduced-motion preference. */
+/* Respect reduced motion. */
 @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after {
         animation-duration: 0.001ms !important;

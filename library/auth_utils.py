@@ -10,11 +10,7 @@ def check_password(plain_password, hashed_password):
     return django_check_password(plain_password, hashed_password)
 
 
-# ─── Login throttling ─────────────────────────────────────────────────────
-# Password guessing was unlimited on all four sign-in doors. These helpers are
-# deliberately tiny and synchronous: a capstone deployment has no Redis and no
-# background worker, and a counter in the database that everyone actually calls
-# beats a perfect design nobody wires up.
+# Login throttling.
 
 def _throttle_row(scope, identifier):
     from .models import LoginAttempt
@@ -26,12 +22,7 @@ def _throttle_row(scope, identifier):
 
 
 def login_locked_message(scope, identifier):
-    """The refusal to show, or None when this identity may still try.
-
-    Returns the message rather than a boolean so the caller cannot forget to
-    explain itself: a locked-out librarian needs to know it is a lockout and not
-    a wrong password, or they will keep typing.
-    """
+    """The refusal to show, or None when this identity may still try."""
     from django.utils import timezone
     from .models import LoginAttempt
 
@@ -84,10 +75,7 @@ def clear_login_failures(scope, identifier):
         LoginAttempt.objects.filter(scope=scope, identifier=key).delete()
 
 
-# A hash of a value nobody can supply. Verifying a password against it costs the
-# same as verifying a real one, which is the point: without this, a missing user
-# returns instantly while a real one runs PBKDF2, and the difference is a
-# perfectly good answer to "does this address have an account?".
+# A hash of a value nobody can supply.
 _DUMMY_HASH = None
 
 
@@ -99,9 +87,7 @@ def waste_password_time():
     django_check_password('no-such-account-placeholder-attempt', _DUMMY_HASH)
 
 
-# One sentence for every way a sign-in can fail. Naming the reason -- no such
-# user, wrong password, suspended -- tells an attacker which addresses are real
-# without them ever needing a correct password.
+# One sentence for every way a sign-in can fail.
 LOGIN_FAILED_TEXT = 'Invalid email or password.'
 
 
@@ -145,13 +131,7 @@ def staff_only_required(view_func):
 
 
 def admin_module_required(module_key):
-    """Administrator-only view covering operational rather than governing work.
-
-    Governance and oversight use admin_only_required and are always available.
-    This covers the desk screens an Administrator sees only where the module has
-    been granted, so the role's default surface is administration without the
-    account being unable to help at the desk when staffing requires it.
-    """
+    """Administrator-only view covering operational rather than governing work."""
     def decorator(view_func):
         def _wrapped_view(request, *args, **kwargs):
             from django.contrib import messages
@@ -163,8 +143,7 @@ def admin_module_required(module_key):
             if request.session.get('admin_role') == 'Staff':
                 return redirect('/library-staff/dashboard/')
 
-            # Read per request, not from the session, so a grant or a
-            # withdrawal takes effect immediately rather than at next login.
+            # Read module access on every request.
             user = User.objects.filter(admin_id=request.session['admin_id']).first()
             if user is None:
                 request.session.flush()
@@ -183,20 +162,7 @@ def admin_module_required(module_key):
 
 
 def granted_module_required(module_key):
-    """Either role, but the module must actually be granted to the account.
-
-    For pages both portals share, where holding the module is the question and
-    the role only decides which dashboard a refusal returns to.
-
-    Only correct where the *page* is gated the same way. Guarding an endpoint
-    with this while the page that calls it is admin_only_required locks an
-    Administrator out of a screen they can still open: the request 302s to the
-    dashboard, the fetch that expected JSON parses an HTML page instead, and the
-    button appears to do nothing at all. Shelf Manager and Floor Plan Management
-    were exactly that for any Administrator holding no modules -- both are
-    admin_only_required pages -- so their endpoints use admin_or_module_required
-    instead. Check the calling page before reaching for this one.
-    """
+    """Either role, but the module must actually be granted to the account."""
     def decorator(view_func):
         def _wrapped_view(request, *args, **kwargs):
             from django.contrib import messages
@@ -227,11 +193,7 @@ def granted_module_required(module_key):
 
 
 def admin_or_module_required(module_key):
-    """Administrators always; Library Staff only with `module_key` granted.
-
-    Used where the manuscript splits a module by role — stock receiving is open
-    to Staff who hold it, while the rest of Inventory stays Administrator-only.
-    """
+    """Administrators always; Library Staff only with `module_key` granted."""
     def decorator(view_func):
         def _wrapped_view(request, *args, **kwargs):
             from django.contrib import messages
@@ -260,13 +222,38 @@ def admin_or_module_required(module_key):
     return decorator
 
 
-def module_required(module_key):
-    """Staff-only view that also requires a module granted by an Administrator.
+def admin_or_any_module_required(*module_keys):
+    """Administrators always; Library Staff holding any one of `module_keys`."""
+    def decorator(view_func):
+        def _wrapped_view(request, *args, **kwargs):
+            from django.contrib import messages
+            from .models import User
+            from .modules import MODULE_LABELS
 
-    The grant is read from the database on every request rather than cached in
-    the session, so revoking a module takes effect immediately instead of at the
-    staff member's next login.
-    """
+            if 'admin_id' not in request.session:
+                return redirect('/admin-portal/login/')
+            if request.session.get('admin_role') != 'Staff':
+                return view_func(request, *args, **kwargs)
+
+            user = User.objects.filter(admin_id=request.session['admin_id']).first()
+            if user is None:
+                request.session.flush()
+                return redirect('/library-staff/login/')
+            if not any(user.has_module(key) for key in module_keys):
+                messages.error(
+                    request,
+                    'You do not have access to '
+                    + ' or '.join(MODULE_LABELS.get(k, k) for k in module_keys)
+                    + '. Ask an administrator to grant it.'
+                )
+                return redirect('/library-staff/dashboard/')
+            return view_func(request, *args, **kwargs)
+        return _wrapped_view
+    return decorator
+
+
+def module_required(module_key):
+    """Staff-only view that also requires a module granted by an Administrator."""
     def decorator(view_func):
         def _wrapped_view(request, *args, **kwargs):
             from django.contrib import messages
@@ -293,12 +280,7 @@ def module_required(module_key):
         return _wrapped_view
     return decorator
 
-# ─── Password policy ──────────────────────────────────────────────────────
-# One number, in one place. It had drifted: self-service changes and resets
-# demanded 8 characters, an Administrator resetting a *staff* password demanded
-# 6, and patron registration checked nothing at all -- so the account types with
-# the most access had the weakest rule, and a one-character password could be
-# set at sign-up.
+# Password policy.
 MIN_PASSWORD_LENGTH = 8
 
 PASSWORD_RULE_TEXT = (
@@ -308,26 +290,7 @@ PASSWORD_RULE_TEXT = (
 
 
 def password_length_error(password, user=None, current_hash=None):
-    """The message to show for an unacceptable password, or None if it passes.
-
-    Kept under its original name because every password path in the app already
-    funnels through it -- registration, self-service change, admin reset, the
-    OTP reset -- so strengthening it here strengthens all of them at once.
-
-    Four checks, in the order a person meets them:
-
-    Length, as before.
-
-    Letter *and* number. The rule was length alone, so "aaaaaaaa" passed.
-
-    Django's own validators, which were configured in settings from the day the
-    project was generated and then never called -- nothing in the codebase ever
-    invoked validate_password. That is 20,000 known-common passwords, a
-    similar-to-your-own-email check, and a not-entirely-numeric check, all free.
-
-    Reuse. "Change your password" that accepts the same password back is not a
-    change, and it is the one people reach for when forced to rotate.
-    """
+    """The message to show for an unacceptable password, or None if it passes."""
     password = password or ''
 
     if len(password) < MIN_PASSWORD_LENGTH:
@@ -344,8 +307,7 @@ def password_length_error(password, user=None, current_hash=None):
         try:
             validate_password(password, user=user)
         except ValidationError as exc:
-            # One message, not the whole list: a wall of red is how people end
-            # up picking the first thing that clears it.
+            # Show one message at a time.
             return exc.messages[0]
     except ImportError:            # pragma: no cover - Django is always present
         pass

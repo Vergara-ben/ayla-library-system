@@ -1,0 +1,832 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en" data-module="admin">
+{# The screen a patron stands in front of. #}
+<head>
+    <meta charset="UTF-8">
+    <meta name="theme-color" content="#ffffff">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ayla Public Library &mdash; Sign in</title>
+    <script src="{% static 'js/theme.js' %}"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="{% static 'js/tailwind-theme.js' %}"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js" integrity="sha384-hStSInNIZ8ljtOVrmrgf7zdHMapaLBWoSnPTtF0nzsybp4+LuhDz6sHuEVpWIX8o" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha384-iw3OoTErCYJJB9mCa8LNS2hbsQ7M3C0EpIsO/H5+EGAkPGc6rk+V8i04oW/K5xq0" crossorigin="anonymous" referrerpolicy="no-referrer">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'css/theme.css' %}">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-main);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+        .logo-text { font-family: 'Rowdies', sans-serif; }
+
+        /* Large touch targets. */
+        .kiosk-choice {
+            min-height: 168px;
+            border-radius: 1.25rem;
+            border: 1px solid var(--border-color);
+            background-color: var(--bg-card);
+            transition: transform .12s ease, border-color .12s ease, background-color .12s ease;
+        }
+        .kiosk-choice:hover, .kiosk-choice:focus-visible {
+            transform: translateY(-2px);
+            border-color: rgb(14 116 144 / .9);
+            outline: none;
+        }
+        .kiosk-choice:active { transform: translateY(0); }
+
+        .kiosk-way {
+            min-height: 132px;
+            border-radius: 1.25rem;
+            border-width: 2px;
+            transition: transform .12s ease, filter .12s ease;
+        }
+        .kiosk-way:hover { transform: translateY(-2px); }
+        .kiosk-way:active { transform: translateY(0); }
+
+        .kiosk-field {
+            background-color: var(--bg-input);
+            border: 1px solid var(--border-color);
+            border-radius: .75rem;
+            padding: .85rem 1rem;
+            width: 100%;
+            color: var(--text-primary);
+            font-size: .95rem;
+        }
+        .kiosk-field:focus { outline: none; border-color: rgb(8 145 178); }
+        .kiosk-label {
+            display: block;
+            font-size: .7rem;
+            font-weight: 700;
+            letter-spacing: .08em;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            margin-bottom: .4rem;
+        }
+
+        /* The confirmation. */
+        .kiosk-modal { backdrop-filter: blur(3px); }
+        @keyframes kioskPop {
+            from { opacity: 0; transform: scale(.94) translateY(8px); }
+            to   { opacity: 1; transform: none; }
+        }
+        .kiosk-pop { animation: kioskPop .18s ease-out; }
+
+        @media print { body { display: none; } }
+    </style>
+</head>
+<body class="flex flex-col">
+
+    <header class="flex items-center justify-between px-6 sm:px-10 py-5">
+        <div class="flex items-center gap-3">
+            <img src="{% static 'images/ayla-logo.png' %}"
+                 data-logo-light="{% static 'images/ayla-logo.png' %}"
+                 data-logo-dark="{% static 'images/ayla-logo-dark.png' %}"
+                 alt="AYLA Public Library" class="ayla-logo h-11">
+            <div>
+                <p class="logo-text text-base tracking-wider text-slate-200 uppercase leading-none">Ayla Public Library</p>
+                <p class="text-[11px] text-slate-500 mt-1">Visitor sign in</p>
+            </div>
+        </div>
+        <div class="flex items-center gap-4">
+            <div class="text-right hidden sm:block">
+                <p id="kioskClock" class="text-lg font-bold text-slate-200 leading-none tabular-nums">&nbsp;</p>
+                <p id="kioskDate" class="text-[11px] text-slate-500 mt-1">{{ today|date:"l, F j, Y" }}</p>
+            </div>
+            {# The way back to the library system. #}
+            <button type="button" onclick="deskOpenUnlock()"
+                    class="text-[11px] font-bold px-3 py-2.5 rounded-lg border border-slate-700 text-slate-400 hover:text-slate-200 hover:bg-slate-800/50">
+                <i class="fa-solid fa-lock text-[10px]"></i> Librarian
+            </button>
+        </div>
+    </header>
+
+    <main class="flex-1 flex items-start sm:items-center justify-center px-5 pb-10">
+        <div class="w-full max-w-3xl">
+
+            <!-- Who is signing in -->
+            <section id="screenChoose">
+                <div class="text-center mb-8">
+                    <h1 class="text-3xl sm:text-4xl font-bold text-slate-100 tracking-tight">Welcome to the library</h1>
+                    <p class="text-slate-400 mt-2 text-sm">Please sign in when you arrive, and sign out when you leave.</p>
+                </div>
+
+                <div class="grid sm:grid-cols-2 gap-5">
+                    <button type="button" onclick="kioskGo('member')"
+                            class="kiosk-choice flex flex-col items-center justify-center gap-3 px-6 text-center">
+                        <i class="fa-solid fa-id-card text-cyan-400 text-3xl"></i>
+                        <span class="text-lg font-bold text-slate-100">I have a library card</span>
+                        <span class="text-[12px] text-slate-500 leading-relaxed">Scan your card, or type your email or card number</span>
+                    </button>
+                    <button type="button" onclick="kioskGo('visitor')"
+                            class="kiosk-choice flex flex-col items-center justify-center gap-3 px-6 text-center">
+                        <i class="fa-solid fa-user-pen text-amber-400 text-3xl"></i>
+                        <span class="text-lg font-bold text-slate-100">I am a visitor</span>
+                        <span class="text-[12px] text-slate-500 leading-relaxed">No card yet &mdash; fill in a few details instead</span>
+                    </button>
+                </div>
+
+                <p class="text-center text-[11px] text-slate-600 mt-7 leading-relaxed">
+                    Only your own visit is recorded here. Nobody else's details are shown on this screen.
+                </p>
+            </section>
+
+            <!-- The card holder -->
+            <section id="screenMember" class="hidden">
+                <button type="button" onclick="kioskGo('choose')" class="text-[12px] font-semibold text-slate-500 hover:text-slate-300 mb-5">
+                    <i class="fa-solid fa-arrow-left text-[10px]"></i> Back
+                </button>
+
+                <div class="rounded-2xl border p-7 sm:p-9" style="background-color: var(--bg-card); border-color: var(--border-color);">
+                    <div class="flex items-start gap-4">
+                        <i class="fa-solid fa-qrcode text-cyan-400 text-3xl mt-1"></i>
+                        <div class="flex-1">
+                            <h2 class="text-xl font-bold text-slate-100">Hold your card up to the scanner</h2>
+                            <p class="text-[12px] text-slate-400 mt-1">The scanner is listening. You do not need to press anything.</p>
+                        </div>
+                        <button type="button" id="kioskCamBtn" onclick="deskToggleCamera()"
+                                class="text-cyan-400 hover:bg-cyan-700/20 text-[11px] font-bold px-3 py-2 rounded-lg border border-cyan-800/80 whitespace-nowrap">
+                            <i class="fa-solid fa-camera text-[10px]"></i> Use camera
+                        </button>
+                    </div>
+
+                    {# Small camera preview. #}
+                    <div id="deskCamWrap" class="hidden mt-6">
+                        <div class="relative aspect-video w-full max-w-[300px] mx-auto bg-slate-900 rounded-xl overflow-hidden">
+                            <video id="deskCamVideo" class="w-full h-full object-contain" autoplay playsinline muted></video>
+                            <canvas id="deskCamCanvas" class="hidden"></canvas>
+                            <div id="deskCamLoading" class="absolute inset-0 flex items-center justify-center text-slate-400 text-xs px-3 text-center">
+                                <i class="fa-solid fa-spinner fa-spin mr-2"></i> Starting camera&hellip;
+                            </div>
+                        </div>
+                        <p id="deskCamStatus" class="text-center text-[11px] text-slate-400 mt-2">Hold the card's QR code up to the camera.</p>
+                    </div>
+
+                    <div class="flex items-center gap-4 my-7">
+                        <span class="flex-1 h-px bg-slate-800"></span>
+                        <span class="text-[11px] font-bold uppercase tracking-widest text-slate-600">or type it</span>
+                        <span class="flex-1 h-px bg-slate-800"></span>
+                    </div>
+
+                    <label class="kiosk-label" for="kioskValue">Email address or card number</label>
+                    <div class="flex flex-col sm:flex-row gap-3">
+                        <input type="text" id="kioskValue" class="kiosk-field flex-1" autocomplete="off"
+                               inputmode="email" placeholder="juan@email.com  or  7482051">
+                        <button type="button" id="kioskIdentifyBtn" onclick="kioskIdentify()"
+                                class="bg-cyan-700 hover:bg-cyan-600 text-white font-bold px-7 py-3.5 rounded-xl whitespace-nowrap">
+                            Continue <i class="fa-solid fa-arrow-right text-xs ml-1"></i>
+                        </button>
+                    </div>
+                    <p class="text-[11px] text-slate-500 mt-3">Your card number is the 7 digits printed under the QR code.</p>
+
+                    <div id="memberError" class="hidden mt-5 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-[13px] text-rose-200 font-medium"></div>
+                </div>
+            </section>
+
+            <!-- Entry or exit -->
+            <section id="screenWay" class="hidden">
+                <button type="button" onclick="kioskGo('choose')" class="text-[12px] font-semibold text-slate-500 hover:text-slate-300 mb-5">
+                    <i class="fa-solid fa-arrow-left text-[10px]"></i> Not you? Start again
+                </button>
+
+                <div class="rounded-2xl border p-7 sm:p-9" style="background-color: var(--bg-card); border-color: var(--border-color);">
+                    <div class="text-center">
+                        <p class="text-[11px] font-bold uppercase tracking-widest text-slate-500">Hello</p>
+                        <h2 id="wayName" class="text-2xl sm:text-3xl font-bold text-slate-100 mt-2">&nbsp;</h2>
+                        <p id="wayCard" class="text-[12px] font-mono text-slate-500 mt-1"></p>
+                        <p id="wayStatus" class="text-[13px] text-slate-400 mt-3"></p>
+                    </div>
+
+                    {# Purpose is only asked on entry. #}
+                    <div id="wayPurposeWrap" class="mt-7 max-w-sm mx-auto">
+                        <label class="kiosk-label" for="wayPurpose">What brings you in today?</label>
+                        <select id="wayPurpose" class="kiosk-field" onchange="kioskSyncOther('wayPurpose', 'wayPurposeOther')">
+                            {% for p in purpose_choices %}<option value="{{ p }}">{{ p }}</option>{% endfor %}
+                        </select>
+                        <input type="text" id="wayPurposeOther" class="kiosk-field hidden mt-3" placeholder="Please say" autocomplete="off">
+                    </div>
+
+                    <div class="grid sm:grid-cols-2 gap-5 mt-8">
+                        <button type="button" id="wayEntryBtn" onclick="kioskCommit('entry')"
+                                class="kiosk-way flex flex-col items-center justify-center gap-2 border-emerald-600/60 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20">
+                            <i class="fa-solid fa-right-to-bracket text-2xl"></i>
+                            <span class="text-lg font-bold">I am coming in</span>
+                            <span class="text-[11px] opacity-80">Entry</span>
+                        </button>
+                        <button type="button" id="wayExitBtn" onclick="kioskCommit('exit')"
+                                class="kiosk-way flex flex-col items-center justify-center gap-2 border-blue-600/60 bg-blue-500/10 text-blue-300 hover:bg-blue-500/20">
+                            <i class="fa-solid fa-right-from-bracket text-2xl"></i>
+                            <span class="text-lg font-bold">I am leaving</span>
+                            <span class="text-[11px] opacity-80">Exit</span>
+                        </button>
+                    </div>
+
+                    <div id="wayError" class="hidden mt-6 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-[13px] text-rose-200 font-medium"></div>
+                </div>
+            </section>
+
+            <!-- The walk-in -->
+            <section id="screenVisitor" class="hidden">
+                <button type="button" onclick="kioskGo('choose')" class="text-[12px] font-semibold text-slate-500 hover:text-slate-300 mb-5">
+                    <i class="fa-solid fa-arrow-left text-[10px]"></i> Back
+                </button>
+
+                <div class="rounded-2xl border p-7 sm:p-9" style="background-color: var(--bg-card); border-color: var(--border-color);">
+                    <h2 class="text-xl font-bold text-slate-100">A few details, please</h2>
+                    <p class="text-[12px] text-slate-400 mt-1">Reading here is free and open to everyone. These details are for the library's visit record only.</p>
+
+                    {# Direction first. #}
+                    <div class="grid grid-cols-2 gap-3 mt-6">
+                        <button type="button" id="visEntryTab" onclick="kioskVisitorWay('entry')"
+                                class="py-3 rounded-xl border-2 border-emerald-600/60 bg-emerald-500/15 text-emerald-300 text-sm font-bold">
+                            <i class="fa-solid fa-right-to-bracket text-xs"></i> I am coming in
+                        </button>
+                        <button type="button" id="visExitTab" onclick="kioskVisitorWay('exit')"
+                                class="py-3 rounded-xl border-2 border-slate-700 text-slate-400 text-sm font-bold hover:text-slate-200">
+                            <i class="fa-solid fa-right-from-bracket text-xs"></i> I am leaving
+                        </button>
+                    </div>
+
+                    <div class="grid sm:grid-cols-2 gap-5 mt-7">
+                        <div class="sm:col-span-2">
+                            <label class="kiosk-label" for="visName">Full name</label>
+                            <input type="text" id="visName" class="kiosk-field" autocomplete="off" placeholder="Juan A. Dela Cruz">
+                        </div>
+                        <div id="visTypeWrap">
+                            <label class="kiosk-label" for="visType">I am a</label>
+                            <select id="visType" class="kiosk-field">
+                                {% for value, label in patron_type_choices %}<option value="{{ value }}"{% if value == 'General Visitor' %} selected{% endif %}>{{ label }}</option>{% endfor %}
+                            </select>
+                        </div>
+                        <div id="visSchoolWrap">
+                            <label class="kiosk-label" for="visSchool">School or organisation <span class="normal-case font-medium text-slate-600">(optional)</span></label>
+                            <input type="text" id="visSchool" list="knownSchools" class="kiosk-field" autocomplete="off" placeholder="Leave blank if none">
+                        </div>
+                        <div class="sm:col-span-2">
+                            <label class="kiosk-label" for="visContact">Email or mobile number <span id="visContactHint" class="normal-case font-medium text-slate-600">(optional)</span></label>
+                            <input type="text" id="visContact" class="kiosk-field" autocomplete="off" placeholder="juan@email.com or 09xx xxx xxxx">
+                        </div>
+                        <div id="visPurposeWrap" class="sm:col-span-2">
+                            <label class="kiosk-label" for="visPurpose">What brings you in today?</label>
+                            <select id="visPurpose" class="kiosk-field" onchange="kioskSyncOther('visPurpose', 'visPurposeOther')">
+                                <option value="">Please choose&hellip;</option>
+                                {% for p in purpose_choices %}<option value="{{ p }}">{{ p }}</option>{% endfor %}
+                            </select>
+                            <input type="text" id="visPurposeOther" class="kiosk-field hidden mt-3" placeholder="Please say" autocomplete="off">
+                        </div>
+                    </div>
+
+                    <p id="visExitNote" class="hidden mt-6 text-[12px] text-slate-400 leading-relaxed rounded-xl border border-slate-700/60 px-4 py-3">
+                        To sign out, type your name and the email or mobile number you gave when you arrived. If you did not give one, the librarian at the counter can sign you out.
+                    </p>
+
+                    <button type="button" id="visDoneBtn" onclick="kioskVisitorReview()"
+                            class="w-full mt-7 bg-cyan-700 hover:bg-cyan-600 text-white font-bold text-base px-6 py-4 rounded-xl">
+                        <i class="fa-solid fa-check text-sm"></i> Done
+                    </button>
+
+                    <div id="visitorError" class="hidden mt-5 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-[13px] text-rose-200 font-medium"></div>
+                </div>
+            </section>
+
+        </div>
+    </main>
+
+    <!-- Check the details -->
+    <div id="reviewModal" class="kiosk-modal hidden fixed inset-0 z-40 items-center justify-center bg-black/70 p-5">
+        <div class="kiosk-pop w-full max-w-md rounded-2xl border shadow-2xl" style="background-color: var(--bg-modal); border-color: var(--border-color);">
+            <div class="px-6 py-5 border-b border-slate-800">
+                <h3 class="text-base font-bold text-slate-100">Is this right?</h3>
+                <p class="text-[12px] text-slate-500 mt-1">Check your details before they are recorded.</p>
+            </div>
+            <dl id="reviewBody" class="px-6 py-5 space-y-3 text-sm"></dl>
+            <div class="px-6 pb-6 flex gap-3">
+                <button type="button" onclick="kioskCloseReview()"
+                        class="flex-1 py-3.5 rounded-xl border border-slate-700 text-slate-300 font-bold hover:bg-slate-800/50">
+                    Go back and edit
+                </button>
+                <button type="button" id="reviewConfirmBtn" onclick="kioskVisitorSubmit()"
+                        class="flex-1 py-3.5 rounded-xl bg-cyan-700 hover:bg-cyan-600 text-white font-bold">
+                    Yes, record it
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Result -->
+    <div id="resultModal" class="kiosk-modal hidden fixed inset-0 z-50 items-center justify-center bg-black/75 p-5">
+        <div class="kiosk-pop w-full max-w-lg rounded-2xl border shadow-2xl text-center px-8 py-10"
+             style="background-color: var(--bg-modal); border-color: var(--border-color);">
+            <div id="resultIcon" class="w-20 h-20 mx-auto rounded-full flex items-center justify-center text-4xl"></div>
+            <p id="resultWay" class="mt-6 text-[11px] font-bold uppercase tracking-[0.2em]"></p>
+            <h3 id="resultName" class="text-3xl font-bold text-slate-100 mt-2 leading-tight"></h3>
+            <p id="resultTime" class="text-lg text-slate-300 mt-3 tabular-nums"></p>
+            <p id="resultMessage" class="text-[13px] text-slate-400 mt-5 leading-relaxed max-w-sm mx-auto"></p>
+            <p id="resultNote" class="hidden text-[12px] text-amber-300/90 mt-4 leading-relaxed max-w-sm mx-auto rounded-xl border border-amber-700/40 bg-amber-500/10 px-4 py-3"></p>
+            <button type="button" onclick="kioskFinish()"
+                    class="mt-8 w-full bg-cyan-700 hover:bg-cyan-600 text-white font-bold text-base px-6 py-4 rounded-xl">
+                Done
+            </button>
+            {# It closes itself. #}
+            <p class="text-[11px] text-slate-600 mt-4">This closes on its own in <span id="resultCountdown">10</span>s</p>
+        </div>
+    </div>
+
+    <!-- Exit desk mode -->
+    <div id="deskUnlockOverlay" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/70 p-4">
+        <div class="rounded-2xl border border-slate-700/60 shadow-2xl w-full max-w-sm" style="background-color: var(--bg-card);">
+            <div class="p-5 border-b border-slate-800 flex items-center gap-2.5">
+                <i class="fa-solid fa-lock text-amber-500 text-sm"></i>
+                <h3 class="text-sm font-bold text-slate-100 tracking-wide">Librarian</h3>
+            </div>
+            <div class="p-6 space-y-4">
+                <p class="text-[11px] text-slate-400 leading-relaxed">Enter your account password to leave desk mode and return to the library system.</p>
+                <input type="password" id="deskUnlockPw" placeholder="Account password" autocomplete="off"
+                       class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-cyan-600">
+                <p id="deskUnlockMsg" class="text-[11px] font-bold text-rose-400 hidden"></p>
+                <div class="flex items-center justify-end gap-2">
+                    <button type="button" onclick="deskCloseUnlock()" class="text-xs font-semibold px-4 py-2.5 rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800/50">Cancel</button>
+                    <button type="button" onclick="deskUnlock()" class="bg-cyan-700 hover:bg-cyan-600 text-white text-xs font-bold px-4 py-2.5 rounded-lg">Unlock</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {# Known schools. #}
+    <datalist id="knownSchools">
+        {% for s in known_schools %}<option value="{{ s }}"></option>{% endfor %}
+    </datalist>
+
+<script>
+    const DESK_URLS = {
+        identify: "{% url 'desk_identify' %}",
+        visit: "{% url 'desk_visit' %}",
+        visitor: "{% url 'desk_visitor' %}",
+        unlock: "{% url 'desk_unlock' %}",
+    };
+
+    async function deskPost(url, data) {
+        const r = await fetch(url, {
+            method: 'POST',
+            headers: { 'X-CSRFToken': '{{ csrf_token }}',
+                       'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams(data),
+        });
+        return r.json();
+    }
+
+    function esc(v) {
+        return String(v == null ? '' : v).replace(/[&<>"]/g, function (c) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+        });
+    }
+
+    // Clock.
+    function kioskTick() {
+        const now = new Date();
+        let h = now.getHours(), m = String(now.getMinutes()).padStart(2, '0');
+        const ampm = h >= 12 ? 'PM' : 'AM';
+        h = h % 12 || 12;
+        document.getElementById('kioskClock').textContent = h + ':' + m + ' ' + ampm;
+    }
+    kioskTick();
+    setInterval(kioskTick, 10000);
+
+    // Screen switching
+    const SCREENS = { choose: 'screenChoose', member: 'screenMember',
+                      way: 'screenWay', visitor: 'screenVisitor' };
+    let kioskScreen = 'choose';
+    let visitorWay = 'entry';
+
+    function kioskGo(name) {
+        kioskScreen = name;
+        Object.keys(SCREENS).forEach(function (key) {
+            document.getElementById(SCREENS[key]).classList.toggle('hidden', key !== name);
+        });
+        hide('memberError'); hide('wayError'); hide('visitorError');
+        if (name !== 'member') deskStopCamera();
+        if (name === 'member') {
+            const box = document.getElementById('kioskValue');
+            box.value = '';
+            box.focus();
+        }
+        if (name === 'choose') kioskResetVisitorForm();
+        kioskTouch();
+    }
+
+    function show(id, text) {
+        const el = document.getElementById(id);
+        el.textContent = text;
+        el.classList.remove('hidden');
+        el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+    function hide(id) { document.getElementById(id).classList.add('hidden'); }
+
+    function kioskSyncOther(selectId, otherId) {
+        const other = document.getElementById(otherId);
+        other.classList.toggle('hidden', document.getElementById(selectId).value !== 'Other');
+    }
+
+    // Return to the start screen when idle.
+    const IDLE_MS = 45000;
+    let idleTimer = null;
+    function kioskTouch() {
+        clearTimeout(idleTimer);
+        if (kioskScreen === 'choose') return;
+        idleTimer = setTimeout(function () {
+            if (!document.getElementById('resultModal').classList.contains('hidden')) return;
+            kioskCloseReview();
+            kioskGo('choose');
+        }, IDLE_MS);
+    }
+    ['click', 'keydown', 'touchstart'].forEach(function (evt) {
+        document.addEventListener(evt, kioskTouch, true);
+    });
+
+    // Step 1: identify the visitor
+    let kioskBusy = false;
+
+    async function kioskIdentify(value) {
+        if (kioskBusy) return;
+        const typed = value || document.getElementById('kioskValue').value.trim();
+        if (!typed) {
+            show('memberError', 'Type your email or card number, or hold your card up to the scanner.');
+            return;
+        }
+        kioskBusy = true;
+        const btn = document.getElementById('kioskIdentifyBtn');
+        btn.disabled = true;
+        try {
+            const r = await deskPost(DESK_URLS.identify, { value: typed });
+            if (!r.success) {
+                kioskGo('member');
+                show('memberError', r.error);
+                return;
+            }
+            kioskShowWay(r);
+        } catch (err) {
+            show('memberError', 'The screen could not reach the library system. Please see the librarian.');
+        } finally {
+            kioskBusy = false;
+            btn.disabled = false;
+        }
+    }
+
+    function kioskShowWay(r) {
+        document.getElementById('wayName').textContent = r.name;
+        document.getElementById('wayCard').textContent = r.card ? ('Card ' + r.card) : '';
+
+        const status = document.getElementById('wayStatus');
+        if (r.inside) {
+            status.innerHTML = 'You have been signed in since <strong class="text-slate-200">'
+                             + esc(r.inside_since) + '</strong>.';
+        } else {
+            status.textContent = 'You are not signed in at the moment.';
+        }
+
+        // Both buttons always work.
+        const entry = document.getElementById('wayEntryBtn');
+        const exit = document.getElementById('wayExitBtn');
+        entry.classList.toggle('opacity-50', r.suggest === 'exit');
+        exit.classList.toggle('opacity-50', r.suggest === 'entry');
+
+        // Purpose belongs to an arrival only.
+        document.getElementById('wayPurposeWrap').classList.toggle('hidden', r.inside);
+        const purpose = document.getElementById('wayPurpose');
+        if (r.purpose) {
+            for (let i = 0; i < purpose.options.length; i++) {
+                if (purpose.options[i].value === r.purpose) { purpose.selectedIndex = i; break; }
+            }
+        }
+        kioskSyncOther('wayPurpose', 'wayPurposeOther');
+        kioskGo('way');
+    }
+
+    // Step 2: entry or exit
+    async function kioskCommit(direction) {
+        if (kioskBusy) return;
+        kioskBusy = true;
+        document.getElementById('wayEntryBtn').disabled = true;
+        document.getElementById('wayExitBtn').disabled = true;
+        try {
+            const r = await deskPost(DESK_URLS.visit, {
+                direction: direction,
+                purpose: document.getElementById('wayPurpose').value,
+                purpose_other: document.getElementById('wayPurposeOther').value.trim(),
+            });
+            if (!r.success) {
+                if (r.expired) { kioskGo('member'); show('memberError', r.error); return; }
+                show('wayError', r.error);
+                return;
+            }
+            kioskShowResult(r, direction);
+        } catch (err) {
+            show('wayError', 'The screen could not reach the library system. Please see the librarian.');
+        } finally {
+            kioskBusy = false;
+            document.getElementById('wayEntryBtn').disabled = false;
+            document.getElementById('wayExitBtn').disabled = false;
+        }
+    }
+
+    // The walk-in's form
+    function kioskVisitorWay(way) {
+        visitorWay = way;
+        const entryTab = document.getElementById('visEntryTab');
+        const exitTab = document.getElementById('visExitTab');
+        const arriving = way === 'entry';
+
+        entryTab.className = arriving
+            ? 'py-3 rounded-xl border-2 border-emerald-600/60 bg-emerald-500/15 text-emerald-300 text-sm font-bold'
+            : 'py-3 rounded-xl border-2 border-slate-700 text-slate-400 text-sm font-bold hover:text-slate-200';
+        exitTab.className = arriving
+            ? 'py-3 rounded-xl border-2 border-slate-700 text-slate-400 text-sm font-bold hover:text-slate-200'
+            : 'py-3 rounded-xl border-2 border-blue-600/60 bg-blue-500/15 text-blue-300 text-sm font-bold';
+
+        // Leaving asks only what is needed to find the visit that is already open.
+        ['visTypeWrap', 'visSchoolWrap', 'visPurposeWrap'].forEach(function (id) {
+            document.getElementById(id).classList.toggle('hidden', !arriving);
+        });
+        document.getElementById('visExitNote').classList.toggle('hidden', arriving);
+        document.getElementById('visContactHint').textContent = arriving ? '(optional)' : '(required)';
+        hide('visitorError');
+    }
+
+    function kioskResetVisitorForm() {
+        ['visName', 'visSchool', 'visContact', 'visPurposeOther'].forEach(function (id) {
+            document.getElementById(id).value = '';
+        });
+        document.getElementById('visPurpose').selectedIndex = 0;
+        document.getElementById('visPurposeOther').classList.add('hidden');
+        kioskVisitorWay('entry');
+    }
+
+    function kioskVisitorFields() {
+        return {
+            direction: visitorWay,
+            name: document.getElementById('visName').value.trim(),
+            contact: document.getElementById('visContact').value.trim(),
+            patron_type: document.getElementById('visType').value,
+            school: document.getElementById('visSchool').value.trim(),
+            purpose: document.getElementById('visPurpose').value,
+            purpose_other: document.getElementById('visPurposeOther').value.trim(),
+        };
+    }
+
+    // Everything typed, read back, before any of it is recorded.
+    function kioskVisitorReview() {
+        const f = kioskVisitorFields();
+        if (f.name.replace(/[^a-z]/gi, '').length < 2) {
+            show('visitorError', 'Please type your full name.');
+            document.getElementById('visName').focus();
+            return;
+        }
+        if (f.direction === 'entry' && !f.purpose) {
+            show('visitorError', 'Please choose what brings you in today.');
+            document.getElementById('visPurpose').focus();
+            return;
+        }
+        if (f.direction === 'exit' && !f.contact) {
+            show('visitorError', 'Please type the email or mobile number you gave when you arrived.');
+            document.getElementById('visContact').focus();
+            return;
+        }
+        hide('visitorError');
+
+        const rows = [['Name', f.name],
+                      ['Signing', f.direction === 'entry' ? 'In (arriving)' : 'Out (leaving)']];
+        if (f.direction === 'entry') {
+            rows.push(['I am a', f.patron_type]);
+            if (f.school) rows.push(['School', f.school]);
+            rows.push(['Purpose', f.purpose === 'Other' ? (f.purpose_other || 'Other') : f.purpose]);
+        }
+        if (f.contact) rows.push(['Contact', f.contact]);
+
+        document.getElementById('reviewBody').innerHTML = rows.map(function (row) {
+            return '<div class="flex items-start justify-between gap-4">'
+                 + '<dt class="text-[11px] font-bold uppercase tracking-wider text-slate-500 pt-0.5">' + esc(row[0]) + '</dt>'
+                 + '<dd class="text-slate-200 font-semibold text-right">' + esc(row[1]) + '</dd></div>';
+        }).join('');
+        const modal = document.getElementById('reviewModal');
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+    }
+
+    function kioskCloseReview() {
+        const modal = document.getElementById('reviewModal');
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
+    }
+
+    async function kioskVisitorSubmit() {
+        if (kioskBusy) return;
+        kioskBusy = true;
+        const btn = document.getElementById('reviewConfirmBtn');
+        btn.disabled = true;
+        try {
+            const f = kioskVisitorFields();
+            const r = await deskPost(DESK_URLS.visitor, f);
+            kioskCloseReview();
+            if (!r.success) { show('visitorError', r.error); return; }
+            kioskShowResult(r, f.direction);
+        } catch (err) {
+            kioskCloseReview();
+            show('visitorError', 'The screen could not reach the library system. Please see the librarian.');
+        } finally {
+            kioskBusy = false;
+            btn.disabled = false;
+        }
+    }
+
+    // The confirmation
+    let resultTimer = null;
+    function kioskShowResult(r, direction) {
+        const leaving = (r.action === 'exit') || direction === 'exit';
+        const icon = document.getElementById('resultIcon');
+        icon.className = 'w-20 h-20 mx-auto rounded-full flex items-center justify-center text-4xl '
+                       + (leaving ? 'bg-blue-500/15 text-blue-300' : 'bg-emerald-500/15 text-emerald-300');
+        icon.innerHTML = '<i class="fa-solid ' + (leaving ? 'fa-hand-peace' : 'fa-check') + '"></i>';
+
+        const way = document.getElementById('resultWay');
+        way.textContent = leaving ? 'Signed out · Exit' : 'Signed in · Entry';
+        way.className = 'mt-6 text-[11px] font-bold uppercase tracking-[0.2em] '
+                      + (leaving ? 'text-blue-300' : 'text-emerald-300');
+
+        document.getElementById('resultName').textContent = r.name || '';
+        const time = document.getElementById('resultTime');
+        time.textContent = r.at ? (leaving ? 'Left at ' + r.at : 'Arrived at ' + r.at) : '';
+        time.classList.toggle('hidden', !r.at);
+
+        document.getElementById('resultMessage').textContent = r.message || '';
+
+        const note = document.getElementById('resultNote');
+        if (r.note) { note.textContent = r.note; note.classList.remove('hidden'); }
+        else { note.classList.add('hidden'); }
+
+        const modal = document.getElementById('resultModal');
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+
+        let left = 10;
+        document.getElementById('resultCountdown').textContent = left;
+        clearInterval(resultTimer);
+        resultTimer = setInterval(function () {
+            left -= 1;
+            document.getElementById('resultCountdown').textContent = Math.max(left, 0);
+            if (left <= 0) kioskFinish();
+        }, 1000);
+    }
+
+    function kioskFinish() {
+        clearInterval(resultTimer);
+        const modal = document.getElementById('resultModal');
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
+        document.getElementById('resultName').textContent = '';
+        kioskGo('choose');
+    }
+
+    // Handheld card scanner.
+    let scanBuffer = '';
+    let scanLast = 0;
+    document.addEventListener('keydown', function (e) {
+        if (!document.getElementById('resultModal').classList.contains('hidden')) return;
+        if (!document.getElementById('deskUnlockOverlay').classList.contains('hidden')) return;
+        // Typing in a box is typing, never scanning.
+        const tag = (e.target.tagName || '').toLowerCase();
+        if (tag === 'input' || tag === 'select' || tag === 'textarea') return;
+
+        const now = Date.now();
+        if (now - scanLast > 120) scanBuffer = '';
+        scanLast = now;
+
+        if (e.key === 'Enter') {
+            const code = scanBuffer.trim();
+            scanBuffer = '';
+            if (code.length >= 4) kioskIdentify(code);
+            return;
+        }
+        if (e.key.length === 1) scanBuffer += e.key;
+    });
+
+    // Enter in the typed box submits it.
+    document.getElementById('kioskValue').addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); kioskIdentify(); }
+    });
+
+    // Webcam scanner.
+    let deskCamStream = null, deskCamTimer = null;
+
+    function deskToggleCamera() {
+        if (deskCamStream || deskCamTimer) { deskStopCamera(); return; }
+        deskStartCamera();
+    }
+
+    async function deskStartCamera() {
+        const wrap = document.getElementById('deskCamWrap');
+        const video = document.getElementById('deskCamVideo');
+        const loading = document.getElementById('deskCamLoading');
+        const status = document.getElementById('deskCamStatus');
+        const btn = document.getElementById('kioskCamBtn');
+
+        wrap.classList.remove('hidden');
+        loading.classList.remove('hidden');
+        loading.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i> Starting camera&hellip;';
+        status.textContent = "Hold the card's QR code up to the camera.";
+
+        try {
+            deskCamStream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: 'environment' },
+            });
+            video.srcObject = deskCamStream;
+            video.onloadedmetadata = function () {
+                loading.classList.add('hidden');
+                deskScanLoop();
+            };
+            btn.innerHTML = '<i class="fa-solid fa-camera-rotate text-[10px]"></i> Stop camera';
+        } catch (err) {
+            // Camera unavailable.
+            deskCamStream = null;
+            loading.innerHTML = '<i class="fa-solid fa-triangle-exclamation mr-2"></i> Camera unavailable';
+            status.textContent = 'Allow camera access, or type your email or card number below.';
+            btn.innerHTML = '<i class="fa-solid fa-camera text-[10px]"></i> Use camera';
+        }
+    }
+
+    function deskScanLoop() {
+        const video = document.getElementById('deskCamVideo');
+        const canvas = document.getElementById('deskCamCanvas');
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        deskCamTimer = setInterval(function () {
+            if (!video || video.readyState !== video.HAVE_ENOUGH_DATA) return;
+            // Scan the full frame.
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const found = jsQR(frame.data, frame.width, frame.height);
+            // Stop after the first read.
+            if (found && found.data && !kioskBusy) {
+                deskStopCamera();
+                kioskIdentify(found.data.trim());
+            }
+        }, 120);
+    }
+
+    function deskStopCamera() {
+        if (deskCamTimer) { clearInterval(deskCamTimer); deskCamTimer = null; }
+        if (deskCamStream) {
+            // Release the camera.
+            deskCamStream.getTracks().forEach(function (t) { t.stop(); });
+            deskCamStream = null;
+        }
+        const video = document.getElementById('deskCamVideo');
+        if (video) video.srcObject = null;
+        const wrap = document.getElementById('deskCamWrap');
+        if (wrap) wrap.classList.add('hidden');
+        const btn = document.getElementById('kioskCamBtn');
+        if (btn) btn.innerHTML = '<i class="fa-solid fa-camera text-[10px]"></i> Use camera';
+    }
+    window.addEventListener('pagehide', deskStopCamera);
+
+    // Leaving desk mode
+    function deskOpenUnlock() {
+        const o = document.getElementById('deskUnlockOverlay');
+        o.classList.remove('hidden');
+        o.classList.add('flex');
+        document.getElementById('deskUnlockPw').focus();
+    }
+    function deskCloseUnlock() {
+        const o = document.getElementById('deskUnlockOverlay');
+        o.classList.add('hidden');
+        o.classList.remove('flex');
+        document.getElementById('deskUnlockPw').value = '';
+        document.getElementById('deskUnlockMsg').classList.add('hidden');
+    }
+    async function deskUnlock() {
+        const msg = document.getElementById('deskUnlockMsg');
+        const r = await deskPost(DESK_URLS.unlock, {
+            password: document.getElementById('deskUnlockPw').value,
+        });
+        if (!r.success) {
+            msg.textContent = r.error;
+            msg.classList.remove('hidden');
+            document.getElementById('deskUnlockPw').value = '';
+            if (r.redirect) window.location.href = r.redirect;
+            return;
+        }
+        window.location.href = r.redirect;
+    }
+    document.getElementById('deskUnlockPw').addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') deskUnlock();
+    });
+
+    kioskVisitorWay('entry');
+</script>
+</body>
+</html>

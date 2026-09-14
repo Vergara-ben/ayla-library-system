@@ -1,20 +1,4 @@
-"""Close visits left open past the library's closing time.
-
-This work already existed, but it only ran opportunistically: close_stale_visits()
-is called when somebody happens to load Log Management or Manage Patrons. On a
-quiet day when nobody opens either page, yesterday's visitors stay "inside"
-overnight and the occupancy figure -- and every visit-duration statistic derived
-from it -- drifts.
-
-Giving it a command means it can be scheduled, which is what makes it reliable:
-
-    python manage.py close_open_visits
-
-Run it once daily, after closing time. On PythonAnywhere that is a scheduled
-task; on a normal host, a cron line. Pair it with the overdue sweep:
-
-    python manage.py send_overdue_notifications
-"""
+"""Close visits left open past the library's closing time."""
 
 from django.core.management.base import BaseCommand
 

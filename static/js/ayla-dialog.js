@@ -1,19 +1,4 @@
-/* Toasts and confirmations, in place of the browser's own dialogs.
- *
- * alert() and confirm() stop the page dead, cannot be styled, and on a delete
- * they say nothing about what is being deleted. This replaces both without
- * asking every call site to change:
- *
- *   - window.alert is shimmed to a toast, so all ~140 existing calls become
- *     non-blocking with no edits at all.
- *   - AylaDialog.confirm() returns a Promise, so a real modal can carry the
- *     detail a bare confirm() never could. Call sites that need it are
- *     converted; a form can opt in declaratively with data-confirm="...".
- *
- * window.confirm is deliberately NOT shimmed. It is synchronous and returns a
- * boolean; a modal cannot be. Pretending otherwise would silently return
- * undefined and let every guarded delete straight through.
- */
+/* Toasts and confirmations, in place of the browser's own dialogs. */
 (function () {
   'use strict';
 
@@ -33,8 +18,7 @@
     });
   }
 
-  // A message written for alert() carries no severity flag, so it is guessed
-  // from the wording. Wrong guesses only change a colour.
+  // A message written for alert() carries no severity flag, so it is guessed from the wording.
   function toneOf(message) {
     var t = String(message || '').toLowerCase();
     if (/fail|error|could not|cannot|unable|invalid|required|not found|too many|denied/.test(t)) {
@@ -55,8 +39,7 @@
   }
 
   function stack() {
-    // The module is loaded from <head>, so a toast raised during parse would
-    // otherwise append to a body that does not exist yet.
+    // Wait for the body before showing a toast.
     if (!document.body) return null;
     var node = document.getElementById(STACK_ID);
     if (node) return node;
@@ -89,8 +72,7 @@
       + 'transition:opacity .18s ease,transform .18s ease;';
     card.innerHTML = '<i class="fa-solid ' + tone.icon + '" style="color:' + tone.accent
       + ';margin-top:2px;font-size:12px"></i>'
-      // Newlines are how alert() has always separated a heading from its
-      // detail, so they survive as line breaks rather than collapsing.
+      // Keep line breaks.
       + '<span style="white-space:pre-wrap">' + esc(message) + '</span>';
 
     var host = stack();
@@ -98,8 +80,7 @@
       whenReady(function () { toast(message, kind); });
       return;
     }
-    // Remembered so a message raised immediately before a redirect can be
-    // carried across it -- see the beforeunload handler below.
+    // Carry the message across a redirect.
     card.dataset.aylaShownAt = String(Date.now());
     card.dataset.aylaMessage = String(message);
     card.dataset.aylaKind = kind || toneOf(message);
@@ -124,10 +105,7 @@
     return dismiss;
   }
 
-  /* A real confirmation. Resolves true or false; never throws.
-   *
-   * opts: { title, detail, confirmLabel, cancelLabel, danger }
-   */
+  /* A real confirmation. */
   function confirm(message, opts) {
     opts = opts || {};
     return new Promise(function (resolve) {
@@ -174,8 +152,7 @@
       function close(answer) {
         document.removeEventListener('keydown', onKey, true);
         if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
-        // Put the caret back where it was, or a keyboard user is dumped at
-        // the top of the document every time they cancel.
+        // Restore focus.
         if (previous && previous.focus) { try { previous.focus(); } catch (e) {} }
         resolve(answer);
       }
@@ -197,15 +174,12 @@
         if (e.target === overlay) close(false);      // clicking away means no
       });
       document.addEventListener('keydown', onKey, true);
-      // Cancel takes focus on a destructive prompt: the safe option should be
-      // what a stray Enter or Space lands on.
+      // Focus Cancel on destructive prompts.
       (danger ? cancel : ok).focus();
     });
   }
 
-  /* A one-field prompt. Resolves the string, or null if cancelled -- the same
-   * contract as window.prompt, so a converted call site keeps its null check.
-   */
+  /* A one-field prompt. */
   function prompt(message, initial, opts) {
     opts = opts || {};
     return new Promise(function (resolve) {
@@ -277,14 +251,7 @@
   window.alert = function (message) { toast(message); };
   window.AylaDialog.nativeAlert = nativeAlert;
 
-  /* Carry a just-raised message across a redirect.
-   *
-   * alert() used to block, so `alert(msg); location.reload();` guaranteed the
-   * message was read before the page went. A toast does not block, so the same
-   * code would flash it and immediately destroy it -- and roughly ten call
-   * sites are written exactly that way. Anything still on screen and younger
-   * than the grace period is stashed and replayed on the next page.
-   */
+  /* Carry a just-raised message across a redirect. */
   var HANDOFF = 'ayla.toast.handoff';
   var HANDOFF_GRACE_MS = 2500;
 
@@ -296,8 +263,7 @@
       if (host) {
         Array.prototype.forEach.call(host.children, function (card) {
           var at = Number(card.dataset.aylaShownAt || 0);
-          // Only the ones too new to have been read. An older toast has had
-          // its moment and should not reappear on the next page.
+          // Only the ones too new to have been read.
           if (now - at <= HANDOFF_GRACE_MS) {
             carry.push({ m: card.dataset.aylaMessage, k: card.dataset.aylaKind });
           }
@@ -312,9 +278,7 @@
     var carried = JSON.parse(sessionStorage.getItem(HANDOFF) || '[]');
     sessionStorage.removeItem(HANDOFF);
     if (Array.isArray(carried) && carried.length) {
-      // On DOMContentLoaded rather than rAF: this module is loaded from
-      // <head>, and rAF can fire before the body has been parsed, leaving the
-      // carried message with nowhere to render.
+      // Show the carried message once the page loads.
       whenReady(function () {
         carried.forEach(function (item) { toast(item.m, item.k); });
       });
@@ -322,7 +286,6 @@
   } catch (e) { /* nothing to carry */ }
 
   // Declarative form confirmation: data-confirm="Delete this?" on the <form>.
-  // Replaces onsubmit="return confirm(...)", which cannot await a modal.
   document.addEventListener('submit', function (e) {
     var form = e.target;
     if (!form || !form.getAttribute) return;
@@ -336,8 +299,7 @@
     }).then(function (yes) {
       if (!yes) return;
       form.dataset.aylaConfirmed = '1';
-      // requestSubmit keeps the submitter and native validation; submit()
-      // is the fallback for anything that does not have it.
+      // Use requestSubmit when available.
       if (form.requestSubmit) form.requestSubmit();
       else form.submit();
     });

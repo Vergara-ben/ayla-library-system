@@ -13,15 +13,13 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@400;700&display=swap" rel="stylesheet">
-    {# Pinned to a version: the bare unpkg URL serves "whatever is latest", #}
-    {# which cannot be hashed and can change under the app without notice. #}
+    {# Pinned library version. #}
     <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"
             integrity="sha384-c9d8RFSL+u3exBOJ4Yp3HUJXS4znl9f+z66d1y54ig+ea249SpqR+w1wyvXz/lk+" crossorigin="anonymous"
             referrerpolicy="no-referrer"></script>
     <script src="{% static 'js/qrsource.js' %}"></script>
     <style>
-        /* Same cart rows as Shelf Manager's "Add Books to Shelf Level", so the
-           two pickers do not read as two different ideas. */
+        /* Picker row styles. */
         .tbtn { width: 24px; height: 24px; border-radius: 6px; border: 1px solid var(--border-color); display: flex; align-items: center; justify-content: center; font-size: 10px; cursor: pointer; background: transparent; flex-shrink: 0; }
         .tbtn.add { color: var(--accent); } .tbtn.add:hover { background: var(--tint-accent); }
         .tbtn.del { color: var(--danger); } .tbtn.del:hover { background: var(--tint-danger); }
@@ -197,6 +195,9 @@
                         <button onclick="openLabelPicker()" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-amber-500/90 text-[11px] font-semibold px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors">
                             <i class="fa-solid fa-print"></i> <span id="toolbarLabelsLabel">Print QR Labels</span>
                         </button>
+                        <button id="toolbarDeleteBtn" onclick="openDeleteBooks()" disabled class="bg-slate-900 border border-slate-800 hover:bg-rose-950/30 text-rose-400/90 text-[11px] font-semibold px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+                            <i class="fa-solid fa-trash-can"></i> <span id="toolbarDeleteLabel">Delete</span>
+                        </button>
                         <button onclick="openAddModal()" class="bg-cyan-700/30 text-cyan-400 border border-cyan-800/80 hover:bg-cyan-700/50 text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
                             <i class="fa-solid fa-plus text-[10px]"></i> Add Book
                         </button>
@@ -216,8 +217,7 @@
 
                         <div class="flex items-center gap-2 self-end lg:self-auto">
                             <div class="relative">
-                                {# Material type, not genre: genre says what it is about, this says #}
-                                {# what it physically is -- a magazine, a bound journal, a comic.   #}
+                                {# Material type filter. #}
                                 <select id="materialFilter" onchange="applyBookFilters()" class="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-400 focus:outline-none pr-8 appearance-none min-w-[120px]">
                                     <option value="">All Types</option>
                                     {% for value, label in material_choices %}<option value="{{ value }}" {% if value == material %}selected{% endif %}>{{ label }}</option>{% endfor %}
@@ -228,6 +228,21 @@
                                 <select id="copiesFilter" onchange="applyBookFilters()" title="How many copies of the title the library holds" class="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-400 focus:outline-none pr-8 appearance-none min-w-[130px]">
                                     <option value="">Any copies</option>
                                     {% for value, label in copies_choices %}<option value="{{ value }}" {% if value == copies %}selected{% endif %}>{{ label }}</option>{% endfor %}
+                                </select>
+                                <i class="fa-solid fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-slate-600 text-[10px] pointer-events-none"></i>
+                            </div>
+                            <div class="relative">
+                                <select id="shelfFilter" onchange="onShelfFilterChange()" title="Which shelf the book is on" class="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-400 focus:outline-none pr-8 appearance-none min-w-[150px]">
+                                    <option value="">All shelves</option>
+                                    <option value="none" {% if shelf == 'none' %}selected{% endif %}>Not shelved{% if unshelved_count %} ({{ unshelved_count }}){% endif %}</option>
+                                    {% for s in shelf_choices %}<option value="{{ s.id }}" {% if shelf == s.id|stringformat:"s" %}selected{% endif %}>{{ s.name }}{% if s.books %} ({{ s.books }}){% endif %}</option>{% endfor %}
+                                </select>
+                                <i class="fa-solid fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-slate-600 text-[10px] pointer-events-none"></i>
+                            </div>
+                            <div class="relative">
+                                <select id="levelFilter" onchange="applyBookFilters()" title="Which board on that shelf" class="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-400 focus:outline-none pr-8 appearance-none min-w-[140px]">
+                                    <option value="">All boards</option>
+                                    {% for s in shelf_choices %}{% for lv in s.levels %}<option value="{{ lv.id }}" data-shelf="{{ s.id }}" {% if level == lv.id|stringformat:"s" %}selected{% endif %}>{{ lv.label }}{% if lv.books %} ({{ lv.books }}){% endif %}</option>{% endfor %}{% endfor %}
                                 </select>
                                 <i class="fa-solid fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-slate-600 text-[10px] pointer-events-none"></i>
                             </div>
@@ -290,18 +305,15 @@
                                     <span class="bg-cyan-950/60 text-cyan-400 border border-cyan-900/40 px-1.5 py-0.5 rounded text-[9px] font-bold tracking-wide uppercase">{{ book.genre|default:"General" }}</span>
                                 </td>
                                 <td class="py-4 px-6">
-                                    {# Colour carries the meaning at a glance; the word carries it for #}
-                                    {# anyone who cannot tell these two greens and ambers apart.       #}
+                                    {# Condition badge. #}
                                     <span class="px-1.5 py-0.5 rounded text-[9px] font-bold tracking-wide uppercase border
                                         {% if book.condition == 'Damaged' %}bg-rose-950/50 text-rose-300 border-rose-800/50
                                         {% elif book.condition == 'Worn' %}bg-amber-950/50 text-amber-300 border-amber-800/50
                                         {% else %}bg-slate-800/60 text-slate-400 border-slate-700/50{% endif %}">{{ book.condition|default:"Good" }}</span>
                                 </td>
-                                {# The spine number. Monospaced so a column of them lines up and a #}
-                                {# transposed digit is visible.                                    #}
+                                {# The spine number. #}
                                 <td class="py-4 px-6 font-mono text-slate-300 whitespace-nowrap">{{ book.call_number|default:"—" }}</td>
-                                {# Shelf, then across, then up: the order somebody walks it. The #}
-                                {# short form is the title attribute for anyone reading a label. #}
+                                {# Shelf, then across, then up: the order somebody walks it. #}
                                 <td class="py-4 px-6 text-slate-400 whitespace-nowrap" title="{{ book.location_short }}">{{ book.location|default:"not shelved" }}</td>
                                 <td class="py-4 px-6 text-center font-semibold text-slate-400">{{ book.copies|default:1 }}</td>
                                 <td class="py-4 px-6">
@@ -315,7 +327,8 @@
                                     <div class="flex items-center justify-center gap-1.5">
                                         <button onclick="viewBookDetails({{ book.book_id }})" class="w-7 h-7 rounded border border-slate-800 text-cyan-400 hover:text-cyan-200 hover:bg-slate-800/40 transition-colors" aria-label="View book details"><i class="fa-solid fa-eye text-[10px]"></i></button>
                                         <a href="{% url 'admin_edit_book' book.book_id %}" class="w-7 h-7 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 transition-colors"><i class="fa-solid fa-pencil text-[10px]"></i></a>
-                                        <form method="post" action="{% url 'admin_delete_book' book.book_id %}" class="inline">
+                                        <form method="post" action="{% url 'admin_delete_book' book.book_id %}" class="inline"
+                                              data-confirm="Delete &quot;{{ book.title|escapejs }}&quot;? This removes the copy and any loan history it has. It cannot be undone.">
                                             {% csrf_token %}
                                             <button type="submit" class="w-7 h-7 rounded border border-slate-800 text-rose-500/70 hover:text-rose-400 hover:bg-rose-950/20 transition-colors" aria-label="Delete"><i class="fa-solid fa-trash-can text-[10px]"></i></button>
                                         </form>
@@ -334,27 +347,7 @@
                 <div class="px-5 py-4 border-t border-slate-800/60 flex items-center justify-between text-xs text-slate-500 bg-slate-900/5">
                     <span class="font-medium">Showing <span class="text-slate-400">{{ books|length }}</span> of <span class="text-slate-400">{{ paginator.count }}</span> books</span>
 
-                    <div class="flex items-center gap-1">
-                        {% if books.has_previous %}
-                            <a href="?page={{ books.previous_page_number }}{% if querystring %}&{{ querystring }}{% endif %}" class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors">&larr; Prev</a>
-                        {% else %}
-                            <button class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors cursor-not-allowed" disabled>&larr; Prev</button>
-                        {% endif %}
-
-                        {% for page_num in paginator.page_range %}
-                            {% if page_num == books.number %}
-                                <button class="px-3 py-1.5 rounded bg-cyan-700/30 text-cyan-400 font-bold border border-cyan-800/50">{{ page_num }}</button>
-                            {% else %}
-                                <a href="?page={{ page_num }}{% if querystring %}&{{ querystring }}{% endif %}" class="px-3 py-1.5 rounded border border-slate-800 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors">{{ page_num }}</a>
-                            {% endif %}
-                        {% endfor %}
-
-                        {% if books.has_next %}
-                            <a href="?page={{ books.next_page_number }}{% if querystring %}&{{ querystring }}{% endif %}" class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors">Next &rarr;</a>
-                        {% else %}
-                            <button class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors cursor-not-allowed" disabled>Next &rarr;</button>
-                        {% endif %}
-                    </div>
+                    {% include 'admin/_pagination.html' with page=books accent='cyan' qs=querystring %}
                 </div>
                 </div>
 
@@ -578,10 +571,7 @@
                             <input type="text" id="pickSearch" oninput="renderLabelPicker()" placeholder="Search title, author or ISBN..." class="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-3 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-amber-800 placeholder-slate-600">
                         </div>
                     </div>
-                    <!-- Labelling a new bay, a refilled level and a single
-                         replacement copy are three different jobs, and mixing
-                         them into one list meant scrolling past every book in
-                         the library to find a shelf. -->
+                    <!-- Label picker modes. -->
                     <div class="px-3 pb-2 flex items-center gap-1">
                         <button type="button" id="pickModeBook" onclick="setPickMode('book')" class="pick-mode on">One by one</button>
                         <button type="button" id="pickModeLevel" onclick="setPickMode('level')" class="pick-mode">By level</button>
@@ -616,7 +606,8 @@
 
     <!-- Import result -->
     <div id="importResultModal" class="hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-        <div class="w-full max-w-lg rounded-2xl border p-6 flex flex-col gap-5 shadow-2xl my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color); max-height: 88vh;">
+        {# Wider modal for the import preview. #}
+        <div class="w-full max-w-xl rounded-2xl border p-6 flex flex-col gap-5 shadow-2xl my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color); max-height: 88vh;">
             <div class="flex items-center gap-3">
                 <div id="importIcon" class="w-9 h-9 rounded-xl flex items-center justify-center text-base flex-shrink-0"></div>
                 <h3 id="importTitle" class="text-base font-bold text-slate-200 tracking-wide">Import finished</h3>
@@ -624,15 +615,38 @@
 
             <div id="importSummary" class="space-y-2 text-xs overflow-y-auto" style="max-height: 46vh;"></div>
 
-            <div class="flex items-center justify-end gap-2.5 pt-1 flex-wrap">
-                <button type="button" id="importCloseBtn" onclick="closeImportResult()" class="px-4 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:text-slate-100 hover:bg-slate-800/40 font-semibold text-[11px] min-w-[84px]">Done</button>
-                <button type="button" id="importConfirmBtn" onclick="confirmImport(false)" class="hidden bg-emerald-700 hover:bg-emerald-600 text-white font-bold px-4 py-2.5 rounded-lg items-center gap-2 text-[11px]"><i class="fa-solid fa-check text-xs"></i> Confirm import</button>
-                <button type="button" id="importConfirmLabelsBtn" onclick="confirmImport(true)" class="hidden bg-amber-700 hover:bg-amber-600 text-white font-bold px-4 py-2.5 rounded-lg items-center gap-2 text-[11px]"><i class="fa-solid fa-print text-xs"></i> Confirm and print QR labels</button>
-                <button type="button" id="importLabelsBtn" onclick="printImportedLabels()" class="hidden bg-amber-700 hover:bg-amber-600 text-white font-bold px-5 py-2.5 rounded-lg items-center gap-2 text-xs"><i class="fa-solid fa-print text-xs"></i> <span id="importLabelsText">Print QR Labels</span></button>
+            {# One row, one button height, one label length that fits. #}
+            <div class="pt-1 flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2.5">
+                <button type="button" id="importCloseBtn" onclick="closeImportResult()" class="w-full sm:w-auto justify-center px-4 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:text-slate-100 hover:bg-slate-800/40 font-semibold text-[11px] min-w-[92px]">Done</button>
+                <button type="button" id="importConfirmBtn" onclick="confirmImport(false)" class="hidden w-full sm:w-auto justify-center bg-emerald-700 hover:bg-emerald-600 text-white font-bold px-4 py-2.5 rounded-lg items-center gap-2 text-[11px]"><i class="fa-solid fa-check text-xs"></i> Confirm import</button>
+                <button type="button" id="importConfirmLabelsBtn" onclick="confirmImport(true)" class="hidden w-full sm:w-auto justify-center bg-amber-700 hover:bg-amber-600 text-white font-bold px-4 py-2.5 rounded-lg items-center gap-2 text-[11px]"><i class="fa-solid fa-print text-xs"></i> Confirm and print labels</button>
+                <button type="button" id="importLabelsBtn" onclick="printImportedLabels()" class="hidden w-full sm:w-auto justify-center bg-amber-700 hover:bg-amber-600 text-white font-bold px-4 py-2.5 rounded-lg items-center gap-2 text-[11px]"><i class="fa-solid fa-print text-xs"></i> <span id="importLabelsText">Print QR Labels</span></button>
             </div>
         </div>
     </div>
 
+
+
+    <!-- Delete selected books -->
+    <div id="deleteBooksModal" class="hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+        <div class="w-full max-w-lg rounded-2xl border p-6 flex flex-col gap-5 shadow-2xl my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color); max-height: 88vh;">
+            <div class="flex items-center gap-3">
+                <div class="w-9 h-9 rounded-xl flex items-center justify-center text-base flex-shrink-0 bg-rose-500/10 text-rose-400 border border-rose-500/25">
+                    <i class="fa-solid fa-triangle-exclamation"></i>
+                </div>
+                <h3 class="text-base font-bold text-slate-200 tracking-wide">Delete books</h3>
+            </div>
+
+            <div id="deleteSummary" class="space-y-2 text-xs overflow-y-auto" style="max-height: 46vh;"></div>
+
+            <div class="flex items-center justify-end gap-2.5 pt-1 flex-wrap">
+                <button type="button" id="deleteCancelBtn" onclick="closeDeleteBooks()" class="px-4 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:text-slate-100 hover:bg-slate-800/40 font-semibold text-[11px] min-w-[84px]">Cancel</button>
+                <button type="button" id="deleteConfirmBtn" onclick="confirmDeleteBooks()" class="hidden bg-rose-700 hover:bg-rose-600 text-white font-bold px-4 py-2.5 rounded-lg items-center gap-2 text-[11px]"><i class="fa-solid fa-trash-can text-xs"></i> <span id="deleteConfirmLabel">Delete them</span></button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Move selected books -->
     <!-- QR Label Sheet Modal -->
     <div id="labelSheetModal" class="hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 overflow-y-auto">
         <div class="w-full max-w-lg rounded-2xl border p-6 flex flex-col gap-5 shadow-2xl relative my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color);">
@@ -646,6 +660,7 @@
                 Each label carries that copy's own QR code, so two copies of the same title
                 never get the same sticker.
             </p>
+            <p id="labelSheetError" class="hidden rounded-lg border border-rose-500/25 bg-rose-500/10 px-3 py-2 text-[11px] text-rose-300"></p>
 
             <div class="space-y-4 text-xs">
                 <div class="grid grid-cols-2 gap-3">
@@ -664,6 +679,19 @@
                     </div>
                 </div>
 
+
+                <div class="space-y-1.5">
+                    <label for="labelSort" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Print order</label>
+                    <select id="labelSort" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                        <option value="location" selected>Shelf order &mdash; walk the room</option>
+                        <option value="title">A to Z by title</option>
+                    </select>
+                    <p class="text-[10px] text-slate-500 leading-relaxed">
+                        Shelf order hands you the pile in the order you walk it:
+                        shelf by shelf, board by board, left to right along each.
+                        A to Z is for checking a title made it onto the sheet.
+                    </p>
+                </div>
                 <div class="rounded-lg border border-slate-800/80 px-3 py-2.5" style="background-color: var(--bg-input);">
                     <p class="text-[11px] text-slate-300" id="labelEstimate">&nbsp;</p>
                 </div>
@@ -699,7 +727,7 @@
 
                 <div class="pt-1 flex items-center justify-end gap-3">
                     <button type="button" onclick="closeLabelSheet()" class="px-5 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:text-slate-100 hover:bg-slate-800/40 font-semibold tracking-wide transition-colors min-w-[100px]">Cancel</button>
-                    <button type="button" onclick="downloadLabelSheet()" class="bg-cyan-700 hover:bg-cyan-600 text-white font-bold px-5 py-2.5 rounded-lg flex items-center gap-2 tracking-wide transition-colors shadow-md"><i class="fa-solid fa-file-pdf text-xs"></i> Download PDF</button>
+                    <button type="button" id="labelDownloadBtn" onclick="downloadLabelSheet()" class="bg-cyan-700 hover:bg-cyan-600 text-white font-bold px-5 py-2.5 rounded-lg flex items-center gap-2 tracking-wide transition-colors shadow-md"><i class="fa-solid fa-file-pdf text-xs"></i> Download PDF</button>
                 </div>
             </div>
         </div>
@@ -715,8 +743,7 @@
                 </button>
             </div>
             <div class="flex flex-col gap-4" id="qr-scan-panel">
-                {# Camera and handheld both feed handleBookQR, so the result panel #}
-                {# below does not care which one read the code. #}
+                {# Camera or handheld scanner. #}
                 <div id="qr-cam-box">
                     <div id="qr-reader" class="rounded-lg overflow-hidden w-full max-w-[260px] mx-auto"></div>
                     <p class="text-xs text-slate-500 text-center mt-3">Point your camera at a book's QR code to search for it</p>
@@ -796,8 +823,7 @@
                         </div>
                     </div>
 
-                    <!-- Staff-side only. The patron endpoint is separate and
-                         deliberately says nothing about who has had a book. -->
+                    <!-- Staff-side only. -->
                     <div class="p-5 rounded-xl border border-slate-800/80 mt-4" style="background-color: var(--bg-card);">
                         <div class="flex items-center justify-between mb-3">
                             <h4 class="text-sm font-bold text-slate-200 tracking-wide">Borrowing history</h4>
@@ -835,8 +861,7 @@
 
     <script>
         function openAddModal() {
-            // A new run: the count and its note start over, or the next book
-            // opens claiming credit for the last batch.
+            // Reset the added count.
             addedThisRun = 0;
             const runNote = document.getElementById('addRunNote');
             if (runNote) runNote.classList.add('hidden');
@@ -852,13 +877,14 @@
             window.location.href = '{% url 'admin_management' %}';
         }
 
-        // The book's own loans, newest first. A link to the transactions page
-        // filtered by title already existed, but answering "who has had this
-        // copy" should not require leaving the book you are looking at.
-        // The level as the spines actually standing on it: a filled block per
-        // copy on the shelf, a hollow one for each that is out, the target
-        // taller. A stored slot cannot show this, because what makes the count
-        // wrong is precisely the copies that are not there.
+        // Shared by the level strip and the loan table below.
+        function esc(v) {
+            return String(v == null ? '' : v).replace(/[&<>"]/g, function (c) {
+                return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+            });
+        }
+
+        // The book's own loans, newest first.
         function renderLevelStrip(data) {
             const strip = document.getElementById('detailStrip');
             const near = document.getElementById('detailNeighbours');
@@ -972,10 +998,7 @@
                             statusEl.className = 'bg-slate-800/50 text-slate-400 border border-slate-700/40 text-xs px-3 py-1 rounded-full font-semibold tracking-wide whitespace-nowrap';
                         }
 
-                        // Rendered by our own server rather than api.qrserver.com: the
-                        // desk is regularly offline, the payload should not be handed to
-                        // a third party, and a cross-origin image cannot be downloaded
-                        // at all -- <a download> is ignored across origins.
+                        // QR image served by our own server.
                         const qrContainer = document.getElementById('qrCodeContainer');
                         const qrDownload = document.getElementById('detailQrDownload');
                         if (data.qr_code) {
@@ -985,8 +1008,7 @@
                             qrDownload.classList.remove('opacity-50', 'pointer-events-none');
                         } else {
                             qrContainer.innerHTML = '<p class="text-slate-400 text-xs">No QR code available</p>';
-                            // Nothing to save, so the button says so rather than
-                            // downloading a 404 page named like a picture.
+                            // No QR code to download.
                             qrDownload.href = '#';
                             qrDownload.classList.add('opacity-50', 'pointer-events-none');
                         }
@@ -1021,8 +1043,7 @@
             html5QrcodeScanner.start({ facingMode: "environment" }, config, onScanSuccess)
             .catch(err => {
                 console.error("Error starting scanner", err);
-                // Was an alert(), which a librarian had to dismiss before they
-                // could reach the handheld option sitting right above it.
+                // Show the camera error inline.
                 html5QrcodeScanner = null;
                 host.innerHTML = '<p class="text-xs text-amber-400 text-center py-8">'
                     + 'Camera unavailable. Allow camera access, or switch to Scanner device above.</p>';
@@ -1031,8 +1052,7 @@
 
         function stopBookQRCamera() {
             if (!html5QrcodeScanner) return;
-            // Cleared first: stop() is async, and a second call arriving before it
-            // settles would try to stop a scanner that is already stopping.
+            // Clear before stopping the scanner.
             const scanner = html5QrcodeScanner;
             html5QrcodeScanner = null;
             scanner.stop().then(() => scanner.clear()).catch(err => {
@@ -1114,18 +1134,13 @@
             });
         }
 
-        // Cataloguing is done in runs -- a stack off one trolley shares a
-        // genre, a shelf and usually a publication year. Carrying those forward
-        // and keeping the dialog open turns each subsequent book into a title
-        // and an author.
+        // Keep shared fields for the next book.
         let addAnother = false;
         let addedThisRun = 0;
 
         window.submitAndAddAnother = function () {
             const form = document.getElementById('addBookForm');
-            // Ask the browser to enforce `required` first; without this an
-            // empty title would post and come back as a server error instead
-            // of highlighting the field.
+            // Run browser validation first.
             if (!form.reportValidity()) return;
             addAnother = true;
             form.requestSubmit();
@@ -1234,17 +1249,15 @@
             }
         });
 
-        // Choosing a file no longer imports it. The file is sent for a preview
-        // first and nothing is written until a confirm button is pressed. That
-        // preview is the real import, run inside a transaction that is then
-        // rolled back, so the figures being confirmed are measured rather than
-        // a second implementation's guess at what the first one would do.
+        // Import: preview first, save on confirm.
         let pendingImportFile = null;
 
-        function postImport(file, preview) {
+        function postImport(file, preview, copyRows) {
             const form = new FormData();
             form.append('excel_file', file);
             if (preview) form.append('preview', '1');
+            // Which of the already-catalogued rows were ticked as real second copies.
+            if (copyRows && copyRows.length) form.append('copy_rows', copyRows.join(','));
             return fetch('{% url 'import_books' %}', {
                 method: 'POST',
                 body: form,
@@ -1267,8 +1280,7 @@
         function uploadExcelFile(input) {
             if (!input.files || !input.files[0]) return;
             pendingImportFile = input.files[0];
-            // Cleared so that picking the same file again after a cancel still
-            // counts as a change and runs the preview again.
+            // Clear so the same file can be picked again.
             input.value = '';
             showImportWorking('Reading ' + pendingImportFile.name + '...');
             postImport(pendingImportFile, true).then(showImportResult).catch(importFailed);
@@ -1284,11 +1296,15 @@
             var s = document.getElementById('statusFilter').value;
             var m = (document.getElementById('materialFilter') || {}).value;
             var c = (document.getElementById('copiesFilter') || {}).value;
+            var sh = (document.getElementById('shelfFilter') || {}).value;
+            var lv = (document.getElementById('levelFilter') || {}).value;
             if (q) p.set('q', q);
             if (s) p.set('status', s);
             if (g) p.set('genre', g);
             if (m) p.set('material', m);
             if (c) p.set('copies', c);
+            if (sh) p.set('shelf', sh);
+            if (lv) p.set('level', lv);
             var qs = p.toString();
             location.href = "{% url 'admin_management' %}" + (qs ? '?' + qs : '');
         }
@@ -1296,21 +1312,25 @@
     <script src="{% static 'js/admin-enhance.js' %}" defer></script>
 
     <script>
-    // ── Selecting books to print QR labels for ────────────────────────────
-    // Ticks survive paging. Someone labelling a delivery works through several
-    // pages of the table, and losing the selection on every page change would
-    // make the feature useless for the one job it exists to do.
+    // QR label selection, kept across pages.
     (function () {
         const STORE = 'ayla.labelSelection';
         const LABELS_URL = "{% url 'book_qr_labels' %}";
 
+        // The selection lives here.
+        let selection = null;
+
         function chosen() {
-            try { return new Set(JSON.parse(sessionStorage.getItem(STORE) || '[]')); }
-            catch (e) { return new Set(); }
+            if (selection === null) {
+                try { selection = new Set(JSON.parse(sessionStorage.getItem(STORE) || '[]')); }
+                catch (e) { selection = new Set(); }
+            }
+            return selection;
         }
         function remember(set) {
-            try { sessionStorage.setItem(STORE, JSON.stringify([...set])); }
-            catch (e) { /* private mode: selection just will not survive paging */ }
+            selection = new Set(set);
+            try { sessionStorage.setItem(STORE, JSON.stringify([...selection])); }
+            catch (e) { /* site data refused: the selection still works here, it just will not survive changing page. */ }
         }
 
         window.onBookTick = function () {
@@ -1329,11 +1349,14 @@
 
         function paintSelection(set) {
             const n = set.size;
-            // One button, in the toolbar beside Import Excel. It always opens
-            // the picker; ticking rows just pre-loads the cart, so the count
-            // rides on the label rather than needing a second button.
+            // One button, in the toolbar beside Import Excel.
             const lab = document.getElementById('toolbarLabelsLabel');
             if (lab) lab.textContent = n ? ('Print QR Labels (' + n + ')') : 'Print QR Labels';
+
+            const del = document.getElementById('toolbarDeleteBtn');
+            const delLab = document.getElementById('toolbarDeleteLabel');
+            if (del) del.disabled = n === 0;
+            if (delLab) delLab.textContent = n ? ('Delete (' + n + ')') : 'Delete';
 
             const ticks = [...document.querySelectorAll('.book-tick')];
             const master = document.getElementById('selectAllBooks');
@@ -1353,8 +1376,7 @@
             paintSelection(set);
         });
 
-        // How many fit per page, worked out the same way the PDF does it, so the
-        // number shown before printing is the number that comes out.
+        // Labels per page, same as the PDF.
         const PAGE_MM = { A4: [210, 297], Letter: [215.9, 279.4], Legal: [215.9, 355.6] };
         const MARGIN_MM = 10, PAD_MM = 2, LEADING = 1.18, PT_MM = 25.4 / 72;
 
@@ -1387,28 +1409,134 @@
         window.openLabelSheet = function (ids) {
             if (Array.isArray(ids) && ids.length) remember(new Set(ids));
             const n = chosen().size;
+            // Only reachable from the toolbar with nothing ticked.
             if (!n) { alert('Tick at least one book first.'); return; }
             document.getElementById('labelCountNote').textContent =
                 n + ' book' + (n === 1 ? '' : 's') + ' selected.';
+            const err = document.getElementById('labelSheetError');
+            if (err) { err.textContent = ''; err.classList.add('hidden'); }
+            const dl = document.getElementById('labelDownloadBtn');
+            if (dl) { dl.disabled = false; dl.innerHTML = '<i class="fa-solid fa-file-pdf text-xs"></i> Download PDF'; }
             document.getElementById('labelSheetModal').classList.remove('hidden');
             refreshLabelEstimate();
         };
+
+
+        // Delete selected books.
+        window.openDeleteBooks = function () {
+            const ids = [...chosen()];
+            if (!ids.length) return;
+            const body = document.getElementById('deleteSummary');
+            body.innerHTML = line('fa-hourglass-half', 'text-slate-400', 'Checking…');
+            document.getElementById('deleteConfirmBtn').classList.add('hidden');
+            document.getElementById('deleteBooksModal').classList.remove('hidden');
+            postDelete(ids, false).then(renderDeleteSummary).catch(deleteFailed);
+        };
+
+        window.closeDeleteBooks = function () {
+            document.getElementById('deleteBooksModal').classList.add('hidden');
+        };
+
+        function postDelete(ids, confirm) {
+            const body = new URLSearchParams({ ids: ids.join(',') });
+            if (confirm) body.append('confirm', '1');
+            return fetch("{% url 'delete_books' %}", {
+                method: 'POST',
+                headers: { 'X-CSRFToken': '{{ csrf_token }}',
+                           'Content-Type': 'application/x-www-form-urlencoded',
+                           'X-Requested-With': 'XMLHttpRequest' },
+                body: body,
+            }).then(r => r.json());
+        }
+
+        function deleteFailed() {
+            document.getElementById('deleteSummary').innerHTML = line(
+                'fa-circle-xmark', 'text-rose-400',
+                'The server did not answer. Nothing was deleted.');
+            document.getElementById('deleteConfirmBtn').classList.add('hidden');
+        }
+
+        function renderDeleteSummary(data) {
+            const body = document.getElementById('deleteSummary');
+            const go = document.getElementById('deleteConfirmBtn');
+            if (!data.success) {
+                body.innerHTML = line('fa-circle-xmark', 'text-rose-400', esc(data.error));
+                go.classList.add('hidden');
+                return;
+            }
+            if (data.preview === false) {          // it is done
+                body.innerHTML = line('fa-circle-check', 'text-emerald-400', esc(data.message));
+                go.classList.add('hidden');
+                document.getElementById('deleteCancelBtn').textContent = 'Done';
+                setTimeout(function () { remember(new Set()); window.location.reload(); }, 700);
+                return;
+            }
+
+            let html = line('fa-circle-exclamation', 'text-rose-400',
+                '<span class="text-slate-200 font-semibold">' + data.deletable
+                + ' book' + (data.deletable === 1 ? '' : 's') + ' will be deleted.</span> '
+                + 'This cannot be undone.');
+
+            if (data.loan_records) {
+                html += line('fa-clock-rotate-left', 'text-amber-400',
+                    '<span class="text-slate-200 font-semibold">' + data.loan_records
+                    + ' loan record' + (data.loan_records === 1 ? '' : 's')
+                    + '</span> will be deleted with them — who borrowed these '
+                    + 'copies, when, and any fine charged.');
+            }
+            if (data.donation_records) {
+                html += line('fa-gift', 'text-amber-400',
+                    data.donation_records + ' donation record(s) will also go.');
+            }
+            if (data.on_loan_count) {
+                html += line('fa-hand-holding', 'text-cyan-400',
+                    '<span class="text-slate-200 font-semibold">' + data.on_loan_count
+                    + ' book' + (data.on_loan_count === 1 ? ' is' : 's are')
+                    + ' out on loan</span> and will be kept: '
+                    + data.on_loan.map(function (b) { return esc(b.title); }).join(', ')
+                    + (data.on_loan_count > data.on_loan.length ? ', …' : '')
+                    + '. Deleting them would lose the only record that they are out.');
+            }
+            body.innerHTML = html;
+
+            if (data.deletable) {
+                document.getElementById('deleteConfirmLabel').textContent =
+                    'Delete ' + data.deletable + ' book' + (data.deletable === 1 ? '' : 's');
+                go.classList.remove('hidden');
+                go.classList.add('flex');
+            } else {
+                go.classList.add('hidden');
+            }
+        }
+
+        window.confirmDeleteBooks = function () {
+            const ids = [...chosen()];
+            if (!ids.length) return;
+            const go = document.getElementById('deleteConfirmBtn');
+            go.classList.add('hidden');
+            document.getElementById('deleteSummary').innerHTML =
+                line('fa-hourglass-half', 'text-slate-400', 'Deleting…');
+            postDelete(ids, true).then(renderDeleteSummary).catch(deleteFailed);
+        };
+
         window.closeLabelSheet = function () {
             document.getElementById('labelSheetModal').classList.add('hidden');
+            // Finish the import after the label sheet closes.
             if (importSummaryAfterLabels) {
                 const summary = importSummaryAfterLabels;
                 importSummaryAfterLabels = null;
-                showImportResult(summary);
+                finishImport(summary);
             }
         };
 
-        window.downloadLabelSheet = function () {
+        window.downloadLabelSheet = async function () {
             const ids = [...chosen()];
             if (!ids.length) return;
             const q = new URLSearchParams({
                 ids: ids.join(','),
                 page: document.getElementById('labelPaper').value,
                 qr_mm: document.getElementById('labelSize').value || '25',
+                sort: (document.getElementById('labelSort') || {}).value || 'location',
                 skip: document.getElementById('labelSkip').value || '0',
                 show_title: document.getElementById('labelShowTitle').checked ? '1' : '0',
                 show_copy: document.getElementById('labelShowCopy').checked ? '1' : '0',
@@ -1418,11 +1546,48 @@
                 show_location: document.getElementById('labelShowLocation').checked ? '1' : '0',
                 cut_guides: document.getElementById('labelCutGuides').checked ? '1' : '0',
             });
-            // Same-origin navigation rather than fetch+blob: the PDF is a file
-            // download, and letting the browser own it keeps the filename the
-            // server chose and costs nothing in memory for a big sheet.
-            window.location.href = LABELS_URL + '?' + q.toString();
-            closeLabelSheet();
+            // Fetched, then handed to the browser as a file, not navigated to.
+            const btn = document.getElementById('labelDownloadBtn');
+            const err = document.getElementById('labelSheetError');
+            function fail(message) {
+                if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-file-pdf text-xs"></i> Download PDF'; }
+                if (err) { err.textContent = message; err.classList.remove('hidden'); }
+            }
+            if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin text-xs"></i> Preparing PDF...'; }
+            if (err) err.classList.add('hidden');
+
+            let res;
+            try {
+                res = await fetch(LABELS_URL + '?' + q.toString(),
+                                  { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+            } catch (e) {
+                fail('The server did not answer. No labels were printed.');
+                return;
+            }
+            // Show an error if the response is not a PDF.
+            const type = res.headers.get('Content-Type') || '';
+            if (!res.ok || type.indexOf('application/pdf') !== 0) {
+                let message = 'The label sheet could not be made. Check that you are still signed in, then try again.';
+                try { const data = await res.json(); if (data && data.error) message = data.error; } catch (e) { /* not JSON */ }
+                fail(message);
+                return;
+            }
+
+            const blob = await res.blob();
+            const named = /filename="?([^";]+)"?/.exec(res.headers.get('Content-Disposition') || '');
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = named ? named[1] : 'AYLA-QR-labels.pdf';
+            link.style.display = 'none';
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            // Wait before closing, which reloads the page.
+            setTimeout(function () {
+                URL.revokeObjectURL(url);
+                closeLabelSheet();
+            }, 1000);
         };
 
         // Called by the import result modal once it knows what it created.
@@ -1431,10 +1596,7 @@
             openLabelSheet(ids);
         };
 
-        // ── Choosing books to label ───────────────────────────────────────
-        // The same cart shape as "Add Books to Shelf Level" in Shelf Manager
-        // and the module grant in User Management: available on the right,
-        // chosen on the left. Three pickers that look like one idea.
+        // Label picker.
         const PICKER_URL = "{% url 'book_label_picker_data' %}";
         let pickBooks = [];        // every book, fetched once
         let pickById = {};
@@ -1446,12 +1608,7 @@
             });
         }
 
-        // Shelf levels come first in the available list so a whole trolley can
-        // be added in one click. A shelf holds fourteen books far more often
-        // than someone wants to click fourteen times.
-        // 'level' buckets one board at a time; 'shelf' takes a whole bay,
-        // every board of it, which is the unit somebody relabelling a bookcase
-        // actually works in.
+        // Shelves and levels listed first.
         function pickGroups(kind) {
             const buckets = new Map();
             pickBooks.forEach(function (b) {
@@ -1507,7 +1664,8 @@
 
         window.renderLabelPicker = function () {
             const q = (document.getElementById('pickSearch').value || '').trim().toLowerCase();
-            const set = new Set(JSON.parse(sessionStorage.getItem('ayla.labelSelection') || '[]'));
+            // Read from the shared selection.
+            const set = chosen();
 
             let html = '';
             if (pickMode === 'book') {
@@ -1527,9 +1685,7 @@
                           + (rows.length - 400) + ' more — keep typing to narrow it down.</div>';
                 }
             } else {
-                // A group already fully chosen is still listed, greyed, rather
-                // than vanishing: a shelf disappearing as you add it reads as
-                // the click having gone wrong.
+                // Keep chosen groups visible, greyed.
                 const groups = pickGroups(pickMode).filter(function (g) {
                     return !q || g.label.toLowerCase().indexOf(q) !== -1;
                 });
@@ -1556,14 +1712,14 @@
             document.getElementById('pickList').innerHTML = html
                 || '<div class="text-slate-500 text-xs p-3 text-center">Nothing left to add.</div>';
 
-            // LEFT — the print list, in shelf order so it reads like the sheet.
-            const chosen = [...set].map(function (id) { return pickById[id]; }).filter(Boolean);
-            chosen.sort(function (a, b) {
+            // Print list, in shelf order.
+            const inCart = [...set].map(function (id) { return pickById[id]; }).filter(Boolean);
+            inCart.sort(function (a, b) {
                 return (a.location || '\uffff').localeCompare(b.location || '\uffff')
                     || a.title.localeCompare(b.title);
             });
-            document.getElementById('pickCart').innerHTML = chosen.length
-                ? chosen.map(function (b) {
+            document.getElementById('pickCart').innerHTML = inCart.length
+                ? inCart.map(function (b) {
                     return pickRow(esc(b.title),
                         esc(b.author) + (b.location ? ' · 📍 ' + esc(b.location) : ' · not shelved'),
                         '<button class="tbtn del" title="Remove" onclick="removeBookFromCart(' + b.book_id + ')"><i class="fa-solid fa-minus"></i></button>',
@@ -1586,20 +1742,18 @@
                 : 'text-[10px] text-slate-500';
         };
 
+        // Picker and table share one selection.
         function saveCart(set) {
-            try { sessionStorage.setItem('ayla.labelSelection', JSON.stringify([...set])); }
-            catch (e) { /* private mode */ }
-            // Keep the table's own checkboxes honest: picking a book here and
-            // seeing its row still unticked would look like the click was lost.
+            remember(set);
+            // Sync the table checkboxes.
             document.querySelectorAll('.book-tick').forEach(function (cb) {
                 cb.checked = set.has(Number(cb.value));
             });
-            paintSelection(set);
+            paintSelection(chosen());
             renderLabelPicker();
         }
         function currentCart() {
-            try { return new Set(JSON.parse(sessionStorage.getItem('ayla.labelSelection') || '[]')); }
-            catch (e) { return new Set(); }
+            return new Set(chosen());     // a copy: callers mutate what they get
         }
 
         window.addBookToCart = function (id) { const s = currentCart(); s.add(id); saveCart(s); };
@@ -1633,9 +1787,7 @@
                 pickMax = d.max_per_sheet || 500;
                 pickById = {};
                 pickBooks.forEach(function (b) { pickById[b.book_id] = b; });
-                // Drop anything that has been deleted since it was ticked.
-                // The selection outlives the page, so without this the count
-                // keeps promising labels for books that no longer exist.
+                // Remove deleted books from the selection.
                 const live = currentCart();
                 const pruned = new Set([...live].filter(function (id) { return pickById[id]; }));
                 if (pruned.size !== live.size) saveCart(pruned);
@@ -1655,10 +1807,7 @@
             openLabelSheet();
         };
 
-        // ── Import result ────────────────────────────────────────────────
-        // A modal rather than alert(): the result has several parts worth
-        // reading, and printing the labels is an offer, not a question that
-        // has to be answered before the page will move on.
+        // Import result modal.
         let importedIds = [];
 
         function line(icon, colour, text) {
@@ -1669,10 +1818,10 @@
 
         // Whether the confirmed import should go straight on to the labels.
         let printAfterImport = false;
-        // Set when a label sheet is opened straight off the back of an import:
-        // the summary then waits until the labels have been dealt with rather
-        // than being buried behind them.
+        // Import summary to show after the label sheet.
         let importSummaryAfterLabels = null;
+        // Last import result.
+        let lastImportData = null;
 
         function showButtons(ids, closeText) {
             ['importConfirmBtn', 'importConfirmLabelsBtn', 'importLabelsBtn'].forEach(
@@ -1691,11 +1840,7 @@
             close.classList.toggle('hidden', !closeText);
         }
 
-        // Every button goes while the server is working: a sheet of 500 rows
-        // takes long enough that a second press is a real possibility, and a
-        // second press would be a second import.
-        // On window because the upload handler lives in an earlier script
-        // block, outside this closure.
+        // Hide buttons while importing.
         window.showImportWorking = function (text) {
             const icon = document.getElementById('importIcon');
             icon.className = 'w-9 h-9 rounded-xl flex items-center justify-center text-base flex-shrink-0 bg-slate-500/10 text-slate-400 border border-slate-500/25';
@@ -1707,16 +1852,76 @@
             document.getElementById('importResultModal').classList.remove('hidden');
         };
 
-        // A confirm button was pressed: run the import for real, on the same
-        // file the preview measured.
+        // Run the real import.
         window.confirmImport = function (thenPrint) {
             const file = pendingImportFile;
             if (!file) return;
+            // Read ticked rows before clearing the modal.
+            const copyRows = tickedCopyRows();
             pendingImportFile = null;          // one press, one import
             printAfterImport = !!thenPrint;
             showImportWorking('Importing ' + file.name + '...');
-            postImport(file, false).then(showImportResult).catch(importFailed);
+            postImport(file, false, copyRows).then(showImportResult).catch(importFailed);
         };
+
+        // Rows ticked as extra copies.
+        function tickedCopyRows() {
+            return Array.prototype.slice
+                .call(document.querySelectorAll('.clash-tick:checked'))
+                .map(function (b) { return b.value; });
+        }
+
+        // Tick or untick all.
+        window.setAllClashes = function (on) {
+            document.querySelectorAll('.clash-tick').forEach(function (b) { b.checked = on; });
+            updateClashCount();
+        };
+
+        window.updateClashCount = function () {
+            const el = document.getElementById('clashChosen');
+            if (el) el.textContent = tickedCopyRows().length;
+        };
+
+        // List of rows already in the catalogue.
+        function clashList(clashes, truncated) {
+            let rows = '';
+            clashes.forEach(function (c) {
+                const held = c.have + (c.have === 1 ? ' copy' : ' copies') + ' on file'
+                           + (c.where ? ' · ' + esc(c.where) : ' · not shelved');
+                rows +=
+                  '<label class="flex items-start gap-2.5 px-2.5 py-2 rounded-lg cursor-pointer hover:bg-slate-800/40">'
+                + '<input type="checkbox" class="clash-tick mt-0.5 flex-shrink-0" value="' + c.row + '"'
+                + ' onchange="updateClashCount()">'
+                + '<span class="min-w-0">'
+                + '<span class="block text-[11px] font-semibold text-slate-200 truncate">' + esc(c.title) + '</span>'
+                + '<span class="block text-[10px] text-slate-500 truncate">row ' + c.row + ' · '
+                + esc(c.author) + ' · ' + held
+                + (c.reason === 'isbn' ? ' · same ISBN' : '') + '</span>'
+                + '</span></label>';
+            });
+            return ''
+              + '<div class="rounded-xl border border-amber-500/25 bg-amber-500/[0.06] p-3 mt-1">'
+              +   '<div class="flex items-center justify-between gap-2 mb-1.5 flex-wrap">'
+              +     '<p class="text-[11px] font-bold text-amber-300">'
+              +       '<i class="fa-solid fa-clone mr-1.5"></i>Already in the catalogue ('
+              +       clashes.length + ')</p>'
+              +     '<div class="flex items-center gap-1.5">'
+              +       '<button type="button" onclick="setAllClashes(true)" class="px-2 py-1 rounded-md border border-slate-700 text-[10px] font-semibold text-slate-300 hover:bg-slate-800/60">All are copies</button>'
+              +       '<button type="button" onclick="setAllClashes(false)" class="px-2 py-1 rounded-md border border-slate-700 text-[10px] font-semibold text-slate-300 hover:bg-slate-800/60">None</button>'
+              +     '</div>'
+              +   '</div>'
+              +   '<p class="text-[10px] text-slate-400 mb-2 leading-relaxed">'
+              +     'Tick a row only if the sheet is listing a genuine extra copy of that book. '
+              +     'Rows left unticked are not imported. '
+              +     '<span class="text-slate-300 font-semibold"><span id="clashChosen">0</span> ticked.</span></p>'
+              +   '<div class="space-y-0.5 overflow-y-auto rounded-lg" style="max-height: 30vh;">' + rows + '</div>'
+              +   (truncated
+                    ? '<p class="text-[10px] text-amber-400/90 mt-2">Only the first ' + clashes.length
+                      + ' are listed. A sheet with more repeats than this is usually the same sheet '
+                      + 'being imported again.</p>'
+                    : '')
+              + '</div>';
+        }
 
         window.showImportResult = function (data) {
             const icon = document.getElementById('importIcon');
@@ -1729,8 +1934,7 @@
                 document.getElementById('importTitle').textContent = 'Import failed';
                 body.innerHTML = line('fa-circle-xmark', 'text-rose-400',
                     esc((data && data.error) || 'Something went wrong.'));
-                // Nothing to confirm: a file the server could not read is not
-                // one that becomes importable by pressing the button again.
+                // Nothing to confirm after an error.
                 pendingImportFile = null;
                 printAfterImport = false;
                 showButtons([], 'Close');
@@ -1743,8 +1947,7 @@
             document.getElementById('importTitle').textContent =
                 data.preview ? 'Ready to import' : 'Import finished';
 
-            // The server sends one sentence per outcome; each becomes its own
-            // row so a skip is not buried mid-paragraph where it gets missed.
+            // One row per message part.
             let html = '';
             if (data.preview) {
                 html += line('fa-circle-info', 'text-cyan-400',
@@ -1767,12 +1970,13 @@
                 html += line('fa-scissors', 'text-amber-400',
                     'Only the first ' + importedIds.length + ' can go on one label sheet.');
             }
+            const clashes = (data.preview && data.clashes) || [];
+            if (clashes.length) html += clashList(clashes, data.clashes_truncated);
             body.innerHTML = html;
 
             if (data.preview) {
-                // Nothing to import means nothing to confirm; the box is then
-                // only explaining why the file would add nothing.
-                showButtons(data.imported
+                // Show confirm buttons only if there is something to import.
+                showButtons(data.imported || clashes.length
                     ? ['importConfirmBtn', 'importConfirmLabelsBtn'] : [], 'Cancel');
                 document.getElementById('importResultModal').classList.remove('hidden');
                 return;
@@ -1786,9 +1990,10 @@
                 showButtons([], 'Done');
             }
 
-            // Confirmed with "and print": straight on to the label options,
-            // since the figures were already read at the confirm step. The
-            // summary comes back once the labels have been dealt with.
+            // Keep the result for later.
+            lastImportData = data;
+
+            // Go straight to the label sheet.
             if (printAfterImport && importedIds.length) {
                 printAfterImport = false;
                 importSummaryAfterLabels = data;
@@ -1796,24 +2001,71 @@
                 window.printLabelsForBooks(importedIds);
                 return;
             }
+            // Asked to print and there is nothing to print: every row was skipped.
             printAfterImport = false;
             document.getElementById('importResultModal').classList.remove('hidden');
         };
 
+        // Say what the import did, then get out of the way.
+        function finishImport(data) {
+            document.getElementById('importResultModal').classList.add('hidden');
+            const msg = String((data && data.message) || 'Import finished.');
+            if (window.AylaDialog) AylaDialog.toast(msg, 'success');
+            window.location.reload();
+        }
+
         window.closeImportResult = function () {
             document.getElementById('importResultModal').classList.add('hidden');
-            // A cancelled preview wrote nothing, so there is nothing to reload
-            // for, and reloading would throw away the rest of the page state.
+            // Cancelled preview, no reload needed.
             if (pendingImportFile) { pendingImportFile = null; return; }
             // Only now, so the summary is not swept away before it is read.
             window.location.reload();
         };
 
         window.printImportedLabels = function () {
+            // Closing the label sheet finishes the import.
+            importSummaryAfterLabels = lastImportData;
             document.getElementById('importResultModal').classList.add('hidden');
             window.printLabelsForBooks(importedIds);
         };
     })();
+    </script>
+
+    <script>
+    // Limit the level list to the chosen shelf.
+    (function () {
+        const shelfSel = document.getElementById('shelfFilter');
+        const levelSel = document.getElementById('levelFilter');
+        if (!shelfSel || !levelSel) return;
+
+        function narrowBoards() {
+            const shelf = shelfSel.value;
+            let visible = 0;
+            [...levelSel.options].forEach(function (opt) {
+                if (!opt.value) return;                       // "All boards"
+                const mine = !shelf || shelf === 'none'
+                    ? false
+                    : opt.dataset.shelf === shelf;
+                opt.hidden = !mine;
+                opt.disabled = !mine;
+                if (mine) visible++;
+            });
+            // Nothing to choose from means the control is noise.
+            levelSel.disabled = visible === 0;
+            levelSel.classList.toggle('opacity-40', visible === 0);
+            if (levelSel.selectedOptions.length && levelSel.selectedOptions[0].disabled) {
+                levelSel.value = '';
+            }
+        }
+
+        window.onShelfFilterChange = function () {
+            levelSel.value = '';        // a board on the old shelf means nothing now
+            narrowBoards();
+            applyBookFilters();
+        };
+
+        narrowBoards();
+    }());
     </script>
 </body>
 </html>

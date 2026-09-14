@@ -1,15 +1,4 @@
-{% comment %}
-The right-hand side of every portal header: desk mode, then the profile menu.
-
-Twelve near-identical copies of this markup had drifted across twenty-five
-templates, differing only in whitespace and accent colour, which is why the
-avatar circle was a dead div on every one of them. One include instead.
-
-`accent` picks the portal's colour (cyan for Administrator, violet for Library
-Staff). `portal_user` comes from the context processor, so no view has to pass
-it. `desk_mode` is only set on Log Management; elsewhere it is simply absent,
-which is what hides the badge.
-{% endcomment %}
+{# The right-hand side of every portal header: desk mode, then the profile menu. #}
 {% firstof accent 'cyan' as hdr_accent %}
 
 <div class="flex items-center gap-3">
@@ -26,9 +15,7 @@ which is what hides the badge.
     <span class="bg-cyan-950 text-cyan-400 text-xs px-2.5 py-1 rounded font-bold border border-cyan-800 tracking-wider">{% if request.session.admin_role == 'Staff' %}STAFF{% else %}ADMIN{% endif %}</span>
     {% endif %}
 
-    {# Arming desk mode hands the computer to a patron, so it belongs wherever #}
-    {# the librarian happens to be standing -- not only on the one page it     #}
-    {# confines the browser to. #}
+    {# Desk mode button. #}
     <form method="post" action="{% url 'desk_arm' %}" class="inline-block"
           data-confirm="Hand this computer to the patron?
 
@@ -44,12 +31,7 @@ This browser stays on Log Management until someone enters their account password
 
     {% endif %}
 
-    {# ── Profile menu ───────────────────────────────────────────────────── #}
-    {# Hidden while desk mode is armed. The patron standing at this screen has #}
-    {# no business seeing the librarian's name and email, and Logout would let #}
-    {# them end the session -- which is precisely what the lock exists to      #}
-    {# prevent. Log Management already masks patron emails in this mode; the   #}
-    {# staff account deserves the same treatment.                              #}
+    {# Profile menu, hidden in desk mode. #}
     {% if not desk_mode %}
     <div class="relative" id="profileMenuWrap">
         <button type="button" id="profileMenuBtn" onclick="togglePortalProfile(event)"
@@ -114,8 +96,7 @@ This browser stays on Log Management until someone enters their account password
         var menu = document.getElementById('profileMenu');
         if (menu.classList.contains('hidden')) {
             menu.classList.remove('hidden');
-            // Next frame, so the browser has painted the closed state and the
-            // transition actually runs rather than being skipped.
+            // Wait a frame so the transition runs.
             requestAnimationFrame(function () { menu.classList.add('is-open'); });
             document.getElementById('profileMenuBtn').setAttribute('aria-expanded', 'true');
         } else {

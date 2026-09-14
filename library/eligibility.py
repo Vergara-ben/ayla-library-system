@@ -1,10 +1,4 @@
-"""Borrowing eligibility — the manuscript's three-point patron validation.
-
-Before a Borrow transaction is allowed, a patron is checked for:
-  1. Account suspensions / inactivity
-  2. Overdue items
-  3. Outstanding lost-book penalties
-"""
+"""Borrowing eligibility checks."""
 
 from django.db.models import Q
 from django.utils import timezone

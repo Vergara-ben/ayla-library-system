@@ -13,8 +13,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@400;700&display=swap" rel="stylesheet">
-    {# Pinned to a version: the bare unpkg URL serves "whatever is latest", #}
-    {# which cannot be hashed and can change under the app without notice. #}
+    {# Pinned library version. #}
     <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"
             integrity="sha384-c9d8RFSL+u3exBOJ4Yp3HUJXS4znl9f+z66d1y54ig+ea249SpqR+w1wyvXz/lk+" crossorigin="anonymous"
             referrerpolicy="no-referrer"></script>
@@ -202,8 +201,7 @@
                         </button>
                         <div class="flex items-center gap-2 self-end lg:self-auto">
                             <div class="relative">
-                                {# Material type, not genre: genre says what it is about, this says #}
-                                {# what it physically is -- a magazine, a bound journal, a comic.   #}
+                                {# Material type filter. #}
                                 <select id="materialFilter" onchange="applyBookFilters()" class="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-400 focus:outline-none pr-8 appearance-none min-w-[120px]">
                                     <option value="">All Types</option>
                                     {% for value, label in material_choices %}<option value="{{ value }}" {% if value == material %}selected{% endif %}>{{ label }}</option>{% endfor %}
@@ -214,6 +212,21 @@
                                 <select id="copiesFilter" onchange="applyBookFilters()" title="How many copies of the title the library holds" class="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-400 focus:outline-none pr-8 appearance-none min-w-[130px]">
                                     <option value="">Any copies</option>
                                     {% for value, label in copies_choices %}<option value="{{ value }}" {% if value == copies %}selected{% endif %}>{{ label }}</option>{% endfor %}
+                                </select>
+                                <i class="fa-solid fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-slate-600 text-[10px] pointer-events-none"></i>
+                            </div>
+                            <div class="relative">
+                                <select id="shelfFilter" onchange="onShelfFilterChange()" title="Which shelf the book is on" class="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-400 focus:outline-none pr-8 appearance-none min-w-[150px]">
+                                    <option value="">All shelves</option>
+                                    <option value="none" {% if shelf == 'none' %}selected{% endif %}>Not shelved{% if unshelved_count %} ({{ unshelved_count }}){% endif %}</option>
+                                    {% for s in shelf_choices %}<option value="{{ s.id }}" {% if shelf == s.id|stringformat:"s" %}selected{% endif %}>{{ s.name }}{% if s.books %} ({{ s.books }}){% endif %}</option>{% endfor %}
+                                </select>
+                                <i class="fa-solid fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-slate-600 text-[10px] pointer-events-none"></i>
+                            </div>
+                            <div class="relative">
+                                <select id="levelFilter" onchange="applyBookFilters()" title="Which board on that shelf" class="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-400 focus:outline-none pr-8 appearance-none min-w-[140px]">
+                                    <option value="">All boards</option>
+                                    {% for s in shelf_choices %}{% for lv in s.levels %}<option value="{{ lv.id }}" data-shelf="{{ s.id }}" {% if level == lv.id|stringformat:"s" %}selected{% endif %}>{{ lv.label }}{% if lv.books %} ({{ lv.books }}){% endif %}</option>{% endfor %}{% endfor %}
                                 </select>
                                 <i class="fa-solid fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-slate-600 text-[10px] pointer-events-none"></i>
                             </div>
@@ -266,18 +279,15 @@
                                     <span class="bg-violet-950/60 text-violet-400 border border-violet-900/40 px-1.5 py-0.5 rounded text-[9px] font-bold tracking-wide uppercase">{{ book.genre|default:"General" }}</span>
                                 </td>
                                 <td class="py-4 px-6">
-                                    {# Colour carries the meaning at a glance; the word carries it for #}
-                                    {# anyone who cannot tell these two greens and ambers apart.       #}
+                                    {# Condition badge. #}
                                     <span class="px-1.5 py-0.5 rounded text-[9px] font-bold tracking-wide uppercase border
                                         {% if book.condition == 'Damaged' %}bg-rose-950/50 text-rose-300 border-rose-800/50
                                         {% elif book.condition == 'Worn' %}bg-amber-950/50 text-amber-300 border-amber-800/50
                                         {% else %}bg-slate-800/60 text-slate-400 border-slate-700/50{% endif %}">{{ book.condition|default:"Good" }}</span>
                                 </td>
-                                {# The spine number. Monospaced so a column of them lines up and a #}
-                                {# transposed digit is visible.                                    #}
+                                {# The spine number. #}
                                 <td class="py-4 px-6 font-mono text-slate-300 whitespace-nowrap">{{ book.call_number|default:"—" }}</td>
-                                {# Shelf, then across, then up: the order somebody walks it. The #}
-                                {# short form is the title attribute for anyone reading a label. #}
+                                {# Shelf, then across, then up: the order somebody walks it. #}
                                 <td class="py-4 px-6 text-slate-400 whitespace-nowrap" title="{{ book.location_short }}">{{ book.location|default:"not shelved" }}</td>
                                 <td class="py-4 px-6 text-center font-semibold text-slate-400">{{ book.copies|default:1 }}</td>
                                 <td class="py-4 px-6">
@@ -310,27 +320,7 @@
                 <div class="px-5 py-4 border-t border-slate-800/60 flex items-center justify-between text-xs text-slate-500 bg-slate-900/5">
                     <span class="font-medium">Showing <span class="text-slate-400">{{ books|length }}</span> of <span class="text-slate-400">{{ paginator.count }}</span> books</span>
 
-                    <div class="flex items-center gap-1">
-                        {% if books.has_previous %}
-                            <a href="?page={{ books.previous_page_number }}{% if querystring %}&{{ querystring }}{% endif %}" class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors">&larr; Prev</a>
-                        {% else %}
-                            <button class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors cursor-not-allowed" disabled>&larr; Prev</button>
-                        {% endif %}
-
-                        {% for page_num in paginator.page_range %}
-                            {% if page_num == books.number %}
-                                <button class="px-3 py-1.5 rounded bg-violet-700/30 text-violet-400 font-bold border border-violet-800/50">{{ page_num }}</button>
-                            {% else %}
-                                <a href="?page={{ page_num }}{% if querystring %}&{{ querystring }}{% endif %}" class="px-3 py-1.5 rounded border border-slate-800 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors">{{ page_num }}</a>
-                            {% endif %}
-                        {% endfor %}
-
-                        {% if books.has_next %}
-                            <a href="?page={{ books.next_page_number }}{% if querystring %}&{{ querystring }}{% endif %}" class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors">Next &rarr;</a>
-                        {% else %}
-                            <button class="px-3 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/20 font-medium transition-colors cursor-not-allowed" disabled>Next &rarr;</button>
-                        {% endif %}
-                    </div>
+                    {% include 'admin/_pagination.html' with page=books accent='violet' qs=querystring %}
                 </div>
                 </div>
 
@@ -552,8 +542,7 @@
                 </button>
             </div>
             <div class="flex flex-col gap-4" id="qr-scan-panel">
-                {# Camera and handheld both feed handleBookQR, so the result panel #}
-                {# below does not care which one read the code. #}
+                {# Camera or handheld scanner. #}
                 <div id="qr-cam-box">
                     <div id="qr-reader" class="rounded-lg overflow-hidden w-full max-w-[260px] mx-auto"></div>
                     <p class="text-xs text-slate-500 text-center mt-3">Point your camera at a book's QR code to search for it</p>
@@ -633,8 +622,7 @@
                         </div>
                     </div>
 
-                    <!-- Staff-side only. The patron endpoint is separate and
-                         deliberately says nothing about who has had a book. -->
+                    <!-- Staff-side only. -->
                     <div class="p-5 rounded-xl border border-slate-800/80 mt-4" style="background-color: var(--bg-card);">
                         <div class="flex items-center justify-between mb-3">
                             <h4 class="text-sm font-bold text-slate-200 tracking-wide">Borrowing history</h4>
@@ -684,19 +672,14 @@
             window.location.href = '{% url 'staff_manage_books' %}';
         }
 
-        // The book's own loans, newest first. A link to the transactions page
-        // filtered by title already existed, but answering "who has had this
-        // copy" should not require leaving the book you are looking at.
+        // The book's own loans, newest first.
         function esc(v) {
             return String(v == null ? '' : v).replace(/[&<>"]/g, function (c) {
                 return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
             });
         }
 
-        // The level as the spines actually standing on it: a filled block per
-        // copy on the shelf, a hollow one for each that is out, the target
-        // taller. A stored slot cannot show this, because what makes the count
-        // wrong is precisely the copies that are not there.
+        // Level strip.
         function renderLevelStrip(data) {
             const strip = document.getElementById('detailStrip');
             const near = document.getElementById('detailNeighbours');
@@ -810,9 +793,7 @@
                             statusEl.className = 'bg-slate-800/50 text-slate-400 border border-slate-700/40 text-xs px-3 py-1 rounded-full font-semibold tracking-wide whitespace-nowrap';
                         }
 
-                        // Same reasoning as the admin portal: our own render, because
-                        // the desk is often offline and a cross-origin image cannot be
-                        // downloaded at all.
+                        // QR image served by our own server.
                         const qrContainer = document.getElementById('qrCodeContainer');
                         const qrDownload = document.getElementById('detailQrDownload');
                         if (data.qr_code) {
@@ -856,8 +837,7 @@
             html5QrcodeScanner.start({ facingMode: "environment" }, config, onScanSuccess)
             .catch(err => {
                 console.error("Error starting scanner", err);
-                // Was an alert(), which a librarian had to dismiss before they
-                // could reach the handheld option sitting right above it.
+                // Show the camera error inline.
                 html5QrcodeScanner = null;
                 host.innerHTML = '<p class="text-xs text-amber-400 text-center py-8">'
                     + 'Camera unavailable. Allow camera access, or switch to Scanner device above.</p>';
@@ -866,8 +846,7 @@
 
         function stopBookQRCamera() {
             if (!html5QrcodeScanner) return;
-            // Cleared first: stop() is async, and a second call arriving before it
-            // settles would try to stop a scanner that is already stopping.
+            // Clear before stopping the scanner.
             const scanner = html5QrcodeScanner;
             html5QrcodeScanner = null;
             scanner.stop().then(() => scanner.clear()).catch(err => {
@@ -1034,9 +1013,7 @@
             }
         });
 
-        // Choosing a file no longer imports it. It is sent for a preview
-        // first -- the real import, run inside a transaction that is then
-        // rolled back -- and nothing is written until Confirm is pressed.
+        // Import: preview first, save on confirm.
         let pendingImportFile = null;
 
         function postImport(file, preview) {
@@ -1065,8 +1042,7 @@
         function uploadExcelFile(input) {
             if (!input.files || !input.files[0]) return;
             pendingImportFile = input.files[0];
-            // Cleared so that picking the same file again after a cancel still
-            // counts as a change and runs the preview again.
+            // Clear so the same file can be picked again.
             input.value = '';
             showImportWorking('Reading ' + pendingImportFile.name + '...');
             postImport(pendingImportFile, true).then(showImportResult).catch(importFailed);
@@ -1095,9 +1071,7 @@
             close.classList.toggle('hidden', !closeText);
         }
 
-        // Every button goes while the server works: a sheet of 500 rows takes
-        // long enough that a second press is a real possibility, and a second
-        // press would be a second import.
+        // Hide buttons while importing.
         function showImportWorking(text) {
             const icon = document.getElementById('importIcon');
             icon.className = 'w-9 h-9 rounded-xl flex items-center justify-center text-base flex-shrink-0 bg-slate-500/10 text-slate-400 border border-slate-500/25';
@@ -1119,8 +1093,7 @@
                 document.getElementById('importTitle').textContent = 'Import failed';
                 body.innerHTML = importLine('fa-circle-xmark', 'text-rose-400',
                     esc((data && data.error) || 'Something went wrong.'));
-                // A file the server could not read does not become importable
-                // by pressing the button again.
+                // A file the server could not read does not become importable by pressing the button again.
                 pendingImportFile = null;
                 showImportButtons(false, 'Close');
                 document.getElementById('importResultModal').classList.remove('hidden');
@@ -1138,8 +1111,7 @@
                     '<span class="text-slate-200 font-semibold">Nothing has been saved yet.</span> '
                     + 'This is what importing this file would do.');
             }
-            // The server sends one sentence per outcome; each becomes its own
-            // row so a skip is not buried mid-paragraph where it gets missed.
+            // One row per message part.
             String(data.message || '').split('. ').forEach(function (part) {
                 const t = part.trim().replace(/\.$/, '');
                 if (!t) return;
@@ -1154,8 +1126,7 @@
             }
             body.innerHTML = html;
 
-            // Nothing to import means nothing to confirm; the box is then only
-            // explaining why the file would add nothing.
+            // Show confirm only if there is something to import.
             showImportButtons(!!(data.preview && data.imported),
                               data.preview ? 'Cancel' : 'Done');
             document.getElementById('importResultModal').classList.remove('hidden');
@@ -1163,8 +1134,7 @@
 
         function closeImportResult() {
             document.getElementById('importResultModal').classList.add('hidden');
-            // A cancelled preview wrote nothing, so there is nothing to reload
-            // for, and reloading would throw away the rest of the page state.
+            // Cancelled preview, no reload needed.
             if (pendingImportFile) { pendingImportFile = null; return; }
             window.location.href = '{% url 'staff_manage_books' %}';
         }
@@ -1179,15 +1149,56 @@
             var s = document.getElementById('statusFilter').value;
             var m = (document.getElementById('materialFilter') || {}).value;
             var c = (document.getElementById('copiesFilter') || {}).value;
+            var sh = (document.getElementById('shelfFilter') || {}).value;
+            var lv = (document.getElementById('levelFilter') || {}).value;
             if (q) p.set('q', q);
             if (s) p.set('status', s);
             if (g) p.set('genre', g);
             if (m) p.set('material', m);
             if (c) p.set('copies', c);
+            if (sh) p.set('shelf', sh);
+            if (lv) p.set('level', lv);
             var qs = p.toString();
             location.href = "{% url 'staff_manage_books' %}" + (qs ? '?' + qs : '');
         }
     </script>
     <script src="{% static 'js/admin-enhance.js' %}" defer></script>
+
+    <script>
+    // Limit the level list to the chosen shelf.
+    (function () {
+        const shelfSel = document.getElementById('shelfFilter');
+        const levelSel = document.getElementById('levelFilter');
+        if (!shelfSel || !levelSel) return;
+
+        function narrowBoards() {
+            const shelf = shelfSel.value;
+            let visible = 0;
+            [...levelSel.options].forEach(function (opt) {
+                if (!opt.value) return;                       // "All boards"
+                const mine = !shelf || shelf === 'none'
+                    ? false
+                    : opt.dataset.shelf === shelf;
+                opt.hidden = !mine;
+                opt.disabled = !mine;
+                if (mine) visible++;
+            });
+            // Nothing to choose from means the control is noise.
+            levelSel.disabled = visible === 0;
+            levelSel.classList.toggle('opacity-40', visible === 0);
+            if (levelSel.selectedOptions.length && levelSel.selectedOptions[0].disabled) {
+                levelSel.value = '';
+            }
+        }
+
+        window.onShelfFilterChange = function () {
+            levelSel.value = '';        // a board on the old shelf means nothing now
+            narrowBoards();
+            applyBookFilters();
+        };
+
+        narrowBoards();
+    }());
+    </script>
 </body>
 </html>

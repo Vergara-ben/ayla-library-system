@@ -1,5 +1,10 @@
 Django>=6.0.5
 psycopg2-binary>=2.9.9
+# The MySQL driver, for hosts that offer nothing else -- the free
+# PythonAnywhere tier among them. The marker keeps it off Windows, where
+# it needs a compiler and where development runs on PostgreSQL anyway, so
+# one requirements file serves both without anybody choosing.
+mysqlclient>=2.2.0 ; sys_platform != "win32"
 python-dotenv>=1.0.0
 openpyxl>=3.1.2
 qrcode>=7.4.2
