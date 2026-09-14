@@ -391,6 +391,34 @@
         .map-dot.waypoint { background: var(--success); }
         .map-dot.waypoint.selected { background: var(--warning); }
 
+        /* Group selection and locks. */
+        .map-dot.multi-selected { box-shadow: 0 0 0 3px var(--warning); }
+        .map-dot.is-locked { cursor: default; opacity: .8; }
+        .lock-badge {
+            color: var(--text-muted); font-size: 10px; line-height: 14px; text-align: center;
+            text-shadow: 0 0 3px var(--bg-card), 0 0 3px var(--bg-card);
+        }
+        .select-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin-bottom: 8px; }
+        .select-bar-label {
+            font-size: 9px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase;
+            color: var(--text-muted); margin-right: 2px;
+        }
+        .select-bar-tip { margin-left: auto; font-size: 10px; color: var(--text-muted); }
+        .group-counts { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+        .group-chip {
+            font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 999px;
+            background: var(--bg-subtle); border: 1px solid var(--border-color); color: var(--text-primary);
+        }
+        .insp-lock {
+            display: flex; align-items: center; justify-content: space-between; gap: 8px;
+            padding: 6px 8px; margin-bottom: 10px; border-radius: 8px;
+            border: 1px solid var(--border-color); background: var(--bg-subtle);
+            font-size: 11px; font-weight: 600; color: var(--text-primary);
+        }
+        .insp-lock i { margin-right: 5px; color: var(--text-muted); }
+        .insp-lock.on { border-color: var(--warning); background: rgba(245, 158, 11, .08); }
+        .insp-lock.on i { color: var(--warning); }
+
         /* Stair shape buttons. */
         .stair-shape {
             display: flex; flex-direction: column; align-items: center; gap: 4px;
@@ -716,8 +744,23 @@
                             <button type="button" onclick="setMode(null)" class="rail-btn" title="Stop drawing and go back to selecting (Esc)">
                                 <i class="fa-solid fa-arrow-pointer"></i><span>Select</span>
                             </button>
+                            <button id="btnArea" type="button" onclick="setMode('area')" class="mode-btn rail-btn" title="Drag a box to select several elements (V). Shift+drag works in Select too.">
+                                <i class="fa-regular fa-object-group"></i><span>Area select</span>
+                            </button>
                         </nav>
                         <div class="map-canvas-col">
+                        {# What area select picks up. #}
+                        <div id="selectBar" class="select-bar">
+                            <span class="select-bar-label">Area select picks</span>
+                            <button type="button" id="pick-room" class="see-btn on" onclick="togglePickKind('room')">Rooms</button>
+                            <button type="button" id="pick-door" class="see-btn on" onclick="togglePickKind('door')">Doors</button>
+                            <button type="button" id="pick-shelf" class="see-btn on" onclick="togglePickKind('shelf')">Shelves</button>
+                            <button type="button" id="pick-obstacle" class="see-btn on" onclick="togglePickKind('obstacle')">Furniture</button>
+                            <button type="button" id="pick-stairs" class="see-btn on" onclick="togglePickKind('stairs')">Stairs</button>
+                            <button type="button" id="pick-beacon" class="see-btn on" onclick="togglePickKind('beacon')">Beacons</button>
+                            <button type="button" id="pick-waypoint" class="see-btn on" onclick="togglePickKind('waypoint')">Waypoints</button>
+                            <span class="select-bar-tip">Shift+drag to select &middot; Shift+click to add or remove</span>
+                        </div>
                         <div id="mapConfig"></div>
                         {# Live length and angle while drawing. #}
                         <div id="drawReadout" class="hidden"></div>
@@ -1485,6 +1528,7 @@
         const CSRF = "{{ csrf_token }}";
         const URLS = {
             mapData: "{% url 'get_map_data' %}",
+            bulk: "{% url 'floorplan_bulk' %}",
             setCanvas: "{% url 'set_floorplan_canvas' %}",
             addRoom: "{% url 'add_room' %}",
             addObstacle: "{% url 'add_obstacle' %}",
@@ -1731,6 +1775,7 @@
             }
             layer.on('mousedown', function (e) {
                 if (e.originalEvent && e.originalEvent.button !== 0) return;  // left button only
+                if (layer._aylaKey && isLocked(layer._aylaKey)) return;
                 if (handlers.enabled && !handlers.enabled()) return;
                 L.DomEvent.stop(e);
                 startXY = canvasXY(e.latlng);
@@ -1800,10 +1845,11 @@
             resetModeHint();
             stopRoomEdit();
             if (lmap && lmap.pm) lmap.pm.disableDraw();
-            ['btnRoom', 'btnShelf', 'btnBeacon', 'btnWaypoint'].forEach(function (id) {
+            ['btnRoom', 'btnShelf', 'btnBeacon', 'btnWaypoint', 'btnArea'].forEach(function (id) {
                 const el = document.getElementById(id);
                 if (el) el.classList.remove('mode-active');
             });
+            if (lmap) lmap.dragging.enable();
             const el = document.getElementById('mapConfig');
             if (el) el.style.cursor = '';
         }
@@ -1828,6 +1874,15 @@
                         + ' — trace a table, counter or pillar: click each corner, then double-click to finish.';
             }
 
+            if (mode === 'area') {
+                const hint = document.getElementById('mapModeHint');
+                if (hint) hint.innerHTML = '<strong class="text-cyan-400">Area select</strong>'
+                        + ' — drag a box around what you want. Only elements fully inside are picked;'
+                        + ' locked ones are skipped. Press V or Esc to stop.';
+            }
+            // Dragging draws the selection box in area mode, so the map does not pan.
+            if (lmap) { if (mode === 'area') lmap.dragging.disable(); else lmap.dragging.enable(); }
+
             // 'room' is a Geoman polygon draw, not a click-to-place mode.
             stopRoomEdit();
             if (lmap && lmap.pm) lmap.pm.disableDraw();
@@ -1840,7 +1895,7 @@
 
             [['btnRoom', 'room'], ['btnObstacle', 'obstacle'], ['btnStairs', 'stairs'],
              ['btnShelfDraw', 'shelfdraw'], ['btnShelf', 'shelf'],
-             ['btnBeacon', 'beacon'], ['btnWaypoint', 'waypoint']].forEach(function (p) {
+             ['btnBeacon', 'beacon'], ['btnWaypoint', 'waypoint'], ['btnArea', 'area']].forEach(function (p) {
                 const el = document.getElementById(p[0]);
                 if (el) el.classList.toggle('mode-active', mode === p[1]);
             });
@@ -1889,6 +1944,10 @@
             if (selectedShelfId !== null) { deselectShelf(); return; }
             if (resizeRoomId !== null) { stopRoomResize(); return; }
 
+            // Clicking empty canvas ends a group selection.
+            if (!mode && groupSel.size) { clearGroupSelection(false); return; }
+            if (mode === 'area') return;
+
             // Room drawing is handled by Geoman's own click handling.
             if (!mode || mode === 'room') return;
             pending = { x: e.latlng.lng, y: imgH - e.latlng.lat };
@@ -1900,12 +1959,12 @@
         // Beacons.
         function addBeaconMarker(b) {
             const m = L.marker(toLatLng(b.map_x, b.map_y), {
-                draggable: true,
-                icon: L.divIcon({ className: 'map-dot beacon', iconSize: [16, 16], iconAnchor: [8, 8] }),
+                draggable: !b.locked,
+                icon: L.divIcon({ className: 'map-dot beacon' + (b.locked ? ' is-locked' : ''), iconSize: [16, 16], iconAnchor: [8, 8] }),
             }).addTo(lmap);
             m.bindTooltip('📡 ' + (b.label || 'Beacon') + ' — ' + b.beacon_uuid, { direction: 'top' });
             m.on('contextmenu', function (e) { L.DomEvent.stop(e); showBeaconInspector(b.beacon_id); });
-            m.on('click', function (e) { if (pendingPlacement()) return; L.DomEvent.stop(e); showBeaconInspector(b.beacon_id); });
+            m.on('click', function (e) { if (pendingPlacement()) return; if (shiftClick(e, 'beacon', b.beacon_id)) return; L.DomEvent.stop(e); showBeaconInspector(b.beacon_id); });
 
             let dragStartLatLng = null;
             m.on('dragstart', function () { dragStartLatLng = m.getLatLng(); });
@@ -1929,22 +1988,28 @@
         }
 
         function renderInspector(kind, kindLabel, id, title, bodyHtml) {
+            // Opening one element ends a group selection.
+            if (kind !== 'group') clearGroupSelection(true);
             inspectorSel = { kind: kind, id: id };
             setInspectorHead(kindLabel, true);
             const body = document.getElementById('inspectorBody');
             if (body) {
                 body.innerHTML = '<div class="map-inspector-title">' + title + '</div>'
+                    + lockBarHtml(kind, id)
                     + bodyHtml + '<div class="insp-saved" id="inspSaved"></div>';
             }
         }
 
         function clearInspector() {
+            clearGroupSelection(true);
             inspectorSel = null;
             setInspectorHead('Nothing selected', false);
             const body = document.getElementById('inspectorBody');
             if (body) {
                 body.innerHTML = '<p class="map-inspector-empty">'
-                    + 'Click a room, shelf, furniture, stairway, waypoint, beacon or door on the map to edit it here.</p>';
+                    + 'Click a room, shelf, furniture, stairway, waypoint, beacon or door on the map to edit it here.</p>'
+                    + '<p class="insp-note">Shift+drag, or Area select, picks several at once.</p>'
+                    + (undoLabel() ? '<div class="map-actions">' + undoButtonHtml() + '</div>' : '');
             }
             if (typeof selectedShelfId !== 'undefined' && selectedShelfId !== null) deselectShelf();
             if (typeof selectedDoorId !== 'undefined' && selectedDoorId !== null) window.deselectDoor();
@@ -2040,14 +2105,14 @@
 
         function addWaypointMarker(w) {
             const m = L.marker(toLatLng(w.map_x, w.map_y), {
-                draggable: true,
-                icon: L.divIcon({ className: 'map-dot waypoint', iconSize: [16, 16], iconAnchor: [8, 8] }),
+                draggable: !w.locked,
+                icon: L.divIcon({ className: 'map-dot waypoint' + (w.locked ? ' is-locked' : ''), iconSize: [16, 16], iconAnchor: [8, 8] }),
             }).addTo(lmap);
             const tip = w.linked_shelf_name
                 ? '🟢 ' + (w.label || 'Waypoint') + ' → ' + w.linked_shelf_name
                 : '🟢 ' + (w.label || 'Waypoint');
             m.bindTooltip(tip, { direction: 'top' });
-            m.on('click', function (e) { if (pendingPlacement()) return; L.DomEvent.stop(e); onWaypointClick(w.waypoint_id); });
+            m.on('click', function (e) { if (pendingPlacement()) return; if (shiftClick(e, 'waypoint', w.waypoint_id)) return; L.DomEvent.stop(e); onWaypointClick(w.waypoint_id); });
             // Right-click opens a waypoint in the panel.
             m.on('contextmenu', function (e) { L.DomEvent.stop(e); showWaypointInspector(w.waypoint_id); });
 
@@ -2063,7 +2128,7 @@
             });
             waypointMarkers[w.waypoint_id] = { marker: m, x: w.map_x, y: w.map_y,
                                                label: w.label, shelf: w.linked_shelf_name,
-                                               shelfId: w.linked_shelf_id };
+                                               shelfId: w.linked_shelf_id, locked: !!w.locked };
         }
 
         function highlightWaypoint(id, on) {
@@ -2392,6 +2457,7 @@
             // Left-click opens it in the properties panel.
             poly.on('click', function (e) {
                 if (mode || pendingPlacement()) return;
+                if (shiftClick(e, 'stairs', st.stairway_id)) return;
                 L.DomEvent.stop(e);
                 showStairsInspector(st.stairway_id);
             });
@@ -2590,6 +2656,7 @@
             // Click to open furniture in the panel.
             poly.on('click', function (e) {
                 if (mode || pendingPlacement()) return;
+                if (shiftClick(e, 'obstacle', o.obstacle_id)) return;
                 L.DomEvent.stop(e);
                 showObstacleInspector(o.obstacle_id);
             });
@@ -2614,12 +2681,13 @@
 
             poly._aylaRoomId = r.room_id;
             poly._aylaRoomName = r.name;
+            poly._aylaKey = 'room:' + r.room_id;
             // Keep room data for the panel.
             roomData[r.room_id] = r;
             // Persist a reshape only after the Administrator confirms it.
             poly.on('pm:update', function (e) { confirmRoomReshape(e.target); });
             poly.on('contextmenu', function (e) { L.DomEvent.stop(e); showRoomInspector(r.room_id); });
-            poly.on('click', function (e) { if (mode || pendingPlacement()) return; L.DomEvent.stop(e); showRoomInspector(r.room_id); });
+            poly.on('click', function (e) { if (mode || pendingPlacement()) return; if (shiftClick(e, 'room', r.room_id)) return; L.DomEvent.stop(e); showRoomInspector(r.room_id); });
             roomShapes[r.room_id] = poly;
             // Right-angle marks.
             if (roomAngleMarks[r.room_id]) lmap.removeLayer(roomAngleMarks[r.room_id]);
@@ -2726,6 +2794,7 @@
         // Reshape one room at a time.
         window.startReshapeRoom = function (id) {
             const poly = roomShapes[id]; if (!poly) return;
+            if (refuseLocked('room', id)) return;
             lmap.closePopup();
             clearMode();
             roomEditingId = id;
@@ -2858,6 +2927,7 @@
         };
 
         window.reshapeObstacle = function (id) {
+            if (refuseLocked('obstacle', id)) return;
             const poly = obstacleShapes[id];
             const o = obstacleData[id];
             if (!poly || !o) return;
@@ -2867,6 +2937,7 @@
 
         window.reshapeShelf = function (id) {
             const entry = shelfShapes[id]; if (!entry) return;
+            if (refuseLocked('shelf', id)) return;
             deselectShelf();
             entry.poly.on('pm:update', function () { saveCorners('shelf', id, entry.poly); });
             startCornerEdit('shelf', id, entry.poly, entry.data.name || 'shelf');
@@ -2933,9 +3004,10 @@
 
             [jamb, sweep].forEach(function (layer) {
                 layer.on('contextmenu', function (e) { L.DomEvent.stop(e); showDoorInspector(d.door_id); });
-                layer.on('click', function (e) { if (mode || pendingPlacement()) return; L.DomEvent.stop(e); showDoorInspector(d.door_id); });
+                layer.on('click', function (e) { if (mode || pendingPlacement()) return; if (shiftClick(e, 'door', d.door_id)) return; L.DomEvent.stop(e); showDoorInspector(d.door_id); });
             });
             doorShapes[d.door_id] = { layers: [opening, jamb, sweep], data: d };
+            jamb._aylaKey = 'door:' + d.door_id;
 
             // Drag along the wall only.
             let dragOrigin = null, wallUx = 0, wallUy = 0;
@@ -3050,6 +3122,7 @@
         };
 
         window.selectDoor = function (id) {
+            if (refuseLocked('door', id)) return;
             const entry = doorShapes[id]; if (!entry) return;
             doorHandles.forEach(function (h) { lmap.removeLayer(h.marker); });
             doorHandles = [];
@@ -3305,6 +3378,7 @@
 
         window.startResizeRoom = function (id) {
             const poly = roomShapes[id]; if (!poly) return;
+            if (refuseLocked('room', id)) return;
             lmap.closePopup();
             clearMode();
             resizeRoomId = id;
@@ -3411,8 +3485,9 @@
                 fillColor: tint, fillOpacity: 0.55,
             }).bindTooltip(shelfTooltip(s), { direction: 'top', sticky: true }).addTo(lmap);
             poly.on('contextmenu', function (e) { L.DomEvent.stop(e); showShelfInspector(s.shelf_id); });
-            poly.on('click', function (e) { if (mode || pendingPlacement()) return; L.DomEvent.stop(e); showShelfInspector(s.shelf_id); });
+            poly.on('click', function (e) { if (mode || pendingPlacement()) return; if (shiftClick(e, 'shelf', s.shelf_id)) return; L.DomEvent.stop(e); showShelfInspector(s.shelf_id); });
             shelfShapes[s.shelf_id] = { poly: poly, data: s };
+            poly._aylaKey = 'shelf:' + s.shelf_id;
 
             // Drag to move a selected shelf.
             let moveStart = null;
@@ -3791,6 +3866,7 @@
 
         window.selectShelf = function (id) {
             const entry = shelfShapes[id]; if (!entry) return;
+            if (refuseLocked('shelf', id)) return;
             lmap.closePopup();
             clearMode();                      // only one thing selected/armed at a time
             selectedShelfId = id;
@@ -3812,6 +3888,7 @@
         // Exact size inputs.
         window.startResizeShelf = function (id) {
             const entry = shelfShapes[id]; if (!entry) return;
+            if (refuseLocked('shelf', id)) return;
             lmap.closePopup();
             resizeShelfId = id;
             document.getElementById('resizeShelfTitle').textContent = entry.data.name || 'Shelf';
@@ -4202,6 +4279,8 @@
                 // Hide connections with waypoints.
                 Object.keys(connections).forEach(function (k) { push(connections[k].polyline); });
             }
+            // Lock badges follow their layer.
+            lockBadges.forEach(function (b) { if (b.layerKind === kind) push(b.marker); });
             return out;
         }
 
@@ -4817,6 +4896,615 @@
             setTimeout(watchMapResize, 400);
         });
 
+        // Group selection: area select, Shift+click, moving, deleting, locking and undo.
+        const LOCK_NOUN = { room: 'room', door: 'door', shelf: 'shelf', obstacle: 'furniture',
+                            stairs: 'stairway', beacon: 'beacon', waypoint: 'waypoint' };
+        const KIND_WORDS = { room: ['room', 'rooms'], door: ['door', 'doors'], shelf: ['shelf', 'shelves'],
+                             obstacle: ['furniture', 'furniture'], stairs: ['stairway', 'stairways'],
+                             beacon: ['beacon', 'beacons'], waypoint: ['waypoint', 'waypoints'] };
+        const KIND_LAYER = { room: 'rooms', door: 'doors', shelf: 'shelves', obstacle: 'obstacles',
+                             stairs: 'stairs', beacon: 'beacons', waypoint: 'waypoints' };
+        const PICK_KEY = 'ayla.floorplan.pick';
+        const VIEW_KEY = 'ayla.floorplan.view';
+        const TOAST_KEY = 'ayla.floorplan.toast';
+        const GROUP_KEY = 'ayla.floorplan.group';
+        const UNDO_KEY = 'ayla.floorplan.undo';
+        const REOPEN_KEY = 'ayla.floorplan.reopen';
+
+        const groupSel = new Map();       // 'kind:id' -> { kind, id }
+        const domKey = new WeakMap();     // drawn element -> 'kind:id', for dragging a selection
+        const pickKinds = { room: true, door: true, shelf: true, obstacle: true,
+                            stairs: true, beacon: true, waypoint: true };
+        let lockBadges = [];              // [{ marker, layerKind }]
+        let marquee = null;
+        let groupDrag = null;
+        let nudge = null;
+        let suppressClick = false;
+
+        try {
+            const savedPick = JSON.parse(localStorage.getItem(PICK_KEY) || '{}');
+            Object.keys(pickKinds).forEach(function (k) {
+                if (typeof savedPick[k] === 'boolean') pickKinds[k] = savedPick[k];
+            });
+        } catch (e) { /* storage off: pick everything */ }
+
+        function store(key, value) {
+            try {
+                if (value === null || value === undefined) sessionStorage.removeItem(key);
+                else sessionStorage.setItem(key, JSON.stringify(value));
+            } catch (e) { /* storage off */ }
+        }
+        function stored(key) {
+            try { return JSON.parse(sessionStorage.getItem(key) || 'null'); } catch (e) { return null; }
+        }
+
+        function paintPickChips() {
+            Object.keys(pickKinds).forEach(function (k) {
+                const btn = document.getElementById('pick-' + k);
+                if (btn) btn.classList.toggle('on', pickKinds[k]);
+            });
+        }
+        window.togglePickKind = function (k) {
+            pickKinds[k] = !pickKinds[k];
+            paintPickChips();
+            try { localStorage.setItem(PICK_KEY, JSON.stringify(pickKinds)); } catch (e) { /* storage off */ }
+        };
+
+        // Lock state.
+        function elementData(kind, id) {
+            if (kind === 'room') return roomData[id];
+            if (kind === 'door') return doorShapes[id] && doorShapes[id].data;
+            if (kind === 'shelf') return shelfShapes[id] && shelfShapes[id].data;
+            if (kind === 'obstacle') return obstacleData[id];
+            if (kind === 'stairs') return stairwayShapes[id] && stairwayShapes[id].data;
+            if (kind === 'beacon') return beaconMarkers[id] && beaconMarkers[id].data;
+            if (kind === 'waypoint') return waypointMarkers[id];
+            return null;
+        }
+        function isLocked(key) {
+            const parts = String(key).split(':');
+            const data = elementData(parts[0], Number(parts[1]));
+            return !!(data && data.locked);
+        }
+        function refuseLocked(kind, id) {
+            if (!isLocked(kind + ':' + id)) return false;
+            mapToast('This ' + LOCK_NOUN[kind] + ' is locked. Unlock it in the panel first.', 'error');
+            return true;
+        }
+        function lockBarHtml(kind, id) {
+            if (!LOCK_NOUN[kind]) return '';
+            const on = isLocked(kind + ':' + id);
+            return '<div class="insp-lock' + (on ? ' on' : '') + '">'
+                + '<span><i class="fa-solid ' + (on ? 'fa-lock' : 'fa-lock-open') + '"></i>'
+                + (on ? 'Locked — cannot be moved or deleted' : 'Unlocked') + '</span>'
+                + '<button type="button" class="map-tool-btn" onclick="setElementLock(\'' + kind + '\',' + Number(id) + ',' + (!on) + ')">'
+                + (on ? 'Unlock' : 'Lock') + '</button></div>';
+        }
+
+        // Where each element is, in canvas units, for box tests and lock badges.
+        function elementPoints(onlyPickable) {
+            const out = [];
+            function want(kind) {
+                return !onlyPickable || (pickKinds[kind] && layerShown[KIND_LAYER[kind]]);
+            }
+            function add(kind, id, points) {
+                if (points && points.length) out.push({ kind: kind, id: Number(id), points: points });
+            }
+            if (want('room')) Object.keys(roomShapes).forEach(function (id) {
+                add('room', id, latLngsToGeometry(roomShapes[id].getLatLngs()));
+            });
+            if (want('door')) Object.keys(doorShapes).forEach(function (id) {
+                const g = doorGeometry(doorShapes[id].data);
+                add('door', id, [g.a, g.b]);
+            });
+            if (want('shelf')) Object.keys(shelfShapes).forEach(function (id) {
+                add('shelf', id, latLngsToGeometry(shelfShapes[id].poly.getLatLngs()));
+            });
+            if (want('obstacle')) Object.keys(obstacleShapes).forEach(function (id) {
+                add('obstacle', id, latLngsToGeometry(obstacleShapes[id].getLatLngs()));
+            });
+            if (want('stairs')) Object.keys(stairwayShapes).forEach(function (id) {
+                add('stairs', id, latLngsToGeometry(stairwayShapes[id].poly.getLatLngs()));
+            });
+            if (want('beacon')) Object.keys(beaconMarkers).forEach(function (id) {
+                const d = beaconMarkers[id].data;
+                add('beacon', id, [[d.map_x, d.map_y]]);
+            });
+            if (want('waypoint')) Object.keys(waypointMarkers).forEach(function (id) {
+                const w = waypointMarkers[id];
+                add('waypoint', id, [[w.x, w.y]]);
+            });
+            return out;
+        }
+
+        function drawLockBadges() {
+            lockBadges.forEach(function (b) { lmap.removeLayer(b.marker); });
+            lockBadges = [];
+            elementPoints(false).forEach(function (c) {
+                if (!isLocked(c.kind + ':' + c.id)) return;
+                let x = 0, y = 0;
+                c.points.forEach(function (p) { x += p[0]; y += p[1]; });
+                x /= c.points.length; y /= c.points.length;
+                if (c.points.length === 1) { x += 10; y -= 10; }   // beside a dot, not on it
+                const marker = L.marker(toLatLng(x, y), {
+                    interactive: false, keyboard: false,
+                    icon: L.divIcon({ className: 'lock-badge', html: '<i class="fa-solid fa-lock"></i>',
+                                      iconSize: [14, 14], iconAnchor: [7, 7] }),
+                }).addTo(lmap);
+                lockBadges.push({ marker: marker, layerKind: KIND_LAYER[c.kind] });
+            });
+            applyLayerVisibility();
+        }
+
+        // Highlighting members.
+        function layersFor(kind, id) {
+            if (kind === 'room') return roomShapes[id] ? [roomShapes[id]] : [];
+            if (kind === 'door') return doorShapes[id] ? doorShapes[id].layers.slice(1) : [];
+            if (kind === 'shelf') return shelfShapes[id] ? [shelfShapes[id].poly] : [];
+            if (kind === 'obstacle') return obstacleShapes[id] ? [obstacleShapes[id]] : [];
+            if (kind === 'stairs') return stairwayShapes[id] ? [stairwayShapes[id].poly] : [];
+            if (kind === 'beacon') return beaconMarkers[id] ? [beaconMarkers[id].marker] : [];
+            if (kind === 'waypoint') return waypointMarkers[id] ? [waypointMarkers[id].marker] : [];
+            return [];
+        }
+
+        function paintMember(kind, id, on) {
+            const key = kind + ':' + id;
+            layersFor(kind, id).forEach(function (layer) {
+                if (layer instanceof L.Marker) {
+                    const el = layer.getElement();
+                    if (el) { el.classList.toggle('multi-selected', on); if (on) domKey.set(el, key); }
+                    return;
+                }
+                if (on) {
+                    if (!layer._aylaStyle) {
+                        layer._aylaStyle = { color: layer.options.color, weight: layer.options.weight,
+                                             dashArray: layer.options.dashArray || null };
+                    }
+                    // A dash no other shape on the plan uses, so a selection never looks like a staff-only room.
+                    layer.setStyle({ color: AylaTheme.color('--warning'), weight: 4, dashArray: '12,5' });
+                    if (layer._path) domKey.set(layer._path, key);
+                } else if (layer._aylaStyle) {
+                    layer.setStyle(layer._aylaStyle);
+                    layer._aylaStyle = null;
+                }
+            });
+        }
+
+        function addGroupMember(kind, id) {
+            const key = kind + ':' + id;
+            if (groupSel.has(key)) return;
+            groupSel.set(key, { kind: kind, id: Number(id) });
+            paintMember(kind, id, true);
+            // Arrow keys move the selection, not the map.
+            if (lmap && lmap.keyboard) lmap.keyboard.disable();
+        }
+
+        function clearGroupSelection(quiet) {
+            const had = groupSel.size > 0;
+            groupSel.forEach(function (m) { paintMember(m.kind, m.id, false); });
+            groupSel.clear();
+            if (lmap && lmap.keyboard) lmap.keyboard.enable();
+            if (!quiet && had && inspectorSel && inspectorSel.kind === 'group') clearInspector();
+        }
+        window.clearGroupSelection = function () { clearGroupSelection(false); };
+
+        // Close single-element editing before a group takes over.
+        function leaveSingleEditing() {
+            deselectShelf();
+            if (selectedDoorId !== null) window.deselectDoor(true);
+            stopRoomResize();
+            stopRoomEdit();
+            if (cornerEdit && cornerEdit.layer && cornerEdit.layer.pm) {
+                cornerEdit.layer.pm.disable();
+                cornerEdit = null;
+                resetModeHint();
+            }
+        }
+
+        function unlockedMembers() {
+            return Array.from(groupSel.values())
+                .filter(function (m) { return !isLocked(m.kind + ':' + m.id); })
+                .map(function (m) { return { kind: m.kind, id: m.id }; });
+        }
+
+        function undoLabel() {
+            const u = stored(UNDO_KEY);
+            return (u && u.plan === floorPlanId) ? u.label : null;
+        }
+        function rememberUndo(label) {
+            store(UNDO_KEY, label ? { plan: floorPlanId, label: label } : null);
+        }
+        function undoButtonHtml() {
+            const label = undoLabel();
+            return label
+                ? '<button class="map-action-btn" onclick="runUndo()"><i class="fa-solid fa-rotate-left"></i> Undo: '
+                  + esc(label.toLowerCase()) + ' (Ctrl+Z)</button>'
+                : '';
+        }
+
+        function renderGroupPanel(skippedLocked) {
+            if (!groupSel.size) { clearInspector(); return; }
+            const counts = {};
+            groupSel.forEach(function (m) { counts[m.kind] = (counts[m.kind] || 0) + 1; });
+            const chips = Object.keys(counts).map(function (k) {
+                return '<span class="group-chip">' + counts[k] + ' ' + KIND_WORDS[k][counts[k] === 1 ? 0 : 1] + '</span>';
+            }).join('');
+            const locked = groupSel.size - unlockedMembers().length;
+            renderInspector('group', 'Selection', 0, groupSel.size + ' selected',
+                '<div class="group-counts">' + chips + '</div>'
+                + (skippedLocked
+                    ? '<p class="insp-note" style="margin-top:0">' + skippedLocked + ' locked element'
+                      + (skippedLocked === 1 ? ' was' : 's were') + ' left out.</p>'
+                    : '')
+                + '<div class="map-actions">'
+                + '<button class="map-action-btn" onclick="groupLock(true)"><i class="fa-solid fa-lock"></i> Lock</button>'
+                + '<button class="map-action-btn" onclick="groupLock(false)"><i class="fa-solid fa-lock-open"></i> Unlock</button>'
+                + '<button class="map-action-btn danger" onclick="groupDelete()"><i class="fa-solid fa-trash"></i> Delete (Del)</button>'
+                + '<button class="map-action-btn" onclick="clearGroupSelection()"><i class="fa-solid fa-xmark"></i> Clear selection (Esc)</button>'
+                + undoButtonHtml()
+                + '</div>'
+                + '<p class="insp-note">Drag any selected element to move them together, or use the '
+                + 'arrow keys (hold Shift for 10). Shift+click adds or removes one element.'
+                + (locked ? ' ' + locked + ' locked element' + (locked === 1 ? ' stays' : 's stay') + ' where it is.' : '')
+                + '</p>');
+        }
+
+        function shiftClick(e, kind, id) {
+            if (!(e.originalEvent && e.originalEvent.shiftKey)) return false;
+            L.DomEvent.stop(e);
+            const current = inspectorSel;
+            leaveSingleEditing();
+            // Shift+click on a second element keeps the first one.
+            if (!groupSel.size && current && current.kind !== 'group' && LOCK_NOUN[current.kind]) {
+                addGroupMember(current.kind, Number(current.id));
+            }
+            const key = kind + ':' + id;
+            if (groupSel.has(key)) { paintMember(kind, id, false); groupSel.delete(key); }
+            else addGroupMember(kind, id);
+            renderGroupPanel(0);
+            return true;
+        }
+
+        function selectInBox(box, additive) {
+            leaveSingleEditing();
+            if (!additive) clearGroupSelection(true);
+            let skipped = 0;
+            elementPoints(true).forEach(function (c) {
+                const inside = c.points.every(function (p) {
+                    return p[0] >= box.minX && p[0] <= box.maxX && p[1] >= box.minY && p[1] <= box.maxY;
+                });
+                if (!inside) return;
+                if (isLocked(c.kind + ':' + c.id)) { skipped += 1; return; }
+                addGroupMember(c.kind, c.id);
+            });
+            if (!groupSel.size) {
+                clearInspector();
+                mapToast(skipped ? 'Only locked elements were inside the box.' : 'Nothing was fully inside the box.');
+                return;
+            }
+            renderGroupPanel(skipped);
+        }
+
+        // Mouse handling, ahead of Leaflet's own.
+        function stopEvent(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+        }
+
+        function keyFromTarget(target, container) {
+            let node = target;
+            while (node && node !== container) {
+                if (domKey.has(node)) return domKey.get(node);
+                node = node.parentNode;
+            }
+            return null;
+        }
+
+        function wireGroupSelection() {
+            const container = lmap.getContainer();
+            container.addEventListener('mousedown', function (e) {
+                if (e.button !== 0) return;
+                if (lmap.pm && typeof lmap.pm.globalDrawModeEnabled === 'function'
+                    && lmap.pm.globalDrawModeEnabled()) return;
+                if (pendingPlacement()) return;
+                if (e.target.closest && e.target.closest('.geo-handle, .leaflet-control')) return;
+
+                if (!mode && !e.shiftKey && groupSel.size && inspectorSel && inspectorSel.kind === 'group') {
+                    const key = keyFromTarget(e.target, container);
+                    if (key && groupSel.has(key)) { stopEvent(e); startGroupDrag(e); }
+                    return;
+                }
+                if (mode === 'area' || (!mode && e.shiftKey)) { stopEvent(e); startMarquee(e); }
+            }, true);
+            container.addEventListener('click', function (e) {
+                if (suppressClick) { suppressClick = false; stopEvent(e); }
+            }, true);
+        }
+
+        function startMarquee(e) {
+            const start = lmap.mouseEventToLatLng(e);
+            lmap.dragging.disable();
+            marquee = {
+                start: start, sx: e.clientX, sy: e.clientY, moved: false, additive: e.shiftKey,
+                rect: L.rectangle([start, start], {
+                    color: AylaTheme.color('--warning'), weight: 1, dashArray: '4,3',
+                    fillColor: AylaTheme.color('--warning'), fillOpacity: 0.08, interactive: false,
+                }).addTo(lmap),
+            };
+            document.addEventListener('mousemove', onMarqueeMove, true);
+            document.addEventListener('mouseup', onMarqueeUp, true);
+        }
+
+        function onMarqueeMove(ev) {
+            if (!marquee) return;
+            if (Math.hypot(ev.clientX - marquee.sx, ev.clientY - marquee.sy) > 4) marquee.moved = true;
+            marquee.rect.setBounds(L.latLngBounds(marquee.start, lmap.mouseEventToLatLng(ev)));
+        }
+
+        function onMarqueeUp(ev) {
+            document.removeEventListener('mousemove', onMarqueeMove, true);
+            document.removeEventListener('mouseup', onMarqueeUp, true);
+            const m = marquee;
+            marquee = null;
+            if (!m) return;
+            lmap.removeLayer(m.rect);
+            if (mode !== 'area') lmap.dragging.enable();
+            if (!m.moved) {
+                // A plain click in area mode clears; Shift+click is handled by the element.
+                if (!m.additive) clearGroupSelection(false);
+                return;
+            }
+            suppressClick = true;
+            setTimeout(function () { suppressClick = false; }, 0);
+            const a = canvasXY(m.start);
+            const b = canvasXY(lmap.mouseEventToLatLng(ev));
+            selectInBox({ minX: Math.min(a.x, b.x), maxX: Math.max(a.x, b.x),
+                          minY: Math.min(a.y, b.y), maxY: Math.max(a.y, b.y) }, m.additive);
+        }
+
+        // Live preview of a group move.
+        function previewLayers() {
+            const out = [];
+            const doorsSeen = new Set();
+            function addDoor(k) {
+                if (doorsSeen.has(String(k)) || !doorShapes[k]) return;
+                doorsSeen.add(String(k));
+                doorShapes[k].layers.forEach(function (l) { out.push(l); });
+            }
+            groupSel.forEach(function (m) {
+                if (isLocked(m.kind + ':' + m.id)) return;
+                const id = m.id;
+                if (m.kind === 'room') {
+                    if (roomShapes[id]) out.push(roomShapes[id]);
+                    if (roomAngleMarks[id]) lmap.removeLayer(roomAngleMarks[id]);
+                    Object.keys(doorShapes).forEach(function (k) {
+                        if (doorShapes[k].data.room_id === id) addDoor(k);
+                    });
+                } else if (m.kind === 'door') {
+                    addDoor(id);
+                } else if (m.kind === 'stairs') {
+                    if (stairwayShapes[id]) stairwayShapes[id].layers.forEach(function (l) { out.push(l); });
+                } else if (m.kind === 'shelf') {
+                    if (shelfShapes[id]) out.push(shelfShapes[id].poly);
+                } else if (m.kind === 'obstacle') {
+                    if (obstacleShapes[id]) out.push(obstacleShapes[id]);
+                } else if (m.kind === 'beacon') {
+                    if (beaconMarkers[id]) out.push(beaconMarkers[id].marker);
+                } else if (m.kind === 'waypoint') {
+                    if (waypointMarkers[id]) out.push(waypointMarkers[id].marker);
+                }
+            });
+            return out;
+        }
+
+        function beginPreview() {
+            return previewLayers().map(function (layer) {
+                return layer instanceof L.Marker
+                    ? { layer: layer, latlng: layer.getLatLng() }
+                    : { layer: layer, latlngs: layer.getLatLngs() };
+            });
+        }
+
+        function shiftLatLngs(ll, dx, dy) {
+            return Array.isArray(ll)
+                ? ll.map(function (x) { return shiftLatLngs(x, dx, dy); })
+                : L.latLng(ll.lat - dy, ll.lng + dx);
+        }
+
+        function applyPreview(base, dx, dy) {
+            base.forEach(function (b) {
+                if (b.latlng) b.layer.setLatLng(shiftLatLngs(b.latlng, dx, dy));
+                else b.layer.setLatLngs(shiftLatLngs(b.latlngs, dx, dy));
+            });
+            groupSel.forEach(function (m) {
+                if (m.kind === 'waypoint') redrawConnectionsFor(m.id);
+            });
+        }
+
+        function startGroupDrag(e) {
+            lmap.dragging.disable();
+            groupDrag = { start: canvasXY(lmap.mouseEventToLatLng(e)), sx: e.clientX, sy: e.clientY,
+                          base: beginPreview(), moved: false, dx: 0, dy: 0 };
+            document.addEventListener('mousemove', onGroupDragMove, true);
+            document.addEventListener('mouseup', onGroupDragUp, true);
+        }
+
+        function onGroupDragMove(ev) {
+            if (!groupDrag) return;
+            if (!groupDrag.moved && Math.hypot(ev.clientX - groupDrag.sx, ev.clientY - groupDrag.sy) < 4) return;
+            groupDrag.moved = true;
+            const p = canvasXY(lmap.mouseEventToLatLng(ev));
+            groupDrag.dx = p.x - groupDrag.start.x;
+            groupDrag.dy = p.y - groupDrag.start.y;
+            applyPreview(groupDrag.base, groupDrag.dx, groupDrag.dy);
+        }
+
+        function onGroupDragUp() {
+            document.removeEventListener('mousemove', onGroupDragMove, true);
+            document.removeEventListener('mouseup', onGroupDragUp, true);
+            lmap.dragging.enable();
+            const d = groupDrag;
+            groupDrag = null;
+            if (!d || !d.moved) return;
+            suppressClick = true;
+            setTimeout(function () { suppressClick = false; }, 0);
+            commitGroupMove(d.dx, d.dy, d.base);
+        }
+
+        function nudgeGroup(dx, dy) {
+            if (!unlockedMembers().length) { mapToast('Everything selected is locked.', 'error'); return; }
+            if (!nudge) nudge = { base: beginPreview(), dx: 0, dy: 0, timer: null };
+            nudge.dx += dx;
+            nudge.dy += dy;
+            applyPreview(nudge.base, nudge.dx, nudge.dy);
+            clearTimeout(nudge.timer);
+            // Save once the keys go quiet, not on every press.
+            nudge.timer = setTimeout(function () {
+                const n = nudge;
+                nudge = null;
+                commitGroupMove(n.dx, n.dy, n.base);
+            }, 600);
+        }
+
+        // Talking to the server.
+        async function postGroup(action, items, extra) {
+            const body = Object.assign({ floor_plan_id: floorPlanId, action: action,
+                                         items: JSON.stringify(items || []) }, extra || {});
+            try { return await postData(URLS.bulk, body); }
+            catch (err) { return { success: false, error: 'The server did not answer. Nothing was changed.' }; }
+        }
+
+        function reloadKeepingView(message, keepSelection) {
+            if (lmap) {
+                const c = lmap.getCenter();
+                store(VIEW_KEY, { plan: floorPlanId, lat: c.lat, lng: c.lng, zoom: lmap.getZoom() });
+            }
+            store(TOAST_KEY, message || null);
+            store(GROUP_KEY, keepSelection && groupSel.size
+                ? { plan: floorPlanId, keys: Array.from(groupSel.keys()) } : null);
+            window.location.reload();
+        }
+
+        function restoreMapView() {
+            const view = stored(VIEW_KEY);
+            store(VIEW_KEY, null);
+            if (view && view.plan === floorPlanId && typeof view.zoom === 'number') {
+                lmap.setView([view.lat, view.lng], view.zoom, { animate: false });
+            }
+        }
+
+        function restoreGroupSelection() {
+            const saved = stored(GROUP_KEY);
+            store(GROUP_KEY, null);
+            if (saved && saved.plan === floorPlanId && Array.isArray(saved.keys)) {
+                saved.keys.forEach(function (key) {
+                    const parts = String(key).split(':');
+                    if (elementData(parts[0], Number(parts[1]))) addGroupMember(parts[0], Number(parts[1]));
+                });
+                if (groupSel.size) renderGroupPanel(0);
+            }
+            const reopen = stored(REOPEN_KEY);
+            store(REOPEN_KEY, null);
+            if (!groupSel.size && reopen && reopen.plan === floorPlanId) {
+                const show = { room: showRoomInspector, door: showDoorInspector, shelf: showShelfInspector,
+                               obstacle: showObstacleInspector, stairs: showStairsInspector,
+                               beacon: showBeaconInspector, waypoint: showWaypointInspector }[reopen.kind];
+                if (show && elementData(reopen.kind, reopen.id)) show(reopen.id);
+            }
+            const toast = stored(TOAST_KEY);
+            store(TOAST_KEY, null);
+            if (toast) mapToast(toast);
+        }
+
+        async function commitGroupMove(dx, dy, base) {
+            const items = unlockedMembers();
+            if (!items.length || (Math.abs(dx) < 0.01 && Math.abs(dy) < 0.01)) {
+                if (base) applyPreview(base, 0, 0);
+                return;
+            }
+            const r = await postGroup('move', items, { dx: dx.toFixed(2), dy: dy.toFixed(2) });
+            if (!r.success) {
+                if (base) applyPreview(base, 0, 0);
+                mapToast(r.error || 'Could not move the selection.', 'error');
+                return;
+            }
+            rememberUndo(r.undo);
+            reloadKeepingView(r.message, true);
+        }
+
+        window.groupLock = async function (on) {
+            const items = Array.from(groupSel.values()).map(function (m) { return { kind: m.kind, id: m.id }; });
+            if (!items.length) return;
+            const r = await postGroup(on ? 'lock' : 'unlock', items);
+            if (!r.success) { mapToast(r.error || 'Could not change the lock.', 'error'); return; }
+            rememberUndo(r.undo);
+            reloadKeepingView(r.message, true);
+        };
+
+        window.setElementLock = async function (kind, id, on) {
+            const r = await postGroup(on ? 'lock' : 'unlock', [{ kind: kind, id: id }]);
+            if (!r.success) { mapToast(r.error || 'Could not change the lock.', 'error'); return; }
+            rememberUndo(r.undo);
+            store(REOPEN_KEY, { plan: floorPlanId, kind: kind, id: id });
+            reloadKeepingView(r.message, false);
+        };
+
+        window.groupDelete = async function () {
+            const items = unlockedMembers();
+            const lockedCount = groupSel.size - items.length;
+            if (!items.length) { mapToast('Everything selected is locked.', 'error'); return; }
+            const preview = await postGroup('preview_delete', items);
+            if (!preview.success) { mapToast(preview.error || 'Could not check the selection.', 'error'); return; }
+            const summary = preview.summary || {};
+            let message = 'This deletes ' + (summary.removes || []).map(function (x) {
+                return x.count + ' ' + x.what;
+            }).join(', ') + '.';
+            (summary.unlinks || []).forEach(function (x) { message += '\n' + x.count + ' ' + x.what + '.'; });
+            if (lockedCount) {
+                message += '\n' + lockedCount + ' locked element' + (lockedCount === 1 ? ' is' : 's are') + ' left out.';
+            }
+            message += '\n\nYou can undo this right after with Ctrl+Z.';
+            if (!await AylaDialog.confirm(message, {
+                title: 'Delete ' + items.length + ' selected?', confirmLabel: 'Delete', cancelLabel: 'Cancel' })) return;
+            const r = await postGroup('delete', items);
+            if (!r.success) { mapToast(r.error || 'Could not delete the selection.', 'error'); return; }
+            rememberUndo(r.undo);
+            reloadKeepingView(r.message, false);
+        };
+
+        window.runUndo = async function () {
+            if (!undoLabel()) { mapToast('Nothing to undo.'); return; }
+            const r = await postGroup('undo', []);
+            rememberUndo(null);
+            if (!r.success) { mapToast(r.error || 'Nothing to undo.', 'error'); return; }
+            reloadKeepingView(r.message, false);
+        };
+
+        // Keyboard: V, Esc, Delete, arrows and Ctrl+Z.
+        document.addEventListener('keydown', function (e) {
+            const t = e.target;
+            if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+            if (!lmap) return;
+            if (lmap.pm && typeof lmap.pm.globalDrawModeEnabled === 'function' && lmap.pm.globalDrawModeEnabled()) return;
+            if (document.querySelector('.ayla-dialog-backdrop, [role="dialog"]:not(.hidden)')) return;
+            const key = e.key;
+            if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (key === 'z' || key === 'Z')) {
+                if (undoLabel()) { e.preventDefault(); window.runUndo(); }
+                return;
+            }
+            if (e.ctrlKey || e.metaKey || e.altKey) return;
+            if ((key === 'v' || key === 'V') && !e.repeat) { e.preventDefault(); window.setMode('area'); return; }
+            if (!groupSel.size || !inspectorSel || inspectorSel.kind !== 'group') return;
+            if (key === 'Escape') { clearGroupSelection(false); return; }
+            if (key === 'Delete' || key === 'Backspace') { e.preventDefault(); window.groupDelete(); return; }
+            const step = e.shiftKey ? 10 : 1;
+            const delta = { ArrowLeft: [-step, 0], ArrowRight: [step, 0],
+                            ArrowUp: [0, -step], ArrowDown: [0, step] }[key];
+            if (delta) { e.preventDefault(); nudgeGroup(delta[0], delta[1]); }
+        });
+
         async function initMapConfig() {
             const picker = document.getElementById('planPicker');
             const planId = picker ? picker.value : '';
@@ -4851,7 +5539,10 @@
                 fillColor: AylaTheme.color('--bg-card'), fillOpacity: 1, interactive: false,
             }).addTo(lmap);
             lmap.fitBounds(bounds);
+            // Keep the zoom and position after a group action reloads the page.
+            restoreMapView();
             lmap.on('click', onMapClick);
+            wireGroupSelection();
             // Geoman: polygon drawing only, no built-in toolbar (the page has its own).
             lmap.pm.setGlobalOptions({ snappable: true, snapDistance: 12 });
             lmap.pm.addControls({ drawMarker: false, drawCircle: false, drawCircleMarker: false,
@@ -4878,6 +5569,9 @@
 
             // Apply saved layer settings last.
             restoreLayerVisibility();
+            paintPickChips();
+            drawLockBadges();
+            restoreGroupSelection();
         }
 
         document.addEventListener('DOMContentLoaded', function () {

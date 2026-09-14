@@ -896,11 +896,10 @@
                 .then(response => response.json())
                 .then(data => {
                     if (data.success && data.book) {
-                        // Fill the search input with the book title
-                        document.getElementById('searchInput').value = data.book.title;
+                        // Open the exact copy that was scanned, not a title search.
                         closeQRScanner();
-                        // Optionally, you could highlight the book in the table or scroll to it
                         highlightBook(data.book.book_id);
+                        viewBookDetails(data.book.book_id);
                     } else {
                         alert('Book not found with this QR code');
                         closeQRScanner();

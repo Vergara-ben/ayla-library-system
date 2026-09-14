@@ -266,6 +266,7 @@
                     <div id="selectMatchingBar" class="hidden px-5 py-2.5 border-b border-slate-800/60 bg-cyan-500/[0.06] flex flex-wrap items-center justify-center gap-2 text-[11px] text-slate-300">
                         <span id="selectMatchingText"></span>
                         <button type="button" id="selectMatchingBtn" class="font-bold text-cyan-400 hover:text-cyan-300 underline underline-offset-2 disabled:opacity-50"></button>
+                        <button type="button" id="selectClearBtn" onclick="clearBookSelection()" class="font-bold text-rose-400 hover:text-rose-300 underline underline-offset-2">Clear selection</button>
                     </div>
 
                     <div class="overflow-x-auto">
@@ -1113,11 +1114,10 @@
                 .then(response => response.json())
                 .then(data => {
                     if (data.success && data.book) {
-                        // Fill the search input with the book title
-                        document.getElementById('searchInput').value = data.book.title;
+                        // Open the exact copy that was scanned, not a title search.
                         closeQRScanner();
-                        // Optionally, you could highlight the book in the table or scroll to it
                         highlightBook(data.book.book_id);
+                        viewBookDetails(data.book.book_id);
                     } else {
                         alert('Book not found with this QR code');
                         closeQRScanner();
@@ -1431,17 +1431,21 @@
             const bar = document.getElementById('selectMatchingBar');
             const text = document.getElementById('selectMatchingText');
             const btn = document.getElementById('selectMatchingBtn');
+            // Shown whenever anything is selected, so books ticked on other pages can be cleared.
             if (bar && text && btn) {
-                const everything = allOnPage && matchedAll() && n >= MATCH_COUNT;
-                const offer = allOnPage && MATCH_COUNT > ticks.length;
-                bar.classList.toggle('hidden', !(everything || offer));
+                const everything = matchedAll() && n >= MATCH_COUNT;
+                const offer = allOnPage && !everything && MATCH_COUNT > ticks.length;
+                const elsewhere = Math.max(0, n - on);
+                bar.classList.toggle('hidden', n === 0);
                 btn.disabled = false;
                 if (everything) {
                     text.textContent = 'All ' + MATCH_COUNT + ' matching books are selected.';
-                    btn.textContent = 'Clear selection';
-                    btn.onclick = window.clearBookSelection;
                 } else {
-                    text.textContent = 'All ' + ticks.length + ' books on this page are selected.';
+                    text.textContent = n + ' book' + (n === 1 ? '' : 's') + ' selected'
+                        + (elsewhere ? ' (' + elsewhere + ' not on this page)' : '') + '.';
+                }
+                btn.hidden = !offer;
+                if (offer) {
                     btn.textContent = 'Select all ' + MATCH_COUNT + ' matching books';
                     btn.onclick = window.selectAllMatching;
                 }

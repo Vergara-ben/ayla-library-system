@@ -92,6 +92,8 @@ class BLEBeacon(models.Model):
     # Mounting height above the floor, in METRES, deliberately not canvas units.
     height = models.FloatField(blank=True, null=True)
     label = models.CharField(max_length=255, blank=True, null=True)
+    # Locked in the editor: cannot be moved or deleted.
+    locked = models.BooleanField(default=False)
 
     class Meta:
         db_table = 'BLE_Beacons'
@@ -118,6 +120,8 @@ class Room(models.Model):
 
     # Whether a patron may walk in here.
     patron_access = models.BooleanField(default=True)
+    # Locked in the editor: cannot be moved, reshaped or deleted.
+    locked = models.BooleanField(default=False)
 
     class Meta:
         db_table = 'Rooms'
@@ -151,6 +155,8 @@ class Door(models.Model):
     swing = models.SmallIntegerField(default=1) # 1 = arc inward, -1 = outward
     label = models.CharField(max_length=255, blank=True, null=True)
     is_active = models.BooleanField(default=True)
+    # Locked in the editor: cannot be moved, resized or deleted.
+    locked = models.BooleanField(default=False)
 
     class Meta:
         db_table = 'Doors'
@@ -187,6 +193,8 @@ class Obstacle(models.Model):
     map_y = models.FloatField(default=0)
     # Whether patrons see it.
     is_active = models.BooleanField(default=True)
+    # Locked in the editor: cannot be moved, reshaped or deleted.
+    locked = models.BooleanField(default=False)
 
     class Meta:
         db_table = 'Obstacles'
@@ -244,6 +252,8 @@ class Stairway(models.Model):
     )
 
     is_active = models.BooleanField(default=True)
+    # Locked in the editor: cannot be moved or deleted.
+    locked = models.BooleanField(default=False)
 
     class Meta:
         db_table = 'Stairways'
@@ -305,6 +315,8 @@ class Shelf(models.Model):
     geometry = models.JSONField(blank=True, null=True)
     description = models.TextField(blank=True, null=True)
     is_active = models.BooleanField(default=True)
+    # Locked in the editor: cannot be moved, resized, rotated or deleted.
+    locked = models.BooleanField(default=False)
 
     class Meta:
         db_table = 'Shelves'
@@ -363,6 +375,8 @@ class Waypoint(models.Model):
     )
     # Laid down by "Generate walkable route" rather than placed by hand.
     is_generated = models.BooleanField(default=False)
+    # Locked in the editor: cannot be moved or deleted, even by Generate Route.
+    locked = models.BooleanField(default=False)
 
     class Meta:
         db_table = 'Waypoints'

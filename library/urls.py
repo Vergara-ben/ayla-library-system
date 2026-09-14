@@ -3,8 +3,11 @@ from . import views
 from . import desk
 from . import chat
 from . import tasks
+from . import floorplan_bulk
 
 urlpatterns = [
+    # Floor plan editor: move, delete, lock and undo several elements at once.
+    path('admin-portal/floor-plan/bulk/', floorplan_bulk.floorplan_bulk, name='floorplan_bulk'),
     # Hosting: uptime pings and the daily task trigger.
     path('healthz/', tasks.healthz, name='healthz'),
     path('tasks/daily/', tasks.run_daily_task, name='run_daily_task'),

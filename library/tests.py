@@ -3,6 +3,7 @@
 from datetime import date, datetime, timedelta
 import io
 import json
+import math
 import os
 from io import StringIO
 from unittest import mock
@@ -6090,6 +6091,154 @@ class ElementPropertiesTests(TestCase):
         st.refresh_from_db()
         self.assertFalse(st.is_active)
         self.assertTrue(Stairway.objects.filter(stairway_id=st.stairway_id).exists())
+
+
+class FloorPlanGroupActionTests(TestCase):
+    """Selecting several elements, moving, deleting, locking and undoing them."""
+
+    URL = '/admin-portal/floor-plan/bulk/'
+
+    def setUp(self):
+        self.client = _signed_in(_admin())
+        self.plan = FloorPlan.objects.create(name='Ground', floor_number=1, is_active=True,
+                                             canvas_width=1000, canvas_height=800)
+        self.room = Room.objects.create(
+            floor_plan=self.plan, name='Reading Room', map_x=500, map_y=400,
+            geometry=[[400, 300], [600, 300], [600, 500], [400, 500]])
+        self.door = Door.objects.create(room=self.room, map_x=500, map_y=300, rotation=0)
+        self.shelf = Shelf.objects.create(room=self.room, name='Shelf A', map_x=450, map_y=400)
+        self.level = ShelfLevel.objects.create(shelf=self.shelf, level_number=1)
+        self.book = Book.objects.create(title='Noli Me Tangere', author='Jose Rizal',
+                                        shelf_level=self.level, qr_code=str(uuid4()),
+                                        status='Available')
+        self.beacon = BLEBeacon.objects.create(floor_plan=self.plan, beacon_uuid=str(uuid4()),
+                                               map_x=100, map_y=100)
+        self.wp_a = Waypoint.objects.create(floor_plan=self.plan, map_x=420, map_y=320)
+        self.wp_b = Waypoint.objects.create(floor_plan=self.plan, map_x=420, map_y=420)
+        self.link = WaypointConnection.objects.create(waypoint_from=self.wp_a,
+                                                      waypoint_to=self.wp_b, distance=100)
+        self.stair = Stairway.objects.create(
+            floor_plan=self.plan, geometry=[[700, 100], [760, 100], [760, 200], [700, 200]],
+            map_x=730, map_y=150)
+
+    def _post(self, action, items=(), **extra):
+        data = {'floor_plan_id': self.plan.floor_plan_id, 'action': action,
+                'items': json.dumps([{'kind': k, 'id': i} for k, i in items])}
+        data.update(extra)
+        return self.client.post(self.URL, data).json()
+
+    def test_moving_a_group_carries_doors_with_their_room(self):
+        r = self._post('move', [('room', self.room.room_id), ('shelf', self.shelf.shelf_id),
+                                ('beacon', self.beacon.beacon_id), ('waypoint', self.wp_a.waypoint_id),
+                                ('stairs', self.stair.stairway_id)], dx=10, dy=5)
+        self.assertTrue(r['success'], r)
+        for obj in (self.room, self.door, self.shelf, self.beacon, self.wp_a, self.link, self.stair):
+            obj.refresh_from_db()
+        self.assertEqual(self.room.geometry[0], [410, 305])
+        self.assertEqual((self.door.map_x, self.door.map_y), (510, 305))
+        self.assertEqual((self.shelf.map_x, self.shelf.map_y), (460, 405))
+        self.assertEqual((self.beacon.map_x, self.beacon.map_y), (110, 105))
+        self.assertEqual(self.stair.geometry[0], [710, 105])
+        # The link length follows the waypoint that moved.
+        self.assertAlmostEqual(self.link.distance, math.hypot(10, 95), places=4)
+
+    def test_a_door_moved_alone_stays_on_its_wall(self):
+        r = self._post('move', [('door', self.door.door_id)], dx=30, dy=40)
+        self.assertTrue(r['success'], r)
+        self.door.refresh_from_db()
+        self.assertEqual((round(self.door.map_x), round(self.door.map_y)), (530, 300))
+
+    def test_locked_elements_refuse_group_move_and_delete(self):
+        Shelf.objects.filter(pk=self.shelf.pk).update(locked=True)
+        for action in ('move', 'delete'):
+            r = self._post(action, [('shelf', self.shelf.shelf_id)], dx=5, dy=5)
+            self.assertFalse(r['success'])
+            self.assertTrue(r['locked'])
+        self.shelf.refresh_from_db()
+        self.assertEqual(self.shelf.map_x, 450)
+
+    def test_deleting_a_room_is_refused_when_a_locked_shelf_is_inside(self):
+        Shelf.objects.filter(pk=self.shelf.pk).update(locked=True)
+        r = self._post('delete', [('room', self.room.room_id)])
+        self.assertFalse(r['success'])
+        self.assertTrue(Room.objects.filter(pk=self.room.pk).exists())
+
+    def test_single_element_actions_respect_the_lock(self):
+        BLEBeacon.objects.filter(pk=self.beacon.pk).update(locked=True)
+        Room.objects.filter(pk=self.room.pk).update(locked=True)
+        r = self.client.post('/admin-portal/move-beacon/', {
+            'beacon_id': self.beacon.beacon_id, 'map_x': 1, 'map_y': 1}).json()
+        self.assertTrue(r['locked'])
+        r = self.client.post('/admin-portal/delete-room/', {'room_id': self.room.room_id},
+                             HTTP_X_REQUESTED_WITH='XMLHttpRequest').json()
+        self.assertTrue(r['locked'])
+        r = self.client.post('/admin-portal/edit-room/', {
+            'room_id': self.room.room_id,
+            'geometry': json.dumps([[0, 0], [50, 0], [50, 50], [0, 50]])}).json()
+        self.assertTrue(r['locked'])
+        # Renaming is not a layout change.
+        r = self.client.post('/admin-portal/edit-room/', {
+            'room_id': self.room.room_id, 'name': 'Quiet Room'}).json()
+        self.assertTrue(r['success'], r)
+        self.assertTrue(Room.objects.filter(pk=self.room.pk, name='Quiet Room').exists())
+
+    def test_delete_preview_counts_what_goes_with_it(self):
+        r = self._post('preview_delete', [('room', self.room.room_id)])
+        self.assertTrue(r['success'], r)
+        removes = {x['what']: x['count'] for x in r['summary']['removes']}
+        self.assertEqual(removes.get('rooms'), 1)
+        self.assertEqual(removes.get('shelves'), 1)
+        self.assertEqual(removes.get('doors'), 1)
+        unlinks = {x['what']: x['count'] for x in r['summary']['unlinks']}
+        self.assertEqual(unlinks.get('books will become unshelved'), 1)
+        self.assertTrue(Room.objects.filter(pk=self.room.pk).exists())
+
+    def test_undo_brings_a_deleted_room_back_with_its_shelves_and_books(self):
+        r = self._post('delete', [('room', self.room.room_id), ('waypoint', self.wp_a.waypoint_id)])
+        self.assertTrue(r['success'], r)
+        self.assertFalse(Room.objects.filter(pk=self.room.pk).exists())
+        self.book.refresh_from_db()
+        self.assertIsNone(self.book.shelf_level_id)
+
+        r = self._post('undo')
+        self.assertTrue(r['success'], r)
+        self.assertTrue(Room.objects.filter(pk=self.room.pk, name='Reading Room').exists())
+        self.assertTrue(Door.objects.filter(pk=self.door.pk).exists())
+        self.assertTrue(ShelfLevel.objects.filter(pk=self.level.pk).exists())
+        self.assertTrue(WaypointConnection.objects.filter(pk=self.link.pk).exists())
+        self.book.refresh_from_db()
+        self.assertEqual(self.book.shelf_level_id, self.level.pk)
+        # One undo only.
+        self.assertFalse(self._post('undo')['success'])
+
+    def test_undo_puts_a_move_back(self):
+        self._post('move', [('room', self.room.room_id)], dx=50, dy=0)
+        self._post('undo')
+        self.room.refresh_from_db()
+        self.door.refresh_from_db()
+        self.assertEqual(self.room.geometry[0], [400, 300])
+        self.assertEqual(self.door.map_x, 500)
+
+    def test_lock_unlock_and_undo(self):
+        r = self._post('lock', [('room', self.room.room_id), ('beacon', self.beacon.beacon_id)])
+        self.assertTrue(r['success'], r)
+        self.assertTrue(Room.objects.get(pk=self.room.pk).locked)
+        self._post('undo')
+        self.assertFalse(Room.objects.get(pk=self.room.pk).locked)
+        self.assertFalse(BLEBeacon.objects.get(pk=self.beacon.pk).locked)
+
+    def test_elements_from_another_floor_are_refused(self):
+        other = FloorPlan.objects.create(name='Upper', floor_number=2)
+        stranger = BLEBeacon.objects.create(floor_plan=other, beacon_uuid=str(uuid4()),
+                                            map_x=5, map_y=5)
+        r = self._post('move', [('beacon', stranger.beacon_id)], dx=10, dy=10)
+        self.assertFalse(r['success'])
+        stranger.refresh_from_db()
+        self.assertEqual(stranger.map_x, 5)
+
+    def test_a_stranger_cannot_use_it(self):
+        r = Client().post(self.URL, {'floor_plan_id': self.plan.floor_plan_id, 'action': 'undo'})
+        self.assertEqual(r.status_code, 302)
 
 
 class CanvasResizeTests(TestCase):

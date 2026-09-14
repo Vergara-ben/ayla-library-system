@@ -6206,6 +6206,11 @@ def edit_room(request):
 
     try:
         room = Room.objects.get(room_id=room_id)
+        if (geometry or _changes_position(map_x, room.map_x)
+                or _changes_position(map_y, room.map_y)):
+            refusal = _locked_response(room, 'room')
+            if refusal:
+                return refusal
         if name:
             room.name = name
         if geometry:
@@ -6271,6 +6276,9 @@ def delete_room(request):
     if not room_id:
         return JsonResponse({'success': False, 'error': 'room_id is required'})
     
+    refusal = _locked_response(Room.objects.filter(room_id=room_id, locked=True).first(), 'room')
+    if refusal:
+        return refusal
     Room.objects.filter(room_id=room_id).delete()
     if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
         return JsonResponse({'success': True})
@@ -6398,6 +6406,9 @@ def delete_stairway(request):
     st = Stairway.objects.filter(stairway_id=request.POST.get('stairway_id')).first()
     if st is None:
         return JsonResponse({'success': False, 'error': 'Stairway not found'})
+    refusal = _locked_response(st, 'stairway')
+    if refusal:
+        return refusal
     label, sid = st.label, st.stairway_id
     st.delete()
     log_admin_action(request, 'Delete', 'Stairway', sid, f'Removed {label}')
@@ -6487,6 +6498,9 @@ def edit_obstacle(request):
         obstacle.name = (request.POST.get('name') or '').strip()[:255] or None
         fields.append('name')
     if 'geometry' in request.POST:
+        refusal = _locked_response(obstacle, 'furniture')
+        if refusal:
+            return refusal
         geometry, geo_error = _parse_geometry(request.POST.get('geometry'))
         if geo_error:
             return JsonResponse({'success': False, 'error': geo_error})
@@ -6516,6 +6530,9 @@ def delete_obstacle(request):
     if obstacle is None:
         return JsonResponse({'success': False, 'error': 'Obstacle not found'})
 
+    refusal = _locked_response(obstacle, 'furniture')
+    if refusal:
+        return refusal
     label, oid = obstacle.label, obstacle.obstacle_id
     obstacle.delete()
     log_admin_action(request, 'Delete', 'Obstacle', oid, f'Removed {label}')
@@ -6711,6 +6728,11 @@ def edit_shelf(request):
     
     try:
         shelf = Shelf.objects.get(shelf_id=shelf_id)
+        if ('geometry' in request.POST or _changes_position(map_x, shelf.map_x)
+                or _changes_position(map_y, shelf.map_y)):
+            refusal = _locked_response(shelf, 'shelf')
+            if refusal:
+                return refusal
         # Which room the shelf is filed under.
         if 'room_id' in request.POST:
             raw_room = (request.POST.get('room_id') or '').strip()
@@ -6786,6 +6808,25 @@ def _translate_geometry(geometry, dx, dy):
     return [[round(p[0] + dx, 2), round(p[1] + dy, 2)] for p in geometry]
 
 
+def _locked_response(obj, noun):
+    """Refuse a layout change to a locked element. Returns None when it is allowed."""
+    if obj is not None and getattr(obj, 'locked', False):
+        return JsonResponse({'success': False, 'locked': True,
+                             'error': f'This {noun} is locked. Unlock it first.'})
+    return None
+
+
+def _changes_position(raw, current):
+    """Whether a posted coordinate differs from the stored one."""
+    if raw is None:
+        return False
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return True
+    return current is None or abs(value - current) > 1e-6
+
+
 def _rotate_geometry(geometry, degrees, cx, cy):
     """Turn an outline about a point, keeping every edge the length it was."""
     rad = math.radians(degrees)
@@ -6816,6 +6857,9 @@ def _set_shelf_position(request, action):
     shelf = Shelf.objects.filter(shelf_id=shelf_id).first()
     if shelf is None:
         return JsonResponse({'success': False, 'error': 'Shelf not found'})
+    refusal = _locked_response(shelf, 'shelf')
+    if refusal:
+        return refusal
 
     # Move a traced shelf's outline with it.
     fields = ['map_x', 'map_y']
@@ -6862,6 +6906,10 @@ def rotate_shelf(request):
     shelf = Shelf.objects.filter(shelf_id=shelf_id).first()
     if shelf is None:
         return JsonResponse({'success': False, 'error': 'Shelf not found'})
+
+    refusal = _locked_response(shelf, 'shelf')
+    if refusal:
+        return refusal
 
     # For a sized shelf the rotation is enough on its own, the rectangle is drawn from it.
     fields = ['rotation']
@@ -7049,6 +7097,9 @@ def move_door(request):
     except (TypeError, ValueError):
         return JsonResponse({'success': False, 'error': 'map_x and map_y are required'})
 
+    refusal = _locked_response(door, 'door')
+    if refusal:
+        return refusal
     room = door.room
     if not room.geometry or len(room.geometry) < 3:
         return JsonResponse({'success': False, 'error': 'This room has no shape to snap to'})
@@ -7070,6 +7121,10 @@ def edit_door(request):
         return JsonResponse({'success': False, 'error': 'Door not found'})
 
     fields = []
+    if 'width' in request.POST or 'map_x' in request.POST or 'map_y' in request.POST:
+        refusal = _locked_response(door, 'door')
+        if refusal:
+            return refusal
     if 'width' in request.POST:
         try:
             width = float(request.POST['width'])
@@ -7138,6 +7193,9 @@ def delete_door(request):
     if door is None:
         return JsonResponse({'success': False, 'error': 'Door not found'})
 
+    refusal = _locked_response(door, 'door')
+    if refusal:
+        return refusal
     room_name, door_id = door.room.name, door.door_id
     door.delete()
     log_admin_action(request, 'Delete', 'Door', door_id, f'Door removed from {room_name}')
@@ -7190,6 +7248,10 @@ def resize_shelf(request):
     if shelf is None:
         return JsonResponse({'success': False, 'error': 'Shelf not found'})
 
+    refusal = _locked_response(shelf, 'shelf')
+    if refusal:
+        return refusal
+
     fields = ['width', 'depth']
     shelf.width, shelf.depth = width, depth
     if new_x is not None:
@@ -7216,6 +7278,9 @@ def unplace_shelf(request):
     if shelf is None:
         return JsonResponse({'success': False, 'error': 'Shelf not found'})
 
+    refusal = _locked_response(shelf, 'shelf')
+    if refusal:
+        return refusal
     shelf.map_x = None
     shelf.map_y = None
     shelf.save(update_fields=['map_x', 'map_y'])
@@ -7233,6 +7298,9 @@ def delete_shelf(request):
     if not shelf_id:
         return JsonResponse({'success': False, 'error': 'shelf_id is required'})
     
+    refusal = _locked_response(Shelf.objects.filter(shelf_id=shelf_id, locked=True).first(), 'shelf')
+    if refusal:
+        return refusal
     Shelf.objects.filter(shelf_id=shelf_id).delete()
     if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
         return JsonResponse({'success': True})
@@ -7406,6 +7474,7 @@ def _door_payload(door, suggest=False):
         'label': door.label or '',
         'room_b': door.room_b_id,
         'is_active': door.is_active,
+        'locked': door.locked,
         'room_name': door.room.name if door.room_id else '',
         'room_b_name': door.room_b.name if door.room_b_id else '',
     }
@@ -7425,6 +7494,7 @@ def _room_payload(room, doors_by_room=None, suggest_doors=False):
         # For the properties panel.
         'description': room.description or '',
         'is_active': room.is_active,
+        'locked': room.locked,
         'doors': [_door_payload(d, suggest=suggest_doors) for d in doors],
     }
 
@@ -7544,8 +7614,9 @@ def generate_waypoints(request):
                                       'so there is nowhere a patron may be routed.'})
 
     with transaction.atomic():
-        removed = Waypoint.objects.filter(floor_plan=plan, is_generated=True).count()
-        Waypoint.objects.filter(floor_plan=plan, is_generated=True).delete()
+        # Locked waypoints survive a regenerate.
+        removed = Waypoint.objects.filter(floor_plan=plan, is_generated=True, locked=False).count()
+        Waypoint.objects.filter(floor_plan=plan, is_generated=True, locked=False).delete()
 
         def room_at(x, y):
             for room in rooms:
@@ -7910,6 +7981,7 @@ def get_map_data(request):
             'label': w.label or '',
             'linked_shelf_id': w.linked_shelf.shelf_id if w.linked_shelf else None,
             'linked_shelf_name': w.linked_shelf.name if w.linked_shelf else None,
+            'locked': w.locked,
         }
         for w in Waypoint.objects.filter(floor_plan=floor_plan).select_related('linked_shelf')
     ]
@@ -7958,6 +8030,7 @@ def get_map_data(request):
             'footprint': s.footprint(),
             'placed': s.map_x is not None and s.map_y is not None,
             'room_id': s.room_id,
+            'locked': s.locked,
         }
         for s in Shelf.objects.filter(room__floor_plan=floor_plan).order_by('name')
     ]
@@ -8158,6 +8231,7 @@ def _stairway_payload(st):
         'connects_to': st.connects_to_id,
         'destination': st.destination_label,
         'is_active': st.is_active,
+        'locked': st.locked,
         'shape': _stair_shape_of(st),
         # Per flight, so a stair that turns draws its own steps and its own arrow on each run.
         'parts': _stair_parts(st),
@@ -8177,6 +8251,7 @@ def _obstacle_payload(o):
         'map_x': o.map_x,
         'map_y': o.map_y,
         'is_active': o.is_active,
+        'locked': o.locked,
     }
 
 
@@ -8196,6 +8271,7 @@ def _beacon_payload(b):
         'map_x': b.map_x,
         'map_y': b.map_y,
         'label': b.label or '',
+        'locked': b.locked,
     }
 
 
@@ -8284,6 +8360,9 @@ def delete_beacon(request):
     if not beacon_id:
         return JsonResponse({'success': False, 'error': 'beacon_id is required'})
 
+    refusal = _locked_response(BLEBeacon.objects.filter(beacon_id=beacon_id, locked=True).first(), 'beacon')
+    if refusal:
+        return refusal
     BLEBeacon.objects.filter(beacon_id=beacon_id).delete()
     return JsonResponse({'success': True})
 
@@ -8304,6 +8383,9 @@ def move_beacon(request):
     except (TypeError, ValueError):
         return JsonResponse({'success': False, 'error': 'map_x and map_y are required'})
 
+    refusal = _locked_response(beacon, 'beacon')
+    if refusal:
+        return refusal
     beacon.map_x, beacon.map_y = map_x, map_y
     beacon.save(update_fields=['map_x', 'map_y'])
     log_admin_action(request, 'Move', 'Beacon', beacon.beacon_id,
@@ -8531,6 +8613,9 @@ def move_waypoint(request):
     except (TypeError, ValueError):
         return JsonResponse({'success': False, 'error': 'map_x and map_y are required'})
 
+    refusal = _locked_response(waypoint, 'waypoint')
+    if refusal:
+        return refusal
     waypoint.map_x, waypoint.map_y = map_x, map_y
     waypoint.save(update_fields=['map_x', 'map_y'])
     log_admin_action(request, 'Move', 'Waypoint', waypoint.waypoint_id,
@@ -8547,6 +8632,9 @@ def delete_waypoint(request):
     if not waypoint_id:
         return JsonResponse({'success': False, 'error': 'waypoint_id is required'})
 
+    refusal = _locked_response(Waypoint.objects.filter(waypoint_id=waypoint_id, locked=True).first(), 'waypoint')
+    if refusal:
+        return refusal
     # Remove all connections referencing this waypoint (either direction), then the waypoint.
     WaypointConnection.objects.filter(
         Q(waypoint_from_id=waypoint_id) | Q(waypoint_to_id=waypoint_id)
