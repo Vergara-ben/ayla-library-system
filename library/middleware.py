@@ -61,6 +61,28 @@ class DeskModeMiddleware:
         return self.get_response(request)
 
 
+class NoStoreSignedInPagesMiddleware:
+    """Keep signed-in pages out of the browser cache, so Back after logout reloads them."""
+
+    SESSION_KEYS = ('admin_id', 'patron_id')
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def _signed_in(self, request):
+        session = getattr(request, 'session', None)
+        return bool(session) and any(session.get(key) for key in self.SESSION_KEYS)
+
+    def __call__(self, request):
+        was_signed_in = self._signed_in(request)
+        response = self.get_response(request)
+        if was_signed_in or self._signed_in(request):
+            response['Cache-Control'] = 'no-cache, no-store, must-revalidate, private'
+            response['Pragma'] = 'no-cache'
+            response['Expires'] = '0'
+        return response
+
+
 class ContentSecurityPolicyMiddleware:
     """Attach the CSP header to every response."""
 

@@ -181,6 +181,39 @@ class HostingEndpointTests(TestCase):
         self.assertIn('Daily maintenance complete', r.json()['output'])
 
 
+class BackButtonAfterLogoutTests(TestCase):
+    """Signed-in pages must not be served from the browser's cache after logout."""
+
+    def test_signed_in_admin_pages_are_not_stored(self):
+        r = _signed_in(_admin()).get('/admin-portal/dashboard/')
+        self.assertEqual(r.status_code, 200)
+        self.assertIn('no-store', r['Cache-Control'])
+
+    def test_signed_in_patron_pages_are_not_stored(self):
+        patron = Patron.objects.create(
+            fullname='Ana Cruz', first_name='Ana', last_name='Cruz', email='ana.back@example.invalid',
+            patron_type='Student', account_status='Active', password_hash=hash_password('SmokeTest123'))
+        c = Client()
+        s = c.session
+        s['patron_id'] = patron.patron_id
+        s.save()
+        r = c.get('/patron/account/')
+        self.assertEqual(r.status_code, 200)
+        self.assertIn('no-store', r['Cache-Control'])
+
+    def test_signed_out_pages_keep_normal_caching(self):
+        r = Client().get('/patron/login/')
+        self.assertNotIn('no-store', r.get('Cache-Control', ''))
+
+    def test_after_logout_the_old_page_sends_you_to_login(self):
+        c = _signed_in(_admin())
+        self.assertEqual(c.get('/admin-portal/dashboard/').status_code, 200)
+        c.get('/admin-portal/logout/')
+        r = c.get('/admin-portal/dashboard/')
+        self.assertEqual(r.status_code, 302)
+        self.assertIn('/admin-portal/login/', r['Location'])
+
+
 class LoginSecurityTests(TestCase):
     """Throttling, session rotation, and the absence of an enumeration oracle."""
 

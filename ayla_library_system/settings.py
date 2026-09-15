@@ -68,6 +68,8 @@ MIDDLEWARE = [
     # Serves collected static files from the app itself.
     'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
+    # Signed-in pages are not kept by the browser, so Back after logout cannot show them.
+    'library.middleware.NoStoreSignedInPagesMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
