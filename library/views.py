@@ -98,7 +98,7 @@ def patron_login(request):
         if locked:
             return render(request, 'patron/patronlogin.html', {'error': locked})
 
-        patron = Patron.objects.filter(email__iexact=email).first()
+        patron = Patron.all_objects.filter(email__iexact=email).first()
         if patron is None:
             waste_password_time()      # a missing account costs what a real one costs
             password_ok = False
@@ -121,6 +121,10 @@ def patron_login(request):
 
         # Password is correct, so it is safe to show the real reason.
         clear_login_failures('patron', email)
+
+        if patron.archived_at is not None:
+            return render(request, 'patron/patronlogin.html',
+                          {'error': 'This account has been archived. Please contact the library.'})
 
         if patron.account_status == 'Pending':
             return render(request, 'patron/patronlogin.html',
@@ -421,10 +425,18 @@ def patron_register(request):
     if password != confirm_password:
         return _form_error('Passwords do not match')
 
-    existing = Patron.objects.filter(email__iexact=email).first()
+    existing = Patron.all_objects.filter(email__iexact=email).first()
     if existing is not None:
+        if existing.archived_at is not None and existing.account_status == 'Pending':
+            # Applying again after a rejection: the rejected application stays archived, minus the email.
+            existing.archive_reason = ('%s (applied again as %s)'
+                                       % (existing.archive_reason, existing.email))[:500]
+            existing.email = None
+            existing.save(update_fields=['email', 'archive_reason'])
+        elif existing.archived_at is not None:
+            return _form_error('This email belongs to an archived account. Please contact the library.')
         # A stale unverified application may be replaced; anything else is a duplicate.
-        if existing.account_status == 'Pending' and not existing.otp_verified:
+        elif existing.account_status == 'Pending' and not existing.otp_verified:
             existing.delete()
         else:
             return _form_error('Email already exists')
@@ -949,7 +961,7 @@ def patron_update_profile(request):
         return JsonResponse({'success': False, 'error': name_error})
     if not email:
         return JsonResponse({'success': False, 'error': 'Email is required.'})
-    if Patron.objects.exclude(patron_id=patron.patron_id).filter(email__iexact=email).exists():
+    if Patron.all_objects.exclude(patron_id=patron.patron_id).filter(email__iexact=email).exists():
         return JsonResponse({'success': False, 'error': 'That email is already in use by another account.'})
 
     patron.fullname = fullname
@@ -1770,7 +1782,7 @@ def admin_add_patron(request):
             error = name_error
         elif not all([patron_type, email, password]):
             error = 'Patron type, email, and password are required.'
-        elif Patron.objects.filter(email=email).exists():
+        elif Patron.all_objects.filter(email=email).exists():
             error = 'A patron with that email already exists.'
         elif not id_confirmed:
             error = 'Confirm that you checked the patron\'s physical ID before registering them.'
@@ -1904,10 +1916,11 @@ def reject_patron(request, patron_id):
 
     reason = (request.POST.get('reason') or '').strip() or None
     fullname, email = patron.fullname, patron.email
-    log_admin_action(request, 'Delete', 'Patron', patron.patron_id,
+    log_admin_action(request, 'Reject', 'Patron', patron.patron_id,
                      f'Rejected registration of "{fullname}"' + (f' — {reason}' if reason else ''))
-    # Deleting the patron also deletes the uploaded ID.
-    patron.delete()
+    # Kept in the Archive with the uploaded ID, so a mistaken rejection can be undone.
+    patron.archive(_actor_name(request),
+                   'Registration rejected' + (f': {reason}' if reason else ''))
     registration_rejected_email(email, fullname, reason)
     messages.success(request, f'Registration of {fullname} rejected.')
     return _patron_page_redirect(request)
@@ -2142,7 +2155,7 @@ def admin_edit_patron(request, patron_id):
             error = name_error
         elif not all([patron_type, email]):
             error = 'Patron type and email are required.'
-        elif Patron.objects.exclude(patron_id=patron_id).filter(email=email).exists():
+        elif Patron.all_objects.exclude(patron_id=patron_id).filter(email=email).exists():
             error = 'A different patron already uses that email.'
         else:
             patron.fullname = fullname
@@ -2210,12 +2223,20 @@ def admin_edit_patron(request, patron_id):
 
 @admin_module_required('patrons')
 def admin_delete_patron(request, patron_id):
+    """Archive a patron: hidden from every page, restorable from the Archive."""
     if request.method == 'POST':
         patron = Patron.objects.filter(patron_id=patron_id).first()
         if patron:
             name = patron.fullname
-            patron.delete()
-            log_admin_action(request, 'Delete', 'Patron', patron_id, f'Deleted "{name}"')
+            out = Transaction.objects.filter(patron=patron, transaction_type='Borrow',
+                                             return_date__isnull=True).count()
+            if out:
+                messages.error(request, f'{name} still has {out} book(s) out. '
+                                        'They must be returned before the patron is archived.')
+            else:
+                patron.archive(_actor_name(request), 'Archived from Manage Patrons')
+                log_admin_action(request, 'Archive', 'Patron', patron_id, f'Archived "{name}"')
+                messages.success(request, f'{name} was moved to the Archive.')
     return redirect('admin_manage_patron')
 
 
@@ -2319,12 +2340,17 @@ def admin_edit_book(request, book_id):
 
 @granted_module_required('books')
 def admin_delete_book(request, book_id):
+    """Archive one copy: hidden from the catalogue, restorable from the Archive."""
     if request.method == 'POST':
         book = Book.objects.filter(book_id=book_id).first()
         if book:
             title = book.title
-            book.delete()
-            log_admin_action(request, 'Delete', 'Book', book_id, f'Deleted "{title}"')
+            if book.status in ('Borrowed', 'Overdue'):
+                messages.error(request, f'"{title}" is out on loan. Return it before archiving.')
+            else:
+                book.archive(_actor_name(request), 'Archived from Manage Books')
+                log_admin_action(request, 'Archive', 'Book', book_id, f'Archived "{title}"')
+                messages.success(request, f'"{title}" was moved to the Archive.')
     return portal_redirect(request, 'admin_management')
 
 
@@ -3025,51 +3051,59 @@ def reshelving_queue(request):
 
 
 def _floorplan_sheet(floor_plan):
-    """One floor, as one printed page."""
+    """One floor for the PDF: its shapes, and the books filed on each shelf."""
+    import re
     width, height = _floorplan_canvas_size(floor_plan)
     rooms = [
         {
             'name': r.name,
-            'points': ' '.join(f'{x},{y}' for x, y in (r.geometry or [])),
+            'points': r.geometry if r.geometry and len(r.geometry) >= 3 else [],
             'label_x': r.map_x,
             'label_y': r.map_y,
-            'has_shape': bool(r.geometry and len(r.geometry) >= 3),
             # Mark staff-only rooms on the printed plan.
             'restricted': not r.patron_access,
         }
         for r in Room.objects.filter(floor_plan=floor_plan, is_active=True)
     ]
 
-    shelves = []
-    for sh in (Shelf.objects
-               .filter(room__floor_plan=floor_plan, is_active=True,
-                       map_x__isnull=False, map_y__isnull=False)
-               .prefetch_related('shelflevel_set')):
-        w = sh.width or 46
-        d = sh.depth or 14
-        cats = [lv.category for lv in sh.shelflevel_set.all() if lv.is_active and lv.category]
-        shelves.append({
+    placed = list(Shelf.objects.filter(room__floor_plan=floor_plan, is_active=True,
+                                       map_x__isnull=False, map_y__isnull=False))
+    books = {}
+    for b in (Book.objects
+              .filter(shelf_level__shelf__in=placed)
+              .select_related('shelf_level', 'shelf_level__shelf')
+              .order_by('shelf_level__column_number', '-shelf_level__is_top',
+                        'shelf_level__is_under', 'shelf_level__level_number',
+                        'shelf_slot', 'title', 'book_id')):
+        books.setdefault(b.shelf_level.shelf_id, []).append({
+            'level': b.shelf_level.label,
+            'position': b.shelf_slot or '',
+            'title': b.title,
+            'author': b.author,
+            'call_number': b.call_number or '',
+            'status': b.get_status_display(),
+        })
+
+    def natural(shelf):
+        # Shelf 2 before Shelf 10.
+        return [int(t) if t.isdigit() else t.lower() for t in re.split(r'(\d+)', shelf.name or '')]
+
+    shelves = [
+        {
             'name': sh.name,
-            'kind': sh.kind,
-            # Traced shelves print as outlines.
-            'points': (' '.join('%s,%s' % (x, y) for x, y in sh.footprint())
-                       if sh.geometry else ''),
-            # Draw rotated rectangles with a transform.
-            'x': sh.map_x - w / 2,
-            'y': sh.map_y - d / 2,
-            'w': w,
-            'h': d,
+            'kind': sh.get_kind_display(),
+            'points': sh.footprint(),
             'cx': sh.map_x,
             'cy': sh.map_y,
-            'rotation': sh.rotation or 0,
-            'sections': ', '.join(sorted(set(cats))),
-        })
+            'books': books.get(sh.shelf_id, []),
+        }
+        for sh in sorted(placed, key=natural)
+    ]
 
     obstacles = [
         {
             'label': o.label,
-            'kind': o.kind,
-            'points': ' '.join(f'{x},{y}' for x, y in (o.geometry or [])),
+            'points': o.geometry,
             'label_x': o.map_x,
             'label_y': o.map_y,
             # Label pillars and named tables only.
@@ -3079,17 +3113,13 @@ def _floorplan_sheet(floor_plan):
         if o.geometry and len(o.geometry) >= 3
     ]
 
-    # Include stairs on the printed plan.
     stairways = [
         {
             'label': st.label,
-            'kind': st.kind,
-            'points': ' '.join(f'{x},{y}' for x, y in (st.geometry or [])),
+            'points': st.geometry,
             'treads': [t for p in _stair_parts(st) for t in p['treads']],
             'label_x': st.map_x,
             'label_y': st.map_y,
-            # Compute the offset here; the add filter drops decimals.
-            'dest_y': st.map_y + 9,
             'destination': st.destination_label if st.connects_to_id else '',
         }
         for st in (Stairway.objects
@@ -3111,10 +3141,14 @@ def _floorplan_sheet(floor_plan):
 
 @admin_or_module_required('indoor_map')
 def floorplan_print(request):
-    """A printable wayfinding map, of one floor or of the whole building."""
+    """The floor plan as a PDF, of one floor or the whole building, with each shelf's books."""
+    from .floorplan_pdf import render_floorplan_pdf
     live_plans = FloorPlan.objects.filter(is_active=True).order_by(
         'floor_number', 'floor_plan_id')
     if not live_plans.exists():
+        if request.headers.get('x-requested-with') == 'XMLHttpRequest':
+            return JsonResponse({'success': False, 'error': 'No floor plan is in service.'},
+                                status=400)
         messages.error(request, 'No floor plan is in service.')
         return portal_redirect(request, 'admin_indoor_map')
 
@@ -3130,16 +3164,226 @@ def floorplan_print(request):
         one, _ = _floor_for_request(request)
         chosen = [one] if one is not None else [live_plans.first()]
 
-    sheets = [_floorplan_sheet(p) for p in chosen]
-    return render(request, 'admin/floorplanprint.html', {
-        'sheets': sheets,
-        # The first sheet drives the page title and the switcher's idea of where it is.
-        'plan': sheets[0]['plan'],
-        'many': len(sheets) > 1,
-        'floors': _floor_payload(live_plans, chosen[0]),
-        'chosen_ids': [p.floor_plan_id for p in chosen],
-        'printed_on': timezone.localdate(),
+    buf = render_floorplan_pdf([_floorplan_sheet(p) for p in chosen], timezone.localdate())
+    if len(chosen) > 1:
+        default = 'Library Map - all floors'
+    else:
+        default = '%s - Library Map' % (chosen[0].name or chosen[0].floor_label)
+    response = HttpResponse(buf.getvalue(), content_type='application/pdf')
+    response['Content-Disposition'] = 'attachment; filename="%s"' % download_name(
+        request, default, '.pdf')
+    return response
+
+
+# Archive: records hidden instead of deleted, restorable by the Administrator.
+
+ARCHIVE_KINDS = [
+    ('patrons', 'Patrons', 'fa-users'),
+    ('registrations', 'Rejected registrations', 'fa-user-xmark'),
+    ('books', 'Books', 'fa-book'),
+    ('donations', 'Donations', 'fa-hand-holding-heart'),
+    ('announcements', 'Announcements', 'fa-bullhorn'),
+    ('logs', 'Visit logs', 'fa-door-open'),
+    ('floorplans', 'Floor plans', 'fa-layer-group'),
+]
+# Record type names used in Activity Logs.
+ARCHIVE_ENTITY = {
+    'patrons': 'Patron', 'registrations': 'Patron', 'books': 'Book', 'donations': 'Donation',
+    'announcements': 'Announcement', 'logs': 'Visit log', 'floorplans': 'Floor plan',
+}
+
+
+def _actor_name(request):
+    """Who is signed in to the portal, for the archive columns."""
+    name = request.session.get('admin_fullname')
+    if not name:
+        user = User.objects.filter(admin_id=request.session.get('admin_id')).first()
+        name = user.fullname if user else ''
+    return name or 'Unknown'
+
+
+def _archived(kind):
+    """Archived rows of one kind, newest first, or None for an unknown kind."""
+    if kind in ('patrons', 'registrations'):
+        qs = Patron.all_objects.filter(archived_at__isnull=False)
+        # A rejected registration is an application that never became a member.
+        qs = (qs.filter(account_status='Pending') if kind == 'registrations'
+              else qs.exclude(account_status='Pending'))
+    elif kind == 'books':
+        qs = Book.all_objects.filter(archived_at__isnull=False).select_related('shelf_level__shelf')
+    elif kind == 'donations':
+        qs = Donation.all_objects.filter(archived_at__isnull=False).select_related('book')
+    elif kind == 'announcements':
+        qs = Announcement.all_objects.filter(archived_at__isnull=False)
+    elif kind == 'logs':
+        qs = PatronLog.all_objects.filter(archived_at__isnull=False).select_related('patron')
+    elif kind == 'floorplans':
+        qs = FloorPlan.all_objects.filter(archived_at__isnull=False)
+    else:
+        return None
+    return qs.order_by('-archived_at')
+
+
+def _archive_search(kind, qs, q):
+    if not q:
+        return qs
+    if kind in ('patrons', 'registrations'):
+        return qs.filter(Q(fullname__icontains=q) | Q(email__icontains=q) | Q(card_number__icontains=q))
+    if kind == 'books':
+        return qs.filter(Q(title__icontains=q) | Q(author__icontains=q) | Q(call_number__icontains=q))
+    if kind == 'donations':
+        return qs.filter(Q(donor_name__icontains=q) | Q(book__title__icontains=q))
+    if kind == 'announcements':
+        return qs.filter(Q(title__icontains=q) | Q(message__icontains=q))
+    if kind == 'logs':
+        return qs.filter(Q(patron__fullname__icontains=q) | Q(purpose_of_visit__icontains=q))
+    return qs.filter(name__icontains=q)
+
+
+def _erase_blocker(kind, obj):
+    """Why a record must stay archived instead of being deleted for good, or ''."""
+    if kind in ('patrons', 'registrations'):
+        if Transaction.objects.filter(patron=obj).exists():
+            return 'It has borrowing history'
+        if PatronLog.all_objects.filter(patron=obj).exists():
+            return 'It has visit logs'
+    elif kind == 'books':
+        if Transaction.objects.filter(book=obj).exists():
+            return 'It has borrowing history'
+        if Donation.all_objects.filter(book=obj).exists():
+            return 'It has a donation record'
+        if InventoryRecord.objects.filter(book=obj).exists():
+            return 'It is linked to inventory'
+    elif kind == 'donations':
+        if obj.inventory_copies.exists():
+            return 'It is linked to inventory'
+    elif kind == 'floorplans':
+        if Book.all_objects.filter(shelf_level__shelf__room__floor_plan=obj).exists():
+            return 'Books are shelved on it'
+    return ''
+
+
+def _archive_row(kind, obj):
+    """One archived record as a table row."""
+    from django.utils.text import Truncator
+    if kind in ('patrons', 'registrations'):
+        title = obj.fullname
+        bits = [obj.patron_type, obj.email or 'no email']
+        if kind == 'patrons' and obj.card_number:
+            bits.append('Card ' + obj.card_display)
+    elif kind == 'books':
+        title = obj.title
+        bits = [obj.author, obj.call_number or '', obj.location_label() or 'Not shelved']
+    elif kind == 'donations':
+        title = obj.donor_name
+        bits = ['"%s"' % obj.book.title if obj.book_id else '',
+                obj.date_donated.strftime('%b %d, %Y') if obj.date_donated else '', obj.status]
+    elif kind == 'announcements':
+        title = obj.title
+        bits = [Truncator(obj.message or '').chars(90)]
+    elif kind == 'logs':
+        title = obj.patron.fullname if obj.patron_id else 'Unknown patron'
+        bits = [timezone.localtime(obj.entry_time).strftime('%b %d, %Y %I:%M %p'),
+                ('left %s' % timezone.localtime(obj.exit_time).strftime('%I:%M %p'))
+                if obj.exit_time else 'no exit recorded',
+                obj.purpose_of_visit or '']
+    else:
+        title = obj.name
+        bits = [obj.floor_label]
+    return {
+        'id': obj.pk,
+        'title': title,
+        'detail': ' · '.join(b for b in bits if b),
+        'archived_at': obj.archived_at,
+        'archived_by': obj.archived_by,
+        'reason': obj.archive_reason,
+        'blocker': _erase_blocker(kind, obj),
+    }
+
+
+@admin_only_required
+def archive_page(request):
+    """Archived records: hidden from their pages, kept in the database, restorable."""
+    from urllib.parse import urlencode
+    labels = {key: label for key, label, _ in ARCHIVE_KINDS}
+    kind = request.GET.get('kind') if request.GET.get('kind') in labels else 'patrons'
+    q = (request.GET.get('q') or '').strip()
+
+    tabs = [{'key': key, 'label': label, 'icon': icon, 'count': _archived(key).count()}
+            for key, label, icon in ARCHIVE_KINDS]
+    records = _archive_search(kind, _archived(kind), q)
+    page_obj = Paginator(records, 25).get_page(request.GET.get('page'))
+
+    return render(request, 'admin/archive.html', {
+        'tabs': tabs,
+        'kind': kind,
+        'kind_label': labels[kind],
+        'q': q,
+        'rows': [_archive_row(kind, obj) for obj in page_obj],
+        'page_obj': page_obj,
+        'querystring': urlencode({k: v for k, v in {'kind': kind, 'q': q}.items() if v}),
     })
+
+
+def _archive_target(request):
+    """The archived record a Restore or Delete form names."""
+    kind = request.POST.get('kind', '')
+    raw = request.POST.get('id', '')
+    qs = _archived(kind)
+    obj = qs.filter(pk=int(raw)).first() if qs is not None and raw.isdigit() else None
+    return kind, obj
+
+
+def _back_to_archive(kind):
+    from django.urls import reverse
+    return redirect('%s?kind=%s' % (reverse('archive_page'), kind if kind in ARCHIVE_ENTITY else 'patrons'))
+
+
+@admin_only_required
+def archive_restore(request):
+    """Put an archived record back where it was."""
+    if request.method != 'POST':
+        return redirect('archive_page')
+    kind, obj = _archive_target(request)
+    if obj is None:
+        messages.error(request, 'That archived record was not found.')
+        return _back_to_archive(kind)
+
+    title = _archive_row(kind, obj)['title']
+    obj.restore()
+    note = ''
+    if kind == 'registrations':
+        note = ' It is back in Pending Registrations.'
+    elif kind == 'floorplans':
+        note = ' It stays out of service until you put it back in service in Floor Plans.'
+    log_admin_action(request, 'Restore', ARCHIVE_ENTITY[kind], obj.pk,
+                     f'Restored "{title}" from the Archive')
+    messages.success(request, f'"{title}" was restored.{note}')
+    return _back_to_archive(kind)
+
+
+@admin_only_required
+def archive_erase(request):
+    """Delete an archived record for good, when nothing else depends on it."""
+    if request.method != 'POST':
+        return redirect('archive_page')
+    kind, obj = _archive_target(request)
+    if obj is None:
+        messages.error(request, 'That archived record was not found.')
+        return _back_to_archive(kind)
+
+    row = _archive_row(kind, obj)
+    if row['blocker']:
+        messages.error(request, f'"{row["title"]}" cannot be deleted permanently: '
+                                f'{row["blocker"].lower()}. It stays in the Archive.')
+        return _back_to_archive(kind)
+
+    pk = obj.pk
+    obj.delete()
+    log_admin_action(request, 'Delete', ARCHIVE_ENTITY[kind], pk,
+                     f'Permanently deleted "{row["title"]}" from the Archive')
+    messages.success(request, f'"{row["title"]}" was deleted permanently.')
+    return _back_to_archive(kind)
 
 
 @admin_only_required
@@ -3645,10 +3889,22 @@ def _patron_qr_payload(patron):
         'patron_type': patron.patron_type,
         'account_status': patron.account_status,
         'card_number': patron.card_display,
+        'contact_number': patron.contact_number or '',
+        'school': patron.school or '',
         'active_borrows': active_borrows,
+        'max_books': BorrowingRule.current().max_books_per_patron,
         'eligible': eligible,
         'violations': violations,
     }
+
+
+@granted_module_required('transactions')
+def patron_details_json(request, patron_id):
+    """A chosen patron's details, for the transaction modal."""
+    patron = Patron.objects.filter(patron_id=patron_id).first()
+    if patron is None:
+        return JsonResponse({'success': False, 'error': 'Patron not found'}, status=404)
+    return JsonResponse({'success': True, 'patron': _patron_qr_payload(patron)})
 
 
 @granted_module_required('transactions')
@@ -3944,7 +4200,7 @@ class _PreviewOnly(Exception):
 
 @granted_module_required('books')
 def delete_books(request):
-    """Delete the ticked books."""
+    """Archive the ticked books."""
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
 
@@ -3955,7 +4211,7 @@ def delete_books(request):
     if len(ids) > MAX_BOOKS_PER_MOVE:
         return JsonResponse({
             'success': False,
-            'error': f'That is {len(ids)} books. Delete at most '
+            'error': f'That is {len(ids)} books. Archive at most '
                      f'{MAX_BOOKS_PER_MOVE} at a time.'})
 
     books = list(Book.objects.filter(book_id__in=ids))
@@ -3990,17 +4246,19 @@ def delete_books(request):
 
     titles = [b.title for b in deletable[:5]]
     with transaction.atomic():
-        Book.objects.filter(book_id__in=deletable_ids).delete()
+        Book.objects.filter(book_id__in=deletable_ids).update(
+            archived_at=timezone.now(), archived_by=_actor_name(request)[:255],
+            archive_reason='Archived from Manage Books')
         log_admin_action(
-            request, 'Delete', 'Book',
-            detail='Deleted %d book(s)%s%s' % (
+            request, 'Archive', 'Book',
+            detail='Archived %d book(s)%s%s' % (
                 len(deletable_ids),
                 ' incl. ' + ', '.join(titles) if titles else '',
-                ' (%d loan record(s) removed)' % loans if loans else ''))
+                ' (%d loan record(s) kept)' % loans if loans else ''))
 
     summary['preview'] = False
     summary['deleted'] = len(deletable_ids)
-    summary['message'] = '%d book%s deleted.' % (
+    summary['message'] = '%d book%s moved to the Archive.' % (
         len(deletable_ids), '' if len(deletable_ids) == 1 else 's')
     return JsonResponse(summary)
 
@@ -4417,7 +4675,7 @@ def import_patrons(request):
             if not fullname or not email:
                 continue
             
-            if Patron.objects.filter(email=email).exists():
+            if Patron.all_objects.filter(email=email).exists():
                 skipped_count += 1
                 continue
             
@@ -4954,17 +5212,17 @@ def delete_donation(request):
                 messages.error(
                     request,
                     f'{held} copy(ies) from this donation are still in Inventory. '
-                    'Deaccession them there before deleting the accessioning record.'
+                    'Deaccession them there before archiving the accessioning record.'
                 )
                 return portal_redirect(request, 'donation_management')
 
-            # Only the accessioning row goes.
-            donation.delete()
-            log_admin_action(request, 'Delete', 'Donation', donation_id, detail)
+            # Only the accessioning row is archived; the catalogue entry stays.
+            donation.archive(_actor_name(request), 'Archived from Donations')
+            log_admin_action(request, 'Archive', 'Donation', donation_id, detail)
             messages.success(
                 request,
-                f'Accessioning record for {detail} removed. The catalogue entry '
-                'remains — delete it in Manage Books if it was created in error.'
+                f'Accessioning record for {detail} moved to the Archive. '
+                'The catalogue entry remains.'
             )
 
     return portal_redirect(request, 'donation_management')
@@ -5080,8 +5338,9 @@ def delete_announcement(request):
         announcement = Announcement.objects.filter(announcement_id=announcement_id).first()
         if announcement:
             title = announcement.title
-            announcement.delete()
-            log_admin_action(request, 'Delete', 'Announcement', announcement_id, f'Deleted "{title}"')
+            announcement.archive(_actor_name(request), 'Archived from Announcements')
+            log_admin_action(request, 'Archive', 'Announcement', announcement_id, f'Archived "{title}"')
+            messages.success(request, f'"{title}" was moved to the Archive.')
 
     return redirect('announcement_management')
 
@@ -5414,8 +5673,15 @@ def toggle_renovation(request):
 @admin_only_required
 def delete_floorplan(request):
     if request.method == 'POST':
-        floorplan_id = request.POST.get('floorplan_id')
-        FloorPlan.objects.filter(floor_plan_id=floorplan_id).delete()
+        plan = FloorPlan.objects.filter(floor_plan_id=request.POST.get('floorplan_id')).first()
+        if plan is not None:
+            # Archived floors are out of service too.
+            FloorPlan.objects.filter(pk=plan.pk).update(
+                is_active=False, archived_at=timezone.now(),
+                archived_by=_actor_name(request)[:255],
+                archive_reason='Archived from Floor Plans' + (' while in service' if plan.is_active else ''))
+            log_admin_action(request, 'Archive', 'Floor plan', plan.pk, f'Archived "{plan.name}"')
+            messages.success(request, f'"{plan.name}" was taken out of service and moved to the Archive.')
     
     return redirect('floorplan_management')
 
@@ -9357,7 +9623,7 @@ def entry_log_register(request):
     except _ValidationError:
         return JsonResponse({'success': False, 'error': 'Please enter a valid email address.'})
 
-    if Patron.objects.filter(email__iexact=email).exists():
+    if Patron.all_objects.filter(email__iexact=email).exists():
         return JsonResponse({'success': False, 'error': 'A patron with this email already exists.'})
 
     verifier = User.objects.filter(admin_id=request.session.get('admin_id')).first()
@@ -9472,9 +9738,16 @@ def edit_patron_log(request):
 
 @granted_module_required('logs')
 def delete_patron_log(request):
-    """Delete a visit log (form POST from the Log Management table)."""
+    """Archive a visit log (form POST from the Log Management table)."""
     if request.method == 'POST':
-        PatronLog.objects.filter(log_id=request.POST.get('log_id')).delete()
+        log = (PatronLog.objects.select_related('patron')
+               .filter(log_id=request.POST.get('log_id')).first())
+        if log is not None:
+            log.archive(_actor_name(request), 'Archived from Log Management')
+            log_admin_action(request, 'Archive', 'Visit log', log.log_id,
+                             f'Archived the visit of "{log.patron.fullname}" on '
+                             f'{timezone.localtime(log.entry_time):%b %d, %Y}', patron=log.patron)
+            messages.success(request, 'Visit log moved to the Archive.')
     return portal_redirect(request, 'admin_log_management')
 
 

@@ -616,7 +616,7 @@
             <section class="hero-banner">
                 <div>
                     <span class="hero-welcome-tag">Admin Dashboard</span>
-                    <h1 class="hero-title">Good morning, Admin 👋</h1>
+                    <h1 class="hero-title">Good morning, Admin</h1>
                     <p class="hero-subtitle">Monday, December 10, 2024 • <span>{{ visitors_today }} patrons currently in the library</span></p>
                 </div>
                 <div class="hero-actions">
@@ -676,7 +676,7 @@
                 
                 <section class="panel">
                     <div class="panel-header">
-                        <h3 class="panel-title">📋 Recent Transactions</h3>
+                        <h3 class="panel-title"><i class="fa-solid fa-clipboard-list" aria-hidden="true"></i> Recent Transactions</h3>
                         {% if 'transactions' in allowed_modules %}<a href="{% url 'admin_transaction' %}" class="btn-view-all">View all &rarr;</a>{% endif %}
                     </div>
 
@@ -716,47 +716,47 @@
                     
                     <section class="panel">
                         <div class="panel-header">
-                            <h3 class="panel-title">⚡ Quick Actions</h3>
+                            <h3 class="panel-title"><i class="fa-solid fa-bolt" aria-hidden="true"></i> Quick Actions</h3>
                         </div>
                         <div class="quick-actions-grid">
                             {# Administration first: these are the role's own work and are always present. #}
                             <a href="{% url 'user_management' %}" class="action-card">
-                                <span class="action-icon">🧑‍💼</span>
+                                <span class="action-icon"><i class="fa-solid fa-user-tie" aria-hidden="true"></i></span>
                                 <span class="action-label">Users</span>
                             </a>
                             <a href="{% url 'admin_reports' %}" class="action-card">
-                                <span class="action-icon">📈</span>
+                                <span class="action-icon"><i class="fa-solid fa-chart-line" aria-hidden="true"></i></span>
                                 <span class="action-label">Reports</span>
                             </a>
                             <a href="{% url 'inventory_management' %}" class="action-card">
-                                <span class="action-icon">📦</span>
+                                <span class="action-icon"><i class="fa-solid fa-box" aria-hidden="true"></i></span>
                                 <span class="action-label">Inventory</span>
                             </a>
                             <a href="{% url 'admin_borrowing_rules' %}" class="action-card">
-                                <span class="action-icon">⚙️</span>
+                                <span class="action-icon"><i class="fa-solid fa-gear" aria-hidden="true"></i></span>
                                 <span class="action-label">Rules</span>
                             </a>
                             {% if 'books' in allowed_modules %}
                             <a href="{% url 'admin_management' %}" class="action-card">
-                                <span class="action-icon">📚</span>
+                                <span class="action-icon"><i class="fa-solid fa-book" aria-hidden="true"></i></span>
                                 <span class="action-label">Books</span>
                             </a>
                             {% endif %}
                             {% if 'patrons' in allowed_modules %}
                             <a href="{% url 'admin_manage_patron' %}" class="action-card">
-                                <span class="action-icon">👥</span>
+                                <span class="action-icon"><i class="fa-solid fa-users" aria-hidden="true"></i></span>
                                 <span class="action-label">Patrons</span>
                             </a>
                             {% endif %}
                             {% if 'transactions' in allowed_modules %}
                             <a href="{% url 'admin_transaction' %}" class="action-card">
-                                <span class="action-icon">📋</span>
+                                <span class="action-icon"><i class="fa-solid fa-clipboard-list" aria-hidden="true"></i></span>
                                 <span class="action-label">Transactions</span>
                             </a>
                             {% endif %}
                             {% if 'logs' in allowed_modules %}
                             <a href="{% url 'admin_log_management' %}" class="action-card">
-                                <span class="action-icon">🚪</span>
+                                <span class="action-icon"><i class="fa-solid fa-door-open" aria-hidden="true"></i></span>
                                 <span class="action-label">Entry Logs</span>
                             </a>
                             {% endif %}
@@ -765,7 +765,7 @@
 
                     <section class="panel">
                         <div class="panel-header">
-                            <h3 class="panel-title">🚪 Today's Entry Log</h3>
+                            <h3 class="panel-title"><i class="fa-solid fa-door-open" aria-hidden="true"></i> Today's Entry Log</h3>
                             {% if 'logs' in allowed_modules %}<a href="{% url 'admin_log_management' %}" class="btn-view-all">View &rarr;</a>{% endif %}
                         </div>
                         <div class="log-stats-list">

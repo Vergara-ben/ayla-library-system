@@ -195,9 +195,6 @@
                         <button onclick="openLabelPicker()" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-amber-500/90 text-[11px] font-semibold px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors">
                             <i class="fa-solid fa-print"></i> <span id="toolbarLabelsLabel">Print QR Labels</span>
                         </button>
-                        <button id="toolbarDeleteBtn" onclick="openDeleteBooks()" disabled class="bg-slate-900 border border-slate-800 hover:bg-rose-950/30 text-rose-400/90 text-[11px] font-semibold px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
-                            <i class="fa-solid fa-trash-can"></i> <span id="toolbarDeleteLabel">Delete</span>
-                        </button>
                         <button onclick="openAddModal()" class="bg-cyan-700/30 text-cyan-400 border border-cyan-800/80 hover:bg-cyan-700/50 text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
                             <i class="fa-solid fa-plus text-[10px]"></i> Add Book
                         </button>
@@ -263,10 +260,23 @@
                         </div>
                     </div>
 
-                    <div id="selectMatchingBar" class="hidden px-5 py-2.5 border-b border-slate-800/60 bg-cyan-500/[0.06] flex flex-wrap items-center justify-center gap-2 text-[11px] text-slate-300">
-                        <span id="selectMatchingText"></span>
-                        <button type="button" id="selectMatchingBtn" class="font-bold text-cyan-400 hover:text-cyan-300 underline underline-offset-2 disabled:opacity-50"></button>
-                        <button type="button" id="selectClearBtn" onclick="clearBookSelection()" class="font-bold text-rose-400 hover:text-rose-300 underline underline-offset-2">Clear selection</button>
+                    {# Selection toolbar, shown while books are ticked. #}
+                    <div id="selectMatchingBar" class="hidden px-5 py-2.5 border-b border-cyan-800/40 bg-cyan-500/[0.07] flex flex-wrap items-center gap-2 text-[11px]">
+                        <span class="inline-flex items-center gap-2 font-bold text-slate-200 mr-1">
+                            <i class="fa-solid fa-square-check text-cyan-400"></i>
+                            <span id="selectMatchingText"></span>
+                        </span>
+                        <button type="button" id="selectMatchingBtn" class="bg-cyan-700/30 text-cyan-300 border border-cyan-800/80 hover:bg-cyan-700/50 font-bold px-3 py-1.5 rounded-lg inline-flex items-center gap-1.5 transition-colors disabled:opacity-50"></button>
+                        <button type="button" id="selectClearBtn" onclick="clearBookSelection()" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-slate-300 font-semibold px-3 py-1.5 rounded-lg inline-flex items-center gap-1.5 transition-colors">
+                            <i class="fa-solid fa-xmark text-[10px]"></i> Clear
+                        </button>
+                        <span class="flex-1"></span>
+                        <button type="button" id="selectPrintBtn" onclick="openLabelSheet()" class="bg-amber-700/20 text-amber-300 border border-amber-800/70 hover:bg-amber-700/40 font-bold px-3 py-1.5 rounded-lg inline-flex items-center gap-1.5 transition-colors">
+                            <i class="fa-solid fa-print text-[10px]"></i> <span id="selectPrintLabel">Print QR Labels</span>
+                        </button>
+                        <button type="button" id="toolbarDeleteBtn" onclick="openDeleteBooks()" class="bg-rose-950/30 text-rose-300 border border-rose-900/60 hover:bg-rose-900/40 font-bold px-3 py-1.5 rounded-lg inline-flex items-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+                            <i class="fa-solid fa-box-archive text-[10px]"></i> <span id="toolbarDeleteLabel">Archive</span>
+                        </button>
                     </div>
 
                     <div class="overflow-x-auto">
@@ -334,9 +344,9 @@
                                         <button onclick="viewBookDetails({{ book.book_id }})" class="w-7 h-7 rounded border border-slate-800 text-cyan-400 hover:text-cyan-200 hover:bg-slate-800/40 transition-colors" aria-label="View book details"><i class="fa-solid fa-eye text-[10px]"></i></button>
                                         <a href="{% url 'admin_edit_book' book.book_id %}" class="w-7 h-7 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 transition-colors"><i class="fa-solid fa-pencil text-[10px]"></i></a>
                                         <form method="post" action="{% url 'admin_delete_book' book.book_id %}" class="inline"
-                                              data-confirm="Delete &quot;{{ book.title|escapejs }}&quot;? This removes the copy and any loan history it has. It cannot be undone.">
+                                              data-confirm="Archive &quot;{{ book.title }}&quot;? It is hidden from the catalogue, its loan history is kept, and it can be restored from the Archive." data-confirm-title="Archive book" data-confirm-label="Archive">
                                             {% csrf_token %}
-                                            <button type="submit" class="w-7 h-7 rounded border border-slate-800 text-rose-500/70 hover:text-rose-400 hover:bg-rose-950/20 transition-colors" aria-label="Delete"><i class="fa-solid fa-trash-can text-[10px]"></i></button>
+                                            <button type="submit" class="w-7 h-7 rounded border border-slate-800 text-rose-500/70 hover:text-rose-400 hover:bg-rose-950/20 transition-colors" aria-label="Archive" title="Archive"><i class="fa-solid fa-box-archive text-[10px]"></i></button>
                                         </form>
                                     </div>
                                 </td>
@@ -639,14 +649,14 @@
                 <div class="w-9 h-9 rounded-xl flex items-center justify-center text-base flex-shrink-0 bg-rose-500/10 text-rose-400 border border-rose-500/25">
                     <i class="fa-solid fa-triangle-exclamation"></i>
                 </div>
-                <h3 class="text-base font-bold text-slate-200 tracking-wide">Delete books</h3>
+                <h3 class="text-base font-bold text-slate-200 tracking-wide">Archive books</h3>
             </div>
 
             <div id="deleteSummary" class="space-y-2 text-xs overflow-y-auto" style="max-height: 46vh;"></div>
 
             <div class="flex items-center justify-end gap-2.5 pt-1 flex-wrap">
                 <button type="button" id="deleteCancelBtn" onclick="closeDeleteBooks()" class="px-4 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:text-slate-100 hover:bg-slate-800/40 font-semibold text-[11px] min-w-[84px]">Cancel</button>
-                <button type="button" id="deleteConfirmBtn" onclick="confirmDeleteBooks()" class="hidden bg-rose-700 hover:bg-rose-600 text-white font-bold px-4 py-2.5 rounded-lg items-center gap-2 text-[11px]"><i class="fa-solid fa-trash-can text-xs"></i> <span id="deleteConfirmLabel">Delete them</span></button>
+                <button type="button" id="deleteConfirmBtn" onclick="confirmDeleteBooks()" class="hidden bg-rose-700 hover:bg-rose-600 text-white font-bold px-4 py-2.5 rounded-lg items-center gap-2 text-[11px]"><i class="fa-solid fa-box-archive text-xs"></i> <span id="deleteConfirmLabel">Archive them</span></button>
             </div>
         </div>
     </div>
@@ -1359,6 +1369,17 @@
             } catch (e) { /* storage refused */ }
         }
 
+        // A new search or filter starts with nothing selected; changing page keeps it.
+        const FILTERS_KEY = 'ayla.labelSelection.filters';
+        try {
+            const savedFilters = sessionStorage.getItem(FILTERS_KEY);
+            if (savedFilters !== null && savedFilters !== MATCH_QS) {
+                sessionStorage.removeItem(STORE);
+                sessionStorage.removeItem(MATCH_KEY);
+            }
+            sessionStorage.setItem(FILTERS_KEY, MATCH_QS);
+        } catch (e) { /* storage refused */ }
+
         window.onBookTick = function () {
             const set = chosen();
             let anyOff = false;
@@ -1409,14 +1430,14 @@
 
         function paintSelection(set) {
             const n = set.size;
-            // One button, in the toolbar beside Import Excel.
-            const lab = document.getElementById('toolbarLabelsLabel');
-            if (lab) lab.textContent = n ? ('Print QR Labels (' + n + ')') : 'Print QR Labels';
+            // Counts sit on the selection toolbar's own buttons.
+            const printLab = document.getElementById('selectPrintLabel');
+            if (printLab) printLab.textContent = 'Print QR Labels (' + n + ')';
 
             const del = document.getElementById('toolbarDeleteBtn');
             const delLab = document.getElementById('toolbarDeleteLabel');
             if (del) del.disabled = n === 0;
-            if (delLab) delLab.textContent = n ? ('Delete (' + n + ')') : 'Delete';
+            if (delLab) delLab.textContent = 'Archive (' + n + ')';
 
             const ticks = [...document.querySelectorAll('.book-tick')];
             const on = ticks.filter(function (cb) { return cb.checked; }).length;
@@ -1427,26 +1448,23 @@
                 master.indeterminate = on > 0 && on < ticks.length;
             }
 
-            // Offer the rest of the matching books once the whole page is ticked.
+            // The selection toolbar appears whenever anything is selected.
             const bar = document.getElementById('selectMatchingBar');
             const text = document.getElementById('selectMatchingText');
             const btn = document.getElementById('selectMatchingBtn');
-            // Shown whenever anything is selected, so books ticked on other pages can be cleared.
             if (bar && text && btn) {
                 const everything = matchedAll() && n >= MATCH_COUNT;
-                const offer = allOnPage && !everything && MATCH_COUNT > ticks.length;
+                const offer = n > 0 && !everything && MATCH_COUNT > n;
                 const elsewhere = Math.max(0, n - on);
                 bar.classList.toggle('hidden', n === 0);
-                btn.disabled = false;
-                if (everything) {
-                    text.textContent = 'All ' + MATCH_COUNT + ' matching books are selected.';
-                } else {
-                    text.textContent = n + ' book' + (n === 1 ? '' : 's') + ' selected'
-                        + (elsewhere ? ' (' + elsewhere + ' not on this page)' : '') + '.';
-                }
+                text.textContent = everything
+                    ? 'All ' + MATCH_COUNT + ' matching books selected'
+                    : n + ' selected' + (elsewhere ? ' · ' + elsewhere + ' not on this page' : '');
                 btn.hidden = !offer;
+                btn.disabled = false;
                 if (offer) {
-                    btn.textContent = 'Select all ' + MATCH_COUNT + ' matching books';
+                    btn.innerHTML = '<i class="fa-solid fa-check-double text-[10px]"></i> Select all '
+                        + MATCH_COUNT + ' matching';
                     btn.onclick = window.selectAllMatching;
                 }
             }
@@ -1537,7 +1555,7 @@
         function deleteFailed() {
             document.getElementById('deleteSummary').innerHTML = line(
                 'fa-circle-xmark', 'text-rose-400',
-                'The server did not answer. Nothing was deleted.');
+                'The server did not answer. Nothing was archived.');
             document.getElementById('deleteConfirmBtn').classList.add('hidden');
         }
 
@@ -1559,19 +1577,19 @@
 
             let html = line('fa-circle-exclamation', 'text-rose-400',
                 '<span class="text-slate-200 font-semibold">' + data.deletable
-                + ' book' + (data.deletable === 1 ? '' : 's') + ' will be deleted.</span> '
-                + 'This cannot be undone.');
+                + ' book' + (data.deletable === 1 ? '' : 's') + ' will be moved to the Archive.</span> '
+                + 'An Administrator can restore them from there.');
 
             if (data.loan_records) {
                 html += line('fa-clock-rotate-left', 'text-amber-400',
                     '<span class="text-slate-200 font-semibold">' + data.loan_records
                     + ' loan record' + (data.loan_records === 1 ? '' : 's')
-                    + '</span> will be deleted with them — who borrowed these '
+                    + '</span> are kept — who borrowed these '
                     + 'copies, when, and any fine charged.');
             }
             if (data.donation_records) {
                 html += line('fa-gift', 'text-amber-400',
-                    data.donation_records + ' donation record(s) will also go.');
+                    data.donation_records + ' donation record(s) are kept too.');
             }
             if (data.on_loan_count) {
                 html += line('fa-hand-holding', 'text-cyan-400',
@@ -1580,13 +1598,13 @@
                     + ' out on loan</span> and will be kept: '
                     + data.on_loan.map(function (b) { return esc(b.title); }).join(', ')
                     + (data.on_loan_count > data.on_loan.length ? ', …' : '')
-                    + '. Deleting them would lose the only record that they are out.');
+                    + '. Return them before archiving.');
             }
             body.innerHTML = html;
 
             if (data.deletable) {
                 document.getElementById('deleteConfirmLabel').textContent =
-                    'Delete ' + data.deletable + ' book' + (data.deletable === 1 ? '' : 's');
+                    'Archive ' + data.deletable + ' book' + (data.deletable === 1 ? '' : 's');
                 go.classList.remove('hidden');
                 go.classList.add('flex');
             } else {
@@ -1762,7 +1780,7 @@
                 });
                 html = rows.slice(0, 400).map(function (b) {
                     return pickRow(esc(b.title),
-                        esc(b.author) + (b.location ? ' · 📍 ' + esc(b.location) : ' · not shelved'),
+                        esc(b.author) + (b.location ? ' · ' + esc(b.location) : ' · not shelved'),
                         '<button class="tbtn add" title="Add" onclick="addBookToCart(' + b.book_id + ')"><i class="fa-solid fa-plus"></i></button>',
                         false);
                 }).join('');
@@ -1807,7 +1825,7 @@
             document.getElementById('pickCart').innerHTML = inCart.length
                 ? inCart.map(function (b) {
                     return pickRow(esc(b.title),
-                        esc(b.author) + (b.location ? ' · 📍 ' + esc(b.location) : ' · not shelved'),
+                        esc(b.author) + (b.location ? ' · ' + esc(b.location) : ' · not shelved'),
                         '<button class="tbtn del" title="Remove" onclick="removeBookFromCart(' + b.book_id + ')"><i class="fa-solid fa-minus"></i></button>',
                         false);
                   }).join('')

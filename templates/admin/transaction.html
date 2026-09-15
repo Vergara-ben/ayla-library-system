@@ -438,10 +438,8 @@
 
                         <input type="hidden" id="selected-patron-id" value="">
                         <input type="hidden" id="scanned-patron-qr" value="">
-                        <div id="selected-patron-display" class="mt-2 text-xs text-slate-400 hidden">
-                            Selected: <span id="patron-name" class="text-cyan-400 font-medium"></span>
-                        </div>
-                        <div id="patron-eligibility-note" class="mt-2 text-[10px] text-amber-400 hidden"></div>
+                        {# Patron details, filled in once a patron is chosen or scanned. #}
+                        <div id="selected-patron-display" class="mt-2 hidden rounded-lg border border-slate-800 bg-slate-900/40 p-3"></div>
                     </div>
 
                     <!-- Books to Process: typed, or added by the scanner above -->
@@ -936,42 +934,97 @@
             });
         }
 
+        // Patron details card.
+        let patronDetailsFor = null;
+
+        function patronCardHtml(p, loading) {
+            const esc = s => String(s == null ? '' : s)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+            const row = (label, value) => (value === '' || value == null) ? '' :
+                '<div><p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">' + label + '</p>'
+                + '<p class="text-xs text-slate-300 mt-0.5 break-words">' + esc(value) + '</p></div>';
+            const status = p.account_status
+                ? '<span class="px-2 py-0.5 rounded text-[10px] font-semibold '
+                  + (p.account_status === 'Active' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400')
+                  + '">' + esc(p.account_status) + '</span>'
+                : '';
+            const loans = p.active_borrows == null ? '' : p.active_borrows + (p.max_books ? ' of ' + p.max_books : '');
+            let footer = '';
+            if (loading) {
+                footer = '<p class="mt-2 text-[10px] text-slate-500">Loading details&hellip;</p>';
+            } else if (p.violations) {
+                footer = p.violations.length
+                    ? '<p class="mt-2 text-[11px] text-amber-400"><i class="fa-solid fa-triangle-exclamation mr-1"></i>Cannot borrow: ' + esc(p.violations.join(', ')) + '</p>'
+                    : '<p class="mt-2 text-[11px] text-emerald-400"><i class="fa-solid fa-circle-check mr-1"></i>Can borrow</p>';
+            }
+            return '<div class="flex items-start justify-between gap-2">'
+                + '<div class="min-w-0">'
+                +   '<p id="patron-name" class="text-sm font-bold text-slate-100 truncate">' + esc(p.fullname) + '</p>'
+                +   '<p class="text-[11px] text-slate-500 mt-0.5">' + esc(p.patron_type || '')
+                +     (p.card_number ? (p.patron_type ? ' · ' : '') + 'Card ' + esc(p.card_number) : '') + '</p>'
+                + '</div>'
+                + '<div class="flex items-center gap-2 flex-shrink-0">' + status
+                +   '<button type="button" onclick="clearPatronSelection()" class="text-slate-500 hover:text-slate-300" aria-label="Clear patron"><i class="fa-solid fa-xmark"></i></button>'
+                + '</div>'
+                + '</div>'
+                + '<div class="grid grid-cols-2 gap-3 mt-3">'
+                +   row('Email', p.email) + row('Contact', p.contact_number)
+                +   row('School', p.school) + row('Books out', loans)
+                + '</div>'
+                + footer;
+        }
+
+        function showPatronCard(p, loading) {
+            const box = document.getElementById('selected-patron-display');
+            box.innerHTML = patronCardHtml(p, loading);
+            box.classList.remove('hidden');
+        }
+
+        function loadPatronDetails(patronId, fallback) {
+            const id = String(patronId);
+            patronDetailsFor = id;
+            fetch(`/admin-portal/patron-details/${encodeURIComponent(id)}/`, {
+                headers: { 'X-Requested-With': 'XMLHttpRequest' }
+            })
+                .then(response => response.json())
+                .then(data => {
+                    // Ignore if another patron was chosen meanwhile.
+                    if (patronDetailsFor !== id) return;
+                    showPatronCard(data.success ? data.patron : fallback, false);
+                })
+                .catch(() => { if (patronDetailsFor === id) showPatronCard(fallback, false); });
+        }
+
         function selectPatron(patronId, fullname, email) {
             document.getElementById('selected-patron-id').value = patronId;
-            document.getElementById('patron-name').textContent = `${fullname} (${email})`;
-            document.getElementById('selected-patron-display').classList.remove('hidden');
             document.getElementById('patron-search').value = fullname;
             patronDropdown.classList.add('hidden');
             // Picked by name or email, so clear any earlier scan.
             document.getElementById('scanned-patron-qr').value = '';
-            document.getElementById('patron-eligibility-note').classList.add('hidden');
+            const basic = { fullname: fullname, email: email };
+            showPatronCard(basic, true);
+            loadPatronDetails(patronId, basic);
         }
 
         function clearPatronSelection() {
+            patronDetailsFor = null;
             document.getElementById('selected-patron-id').value = '';
             document.getElementById('scanned-patron-qr').value = '';
             document.getElementById('patron-search').value = '';
-            document.getElementById('selected-patron-display').classList.add('hidden');
-            document.getElementById('patron-eligibility-note').classList.add('hidden');
+            const box = document.getElementById('selected-patron-display');
+            box.innerHTML = '';
+            box.classList.add('hidden');
             // So the same card can be scanned again straight away after a clear.
             lastScanCode = '';
         }
 
         function applyScannedPatron(qrCode, patron) {
+            patronDetailsFor = String(patron.patron_id);
             document.getElementById('selected-patron-id').value = patron.patron_id;
             document.getElementById('scanned-patron-qr').value = qrCode;
-            document.getElementById('patron-name').textContent =
-                `${patron.fullname} (${patron.email}) — ${patron.account_status}`;
-            document.getElementById('selected-patron-display').classList.remove('hidden');
             document.getElementById('patron-search').value = patron.fullname;
-
-            const note = document.getElementById('patron-eligibility-note');
-            if (patron.violations && patron.violations.length > 0) {
-                note.textContent = `Not eligible to borrow: ${patron.violations.join(', ')}`;
-                note.classList.remove('hidden');
-            } else {
-                note.classList.add('hidden');
-            }
+            showPatronCard(patron, false);
         }
 
         // Book search functionality (manual alternative to QR scanning)
@@ -1220,9 +1273,12 @@
                 +   detailRow('Genre', esc(d.genre))
                 +   detailRow('Published', esc(d.publication_year))
                 +   detailRow('Copies', esc(d.copies))
-                +   detailRow('Section', esc(d.category))
+                +   detailRow('Category', esc(d.category))
                 +   detailRow('Shelf', esc(d.shelf))
                 +   detailRow('Shelf level', esc(d.shelf_level))
+                + '</div>'
+                + '<div class="pt-2 border-t border-slate-800">'
+                +   detailRow('Position on the shelf', esc(d.location || 'Not shelved'))
                 + '</div>'
                 + '<div class="pt-2 border-t border-slate-800">'
                 +   '<p class="text-[10px] uppercase font-bold tracking-wider text-slate-500 mb-2">QR Code</p>'

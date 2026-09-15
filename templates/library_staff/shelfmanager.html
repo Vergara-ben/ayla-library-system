@@ -921,7 +921,7 @@
             var btn = inCart
                 ? '<button class="tbtn del" title="Remove" onclick="removeFromCart(' + b.book_id + ')"><i class="fa-solid fa-minus"></i></button>'
                 : '<button class="tbtn add" title="Add" onclick="addToCart(' + b.book_id + ')"><i class="fa-solid fa-plus"></i></button>';
-            var sub = esc(b.author) + (b.location ? ' · 📍 ' + esc(b.location) : '');
+            var sub = esc(b.author) + (b.location ? ' · ' + esc(b.location) : '');
             return '<div class="flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg border border-slate-800 hover:border-slate-700 bg-slate-950/40">'
                 + '<div class="min-w-0"><span class="block text-xs font-medium text-slate-200 truncate">' + esc(b.title) + '</span>'
                 + '<span class="block text-[10px] text-slate-500 truncate">' + sub + '</span></div>'

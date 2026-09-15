@@ -574,11 +574,11 @@
                                         <button data-floorplan-id="{{ floorplan.floor_plan_id }}" data-notice="{{ floorplan.renovation_notice|default:"" }}" data-message="{{ floorplan.renovation_message|default:"" }}" onclick="openRenovationModalFromData(this)" class="w-7 h-7 rounded border border-slate-800 text-amber-500/70 hover:text-amber-400 hover:bg-amber-950/20 transition-colors" title="Toggle Renovation">
                                             <i class="fa-solid fa-hammer text-[10px]"></i>
                                         </button>
-                                        <form method="post" action="{% url 'delete_floorplan' %}" class="inline" data-confirm="Are you sure you want to delete this floor plan?">
+                                        <form method="post" action="{% url 'delete_floorplan' %}" class="inline" data-confirm="Archive this floor plan? It is taken out of service and hidden, and can be restored from the Archive." data-confirm-title="Archive floor plan" data-confirm-label="Archive">
                                             {% csrf_token %}
                                             <input type="hidden" name="floorplan_id" value="{{ floorplan.floor_plan_id }}">
-                                            <button type="submit" class="w-7 h-7 rounded border border-slate-800 text-rose-500/70 hover:text-rose-400 hover:bg-rose-950/20 transition-colors" title="Delete">
-                                                <i class="fa-solid fa-trash-can text-[10px]"></i>
+                                            <button type="submit" class="w-7 h-7 rounded border border-slate-800 text-rose-500/70 hover:text-rose-400 hover:bg-rose-950/20 transition-colors" title="Archive" aria-label="Archive">
+                                                <i class="fa-solid fa-box-archive text-[10px]"></i>
                                             </button>
                                         </form>
                                     </div>
@@ -1962,7 +1962,7 @@
                 draggable: !b.locked,
                 icon: L.divIcon({ className: 'map-dot beacon' + (b.locked ? ' is-locked' : ''), iconSize: [16, 16], iconAnchor: [8, 8] }),
             }).addTo(lmap);
-            m.bindTooltip('📡 ' + (b.label || 'Beacon') + ' — ' + b.beacon_uuid, { direction: 'top' });
+            m.bindTooltip('<i class="fa-solid fa-tower-broadcast"></i> ' + (b.label || 'Beacon') + ' — ' + b.beacon_uuid, { direction: 'top' });
             m.on('contextmenu', function (e) { L.DomEvent.stop(e); showBeaconInspector(b.beacon_id); });
             m.on('click', function (e) { if (pendingPlacement()) return; if (shiftClick(e, 'beacon', b.beacon_id)) return; L.DomEvent.stop(e); showBeaconInspector(b.beacon_id); });
 
@@ -2109,8 +2109,8 @@
                 icon: L.divIcon({ className: 'map-dot waypoint' + (w.locked ? ' is-locked' : ''), iconSize: [16, 16], iconAnchor: [8, 8] }),
             }).addTo(lmap);
             const tip = w.linked_shelf_name
-                ? '🟢 ' + (w.label || 'Waypoint') + ' → ' + w.linked_shelf_name
-                : '🟢 ' + (w.label || 'Waypoint');
+                ? '<i class="fa-solid fa-location-dot"></i> ' + (w.label || 'Waypoint') + ' → ' + w.linked_shelf_name
+                : '<i class="fa-solid fa-location-dot"></i> ' + (w.label || 'Waypoint');
             m.bindTooltip(tip, { direction: 'top' });
             m.on('click', function (e) { if (pendingPlacement()) return; if (shiftClick(e, 'waypoint', w.waypoint_id)) return; L.DomEvent.stop(e); onWaypointClick(w.waypoint_id); });
             // Right-click opens a waypoint in the panel.
@@ -3450,10 +3450,10 @@
         function shelfTooltip(s) {
             const what = s.kind && s.kind !== 'Shelf' ? s.kind.toLowerCase() : 'shelf';
             if (isTraced(s)) {
-                return '📚 ' + (s.name || 'Shelf') + ' · traced ' + what
+                return '<i class="fa-solid fa-book"></i> ' + (s.name || 'Shelf') + ' · traced ' + what
                      + ' · ' + s.geometry.length + ' corners';
             }
-            return '📚 ' + (s.name || 'Shelf') + ' · '
+            return '<i class="fa-solid fa-book"></i> ' + (s.name || 'Shelf') + ' · '
                 + Math.round(s.width || SHELF_W) + '×' + Math.round(s.depth || SHELF_D)
                 + ' · ' + Math.round(s.rotation || 0) + '°';
         }
@@ -4515,7 +4515,7 @@
                 const btn = document.createElement('button');
                 btn.type = 'button';
                 btn.className = 'text-[11px] font-bold px-2.5 py-1 rounded-lg border border-amber-500/40 text-amber-500 hover:bg-amber-500/10 transition-colors';
-                btn.textContent = '✏️ ' + (r.name || ('Room ' + r.room_id));
+                btn.textContent = (r.name || ('Room ' + r.room_id));
                 btn.onclick = function () { startDrawingForRoom(r.room_id, r.name); };
                 list.appendChild(btn);
             });
@@ -4535,7 +4535,7 @@
                 const btn = document.createElement('button');
                 btn.type = 'button';
                 btn.className = 'text-[11px] font-bold px-2.5 py-1 rounded-lg border border-purple-500/40 text-purple-400 hover:bg-purple-500/10 transition-colors';
-                btn.textContent = '📚 ' + (s.name || ('Shelf ' + s.shelf_id));
+                btn.textContent = (s.name || ('Shelf ' + s.shelf_id));
                 btn.onclick = function () { startPlacingShelf(s.shelf_id, s.name); };
                 list.appendChild(btn);
             });

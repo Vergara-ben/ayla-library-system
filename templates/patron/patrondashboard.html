@@ -185,6 +185,7 @@
     <link rel="stylesheet" href="{% static 'css/patron.css' %}">
     <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
     <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha384-iw3OoTErCYJJB9mCa8LNS2hbsQ7M3C0EpIsO/H5+EGAkPGc6rk+V8i04oW/K5xq0" crossorigin="anonymous" referrerpolicy="no-referrer">
 </head>
 <body>
 
@@ -195,7 +196,7 @@
   </div>
   <div class="nav-right">
     <button type="button" class="theme-toggle" data-theme-toggle></button>
-    <a href="{% url 'patron_announcements' %}" class="nav-btn">🔔{% if recent_announcements %}<span class="badge">{{ recent_announcements|length }}</span>{% endif %}</a>
+    <a href="{% url 'patron_announcements' %}" class="nav-btn"><i class="fa-solid fa-bell" aria-hidden="true"></i>{% if recent_announcements %}<span class="badge">{{ recent_announcements|length }}</span>{% endif %}</a>
     <a href="{% url 'patron_account' %}" class="avatar">{{ patron.fullname|first|upper }}</a>
   </div>
 </nav>
@@ -205,18 +206,18 @@
   <!-- ANNOUNCEMENT -->
   {% if recent_announcements %}
   <div class="announcement" id="annBanner">
-    <div class="ann-icon">📢</div>
+    <div class="ann-icon"><i class="fa-solid fa-bullhorn" aria-hidden="true"></i></div>
     <div class="ann-text">
       <div class="ann-title">{{ recent_announcements.0.title }}</div>
       <div class="ann-msg">{{ recent_announcements.0.message }}</div>
     </div>
-    <div class="ann-close" onclick="document.getElementById('annBanner').style.display='none'">✕</div>
+    <div class="ann-close" onclick="document.getElementById('annBanner').style.display='none'"><i class="fa-solid fa-xmark" aria-hidden="true"></i></div>
   </div>
   {% endif %}
 
   <!-- GREETING -->
   <div class="greeting">
-    <h1>Hello, {{ patron.fullname }} 🌤️</h1>
+    <h1>Hello, {{ patron.fullname }}</h1>
     {% if overdue_count %}
     <p>You have <span>{{ overdue_count }} overdue book{{ overdue_count|pluralize }}</span>. Please return them soon!</p>
     {% elif borrowed_count %}
@@ -229,25 +230,25 @@
   <!-- STATS -->
   <div class="stats">
     <div class="stat-card green" onclick="window.location.href='{% url 'patron_account' %}'">
-      <div class="stat-icon">📚</div>
+      <div class="stat-icon"><i class="fa-solid fa-book" aria-hidden="true"></i></div>
       <div class="stat-num">{{ borrowed_count }}</div>
       <div class="stat-label">Books Borrowed</div>
       <div class="stat-sub">↑ Active borrows</div>
     </div>
     <div class="stat-card amber">
-      <div class="stat-icon">⏰</div>
+      <div class="stat-icon"><i class="fa-solid fa-clock" aria-hidden="true"></i></div>
       <div class="stat-num">{{ overdue_count }}</div>
       <div class="stat-label">Overdue Books</div>
-      <div class="stat-sub">⚠ Return soon</div>
+      <div class="stat-sub"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> Return soon</div>
     </div>
     <div class="stat-card blue">
-      <div class="stat-icon">🕐</div>
+      <div class="stat-icon"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i></div>
       <div class="stat-num">{{ history_count }}</div>
       <div class="stat-label">Books in History</div>
       <div class="stat-sub">↑ Returned</div>
     </div>
     <div class="stat-card pink">
-      <div class="stat-icon">🆔</div>
+      <div class="stat-icon"><i class="fa-solid fa-id-card" aria-hidden="true"></i></div>
       <div class="stat-num">{{ patron.patron_id }}</div>
       <div class="stat-label">Patron ID</div>
       <div class="stat-sub">{{ patron.patron_type }}</div>
@@ -261,7 +262,7 @@
       <!-- Active Loans -->
       <div class="card" style="margin-bottom:16px;">
         <div class="card-header">
-          <div class="card-title">📖 Active Borrows</div>
+          <div class="card-title"><i class="fa-solid fa-book-open" aria-hidden="true"></i> Active Borrows</div>
           <a href="{% url 'patron_account' %}" class="view-all">View all →</a>
         </div>
         {% for tx in active_loans %}
@@ -286,12 +287,12 @@
       <!-- History -->
       <div class="card">
         <div class="card-header">
-          <div class="card-title">🕐 Recent History</div>
+          <div class="card-title"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i> Recent History</div>
           <a href="{% url 'patron_account' %}" class="view-all">View all →</a>
         </div>
         {% for tx in recent_history %}
         <div class="history-item">
-          <div class="hist-icon">📗</div>
+          <div class="hist-icon"><i class="fa-solid fa-book" aria-hidden="true"></i></div>
           <div style="flex:1">
             <div class="hist-title">{{ tx.book.title }}</div>
             <div class="hist-date">Returned {{ tx.return_date|date:"M j, Y" }}</div>
@@ -308,20 +309,20 @@
     <div>
       <!-- Quick Actions -->
       <div class="card" style="margin-bottom:16px;">
-        <div class="card-title" style="margin-bottom:14px;">⚡ Quick Actions</div>
+        <div class="card-title" style="margin-bottom:14px;"><i class="fa-solid fa-bolt" aria-hidden="true"></i> Quick Actions</div>
         <div class="quick-grid">
-          <a href="{% url 'patron_catalog' %}" class="q-btn"><div class="q-btn-icon">🔍</div><div class="q-btn-label">Search</div></a>
-          <a href="{% url 'patron_map' %}" class="q-btn"><div class="q-btn-icon">🗺️</div><div class="q-btn-label">Navigate</div></a>
-          <a href="{% url 'patron_account' %}" class="q-btn"><div class="q-btn-icon">📚</div><div class="q-btn-label">Borrowing</div></a>
+          <a href="{% url 'patron_catalog' %}" class="q-btn"><div class="q-btn-icon"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i></div><div class="q-btn-label">Search</div></a>
+          <a href="{% url 'patron_map' %}" class="q-btn"><div class="q-btn-icon"><i class="fa-solid fa-map" aria-hidden="true"></i></div><div class="q-btn-label">Navigate</div></a>
+          <a href="{% url 'patron_account' %}" class="q-btn"><div class="q-btn-icon"><i class="fa-solid fa-book" aria-hidden="true"></i></div><div class="q-btn-label">Borrowing</div></a>
         </div>
       </div>
 
       <!-- Overdue -->
       <div class="card">
-        <div class="card-title" style="margin-bottom:14px;">⚠️ Overdue Notice</div>
+        <div class="card-title" style="margin-bottom:14px;"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> Overdue Notice</div>
         {% if overdue_loans %}
         <div class="overdue-card">
-          <div class="overdue-title">🚨 {{ overdue_count }} Overdue Book{{ overdue_count|pluralize }}</div>
+          <div class="overdue-title"><i class="fa-solid fa-circle-exclamation" aria-hidden="true"></i> {{ overdue_count }} Overdue Book{{ overdue_count|pluralize }}</div>
           {% for tx in overdue_loans %}
           <div class="overdue-item">
             <div style="font-weight:600;font-size:12px;">{{ tx.book.title }}</div>
@@ -331,7 +332,7 @@
         </div>
         <button onclick="window.location.href='{% url 'patron_account' %}'" style="width:100%;margin-top:12px;padding:10px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--danger);font-family:'DM Sans',sans-serif;font-size:12px;cursor:pointer;transition:all 0.2s;" onmouseover="this.style.borderColor='var(--danger)'" onmouseout="this.style.borderColor='var(--border)'">View & Renew →</button>
         {% else %}
-        <div class="overdue-days" style="color:var(--muted)">No overdue books. 🎉</div>
+        <div class="overdue-days" style="color:var(--muted)">No overdue books.</div>
         {% endif %}
       </div>
     </div>
@@ -341,16 +342,16 @@
 <!-- BOTTOM NAV -->
 <nav class="bottom-nav">
   <a href="{% url 'patron_dashboard' %}" class="nav-item active">
-    <div class="nav-icon">🏠</div><div class="nav-label">Home</div>
+    <div class="nav-icon"><i class="fa-solid fa-house" aria-hidden="true"></i></div><div class="nav-label">Home</div>
   </a>
   <a href="{% url 'patron_catalog' %}" class="nav-item">
-    <div class="nav-icon">🔍</div><div class="nav-label">Search</div>
+    <div class="nav-icon"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i></div><div class="nav-label">Search</div>
   </a>
   <a href="{% url 'patron_map' %}" class="nav-item">
-    <div class="nav-icon">🗺️</div><div class="nav-label">Map</div>
+    <div class="nav-icon"><i class="fa-solid fa-map" aria-hidden="true"></i></div><div class="nav-label">Map</div>
   </a>
   <a href="{% url 'patron_account' %}" class="nav-item">
-    <div class="nav-icon">👤</div><div class="nav-label">Account</div>
+    <div class="nav-icon"><i class="fa-solid fa-user" aria-hidden="true"></i></div><div class="nav-label">Account</div>
   </a>
 </nav>
 </body>

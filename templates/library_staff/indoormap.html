@@ -559,7 +559,7 @@
                 {% if not no_floorplans %}
                 <section class="panel">
                     <div class="panel-meta">
-                        <span>🗺️</span> Floor Plan
+                        <span><i class="fa-solid fa-map" aria-hidden="true"></i></span> Floor Plan
                     </div>
 
                     {# Which floor is on screen, in words. #}
@@ -569,19 +569,19 @@
                         <div class="filter-item">
                             <input type="checkbox" id="show-rooms" checked>
                             <label for="show-rooms">
-                                <span class="emoji">🏠</span> Rooms
+                                <span class="emoji"><i class="fa-solid fa-house" aria-hidden="true"></i></span> Rooms
                             </label>
                         </div>
                         <div class="filter-item">
                             <input type="checkbox" id="show-shelves" checked>
                             <label for="show-shelves">
-                                <span class="emoji">📚</span> Shelves
+                                <span class="emoji"><i class="fa-solid fa-book" aria-hidden="true"></i></span> Shelves
                             </label>
                         </div>
                         <div class="filter-item">
                             <input type="checkbox" id="show-waypoints" checked>
                             <label for="show-waypoints">
-                                <span class="emoji">📍</span> Waypoints
+                                <span class="emoji"><i class="fa-solid fa-location-dot" aria-hidden="true"></i></span> Waypoints
                             </label>
                         </div>
                         {% if show_beacons %}
@@ -589,7 +589,7 @@
                         <div class="filter-item">
                             <input type="checkbox" id="show-beacons" checked>
                             <label for="show-beacons">
-                                <span class="emoji">📡</span> BLE Beacons
+                                <span class="emoji"><i class="fa-solid fa-tower-broadcast" aria-hidden="true"></i></span> BLE Beacons
                             </label>
                         </div>
                         {% endif %}
@@ -599,17 +599,17 @@
 
                 <section class="panel" id="navigatingToPanel" style="display:none;">
                     <div class="panel-meta">
-                        <span>🧭</span> Locating
+                        <span><i class="fa-solid fa-compass" aria-hidden="true"></i></span> Locating
                     </div>
                     <h3 class="panel-heading-serif" id="navTargetShelf">Shelf</h3>
                     <p class="panel-sub-label" id="navTargetBook"></p>
-                    <p class="step-text">📍 In <strong class="shelf-highlight" id="navTargetRoom">this room</strong> — highlighted on the map.</p>
+                    <p class="step-text"><i class="fa-solid fa-location-dot" aria-hidden="true"></i> In <strong class="shelf-highlight" id="navTargetRoom">this room</strong> — highlighted on the map.</p>
                 </section>
 
                 {# Asked for a shelf that is on another storey. #}
                 <section class="panel" id="otherFloorPanel" style="display:none;">
                     <div class="panel-meta">
-                        <span>🧭</span> Locating
+                        <span><i class="fa-solid fa-compass" aria-hidden="true"></i></span> Locating
                     </div>
                     <h3 class="panel-heading-serif" id="awayShelfName">Shelf</h3>
                     <p class="panel-sub-label" id="awayBookName"></p>
@@ -619,7 +619,7 @@
 
                 <section class="panel" id="noTargetPanel">
                     <div class="panel-meta">
-                        <span>🧭</span> Locating
+                        <span><i class="fa-solid fa-compass" aria-hidden="true"></i></span> Locating
                     </div>
                     <p class="panel-sub-label" style="margin-bottom:0;">Search for a book below, or choose "Locate on Map" from a book's details in Manage Books.</p>
                 </section>
@@ -627,7 +627,7 @@
                 {# Find a book, on the map itself. #}
                 <section class="panel" id="findPanel">
                     <div class="panel-meta">
-                        <span>🔍</span> Find a book
+                        <span><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i></span> Find a book
                     </div>
                     <input id="mapFindInput" type="search" class="mf-input" autocomplete="off"
                            placeholder="Title, author, ISBN or subject" aria-label="Search for a book">
@@ -781,7 +781,7 @@
                     if (r.shelf_id && r.navigable) {
                         const href = '?shelf=' + r.shelf_id + '&book=' + encodeURIComponent(r.title);
                         return '<a class="mf-item" href="' + href + '">' + head
-                             + '<div class="mf-where go">📍 ' + esc(r.location) + '</div></a>';
+                             + '<div class="mf-where go"><i class="fa-solid fa-location-dot" aria-hidden="true"></i> ' + esc(r.location) + '</div></a>';
                     }
                     const why = r.shelved ? 'Shelf not placed on the floor plan' : 'Not yet shelved';
                     return '<div class="mf-item">' + head + '<div class="mf-where">' + why + '</div></div>';
@@ -953,7 +953,7 @@
             // Add room markers
             if (roomsData && roomsData.length > 0) {
                 roomsData.forEach(room => {
-                    const marker = createEmojiMarker(room.x, room.y, '🏠', room.name, room.description, 'var(--accent)');
+                    const marker = createEmojiMarker(room.x, room.y, '<i class="fa-solid fa-house"></i>', room.name, room.description, 'var(--accent)');
                     roomMarkers.push(marker);
                     marker.addTo(map);
                 });
@@ -992,7 +992,7 @@
             // Add waypoint markers
             if (waypointsData && waypointsData.length > 0) {
                 waypointsData.forEach(waypoint => {
-                    const marker = createEmojiMarker(waypoint.x, waypoint.y, '📍', waypoint.label || 'Waypoint', '', 'var(--warning)');
+                    const marker = createEmojiMarker(waypoint.x, waypoint.y, '<i class="fa-solid fa-location-dot"></i>', waypoint.label || 'Waypoint', '', 'var(--warning)');
                     waypointMarkers.push(marker);
                     marker.addTo(map);
                 });
@@ -1002,7 +1002,7 @@
             if (beaconsData && beaconsData.length > 0) {
                 beaconsData.forEach(beacon => {
                     const marker = createEmojiMarker(
-                        beacon.x, beacon.y, '📡',
+                        beacon.x, beacon.y, '<i class="fa-solid fa-tower-broadcast"></i>',
                         beacon.label || 'BLE Beacon',
                         beacon.uuid ? 'UUID: ' + beacon.uuid : '',
                         'var(--accent-blue)');
@@ -1022,7 +1022,8 @@
             const icon = L.divIcon({
                 className: 'emoji-marker',
                 html: `<div style="
-                    font-size: 24px;
+                    font-size: 22px;
+                    color: ${color || 'var(--accent)'};
                     text-shadow: 0 2px 4px var(--scrim);
                     cursor: pointer;
                 ">${emoji}</div>`,

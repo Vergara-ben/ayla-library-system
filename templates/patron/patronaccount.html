@@ -114,14 +114,15 @@
     <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
     <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
     <script src="{% static 'js/ayla-dialog.js' %}"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha384-iw3OoTErCYJJB9mCa8LNS2hbsQ7M3C0EpIsO/H5+EGAkPGc6rk+V8i04oW/K5xq0" crossorigin="anonymous" referrerpolicy="no-referrer">
 </head>
 <body>
 <nav class="navbar">
-  <a href="{% url 'patron_dashboard' %}" class="back-btn">←</a>
+  <a href="{% url 'patron_dashboard' %}" class="back-btn" aria-label="Back"><i class="fa-solid fa-arrow-left" aria-hidden="true"></i></a>
   <div class="nav-title">My Account</div>
   <div style="display:flex;align-items:center;gap:10px;">
     <button type="button" class="theme-toggle" data-theme-toggle></button>
-    <button class="edit-btn" onclick="toggleEdit()">✏️ Edit</button>
+    <button class="edit-btn" onclick="toggleEdit()"><i class="fa-solid fa-pen" aria-hidden="true"></i> Edit</button>
   </div>
 </nav>
 
@@ -131,7 +132,7 @@
     <div class="avatar">{{ patron.fullname|first|upper }}</div>
     <div class="profile-info">
       <div class="profile-name">{{ patron.fullname }}</div>
-      <div class="profile-type">🎓 {{ patron.patron_type }} Patron</div>
+      <div class="profile-type"><i class="fa-solid fa-graduation-cap" aria-hidden="true"></i> {{ patron.patron_type }} Patron</div>
       <div class="profile-email">{{ patron.email }}</div>
       {# The number printed on their card, which is what the front desk asks for. #}
       <div class="patron-id">{% if patron.card_number %}Card No.: <span>AYLA-{{ patron.card_display }}</span>{% else %}Patron ID: <span>{{ patron.patron_id }}</span>{% endif %}</div>
@@ -141,7 +142,7 @@
   <!-- MY QR CODE -->
   {% if patron.qr_code %}
   <div class="section" style="animation-delay:0.05s">
-    <div class="section-title" style="margin-bottom:14px">🎫 My Library QR Code</div>
+    <div class="section-title" style="margin-bottom:14px"><i class="fa-solid fa-qrcode" aria-hidden="true"></i> My Library QR Code</div>
     <div class="qr-section">
       <div class="qr-mini" style="width:110px;height:110px;padding:6px;">
         <img id="patronQrImg" src="{{ qr_data_uri|default:'' }}" alt="My QR Code" style="width:100%;height:100%;">
@@ -150,8 +151,8 @@
         <div class="qr-title">Present this at the library desk</div>
         <div class="qr-sub">Staff scan it for borrowing, returning, and entry logging.</div>
       </div>
-      <a class="btn-dl" href="{% url 'my_library_card' %}" style="text-decoration:none;">🪪 My Library Card</a>
-      <a class="btn-dl" href="{% url 'patron_messages' %}" style="text-decoration:none;">💬 Ask a Librarian</a>
+      <a class="btn-dl" href="{% url 'my_library_card' %}" style="text-decoration:none;"><i class="fa-solid fa-id-card" aria-hidden="true"></i> My Library Card</a>
+      <a class="btn-dl" href="{% url 'patron_messages' %}" style="text-decoration:none;"><i class="fa-solid fa-comments" aria-hidden="true"></i> Ask a Librarian</a>
     </div>
   </div>
   {% endif %}
@@ -159,7 +160,7 @@
   <!-- ACTIVE LOANS -->
   <div class="section" style="animation-delay:0.1s">
     <div class="section-header">
-      <div class="section-title">📚 Active Loans</div>
+      <div class="section-title"><i class="fa-solid fa-book" aria-hidden="true"></i> Active Loans</div>
       <div class="see-all">View all</div>
     </div>
     {% for tx in active_loans %}
@@ -179,7 +180,7 @@
         </div>
         {% endif %}
         {% if tx.pending_extension %}
-        <div class="ext-status" style="font-size:11px;color:var(--muted);margin-top:4px;">⏳ Extension requested — awaiting the library</div>
+        <div class="ext-status" style="font-size:11px;color:var(--muted);margin-top:4px;"><i class="fa-solid fa-hourglass-half" aria-hidden="true"></i> Extension requested — awaiting the library</div>
         {% else %}
         <button type="button" class="ext-request-btn" data-tx-id="{{ tx.transaction_id }}" onclick="requestExtension(this)" style="margin-top:6px;font-size:11px;font-weight:600;color:var(--accent);background:none;border:none;padding:0;cursor:pointer;text-decoration:underline;">Request Extension</button>
         {% endif %}
@@ -198,12 +199,12 @@
   <!-- HISTORY -->
   <div class="section" style="animation-delay:0.15s">
     <div class="section-header">
-      <div class="section-title">🕐 Borrowing History</div>
+      <div class="section-title"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i> Borrowing History</div>
       <div class="see-all">{{ history|length }} total</div>
     </div>
     {% for tx in history %}
     <div class="hist-row">
-      <div class="hist-icon">📗</div>
+      <div class="hist-icon"><i class="fa-solid fa-book" aria-hidden="true"></i></div>
       <div class="hist-info">
         <div class="hist-title">{{ tx.book.title }}</div>
         <div class="hist-dates">Borrowed {{ tx.transaction_date|date:"M j" }} → Returned {{ tx.return_date|date:"M j, Y" }}{% if tx.fine_amount %} · <span style="color:var(--danger);font-weight:700">Fine ₱{{ tx.fine_amount }}</span>{% endif %}</div>
@@ -217,7 +218,7 @@
 
   <!-- ACCOUNT INFO -->
   <div class="section" style="animation-delay:0.2s">
-    <div class="section-title" style="margin-bottom:16px">⚙️ Account Information</div>
+    <div class="section-title" style="margin-bottom:16px"><i class="fa-solid fa-gear" aria-hidden="true"></i> Account Information</div>
     <div class="form-grid">
       <div class="form-group">
         <label for="firstName">First Name</label>
@@ -253,7 +254,7 @@
 
   <!-- SECURITY -->
   <div class="section" style="animation-delay:0.25s">
-    <div class="section-title" style="margin-bottom:16px">🔐 Security</div>
+    <div class="section-title" style="margin-bottom:16px"><i class="fa-solid fa-lock" aria-hidden="true"></i> Security</div>
 
     <div class="form-group">
       <label for="currentPassword">Change Password</label>
@@ -275,7 +276,7 @@
 
   <!-- DEACTIVATE ACCOUNT -->
   <div class="section" style="animation-delay:0.3s;border-color:var(--danger)">
-    <div class="section-title" style="margin-bottom:16px;color:var(--danger)">⚠️ Deactivate Account</div>
+    <div class="section-title" style="margin-bottom:16px;color:var(--danger)"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> Deactivate Account</div>
     <p style="font-size:12px;color:var(--muted);margin-bottom:12px;line-height:1.5;">
       Deactivating signs you out and blocks login until you reactivate. You can't
       deactivate while you still have unreturned books.
@@ -295,15 +296,15 @@
 
   <!-- LOGOUT -->
   <button class="logout-btn" onclick="if(confirm('Log out of AYLA?'))window.location.href='{% url 'patron_login' %}'">
-    🚪 Logout
+    <i class="fa-solid fa-right-from-bracket" aria-hidden="true"></i> Logout
   </button>
 </div>
 
 <nav class="bottom-nav">
-  <a href="{% url 'patron_dashboard' %}" class="nav-item"><div class="nav-icon">🏠</div><div class="nav-label">Home</div></a>
-  <a href="{% url 'patron_catalog' %}" class="nav-item"><div class="nav-icon">🔍</div><div class="nav-label">Search</div></a>
-  <a href="{% url 'patron_map' %}" class="nav-item"><div class="nav-icon">🗺️</div><div class="nav-label">Map</div></a>
-  <a href="{% url 'patron_account' %}" class="nav-item active"><div class="nav-icon">👤</div><div class="nav-label">Account</div></a>
+  <a href="{% url 'patron_dashboard' %}" class="nav-item"><div class="nav-icon"><i class="fa-solid fa-house" aria-hidden="true"></i></div><div class="nav-label">Home</div></a>
+  <a href="{% url 'patron_catalog' %}" class="nav-item"><div class="nav-icon"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i></div><div class="nav-label">Search</div></a>
+  <a href="{% url 'patron_map' %}" class="nav-item"><div class="nav-icon"><i class="fa-solid fa-map" aria-hidden="true"></i></div><div class="nav-label">Map</div></a>
+  <a href="{% url 'patron_account' %}" class="nav-item active"><div class="nav-icon"><i class="fa-solid fa-user" aria-hidden="true"></i></div><div class="nav-label">Account</div></a>
 </nav>
 
 <form id="csrfForm" style="display:none">{% csrf_token %}</form>
@@ -338,7 +339,7 @@ function requestExtension(btn){
         const status = document.createElement('div');
         status.className = 'ext-status';
         status.style.cssText = 'font-size:11px;color:var(--muted);margin-top:4px;';
-        status.textContent = '⏳ Extension requested — awaiting the library';
+        status.textContent = 'Extension requested — awaiting the library';
         btn.replaceWith(status);
         toast('Extension requested. Due ' + res.requested_due_date + ' if approved.');
       } else {
@@ -360,7 +361,7 @@ const EDITABLE = ['firstName','middleName','lastName','email','phone','address']
 function toggleEdit(){
   editing = !editing;
   EDITABLE.forEach(id=>{ document.getElementById(id).disabled = !editing; });
-  document.querySelector('.edit-btn').textContent = editing ? '✕ Cancel' : '✏️ Edit';
+  document.querySelector('.edit-btn').innerHTML = editing ? '<i class="fa-solid fa-xmark"></i> Cancel' : '<i class="fa-solid fa-pen"></i> Edit';
   document.getElementById('saveBtn').style.display = editing ? 'block' : 'none';
 }
 function saveChanges(){
@@ -372,13 +373,13 @@ function saveChanges(){
     contact_number: document.getElementById('phone').value.trim(),
     address: document.getElementById('address').value.trim(),
   }).then(res=>{
-    if(!res.success){ toast('⚠️ '+res.error, false); return; }
+    if(!res.success){ toast(res.error, false); return; }
     editing = false;
     EDITABLE.forEach(id=>{ document.getElementById(id).disabled = true; });
-    document.querySelector('.edit-btn').textContent = '✏️ Edit';
+    document.querySelector('.edit-btn').innerHTML = '<i class="fa-solid fa-pen"></i> Edit';
     document.getElementById('saveBtn').style.display = 'none';
-    toast('✅ Changes saved!');
-  }).catch(()=>toast('⚠️ Could not save changes.', false));
+    toast('Changes saved!');
+  }).catch(()=>toast('Could not save changes.', false));
 }
 
 // Send both passwords with the code.
@@ -395,12 +396,12 @@ function startPasswordChange(btn){
     .then(res=>{
       btn.disabled = false;
       btn.textContent = 'Update Password';
-      if(!res.success){ toast('⚠️ '+res.error, false); return; }
+      if(!res.success){ toast(res.error, false); return; }
       document.getElementById('passwordStart').style.display = 'none';
       document.getElementById('passwordOtp').style.display = 'block';
       toast('Verification code sent to your email.');
     })
-    .catch(()=>{ btn.disabled=false; btn.textContent='Update Password'; toast('⚠️ Could not send the code.', false); });
+    .catch(()=>{ btn.disabled=false; btn.textContent='Update Password'; toast('Could not send the code.', false); });
 }
 function cancelPasswordChange(){
   document.getElementById('passwordOtp').style.display = 'none';
@@ -416,13 +417,13 @@ function confirmPasswordChange(btn){
     .then(res=>{
       btn.disabled = false;
       btn.textContent = 'Confirm Password Change';
-      if(!res.success){ toast('⚠️ '+res.error, false); return; }
-      toast('✅ Password changed!');
+      if(!res.success){ toast(res.error, false); return; }
+      toast('Password changed!');
       cancelPasswordChange();
       document.getElementById('currentPassword').value='';
       document.getElementById('newPassword').value='';
     })
-    .catch(()=>{ btn.disabled=false; btn.textContent='Confirm Password Change'; toast('⚠️ Could not change password.', false); });
+    .catch(()=>{ btn.disabled=false; btn.textContent='Confirm Password Change'; toast('Could not change password.', false); });
 }
 
 function startDeactivate(btn){
@@ -433,12 +434,12 @@ function startDeactivate(btn){
     .then(res=>{
       btn.disabled = false;
       btn.textContent = 'Deactivate Account';
-      if(!res.success){ toast('⚠️ '+res.error, false); return; }
+      if(!res.success){ toast(res.error, false); return; }
       document.getElementById('deactivateStart').style.display = 'none';
       document.getElementById('deactivateOtp').style.display = 'block';
       toast('Verification code sent to your email.');
     })
-    .catch(()=>{ btn.disabled=false; btn.textContent='Deactivate Account'; toast('⚠️ Could not send the code.', false); });
+    .catch(()=>{ btn.disabled=false; btn.textContent='Deactivate Account'; toast('Could not send the code.', false); });
 }
 function cancelDeactivate(){
   document.getElementById('deactivateOtp').style.display = 'none';
@@ -455,13 +456,13 @@ function confirmDeactivate(btn){
       if(!res.success){
         btn.disabled = false;
         btn.textContent = 'Confirm Deactivation';
-        toast('⚠️ '+res.error, false);
+        toast(res.error, false);
         return;
       }
       toast('Account deactivated. Signing you out…');
       setTimeout(()=>{ window.location.href = '{% url 'patron_login' %}'; }, 1500);
     })
-    .catch(()=>{ btn.disabled=false; btn.textContent='Confirm Deactivation'; toast('⚠️ Could not verify the code.', false); });
+    .catch(()=>{ btn.disabled=false; btn.textContent='Confirm Deactivation'; toast('Could not verify the code.', false); });
 }
 </script>
 </body>

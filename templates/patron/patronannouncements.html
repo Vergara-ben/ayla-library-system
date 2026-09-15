@@ -112,10 +112,11 @@
     <link rel="stylesheet" href="{% static 'css/patron.css' %}">
     <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
     <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha384-iw3OoTErCYJJB9mCa8LNS2hbsQ7M3C0EpIsO/H5+EGAkPGc6rk+V8i04oW/K5xq0" crossorigin="anonymous" referrerpolicy="no-referrer">
 </head>
 <body>
 <nav class="navbar">
-  <a href="{% url 'patron_dashboard' %}" class="back-btn">←</a>
+  <a href="{% url 'patron_dashboard' %}" class="back-btn" aria-label="Back"><i class="fa-solid fa-arrow-left" aria-hidden="true"></i></a>
   <div class="nav-title">Updates</div>
   <div style="display:flex;align-items:center;gap:10px;">
     <button type="button" class="theme-toggle" data-theme-toggle></button>
@@ -124,8 +125,8 @@
 </nav>
 
 <div class="tabs">
-  <button class="tab active" onclick="switchTab('ann',this)">📢 Announcements</button>
-  <button class="tab" onclick="switchTab('notif',this)">🔔 Notifications <span class="tab-badge">2</span></button>
+  <button class="tab active" onclick="switchTab('ann',this)"><i class="fa-solid fa-bullhorn" aria-hidden="true"></i> Announcements</button>
+  <button class="tab" onclick="switchTab('notif',this)"><i class="fa-solid fa-bell" aria-hidden="true"></i> Notifications <span class="tab-badge">2</span></button>
 </div>
 
 <div class="page">
@@ -135,7 +136,7 @@
     <div class="ann-card" onclick="markRead(this)">
       <div class="ann-header">
         <div class="ann-title-row">
-          <div class="ann-icon-badge">📢</div>
+          <div class="ann-icon-badge"><i class="fa-solid fa-bullhorn" aria-hidden="true"></i></div>
           <div class="ann-title">{{ ann.title }}</div>
         </div>
         <div class="ann-date">{{ ann.created_at|date:"M j" }}</div>
@@ -144,7 +145,7 @@
     </div>
     {% empty %}
     <div class="empty">
-      <div class="empty-icon">📭</div>
+      <div class="empty-icon"><i class="fa-solid fa-inbox" aria-hidden="true"></i></div>
       <div>No announcements right now.</div>
     </div>
     {% endfor %}
@@ -155,7 +156,7 @@
     <div class="section-date">Today</div>
 
     <div class="notif-card overdue">
-      <div class="notif-icon">🚨</div>
+      <div class="notif-icon"><i class="fa-solid fa-circle-exclamation" aria-hidden="true"></i></div>
       <div class="notif-body">
         <div class="notif-title">Overdue: Discrete Mathematics</div>
         <div class="notif-sub">Due date was <strong style="color:var(--danger)">December 8</strong> · 2 days overdue<br>Accumulating fine: <strong style="color:var(--danger)">₱10.00</strong> (₱5/day)</div>
@@ -167,7 +168,7 @@
     </div>
 
     <div class="notif-card due-soon">
-      <div class="notif-icon">⏰</div>
+      <div class="notif-icon"><i class="fa-solid fa-clock" aria-hidden="true"></i></div>
       <div class="notif-body">
         <div class="notif-title">Due Soon: Data Structures & Algorithms</div>
         <div class="notif-sub">Due in <strong style="color:var(--accent2)">2 days</strong> · December 12<br>Please return or renew before the deadline</div>
@@ -181,7 +182,7 @@
     <div class="section-date" style="margin-top:24px">Earlier</div>
 
     <div class="notif-card returned">
-      <div class="notif-icon">✅</div>
+      <div class="notif-icon"><i class="fa-solid fa-circle-check" aria-hidden="true"></i></div>
       <div class="notif-body">
         <div class="notif-title">Book Returned Successfully</div>
         <div class="notif-sub">Introduction to Algorithms · Returned Nov 15<br>No overdue fine incurred.</div>
@@ -190,7 +191,7 @@
     </div>
 
     <div class="notif-card">
-      <div class="notif-icon">🎉</div>
+      <div class="notif-icon"><i class="fa-solid fa-circle-info" aria-hidden="true"></i></div>
       <div class="notif-body">
         <div class="notif-title">Welcome to AYLA!</div>
         <div class="notif-sub">Your library account has been activated. You can now borrow up to 5 books at a time.</div>
@@ -201,14 +202,14 @@
 </div>
 
 <nav class="bottom-nav">
-  <a href="{% url 'patron_dashboard' %}" class="nav-item"><div class="nav-icon">🏠</div><div class="nav-label">Home</div></a>
-  <a href="{% url 'patron_catalog' %}" class="nav-item"><div class="nav-icon">🔍</div><div class="nav-label">Search</div></a>
-  <a href="{% url 'patron_map' %}" class="nav-item"><div class="nav-icon">🗺️</div><div class="nav-label">Map</div></a>
+  <a href="{% url 'patron_dashboard' %}" class="nav-item"><div class="nav-icon"><i class="fa-solid fa-house" aria-hidden="true"></i></div><div class="nav-label">Home</div></a>
+  <a href="{% url 'patron_catalog' %}" class="nav-item"><div class="nav-icon"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i></div><div class="nav-label">Search</div></a>
+  <a href="{% url 'patron_map' %}" class="nav-item"><div class="nav-icon"><i class="fa-solid fa-map" aria-hidden="true"></i></div><div class="nav-label">Map</div></a>
   {% if patron_signed_in %}
-  <a href="{% url 'patron_account' %}" class="nav-item"><div class="nav-icon">👤</div><div class="nav-label">Account</div></a>
+  <a href="{% url 'patron_account' %}" class="nav-item"><div class="nav-icon"><i class="fa-solid fa-user" aria-hidden="true"></i></div><div class="nav-label">Account</div></a>
   {% else %}
   {# Tab stays put for a visitor; tapping explains what an account is for. #}
-  <a href="{% url 'patron_login' %}" class="nav-item" onclick="showGuestPrompt(event)"><div class="nav-icon">👤</div><div class="nav-label">Account</div></a>
+  <a href="{% url 'patron_login' %}" class="nav-item" onclick="showGuestPrompt(event)"><div class="nav-icon"><i class="fa-solid fa-user" aria-hidden="true"></i></div><div class="nav-label">Account</div></a>
   {% endif %}
 </nav>
 

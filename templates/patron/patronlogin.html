@@ -439,6 +439,7 @@ label{
     <link rel="stylesheet" href="{% static 'css/patron.css' %}">
     <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
     <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha384-iw3OoTErCYJJB9mCa8LNS2hbsQ7M3C0EpIsO/H5+EGAkPGc6rk+V8i04oW/K5xq0" crossorigin="anonymous" referrerpolicy="no-referrer">
 </head>
 
 <body>
@@ -499,7 +500,7 @@ label{
             <label for="f_email">Email Address</label>
 
             <div class="input">
-              <div class="icon">✉</div>
+              <div class="icon"><i class="fa-solid fa-envelope" aria-hidden="true"></i></div>
               <input id="f_email" type="email" name="email" placeholder="name@domain.com" required>
             </div>
           </div>
@@ -508,7 +509,7 @@ label{
             <label for="f_password">Password</label>
 
             <div class="input">
-              <div class="icon">🔒</div>
+              <div class="icon"><i class="fa-solid fa-lock" aria-hidden="true"></i></div>
               <input id="f_password" type="password" name="password" placeholder="••••••••••" required>
             </div>
           </div>

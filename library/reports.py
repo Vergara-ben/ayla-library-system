@@ -30,6 +30,8 @@ SNAPSHOT_REPORTS = {'books', 'patrons', 'stock_levels', 'unreturned'}
 
 LIBRARY_NAME = 'Ayla Public Library'
 LIBRARY_LOCATION = 'Brgy. Sala, Cabuyao, Laguna'
+# Hours shown in the peak-hour statistics: 8 AM up to the 5 PM hour.
+OPEN_HOURS = range(8, 18)
 
 
 # Date handling
@@ -805,7 +807,7 @@ def _analytics(start, end):
         per_title[key] = per_title.get(key, 0) + 1
     ranked = sorted(per_title.items(), key=lambda kv: (-kv[1], kv[0][0]))
 
-    # Busiest hours.
+    # Busiest hours, counted within opening hours only.
     visits = PatronLog.objects.filter(entry_time__date__range=(start, end))
 
     per_hour = {}
@@ -813,9 +815,11 @@ def _analytics(start, end):
     total_visits = 0
     for log in visits:
         local = timezone.localtime(log.entry_time)
-        per_hour[local.hour] = per_hour.get(local.hour, 0) + 1
+        if local.hour in OPEN_HOURS:
+            per_hour[local.hour] = per_hour.get(local.hour, 0) + 1
         per_weekday[local.weekday()] = per_weekday.get(local.weekday(), 0) + 1
         total_visits += 1
+    open_visits = sum(per_hour.values())
 
     def _hour_label(h):
         # Format the hour by hand so it works on Windows.
@@ -843,22 +847,22 @@ def _analytics(start, end):
 
     # Average over hours that had visits.
     active_hours = len(per_hour)
-    avg_per_active_hour = (total_visits / active_hours) if active_hours else 0
-    peak_share = (peak_count / total_visits * 100) if total_visits else 0
+    avg_per_active_hour = (open_visits / active_hours) if active_hours else 0
+    peak_share = (peak_count / open_visits * 100) if open_visits else 0
 
     # How much busier the peak is than a typical open hour.
     peak_vs_average = (peak_count / avg_per_active_hour) if avg_per_active_hour else 0
 
-    # Include quiet hours between the first and last visit.
+    # Every opening hour, quiet ones included.
     hours = []
     if per_hour:
-        for h in range(min(per_hour), max(per_hour) + 1):
+        for h in OPEN_HOURS:
             n = per_hour.get(h, 0)
             hours.append({
                 'hour': h,
                 'label': _hour_label(h),
                 'value': n,
-                'share': round((n / total_visits) * 100, 1) if total_visits else 0,
+                'share': round((n / open_visits) * 100, 1) if open_visits else 0,
                 'is_peak': h == peak_hour,
             })
 
@@ -866,7 +870,7 @@ def _analytics(start, end):
         [(h['label'], h['value']) for h in hours],
         kind='line',
         title='Visits by hour of day',
-        note='Busiest hour marked. Counts are library entries, not borrows.',
+        note='8 AM to 5 PM. Busiest hour marked. Counts are library entries, not borrows.',
         empty_note='No visits were logged in this period.',
         highlight=_hour_label(peak_hour) if peak_hour is not None else None,
         axis_note='Hour of day \u00b7 vertical axis is number of library entries',
@@ -898,7 +902,7 @@ def _analytics(start, end):
         'breakdown': {
             'Visits by hour': [
                 (_hour_span(h), str(per_hour.get(h, 0)))
-                for h in sorted(per_hour)
+                for h in OPEN_HOURS
             ],
             'Visits by day of week': [
                 (WEEKDAYS[d], str(per_weekday[d]))

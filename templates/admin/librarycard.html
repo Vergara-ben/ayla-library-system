@@ -232,6 +232,7 @@
     * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   }
 </style>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha384-iw3OoTErCYJJB9mCa8LNS2hbsQ7M3C0EpIsO/H5+EGAkPGc6rk+V8i04oW/K5xq0" crossorigin="anonymous" referrerpolicy="no-referrer">
 </head>
 <body>
 
@@ -239,13 +240,13 @@
     <label class="filename">File name
       <input type="text" id="printFileName" maxlength="100" value="Library Card - {{ patron.fullname }}">
     </label>
-    <button type="button" class="btn" onclick="printWithName('printFileName')">🖨 Print card</button>
+    <button type="button" class="btn" onclick="printWithName('printFileName')"><i class="fa-solid fa-print" aria-hidden="true"></i> Print card</button>
     <select id="sideSelect" class="btn secondary" onchange="pickSide(this.value)" aria-label="Which side to print">
       <option value="both">Both sides</option>
       <option value="front">Front only</option>
       <option value="back">Back only</option>
     </select>
-    <a class="btn secondary" id="downloadQr" download="ayla_qr_{{ patron.patron_id }}.png">⬇ Save QR only</a>
+    <a class="btn secondary" id="downloadQr" download="ayla_qr_{{ patron.patron_id }}.png"><i class="fa-solid fa-download" aria-hidden="true"></i> Save QR only</a>
     {% if printed_by_staff %}
       {# Only show the back link with patrons access. #}
       {% if 'patrons' in allowed_modules %}

@@ -617,7 +617,7 @@
             <section class="hero-banner">
                 <div>
                     <span class="hero-welcome-tag">Staff Dashboard</span>
-                    <h1 class="hero-title">Welcome back, {{ admin.fullname|default:"Staff" }} 👋</h1>
+                    <h1 class="hero-title">Welcome back, {{ admin.fullname|default:"Staff" }}</h1>
                     <p class="hero-subtitle"><span>{{ visitors_today }} patron{{ visitors_today|pluralize }} logged in today</span></p>
                 </div>
                 <div class="hero-actions">
@@ -654,7 +654,7 @@
                 
                 <section class="panel">
                     <div class="panel-header">
-                        <h3 class="panel-title">📋 Recent Transactions</h3>
+                        <h3 class="panel-title"><i class="fa-solid fa-clipboard-list" aria-hidden="true"></i> Recent Transactions</h3>
                         <a href="{% url 'staff_transaction' %}" class="btn-view-all">View all &rarr;</a>
                     </div>
 
@@ -694,30 +694,30 @@
                     
                     <section class="panel">
                         <div class="panel-header">
-                            <h3 class="panel-title">⚡ Quick Actions</h3>
+                            <h3 class="panel-title"><i class="fa-solid fa-bolt" aria-hidden="true"></i> Quick Actions</h3>
                         </div>
                         <div class="quick-actions-grid">
                             {% if 'books' in allowed_modules %}
                             <a href="{% url 'staff_manage_books' %}" class="action-card">
-                                <span class="action-icon">📚</span>
+                                <span class="action-icon"><i class="fa-solid fa-book" aria-hidden="true"></i></span>
                                 <span class="action-label">Books</span>
                             </a>
                             {% endif %}
                             {% if 'transactions' in allowed_modules %}
                             <a href="{% url 'staff_transaction' %}" class="action-card">
-                                <span class="action-icon">📋</span>
+                                <span class="action-icon"><i class="fa-solid fa-clipboard-list" aria-hidden="true"></i></span>
                                 <span class="action-label">Transactions</span>
                             </a>
                             {% endif %}
                             {% if 'logs' in allowed_modules %}
                             <a href="{% url 'staff_logs' %}" class="action-card">
-                                <span class="action-icon">🚪</span>
+                                <span class="action-icon"><i class="fa-solid fa-door-open" aria-hidden="true"></i></span>
                                 <span class="action-label">Entry Logs</span>
                             </a>
                             {% endif %}
                             {% if 'shelf' in allowed_modules %}
                             <a href="{% url 'staff_shelf' %}" class="action-card">
-                                <span class="action-icon">🗂️</span>
+                                <span class="action-icon"><i class="fa-solid fa-folder-tree" aria-hidden="true"></i></span>
                                 <span class="action-label">Shelves</span>
                             </a>
                             {% endif %}
@@ -729,7 +729,7 @@
 
                     <section class="panel">
                         <div class="panel-header">
-                            <h3 class="panel-title">🚪 Today at a Glance</h3>
+                            <h3 class="panel-title"><i class="fa-solid fa-door-open" aria-hidden="true"></i> Today at a Glance</h3>
                             <a href="{% url 'staff_logs' %}" class="btn-view-all">View &rarr;</a>
                         </div>
                         <div class="log-stats-list">

@@ -381,11 +381,11 @@
                                                     class="w-7 h-7 rounded border border-slate-800 text-amber-500/70 hover:text-amber-400 hover:bg-amber-950/20 transition-colors" title="Edit Log">
                                                 <i class="fa-solid fa-pen text-[10px]"></i>
                                             </button>
-                                            <form method="post" action="{% url 'delete_patron_log' %}" class="inline" data-confirm="Delete this visit log?">
+                                            <form method="post" action="{% url 'delete_patron_log' %}" class="inline" data-confirm="Archive this visit log? It is left out of the visit counts, and an Administrator can restore it from the Archive." data-confirm-title="Archive visit log" data-confirm-label="Archive">
                                                 {% csrf_token %}
                                                 <input type="hidden" name="log_id" value="{{ log.log_id }}">
-                                                <button type="submit" class="w-7 h-7 rounded border border-slate-800 text-rose-500/70 hover:text-rose-400 hover:bg-rose-950/20 transition-colors" title="Delete Log">
-                                                    <i class="fa-solid fa-trash-can text-[10px]"></i>
+                                                <button type="submit" class="w-7 h-7 rounded border border-slate-800 text-rose-500/70 hover:text-rose-400 hover:bg-rose-950/20 transition-colors" title="Archive Log" aria-label="Archive Log">
+                                                    <i class="fa-solid fa-box-archive text-[10px]"></i>
                                                 </button>
                                             </form>
                                         </div>

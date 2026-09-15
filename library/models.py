@@ -8,7 +8,42 @@ from .modules import MODULE_LABELS, clean_module_keys
 from .names import compose_name, parse_name
 
 
-class ActiveLocationManager(models.Manager):
+class ArchiveManager(models.Manager):
+    """Hides archived rows. `all_objects` still sees them."""
+    def get_queryset(self):
+        return super().get_queryset().filter(archived_at__isnull=True)
+
+
+class Archivable(models.Model):
+    """A record that is archived instead of deleted, so it can be restored."""
+    archived_at = models.DateTimeField(blank=True, null=True, db_index=True)
+    archived_by = models.CharField(max_length=255, blank=True, default='')
+    archive_reason = models.CharField(max_length=500, blank=True, default='')
+
+    objects = ArchiveManager()
+    all_objects = models.Manager()
+
+    class Meta:
+        abstract = True
+
+    @property
+    def is_archived(self):
+        return self.archived_at is not None
+
+    def archive(self, by='', reason=''):
+        self.archived_at = timezone.now()
+        self.archived_by = (by or '')[:255]
+        self.archive_reason = (reason or '')[:500]
+        self.save(update_fields=['archived_at', 'archived_by', 'archive_reason'])
+
+    def restore(self):
+        self.archived_at = None
+        self.archived_by = ''
+        self.archive_reason = ''
+        self.save(update_fields=['archived_at', 'archived_by', 'archive_reason'])
+
+
+class ActiveLocationManager(ArchiveManager):
     """Manager that filters books to only include those in active locations"""
     def get_queryset(self):
         return super().get_queryset().filter(
@@ -20,7 +55,7 @@ class ActiveLocationManager(models.Manager):
 
 
 # Floor plans
-class FloorPlan(models.Model):
+class FloorPlan(Archivable):
     """A floor plan is a blank vector canvas the Administrator draws on."""
     floor_plan_id = models.AutoField(primary_key=True)
     name = models.CharField(max_length=255, default='Floor Plan')
@@ -479,7 +514,7 @@ class ShelfLevel(models.Model):
 
 
 # Books
-class Book(models.Model):
+class Book(Archivable):
 
     STATUS_CHOICES = [
         ('Available', 'Available'),
@@ -633,7 +668,8 @@ class Book(models.Model):
             self.call_number = self.derive_call_number()
         super().save(*args, **kwargs)
 
-    objects = models.Manager()
+    objects = ArchiveManager()
+    all_objects = models.Manager()
     active_locations = ActiveLocationManager()
 
     class Meta:
@@ -649,7 +685,7 @@ class Book(models.Model):
 
 
 # Donations
-class Donation(models.Model):
+class Donation(Archivable):
 
     STATUS_CHOICES = [
         ('Received', 'Received'),
@@ -739,7 +775,7 @@ class User(models.Model):
 
 
 # Announcements
-class Announcement(models.Model):
+class Announcement(Archivable):
     announcement_id = models.AutoField(primary_key=True)
     posted_by = models.ForeignKey(
         User,
@@ -759,7 +795,7 @@ class Announcement(models.Model):
 
 
 # Patron
-class Patron(models.Model):
+class Patron(Archivable):
 
     # Wrong OTP guesses allowed before the code is burnt.
     MAX_OTP_ATTEMPTS = 5
@@ -1023,7 +1059,7 @@ class ReactivationRequest(models.Model):
 
 
 # Patron logs
-class PatronLog(models.Model):
+class PatronLog(Archivable):
     """One visit session: entry_time is set on entry, exit_time on exit."""
 
     log_id = models.AutoField(primary_key=True)

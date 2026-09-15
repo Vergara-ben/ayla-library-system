@@ -301,9 +301,9 @@
                                     <div class="flex items-center justify-center gap-1.5">
                                         <button onclick="viewBookDetails({{ book.book_id }})" class="w-7 h-7 rounded border border-slate-800 text-violet-400 hover:text-violet-200 hover:bg-slate-800/40 transition-colors" aria-label="View book details"><i class="fa-solid fa-eye text-[10px]"></i></button>
                                         <a href="{% url 'admin_edit_book' book.book_id %}" class="w-7 h-7 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 transition-colors"><i class="fa-solid fa-pencil text-[10px]"></i></a>
-                                        <form method="post" action="{% url 'admin_delete_book' book.book_id %}" class="inline">
+                                        <form method="post" action="{% url 'admin_delete_book' book.book_id %}" class="inline" data-confirm="Archive &quot;{{ book.title }}&quot;? It is hidden from the catalogue, its loan history is kept, and an Administrator can restore it from the Archive." data-confirm-title="Archive book" data-confirm-label="Archive">
                                             {% csrf_token %}
-                                            <button type="submit" class="w-7 h-7 rounded border border-slate-800 text-rose-500/70 hover:text-rose-400 hover:bg-rose-950/20 transition-colors" aria-label="Delete"><i class="fa-solid fa-trash-can text-[10px]"></i></button>
+                                            <button type="submit" class="w-7 h-7 rounded border border-slate-800 text-rose-500/70 hover:text-rose-400 hover:bg-rose-950/20 transition-colors" aria-label="Archive" title="Archive"><i class="fa-solid fa-box-archive text-[10px]"></i></button>
                                         </form>
                                     </div>
                                 </td>

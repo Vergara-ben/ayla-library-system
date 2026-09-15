@@ -241,7 +241,7 @@
                             <div class="text-slate-500 mt-0.5">{{ r.patron.email }} &middot; requested {{ r.requested_at|date:"M j, Y" }}</div>
                         </div>
                         <div class="flex items-center gap-1.5 flex-shrink-0">
-                            <form method="post" action="{% url 'respond_to_reactivation' r.request_id %}" class="inline-block" data-confirm="Reactivate {{ r.patron.fullname|escapejs }}?">
+                            <form method="post" action="{% url 'respond_to_reactivation' r.request_id %}" class="inline-block" data-confirm="Reactivate {{ r.patron.fullname }}?">
                                 {% csrf_token %}
                                 <input type="hidden" name="action" value="approve">
                                 <button type="submit" class="rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2.5 py-1.5 text-[10px] font-semibold hover:bg-emerald-500/20 hover:text-emerald-100">Approve</button>
@@ -403,7 +403,7 @@
                                         <div class="flex items-center justify-center gap-1.5">
                                             {% if patron.account_status == 'Visitor' %}
                                             {# Visitors keep their visit history when they join. #}
-                                            <form method="post" action="{% url 'promote_visitor' patron.patron_id %}" class="inline-block" data-confirm="Move {{ patron.fullname|escapejs }} to Pending Registrations? You will check their physical ID before the account is activated.">
+                                            <form method="post" action="{% url 'promote_visitor' patron.patron_id %}" class="inline-block" data-confirm="Move {{ patron.fullname }} to Pending Registrations? You will check their physical ID before the account is activated.">
                                                 {% csrf_token %}
                                                 <button type="submit" class="text-[10px] font-bold px-2.5 py-1.5 rounded-lg bg-violet-700/25 text-violet-400 border border-violet-800/70 hover:bg-violet-700/45 transition-colors whitespace-nowrap">
                                                     <i class="fa-solid fa-user-plus text-[9px]"></i> Register as member
@@ -777,7 +777,7 @@
             if (!rvPatron) return;
             const form = document.getElementById('reviewForm');
             if (action === 'reject') {
-                if (!await AylaDialog.confirm('Reject the registration of ' + rvPatron.name + '? Their application and uploaded ID will be deleted.')) return;
+                if (!await AylaDialog.confirm('Reject the registration of ' + rvPatron.name + '? Their application and uploaded ID will be kept in the Archive.')) return;
                 document.getElementById('rvReasonField').value = document.getElementById('rvReason').value.trim();
                 form.action = rvPatron.rejectUrl;
             } else {

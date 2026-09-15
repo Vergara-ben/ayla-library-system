@@ -111,14 +111,15 @@
     <link rel="stylesheet" href="{% static 'css/patron.css' %}">
     <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
     <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha384-iw3OoTErCYJJB9mCa8LNS2hbsQ7M3C0EpIsO/H5+EGAkPGc6rk+V8i04oW/K5xq0" crossorigin="anonymous" referrerpolicy="no-referrer">
 </head>
 <body>
 <nav class="navbar">
-  <a href="{% url 'patron_catalog' %}" class="back-btn">←</a>
+  <a href="{% url 'patron_catalog' %}" class="back-btn" aria-label="Back"><i class="fa-solid fa-arrow-left" aria-hidden="true"></i></a>
   <div class="nav-title">Book Details</div>
   <div style="display:flex;align-items:center;gap:10px;">
     <button type="button" class="theme-toggle" data-theme-toggle></button>
-    <div class="save-btn" id="saveBtn" onclick="toggleSave(this)">🔖</div>
+    <div class="save-btn" id="saveBtn" onclick="toggleSave(this)"><i class="fa-regular fa-bookmark" aria-hidden="true"></i></div>
   </div>
 </nav>
 
@@ -128,9 +129,9 @@
   <div class="book-main-title">{{ book.title }}</div>
   <div class="book-main-author">{{ book.author }}</div>
   {% if book.status == 'Available' %}
-  <div class="status-badge status-available">🟢 {{ book.status }}</div>
+  <div class="status-badge status-available"><i class="fa-solid fa-circle" style="font-size:.55em;vertical-align:middle" aria-hidden="true"></i> {{ book.status }}</div>
   {% elif book.status == 'Borrowed' or book.status == 'Overdue' or book.status == 'Lost' %}
-  <div class="status-badge status-borrowed">🔴 {{ book.status }}</div>
+  <div class="status-badge status-borrowed"><i class="fa-solid fa-circle" style="font-size:.55em;vertical-align:middle" aria-hidden="true"></i> {{ book.status }}</div>
   {% else %}
   <div class="status-badge status-available">{{ book.status }}</div>
   {% endif %}
@@ -139,7 +140,7 @@
 <div class="page">
   <!-- Bibliographic Info -->
   <div class="detail-card">
-    <div class="detail-section-title">📋 Book Information</div>
+    <div class="detail-section-title"><i class="fa-solid fa-circle-info" aria-hidden="true"></i> Book Information</div>
     <div class="detail-row"><div class="detail-key">Author</div><div class="detail-val">{{ book.author }}</div></div>
     <div class="detail-row"><div class="detail-key">Year</div><div class="detail-val">{{ book.publication_year|default:"N/A" }}</div></div>
     <div class="detail-row"><div class="detail-key">ISBN</div><div class="detail-val">{{ book.ISBN|default:"N/A" }}</div></div>
@@ -149,7 +150,7 @@
 
   <!-- Shelf Location -->
   <div class="detail-card">
-    <div class="detail-section-title">📍 Shelf Location</div>
+    <div class="detail-section-title"><i class="fa-solid fa-location-dot" aria-hidden="true"></i> Shelf Location</div>
     <div class="detail-row">
       <div class="detail-key">Location</div>
       <div class="detail-val">
@@ -171,7 +172,7 @@
 
   <!-- Description -->
   <div class="detail-card">
-    <div class="detail-section-title">📝 About This Book</div>
+    <div class="detail-section-title"><i class="fa-solid fa-align-left" aria-hidden="true"></i> About This Book</div>
     <div class="description" id="desc">
       {% if book.genre %}{{ book.title }} by {{ book.author }} is categorized under {{ book.genre }}.{% else %}{{ book.title }} by {{ book.author }}.{% endif %}
     </div>
@@ -191,7 +192,7 @@
 <script>
 function toggleSave(el){
   el.classList.toggle('saved');
-  el.textContent = el.classList.contains('saved') ? '⭐' : '🔖';
+  el.innerHTML = el.classList.contains('saved') ? '<i class="fa-solid fa-star"></i>' : '<i class="fa-regular fa-bookmark"></i>';
 }
 </script>
 </body>

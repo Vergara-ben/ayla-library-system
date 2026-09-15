@@ -48,7 +48,7 @@ def generate(exists=None):
         from .models import Patron
 
         def exists(candidate):
-            return Patron.objects.filter(card_number=candidate).exists()
+            return Patron.all_objects.filter(card_number=candidate).exists()
 
     # Retry if the number is already taken.
     for _ in range(50):

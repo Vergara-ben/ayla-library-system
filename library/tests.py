@@ -148,12 +148,129 @@ class PatronCredentialStorageTests(TestCase):
         self.assertEqual(r['Content-Type'], 'image/png')
         self.assertEqual(r.content, self.PNG)
 
-    def test_rejecting_the_application_removes_it(self):
+    def test_rejecting_the_application_archives_it_with_the_id(self):
         from .models import PatronCredential
         p = self._register()
         _signed_in(_admin(modules='patrons')).post('/admin-portal/reject-patron/%d/' % p.patron_id)
         self.assertFalse(Patron.objects.filter(email=self.EMAIL).exists())
-        self.assertFalse(PatronCredential.objects.exists())
+        self.assertTrue(Patron.all_objects.filter(email=self.EMAIL, archived_at__isnull=False).exists())
+        self.assertTrue(PatronCredential.objects.exists())
+
+
+class ArchiveTests(TestCase):
+    """Deleting archives: the row stays in the database, hidden, and can be restored."""
+
+    def setUp(self):
+        self.user = _admin(modules='patrons,books,donations,logs')
+        self.client = _signed_in(self.user)
+        self.patron = Patron.objects.create(first_name='Ana', last_name='Reyes',
+                                            email='ana@example.invalid', patron_type='Student')
+        self.book = Book.objects.create(title='Noli Me Tangere', author='Rizal', genre='FIC')
+
+    def _archive_page(self, kind, q=''):
+        return self.client.get('/admin-portal/archive/', {'kind': kind, 'q': q})
+
+    def _returned_loan(self):
+        return Transaction.objects.create(book=self.book, patron=self.patron,
+                                          transaction_type='Borrow',
+                                          return_date=timezone.localdate())
+
+    def test_archiving_a_patron_keeps_the_row_and_the_history(self):
+        tx = self._returned_loan()
+        self.client.post('/admin-portal/delete-patron/%d/' % self.patron.patron_id)
+        self.assertFalse(Patron.objects.filter(pk=self.patron.pk).exists())
+        archived = Patron.all_objects.get(pk=self.patron.pk)
+        self.assertIsNotNone(archived.archived_at)
+        self.assertEqual(archived.archived_by, 'Smoke Admin')
+        self.assertTrue(Transaction.objects.filter(pk=tx.pk).exists())
+        self.assertContains(self._archive_page('patrons'), 'Reyes')
+
+    def test_a_patron_with_books_out_is_not_archived(self):
+        Transaction.objects.create(book=self.book, patron=self.patron, transaction_type='Borrow')
+        self.client.post('/admin-portal/delete-patron/%d/' % self.patron.patron_id)
+        self.assertTrue(Patron.objects.filter(pk=self.patron.pk).exists())
+
+    def test_a_borrowed_book_is_not_archived(self):
+        self.book.status = 'Borrowed'
+        self.book.save()
+        self.client.post('/admin-portal/delete-book/%d/' % self.book.book_id)
+        self.assertTrue(Book.objects.filter(pk=self.book.pk).exists())
+
+    def test_restoring_puts_the_record_back(self):
+        self.client.post('/admin-portal/delete-book/%d/' % self.book.book_id)
+        self.assertFalse(Book.objects.filter(pk=self.book.pk).exists())
+        self.assertContains(self._archive_page('books'), 'Noli Me Tangere')
+        self.client.post('/admin-portal/archive/restore/', {'kind': 'books', 'id': self.book.book_id})
+        self.assertIsNone(Book.objects.get(pk=self.book.pk).archived_at)
+        self.assertTrue(SystemLog.objects.filter(action='Restore', entity_type='Book').exists())
+
+    def test_a_signed_in_patron_who_is_archived_is_signed_out(self):
+        c = Client()
+        s = c.session
+        s['patron_id'] = self.patron.patron_id
+        s.save()
+        self.patron.archive('Smoke Admin', 'test')
+        r = c.get('/patron/account/')
+        self.assertEqual(r.status_code, 302)
+        self.assertIn('/patron/login/', r['Location'])
+
+    def test_a_book_with_history_can_only_stay_archived(self):
+        self._returned_loan()
+        self.book.archive('Smoke Admin')
+        self.client.post('/admin-portal/archive/erase/', {'kind': 'books', 'id': self.book.book_id})
+        self.assertTrue(Book.all_objects.filter(pk=self.book.pk).exists())
+        self.assertEqual(Transaction.objects.count(), 1)
+
+    def test_a_record_nothing_depends_on_can_be_deleted_for_good(self):
+        self.book.archive('Smoke Admin')
+        self.client.post('/admin-portal/archive/erase/', {'kind': 'books', 'id': self.book.book_id})
+        self.assertFalse(Book.all_objects.filter(pk=self.book.pk).exists())
+
+    def test_a_record_that_is_not_archived_cannot_be_erased(self):
+        self.client.post('/admin-portal/archive/erase/', {'kind': 'books', 'id': self.book.book_id})
+        self.assertTrue(Book.objects.filter(pk=self.book.pk).exists())
+
+    def test_the_archive_is_for_the_administrator_only(self):
+        staff = User.objects.create(
+            fullname='Desk Staff', email='desk-archive@example.invalid',
+            password_hash=hash_password('SmokeTest123'), role='Staff',
+            account_status='Active', modules='books')
+        r = _signed_in(staff).get('/admin-portal/archive/')
+        self.assertNotEqual(r.status_code, 200)
+
+    def test_a_visit_log_is_archived_and_left_out_of_counts(self):
+        log = PatronLog.objects.create(patron=self.patron)
+        self.client.post('/admin-portal/delete-log/', {'log_id': log.log_id})
+        self.assertEqual(PatronLog.objects.count(), 0)
+        self.assertEqual(PatronLog.all_objects.count(), 1)
+        self.assertContains(self._archive_page('logs'), 'Reyes')
+
+    def test_archiving_a_floor_plan_takes_it_out_of_service(self):
+        plan = FloorPlan.objects.create(name='Mezzanine', floor_number=2, is_active=True)
+        self.client.post('/admin-portal/delete-floorplan/', {'floorplan_id': plan.pk})
+        archived = FloorPlan.all_objects.get(pk=plan.pk)
+        self.assertIsNotNone(archived.archived_at)
+        self.assertFalse(archived.is_active)
+        self.assertContains(self._archive_page('floorplans'), 'Mezzanine')
+
+    def test_a_rejected_registration_can_be_restored_to_pending(self):
+        pending = Patron.objects.create(
+            first_name='New', last_name='Applicant', email='new@example.invalid',
+            patron_type='Student', account_status='Pending', otp_verified=True)
+        self.client.post('/admin-portal/reject-patron/%d/' % pending.patron_id,
+                         {'reason': 'Blurry ID'})
+        self.assertIn('Blurry ID', Patron.all_objects.get(pk=pending.pk).archive_reason)
+        self.assertContains(self._archive_page('registrations'), 'Applicant')
+        self.client.post('/admin-portal/archive/restore/',
+                         {'kind': 'registrations', 'id': pending.pk})
+        self.assertTrue(Patron.objects.filter(pk=pending.pk, account_status='Pending').exists())
+
+    def test_an_archived_email_is_still_taken(self):
+        self.patron.archive('Smoke Admin')
+        r = self.client.post('/admin-portal/add-patron/', {
+            'first_name': 'Other', 'last_name': 'Person', 'email': 'ana@example.invalid',
+            'patron_type': 'Student', 'password': 'SmokeTest123', 'id_confirmed': 'on'})
+        self.assertEqual(Patron.all_objects.filter(email='ana@example.invalid').count(), 1)
 
 
 class HostingEndpointTests(TestCase):
@@ -179,6 +296,47 @@ class HostingEndpointTests(TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertTrue(r.json()['ok'])
         self.assertIn('Daily maintenance complete', r.json()['output'])
+
+
+class TransactionPatronDetailsTests(TestCase):
+    """The transaction modal shows who the chosen patron is."""
+
+    def setUp(self):
+        self.patron = Patron.objects.create(
+            fullname='Ana Cruz', first_name='Ana', last_name='Cruz', email='ana.tx@example.invalid',
+            patron_type='Student', account_status='Active', contact_number='09171234567',
+            school='Sala National High School', qr_code=str(uuid4()),
+            password_hash=hash_password('SmokeTest123'))
+
+    def test_details_for_a_chosen_patron(self):
+        r = _signed_in(_admin(modules='transactions')).get(
+            '/admin-portal/patron-details/%d/' % self.patron.patron_id)
+        self.assertEqual(r.status_code, 200)
+        p = r.json()['patron']
+        self.assertEqual(p['fullname'], 'Ana Cruz')
+        self.assertEqual(p['contact_number'], '09171234567')
+        self.assertEqual(p['school'], 'Sala National High School')
+        self.assertEqual(p['card_number'], self.patron.card_display)
+        self.assertEqual(p['active_borrows'], 0)
+        self.assertTrue(p['max_books'] >= 1)
+        self.assertTrue(p['eligible'])
+
+    def test_unknown_patron(self):
+        r = _signed_in(_admin(modules='transactions')).get('/admin-portal/patron-details/999999/')
+        self.assertEqual(r.status_code, 404)
+
+    def test_staff_without_transactions_cannot_see_it(self):
+        staff = User.objects.create(
+            fullname='Staff Member', email='staff.books@example.invalid',
+            password_hash=hash_password('SmokeTest123'),
+            role='Staff', account_status='Active', modules='books')
+        r = _signed_in(staff).get('/admin-portal/patron-details/%d/' % self.patron.patron_id)
+        self.assertNotEqual(r.status_code, 200)
+
+    def test_modal_book_details_show_position_not_section(self):
+        html = _signed_in(_admin(modules='transactions')).get('/admin-portal/transaction/').content.decode()
+        self.assertIn('Position on the shelf', html)
+        self.assertNotIn("detailRow('Section'", html)
 
 
 class ServerMadeQRImageTests(TestCase):
@@ -2910,52 +3068,77 @@ class PrintSeveralFloorsTests(TestCase):
     def _get(self, query=''):
         return self.client.get('/admin-portal/floor-plan/print/' + query)
 
-    def _pages(self, r):
-        return r.content.decode().count('class="floor-page"')
+    def _pdf_pages(self, r):
+        import io as _io
+        from pypdf import PdfReader
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r['Content-Type'], 'application/pdf')
+        return [p.extract_text() for p in PdfReader(_io.BytesIO(r.content)).pages]
+
+    def _text(self, r):
+        return '\n'.join(self._pdf_pages(r))
+
+    def _floors(self, r):
+        return self._text(r).count('Floor plan:')
 
     def test_one_floor_by_default(self):
         """A bare link keeps doing what it always did."""
-        r = self._get()
-        self.assertEqual(r.status_code, 200)
-        self.assertEqual(self._pages(r), 1)
+        self.assertEqual(self._floors(self._get()), 1)
 
     def test_a_named_floor_is_the_one_printed(self):
-        r = self._get('?floor=%d' % self.first.floor_plan_id)
-        self.assertEqual(self._pages(r), 1)
-        self.assertContains(r, 'Shelf on First')
-        self.assertNotContains(r, 'Shelf on Ground')
+        text = self._text(self._get('?floor=%d' % self.first.floor_plan_id))
+        self.assertEqual(text.count('Floor plan:'), 1)
+        self.assertIn('Shelf on First', text)
+        self.assertNotIn('Shelf on Ground', text)
 
     def test_all_floors_come_out_as_one_document(self):
         """The point: one trip to the printer, not one per storey."""
-        r = self._get('?floor=all')
-        self.assertEqual(self._pages(r), 2)
-        self.assertContains(r, 'Shelf on Ground')
-        self.assertContains(r, 'Shelf on First')
+        text = self._text(self._get('?floor=all'))
+        self.assertEqual(text.count('Floor plan:'), 2)
+        self.assertIn('Shelf on Ground', text)
+        self.assertIn('Shelf on First', text)
 
     def test_two_named_floors_print_together(self):
         r = self._get('?floor=%d&floor=%d'
                       % (self.ground.floor_plan_id, self.first.floor_plan_id))
-        self.assertEqual(self._pages(r), 2)
+        self.assertEqual(self._floors(r), 2)
 
     def test_a_floor_out_of_service_is_never_printed(self):
         """A wall map of a storey nobody may enter is a wrong map."""
-        r = self._get('?floor=%d' % self.draft.floor_plan_id)
-        self.assertNotContains(r, 'Attic')
+        self.assertNotIn('Attic', self._text(self._get('?floor=%d' % self.draft.floor_plan_id)))
 
     def test_nonsense_falls_back_to_one_floor_rather_than_failing(self):
         for query in ('?floor=999999', '?floor=abc', '?floor='):
-            r = self._get(query)
-            self.assertEqual(r.status_code, 200, query)
-            self.assertEqual(self._pages(r), 1, query)
+            self.assertEqual(self._floors(self._get(query)), 1, query)
 
-    def test_each_floor_gets_its_own_page_break(self):
-        r = self._get('?floor=all')
-        self.assertContains(r, 'page-break-after')
+    def test_each_floor_starts_on_its_own_page(self):
+        pages = self._pdf_pages(self._get('?floor=all'))
+        maps = [p for p in pages if 'Floor plan:' in p]
+        self.assertEqual(len(maps), 2)
+        self.assertTrue(all(p.count('Floor plan:') == 1 for p in maps))
 
-    def test_the_indoor_map_offers_both(self):
+    def test_lists_the_books_on_each_shelf_without_sections(self):
+        shelf = Shelf.objects.get(name='Shelf on Ground')
+        level = ShelfLevel.objects.create(shelf=shelf, level_number=2, category='Fiction')
+        Book.objects.create(title='The Quiet Sea', author='Jane Austen',
+                            shelf_level=level, shelf_slot=1)
+        text = self._text(self._get('?floor=%d' % self.ground.floor_plan_id))
+        self.assertIn('The Quiet Sea', text)
+        self.assertIn('Level 2', text)
+        self.assertNotIn('Fiction', text)
+        self.assertNotIn('Sections', text)
+
+    def test_the_file_name_is_the_one_typed(self):
+        r = self._get('?floor=all&filename=Building map')
+        self.assertIn('filename="Building map.pdf"', r['Content-Disposition'])
+        self.assertIn('attachment', r['Content-Disposition'])
+
+    def test_the_indoor_map_opens_a_print_modal(self):
         html = self.client.get('/admin-portal/indoor-map/').content.decode()
-        self.assertIn('Print this floor', html)
-        self.assertIn('Print all floors', html)
+        self.assertIn('Print floor plan', html)
+        self.assertIn('id="floorPrintModal"', html)
+        self.assertIn('value="all"', html)
+        self.assertNotIn('Print this floor', html)
 
 
 class ShelfRoomTests(TestCase):
@@ -5486,14 +5669,14 @@ class DeleteBooksTests(TestCase):
         r = self._post([book])
         self.assertEqual(r['loan_records'], 3)
 
-    def test_deleting_really_does_take_the_loan_history(self):
-        """Not a warning about a hypothetical: this is what CASCADE does."""
+    def test_archiving_keeps_the_loan_history(self):
+        """The copy is hidden in the Archive; its loan records stay."""
         book = self._book('Has history')
         Transaction.objects.create(book=book, patron=self.patron,
                                    transaction_type='Borrow')
-        self.assertEqual(Transaction.objects.count(), 1)
         self._post([book], confirm=True)
-        self.assertEqual(Transaction.objects.count(), 0)
+        self.assertEqual(Transaction.objects.count(), 1)
+        self.assertTrue(Book.all_objects.filter(pk=book.pk, archived_at__isnull=False).exists())
 
     def test_everything_selected_being_on_loan_is_refused(self):
         out = [self._book('A', status='Borrowed'), self._book('B', status='Borrowed')]
@@ -5598,9 +5781,32 @@ class AnalyticsTests(TestCase):
         self.assertEqual(arrivals['peak'], '9 AM')
         rows = dict(occupancy['rows'])
         self.assertEqual(rows['9 AM'], '3.0')
-        # The long visit covers 2, 3, 4, 5 and 6 PM.
-        for hour in ('2 PM', '3 PM', '4 PM', '5 PM', '6 PM'):
+        # The long visit covers 2 to 6 PM; the charts stop at the 5 PM hour.
+        for hour in ('2 PM', '3 PM', '4 PM', '5 PM'):
             self.assertEqual(rows[hour], '1.0', hour)
+        self.assertNotIn('6 PM', rows)
+
+    def test_peak_hours_run_from_8_am_to_5_pm_only(self):
+        """Visits before 8 AM or after the 5 PM hour are left out of the hour statistics."""
+        for _ in range(5):
+            self._visit(1, 7, 7)
+            self._visit(1, 19, 19)
+        self._visit(1, 10, 10)
+        arrivals = self.analytics.visits_by_hour(self.start, self.end)
+        labels = [label for label, _ in arrivals['rows']]
+        self.assertEqual(labels[0], '8 AM')
+        self.assertEqual(labels[-1], '5 PM')
+        self.assertEqual(len(labels), 10)
+        self.assertEqual(arrivals['peak'], '10 AM')
+        self.assertEqual(arrivals['total'], 1)
+        occupancy = self.analytics.occupancy_by_hour(self.start, self.end)
+        self.assertEqual([label for label, _ in occupancy['rows']], labels)
+        self.assertEqual(occupancy['busiest'], '10 AM')
+
+        from library.reports import _analytics
+        report = dict(_analytics(self.start, self.end)['summary'])
+        self.assertEqual(report['Peak Hour'], '10 AM – 11 AM')
+        self.assertEqual(report['Visits In Peak Hour'], 1)
 
     def test_a_visit_spanning_hours_counts_in_each_one(self):
         self._visit(1, 9, 12)

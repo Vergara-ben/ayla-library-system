@@ -123,6 +123,7 @@ urlpatterns = [
     path('admin-portal/book-details/<int:book_id>/', views.admin_book_details_ajax, name='admin_book_details_ajax'),
     path('admin-portal/book-qr/<int:book_id>/', views.book_qr_png, name='book_qr_png'),
     path('admin-portal/search-book-by-qr/', views.search_book_by_qr, name='search_book_by_qr'),
+    path('admin-portal/patron-details/<int:patron_id>/', views.patron_details_json, name='patron_details_json'),
     path('admin-portal/resolve-qr/', views.resolve_transaction_qr, name='resolve_transaction_qr'),
     path('admin-portal/search-patron-by-qr/', views.search_patron_by_qr, name='search_patron_by_qr'),
     path('admin-portal/download-book-template/', views.download_book_template, name='download_book_template'),
@@ -189,6 +190,10 @@ urlpatterns = [
     path('admin-portal/log-register/', views.entry_log_register, name='entry_log_register'),
     path('admin-portal/edit-log/', views.edit_patron_log, name='edit_patron_log'),
     path('admin-portal/delete-log/', views.delete_patron_log, name='delete_patron_log'),
+    # Archive: records hidden instead of deleted.
+    path('admin-portal/archive/', views.archive_page, name='archive_page'),
+    path('admin-portal/archive/restore/', views.archive_restore, name='archive_restore'),
+    path('admin-portal/archive/erase/', views.archive_erase, name='archive_erase'),
     # Reports
     path('admin-portal/analytics/', views.admin_analytics, name='admin_analytics'),
     path('admin-portal/reports/', views.admin_reports, name='admin_reports'),

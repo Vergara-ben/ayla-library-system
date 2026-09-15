@@ -541,14 +541,10 @@
         <header class="top-navbar">
             <h2 class="page-title">Indoor Map & Navigation</h2>
             <div class="navbar-actions">
-                {# Print links. #}
-                <a href="{% url 'floorplan_print' %}?floor={{ current_floor_id }}" class="text-xs text-slate-400 hover:text-cyan-400 flex items-center gap-1.5" style="margin-right:12px">
-                    <i class="fa-solid fa-print"></i> Print this floor
-                </a>
-                {% if floor_count > 1 %}
-                <a href="{% url 'floorplan_print' %}?floor=all" class="text-xs text-slate-400 hover:text-cyan-400 flex items-center gap-1.5" style="margin-right:12px">
-                    <i class="fa-solid fa-layer-group"></i> Print all floors
-                </a>
+                {% if not no_floorplans %}
+                <button type="button" onclick="openFloorPrint()" class="text-xs text-slate-400 hover:text-cyan-400 flex items-center gap-1.5" style="margin-right:12px">
+                    <i class="fa-solid fa-print"></i> Print floor plan
+                </button>
                 {% endif %}
                 {% include 'admin/_headeractions.html' with accent='cyan' %}
             </div>
@@ -795,7 +791,7 @@
                     if (r.shelf_id && r.navigable) {
                         const href = '?shelf=' + r.shelf_id + '&book=' + encodeURIComponent(r.title);
                         return '<a class="mf-item" href="' + href + '">' + head
-                             + '<div class="mf-where go">📍 ' + esc(r.location) + '</div></a>';
+                             + '<div class="mf-where go"><i class="fa-solid fa-location-dot" aria-hidden="true"></i> ' + esc(r.location) + '</div></a>';
                     }
                     const why = r.shelved ? 'Shelf not placed on the floor plan' : 'Not yet shelved';
                     return '<div class="mf-item">' + head + '<div class="mf-where">' + why + '</div></div>';
@@ -1216,6 +1212,122 @@
             }
         }
     </script>
+
+    {% if not no_floorplans %}
+    {# Print floor plan: choose the floors and a file name, then download the PDF. #}
+    <div id="floorPrintModal" class="hidden fixed inset-0 bg-black/60 flex items-center justify-center p-4 overflow-y-auto" style="z-index:2000" role="dialog" aria-modal="true" aria-labelledby="floorPrintTitle">
+        <div class="w-full max-w-md rounded-2xl border p-6 flex flex-col gap-5 shadow-2xl relative my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color);">
+            <div class="flex items-center justify-between">
+                <h3 id="floorPrintTitle" class="text-base font-bold text-slate-200 tracking-wide">Print Floor Plan</h3>
+                <button type="button" onclick="closeFloorPrint()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40 transition-colors" aria-label="Close"><i class="fa-solid fa-xmark text-sm"></i></button>
+            </div>
+
+            <p class="text-xs text-slate-400 leading-relaxed">
+                A PDF of the floor plan with every shelf named, followed by the books on each shelf.
+            </p>
+            <p id="floorPrintError" class="hidden rounded-lg border border-rose-500/25 bg-rose-500/10 px-3 py-2 text-[11px] text-rose-300"></p>
+
+            <div class="space-y-4 text-xs">
+                <div class="space-y-2">
+                    <span class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Floors</span>
+                    <label class="flex items-center gap-2 cursor-pointer text-slate-300"><input type="radio" name="floorPrintChoice" value="{{ current_floor_id }}" checked class="accent-cyan-600 w-3.5 h-3.5"> This floor</label>
+                    {% if floor_count > 1 %}
+                    <label class="flex items-center gap-2 cursor-pointer text-slate-300"><input type="radio" name="floorPrintChoice" value="all" class="accent-cyan-600 w-3.5 h-3.5"> All floors</label>
+                    {% endif %}
+                </div>
+
+                <div class="space-y-1.5">
+                    <label for="floorPrintFileName" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">File name</label>
+                    <input type="text" id="floorPrintFileName" maxlength="100" placeholder="Library Map"
+                           class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                    <p class="text-[10px] text-slate-500">Leave blank for the default name. .pdf is added for you.</p>
+                </div>
+
+                <div class="pt-1 flex items-center justify-end gap-3">
+                    <button type="button" onclick="closeFloorPrint()" class="px-5 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:text-slate-100 hover:bg-slate-800/40 font-semibold tracking-wide transition-colors min-w-[100px]">Cancel</button>
+                    <button type="button" id="floorPrintBtn" onclick="downloadFloorPrint()" class="bg-cyan-700 hover:bg-cyan-600 text-white font-bold px-5 py-2.5 rounded-lg flex items-center gap-2 tracking-wide transition-colors shadow-md"><i class="fa-solid fa-file-pdf text-xs"></i> Download PDF</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        (function () {
+            const PRINT_URL = "{% url 'floorplan_print' %}";
+            const modal = document.getElementById('floorPrintModal');
+            const btn = document.getElementById('floorPrintBtn');
+            const err = document.getElementById('floorPrintError');
+            const READY = '<i class="fa-solid fa-file-pdf text-xs"></i> Download PDF';
+
+            window.openFloorPrint = function () {
+                err.classList.add('hidden');
+                btn.disabled = false;
+                btn.innerHTML = READY;
+                modal.classList.remove('hidden');
+                document.getElementById('floorPrintFileName').focus();
+            };
+            window.closeFloorPrint = function () {
+                modal.classList.add('hidden');
+            };
+            modal.addEventListener('click', function (e) {
+                if (e.target === modal) closeFloorPrint();
+            });
+            document.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape' && !modal.classList.contains('hidden')) closeFloorPrint();
+            });
+
+            window.downloadFloorPrint = async function () {
+                const choice = modal.querySelector('input[name="floorPrintChoice"]:checked');
+                const q = new URLSearchParams({
+                    floor: choice ? choice.value : '',
+                    filename: document.getElementById('floorPrintFileName').value || '',
+                });
+                function fail(message) {
+                    btn.disabled = false;
+                    btn.innerHTML = READY;
+                    err.textContent = message;
+                    err.classList.remove('hidden');
+                }
+                btn.disabled = true;
+                btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin text-xs"></i> Preparing PDF...';
+                err.classList.add('hidden');
+
+                let res;
+                try {
+                    res = await fetch(PRINT_URL + '?' + q.toString(),
+                                      { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+                } catch (e) {
+                    fail('The server did not answer. Try again.');
+                    return;
+                }
+                const type = res.headers.get('Content-Type') || '';
+                if (!res.ok || type.indexOf('application/pdf') !== 0) {
+                    let message = 'The floor plan could not be made. Check that you are still signed in, then try again.';
+                    try { const data = await res.json(); if (data && data.error) message = data.error; } catch (e) { /* not JSON */ }
+                    fail(message);
+                    return;
+                }
+
+                const blob = await res.blob();
+                const named = /filename="?([^";]+)"?/.exec(res.headers.get('Content-Disposition') || '');
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = named ? named[1] : 'Library Map.pdf';
+                link.style.display = 'none';
+                document.body.appendChild(link);
+                link.click();
+                link.remove();
+                setTimeout(function () {
+                    URL.revokeObjectURL(url);
+                    btn.disabled = false;
+                    btn.innerHTML = READY;
+                    closeFloorPrint();
+                }, 800);
+            };
+        })();
+    </script>
+    {% endif %}
 
     <script src="{% static 'js/admin-enhance.js' %}" defer></script>
 </body>

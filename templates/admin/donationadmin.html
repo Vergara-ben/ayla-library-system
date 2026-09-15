@@ -203,10 +203,10 @@
                                                 <option value="Shelved" {% if donation.status == 'Shelved' %}selected{% endif %}>Shelved</option>
                                             </select>
                                         </form>
-                                        <form method="post" action="{% url 'delete_donation' %}" class="inline" data-confirm="Remove the accessioning record for this title? The catalogue entry and its borrowing history are kept.">
+                                        <form method="post" action="{% url 'delete_donation' %}" class="inline" data-confirm="Archive the accessioning record for this title? The catalogue entry and its borrowing history are kept, and an Administrator can restore it from the Archive." data-confirm-title="Archive donation" data-confirm-label="Archive">
                                             {% csrf_token %}
                                             <input type="hidden" name="donation_id" value="{{ donation.donation_id }}">
-                                            <button type="submit" class="w-7 h-7 rounded border border-slate-800 text-rose-500/70 hover:text-rose-400 hover:bg-rose-950/20 transition-colors" title="Remove this accessioning row"><i class="fa-solid fa-trash-can text-[10px]"></i></button>
+                                            <button type="submit" class="w-7 h-7 rounded border border-slate-800 text-rose-500/70 hover:text-rose-400 hover:bg-rose-950/20 transition-colors" title="Archive this accessioning row" aria-label="Archive"><i class="fa-solid fa-box-archive text-[10px]"></i></button>
                                         </form>
                                     </div>
                                 </td>

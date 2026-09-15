@@ -95,6 +95,11 @@ def patron_login_required(view_func):
     def _wrapped_view(request, *args, **kwargs):
         if 'patron_id' not in request.session:
             return redirect('/patron/login/')
+        from .models import Patron
+        # An archived patron is signed out.
+        if not Patron.objects.filter(patron_id=request.session['patron_id']).exists():
+            request.session.flush()
+            return redirect('/patron/login/')
         return view_func(request, *args, **kwargs)
     return _wrapped_view
 

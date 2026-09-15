@@ -7,7 +7,7 @@ from django.db.models import Count, Q
 from django.utils import timezone
 
 from .models import Book, Patron, PatronLog, ShelfLevel, Shelf, Transaction
-from .reports import _chart, _days_in, _day_label
+from .reports import OPEN_HOURS, _chart, _days_in, _day_label
 
 
 WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday',
@@ -25,19 +25,16 @@ def _hour_label(hour):
 def visits_by_hour(start, end):
     """Arrivals per hour of day."""
     logs = PatronLog.objects.filter(entry_time__date__range=(start, end))
-    per_hour = Counter(timezone.localtime(l.entry_time).hour for l in logs)
-    if not per_hour:
-        hours = range(8, 18)
-        peak = None
-    else:
-        hours = range(min(per_hour), max(per_hour) + 1)
-        peak = max(per_hour, key=lambda h: per_hour[h])
+    per_hour = Counter(h for h in (timezone.localtime(l.entry_time).hour for l in logs)
+                       if h in OPEN_HOURS)
+    # The earlier hour wins a tie.
+    peak = max(sorted(per_hour), key=lambda h: per_hour[h]) if per_hour else None
 
-    series = [(_hour_label(h), per_hour.get(h, 0)) for h in hours]
+    series = [(_hour_label(h), per_hour.get(h, 0)) for h in OPEN_HOURS]
     return {
         'chart': _chart(
             series, kind='line', title='Arrivals by hour',
-            note='When people come in. The busiest hour is marked.',
+            note='When people come in, 8 AM to 5 PM. The busiest hour is marked.',
             empty_note='No visits were logged in this period.',
             highlight=_hour_label(peak) if peak is not None else None,
             axis_note='Hour of day · vertical axis is people arriving'),
@@ -64,11 +61,11 @@ def occupancy_by_hour(start, end):
             continue
         days.add(entry.date())
         for hour in range(entry.hour, min(exit_at.hour, 23) + 1):
-            per_hour[hour] += 1
+            if hour in OPEN_HOURS:
+                per_hour[hour] += 1
 
     day_count = len(days) or 1
-    hours = range(min(per_hour), max(per_hour) + 1) if per_hour else range(8, 18)
-    series = [(_hour_label(h), round(per_hour.get(h, 0) / day_count, 1)) for h in hours]
+    series = [(_hour_label(h), round(per_hour.get(h, 0) / day_count, 1)) for h in OPEN_HOURS]
     busiest = max(per_hour, key=lambda h: per_hour[h]) if per_hour else None
 
     excluded = (PatronLog.objects
@@ -79,8 +76,8 @@ def occupancy_by_hour(start, end):
     return {
         'chart': _chart(
             series, kind='line', title='People inside, by hour',
-            note='Average number in the room, not arrivals. The fullest hour '
-                 'is marked.',
+            note='Average number in the room, not arrivals, 8 AM to 5 PM. '
+                 'The fullest hour is marked.',
             empty_note='No completed visits to measure in this period.',
             highlight=_hour_label(busiest) if busiest is not None else None,
             axis_note='Hour of day · vertical axis is average people inside'),

@@ -225,10 +225,11 @@
     <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
     <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
     <script src="{% static 'js/ayla-dialog.js' %}"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha384-iw3OoTErCYJJB9mCa8LNS2hbsQ7M3C0EpIsO/H5+EGAkPGc6rk+V8i04oW/K5xq0" crossorigin="anonymous" referrerpolicy="no-referrer">
 </head>
 <body>
 <nav class="navbar">
-  <a href="{% if target.book_id %}{% url 'patron_book_details' target.book_id %}{% else %}{% url 'patron_catalog' %}{% endif %}" class="back-btn">←</a>
+  <a href="{% if target.book_id %}{% url 'patron_book_details' target.book_id %}{% else %}{% url 'patron_catalog' %}{% endif %}" class="back-btn" aria-label="Back"><i class="fa-solid fa-arrow-left" aria-hidden="true"></i></a>
   <div class="nav-title" id="navTitle">Floor Map</div>
   {# Hidden unless there is more than one floor. #}
   <select id="floorPicker" class="floor-picker" onchange="switchFloor(this.value)" style="display:none" aria-label="Choose a floor"></select>
@@ -263,8 +264,8 @@
   </div>
   <div class="btn-row">
     {# The map could only be pointed at a book from the catalogue. #}
-    <button type="button" class="btn-layers" id="findBtn" onclick="openFind()">🔍 Find a book</button>
-    <button class="btn-nav" id="navBtn" onclick="showBTModal()">📡 Enable Navigation</button>
+    <button type="button" class="btn-layers" id="findBtn" onclick="openFind()"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i> Find a book</button>
+    <button class="btn-nav" id="navBtn" onclick="showBTModal()"><i class="fa-solid fa-tower-broadcast" aria-hidden="true"></i> Enable Navigation</button>
   </div>
 </div>
 
@@ -273,7 +274,7 @@
 <!-- BT Modal -->
 <div class="modal-overlay" id="btModal">
   <div class="modal">
-    <div class="modal-icon">📡</div>
+    <div class="modal-icon"><i class="fa-solid fa-tower-broadcast" aria-hidden="true"></i></div>
     <div class="modal-title">Enable Navigation</div>
     <div class="modal-text">Turn on Bluetooth to enable indoor positioning. This allows AYLA to show your real-time location on the map and guide you to the target shelf.</div>
     <button class="btn-enable" onclick="enableBLE()">Enable Bluetooth →</button>
@@ -285,7 +286,7 @@
 <!-- Why Bluetooth cannot start here. -->
 <div class="modal-overlay" id="bleHelpModal">
   <div class="modal">
-    <div class="modal-icon">🧭</div>
+    <div class="modal-icon"><i class="fa-solid fa-compass" aria-hidden="true"></i></div>
     <div class="modal-title" id="bleHelpTitle"></div>
     <div class="modal-text help" id="bleHelpText"></div>
     <a class="btn-enable" id="bleHelpGuide" href="{% url 'live_position_guide' %}" style="display:block;text-decoration:none;">View setup steps</a>
@@ -298,7 +299,7 @@
   <div class="find-sheet" role="dialog" aria-modal="true" aria-labelledby="findTitle">
     <div class="find-head">
       <div class="find-title" id="findTitle">Find a book</div>
-      <button type="button" class="find-close" onclick="closeFind()" aria-label="Close">✕</button>
+      <button type="button" class="find-close" onclick="closeFind()" aria-label="Close"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
     </div>
     <input id="findInput" class="find-input" type="search" autocomplete="off"
            placeholder="Search title, author, ISBN or subject" aria-label="Search the catalogue">
@@ -719,7 +720,7 @@ async function initMap() {
       color: accent, weight: 2, fillColor: accent,
       fillOpacity: s.elevated ? 0.12 : (isTarget ? 0.8 : 0.4),
       dashArray: s.elevated ? '6,4' : null,
-    }).bindTooltip((isTarget ? '🎯 ' : '') + (s.label || s.name)
+    }).bindTooltip((isTarget ? '<i class="fa-solid fa-bullseye"></i> ' : '') + (s.label || s.name)
                    + (s.elevated ? ' — above head height' : ''),
                    { direction: 'top', sticky: true }).addTo(shelfLayer);
 
@@ -882,14 +883,14 @@ function showArrived() {
   if (stairHighlight) { routeLayer.removeLayer(stairHighlight); stairHighlight = null; }
 
   document.getElementById('shelfName').textContent =
-    '✅ You have arrived at ' + (targetData.shelf_name || 'the shelf');
+    'You have arrived at ' + (targetData.shelf_name || 'the shelf');
   // Show the exact position on arrival.
   const where = targetData.location || '';
   document.getElementById('shelfPath').textContent = targetData.book_title
     ? ('Look for “' + targetData.book_title + '”' + (where ? ' — ' + where : '') + '.')
     : (where || 'The book should be on this shelf.');
   const btn = document.getElementById('navBtn');
-  if (btn) btn.textContent = '✅ Arrived';
+  if (btn) btn.textContent = 'Arrived';
 
   // Ring the shelf so the last few steps have something to aim at.
   if (targetPoint) {
@@ -970,7 +971,7 @@ async function computeRoute() {
     : r.route;
   // Chevrons, and no line joining them.
   drawRouteArrows(drawPoints);
-  document.getElementById('navBtn').textContent = '🧭 Navigating…';
+  document.getElementById('navBtn').textContent = 'Navigating…';
 
   const ppm = mapData && mapData.pixels_per_meter;
   const asDistance = function (v) {
@@ -1024,7 +1025,7 @@ function showFloorHandover(r) {
     row.appendChild(btn);
   }
   if (btn) {
-    btn.textContent = '⬆ Continue on the ' + r.target_floor.label;
+    btn.textContent = 'Continue on the ' + r.target_floor.label;
     btn.onclick = function () { switchFloor(r.target_floor.floor_plan_id); };
   }
 
@@ -1599,7 +1600,7 @@ async function runFind(reset) {
       return '<a class="find-item" href="' + MAP_URL + '?book_id=' + r.book_id + '">'
            + '<div class="find-item-top"><div class="find-item-title">' + findEsc(r.title) + '</div>' + avail + '</div>'
            + '<div class="find-item-sub">' + sub + '</div>'
-           + '<div class="find-item-where go">📍 ' + findEsc(r.location) + ' \u2014 show on map</div></a>';
+           + '<div class="find-item-where go"><i class="fa-solid fa-location-dot"></i> ' + findEsc(r.location) + ' \u2014 show on map</div></a>';
     }
     const where = r.shelved
       ? 'This shelf is not on the map yet \u2014 ask at the desk'

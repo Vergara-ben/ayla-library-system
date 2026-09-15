@@ -27,7 +27,7 @@
     background-repeat: no-repeat;
   }
 
-  /* 💡 TINANGGAL NA NATIN DITO YUNG GRID OVERLAY NA MAY MGA GUHIT-GUHIT */
+  /* Grid overlay removed. */
 
   /* Swabeng blur sa likod ng card para maging lumulutang ang UI */
   .bg-orb { display: none; }
@@ -181,6 +181,7 @@
     <link rel="stylesheet" href="{% static 'css/patron.css' %}">
     <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
     <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha384-iw3OoTErCYJJB9mCa8LNS2hbsQ7M3C0EpIsO/H5+EGAkPGc6rk+V8i04oW/K5xq0" crossorigin="anonymous" referrerpolicy="no-referrer">
 </head>
 <body>
 <div class="bg-orb orb1"></div>
@@ -202,7 +203,7 @@
   {% if error %}<p class="error-text">{{ error }}</p>{% endif %}
   {% if info %}<p style="font-size:13px;color:var(--accent);text-align:center;margin-bottom:12px;">{{ info }}</p>{% endif %}
   <div class="card" id="otpCard">
-    <div class="section-title">📧 Verify Your Email</div>
+    <div class="section-title"><i class="fa-solid fa-envelope" aria-hidden="true"></i> Verify Your Email</div>
     <p style="font-size:13px;color:var(--muted);margin-bottom:20px;">
       We sent a 6-digit code to <strong style="color:var(--text)">{{ otp_email }}</strong>.
       Enter it below to verify your email address.
@@ -218,7 +219,7 @@
                style="text-align:center;font-size:22px;letter-spacing:8px;font-weight:700;">
       </div>
       <div class="btn-row">
-        <button type="submit" class="btn-primary" style="width:100%">Verify ✓</button>
+        <button type="submit" class="btn-primary" style="width:100%">Verify <i class="fa-solid fa-check" aria-hidden="true"></i></button>
       </div>
     </form>
     <form method="POST" action="{% url 'patron_register' %}" style="margin-top:14px;text-align:center;">
@@ -234,7 +235,7 @@
   {% elif stage == 'pending' %}
   <!-- Awaiting approval -->
   <div class="card success-screen show" id="pendingCard">
-    <div class="success-icon">⏳</div>
+    <div class="success-icon"><i class="fa-solid fa-hourglass-half" aria-hidden="true"></i></div>
     <div class="success-title">Email Verified!</div>
     <div class="success-sub">
       Your registration is now awaiting administrator approval.<br>
@@ -264,7 +265,7 @@
 
     <div class="card" id="formCard">
       <div id="step1">
-        <div class="section-title">👤 Personal Information</div>
+        <div class="section-title"><i class="fa-solid fa-user" aria-hidden="true"></i> Personal Information</div>
         <div class="form-grid">
           <div class="form-group full">
             <label for="firstNameField">First Name</label>
@@ -305,13 +306,13 @@
       </div>
 
       <div id="step2" style="display:none">
-        <div class="section-title">🏷️ Patron Type</div>
+        <div class="section-title"><i class="fa-solid fa-tag" aria-hidden="true"></i> Patron Type</div>
         <p style="font-size:13px;color:var(--muted);margin-bottom:20px;">Select your patron category</p>
         <div class="patron-types">
-          <div class="type-card" onclick="selectType(this)"><div class="type-icon">🎓</div><div class="type-label">Student</div></div>
-          <div class="type-card" onclick="selectType(this)"><div class="type-icon">👩‍🏫</div><div class="type-label">Teacher</div></div>
-          <div class="type-card" onclick="selectType(this)"><div class="type-icon">👨‍👩‍👧</div><div class="type-label">Parent</div></div>
-          <div class="type-card" onclick="selectType(this)"><div class="type-icon">🧑</div><div class="type-label">General Visitor</div></div>
+          <div class="type-card" onclick="selectType(this)"><div class="type-icon"><i class="fa-solid fa-graduation-cap" aria-hidden="true"></i></div><div class="type-label">Student</div></div>
+          <div class="type-card" onclick="selectType(this)"><div class="type-icon"><i class="fa-solid fa-chalkboard-user" aria-hidden="true"></i></div><div class="type-label">Teacher</div></div>
+          <div class="type-card" onclick="selectType(this)"><div class="type-icon"><i class="fa-solid fa-people-roof" aria-hidden="true"></i></div><div class="type-label">Parent</div></div>
+          <div class="type-card" onclick="selectType(this)"><div class="type-icon"><i class="fa-solid fa-user" aria-hidden="true"></i></div><div class="type-label">General Visitor</div></div>
         </div>
         <div class="btn-row">
           <button type="button" class="btn-secondary" onclick="goStep(1)">← Back</button>
@@ -320,7 +321,7 @@
       </div>
 
       <div id="step3" style="display:none">
-        <div class="section-title">🔐 Security &amp; Verification</div>
+        <div class="section-title"><i class="fa-solid fa-lock" aria-hidden="true"></i> Security &amp; Verification</div>
         <div class="form-group" style="margin-bottom:16px">
           <label for="password">Password</label>
           <input type="password" id="password" name="password" placeholder="At least 8 characters" required>
@@ -339,20 +340,20 @@
           </div>
         </div>
         <div style="font-size:12px;color:var(--muted);background:var(--glass);border-radius:10px;padding:12px 14px;border:1px solid var(--glass-border);margin-bottom:8px">
-          📋 By registering, you agree to the library's borrowing policy and terms of use.
+          <i class="fa-solid fa-clipboard-list" aria-hidden="true"></i> By registering, you agree to the library's borrowing policy and terms of use.
           After email verification, library staff review your uploaded ID before your account
           is activated. You will be emailed once it is approved.
         </div>
         <div class="btn-row">
           <button type="button" class="btn-secondary" onclick="goStep(2)">← Back</button>
-          <button type="submit" class="btn-primary">Register ✓</button>
+          <button type="submit" class="btn-primary">Register <i class="fa-solid fa-check" aria-hidden="true"></i></button>
         </div>
       </div>
     </div>
   </form>
 
   <div class="card success-screen" id="successCard">
-    <div class="success-icon">✅</div>
+    <div class="success-icon"><i class="fa-solid fa-circle-check" aria-hidden="true"></i></div>
     <div class="success-title">Registration Successful!</div>
     <div class="success-sub">Your library account has been created.</div>
     <div class="action-btns">

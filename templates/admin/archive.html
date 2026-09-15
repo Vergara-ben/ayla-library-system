@@ -1,0 +1,239 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en" data-module="admin">
+<head>
+    <meta charset="UTF-8">
+    <meta name="theme-color" content="#ffffff">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ayla Admin Panel - Archive</title>
+    <script src="{% static 'js/theme.js' %}"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="{% static 'js/tailwind-theme.js' %}"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha384-iw3OoTErCYJJB9mCa8LNS2hbsQ7M3C0EpIsO/H5+EGAkPGc6rk+V8i04oW/K5xq0" crossorigin="anonymous" referrerpolicy="no-referrer">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'css/theme.css' %}">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-main);
+            color: var(--text-primary);
+        }
+        .logo-text { font-family: 'Rowdies', sans-serif; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: var(--bg-main); }
+        ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
+
+        .log-table { width: 100%; border-collapse: collapse; }
+        .log-table th {
+            text-align: left;
+            font-size: 10px;
+            letter-spacing: .08em;
+            text-transform: uppercase;
+            font-weight: 700;
+            color: var(--text-muted, #64748b);
+            padding: 10px 14px;
+            border-bottom: 1px solid var(--border-color);
+            white-space: nowrap;
+        }
+        .log-table td {
+            padding: 11px 14px;
+            border-bottom: 1px solid var(--border-color);
+            font-size: 13px;
+            vertical-align: top;
+        }
+        .log-table tr:last-child td { border-bottom: none; }
+        .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+
+        .filter-field {
+            background-color: var(--bg-input);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 8px 12px;
+            font-size: 13px;
+            color: var(--text-primary);
+        }
+        .filter-field:focus { outline: none; border-color: #0e7490; }
+
+        .kind-tab {
+            display: inline-flex; align-items: center; gap: 8px;
+            padding: 7px 12px; border-radius: 8px; font-size: 12px; font-weight: 600;
+            border: 1px solid var(--border-color); color: var(--text-secondary, #94a3b8);
+            background-color: var(--bg-card); white-space: nowrap;
+        }
+        .kind-tab:hover { color: var(--text-primary); }
+        .kind-tab.is-on { color: #22d3ee; border-color: rgba(14,116,144,.6); background: rgba(6,182,212,.08); }
+        .kind-count { font-size: 10px; padding: 1px 7px; border-radius: 999px; background: rgba(100,116,139,.18); }
+
+        @media (max-width: 1024px) {
+            aside { position: fixed; left: -100%; top: 0; height: 100vh; z-index: 50; transition: left .3s ease; }
+            aside.open { left: 0; }
+            .mobile-menu-btn { display: flex !important; }
+            main { padding: 1rem; }
+        }
+        @media (max-width: 768px) {
+            header { padding: 0 1rem; }
+            header h2 { font-size: 1rem; }
+        }
+        .mobile-menu-btn { display: none; align-items: center; justify-content: center; width: 40px; height: 40px; margin-right: .75rem; color: var(--text-secondary); }
+    </style>
+    <link rel="stylesheet" href="{% static 'css/admin-enhance.css' %}">
+    <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
+    <script src="{% static 'js/ayla-dialog.js' %}"></script>
+</head>
+<body class="flex h-screen overflow-hidden">
+<a href="#main-content" class="skip-link">Skip to main content</a>
+
+    {% include 'admin/_sidebar.html' with active='archive' %}
+
+    <div class="flex-1 flex flex-col overflow-hidden">
+
+        <header class="h-16 flex-shrink-0 flex items-center justify-between px-8" style="background-color: var(--bg-main);">
+            <div class="flex items-center">
+                <button class="mobile-menu-btn" onclick="toggleSidebar()" aria-label="Toggle navigation menu">
+                    <i class="fa-solid fa-bars"></i>
+                </button>
+                <h2 class="logo-text text-lg tracking-wider text-slate-200 uppercase">Archive</h2>
+            </div>
+            <div class="flex items-center gap-3">
+                {% include 'admin/_headeractions.html' with accent='cyan' %}
+            </div>
+        </header>
+
+        <main id="main-content" tabindex="-1" class="flex-1 overflow-y-auto p-8 space-y-6">
+
+            {# Page description. #}
+            <div class="rounded-xl border border-slate-800/80 p-4" style="background-color: var(--bg-card);">
+                <div class="flex items-start gap-3">
+                    <i class="fa-solid fa-box-archive text-cyan-500 mt-1"></i>
+                    <div class="text-xs text-slate-400 leading-relaxed">
+                        <span class="font-bold text-slate-200">Archived records are hidden, not deleted.</span>
+                        They no longer appear on their pages, in searches or in counts, but they stay in the
+                        database with their history. <span class="text-slate-300">Restore</span> puts a record
+                        back where it was. <span class="text-slate-300">Delete permanently</span> is only
+                        possible for a record nothing else depends on; transactions and activity logs are
+                        never removed.
+                    </div>
+                </div>
+            </div>
+
+            <nav class="flex flex-wrap gap-2" aria-label="Record types">
+                {% for tab in tabs %}
+                <a href="?kind={{ tab.key }}" class="kind-tab{% if tab.key == kind %} is-on{% endif %}"{% if tab.key == kind %} aria-current="page"{% endif %}>
+                    <i class="fa-solid {{ tab.icon }} text-[11px]"></i> {{ tab.label }}
+                    <span class="kind-count">{{ tab.count }}</span>
+                </a>
+                {% endfor %}
+            </nav>
+
+            <form method="get" class="rounded-xl border border-slate-800/80 p-4" style="background-color: var(--bg-card);">
+                <input type="hidden" name="kind" value="{{ kind }}">
+                <div class="flex flex-wrap items-end gap-3">
+                    <div class="flex-1 min-w-[220px]">
+                        <label for="f_q" class="block text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1.5">Search {{ kind_label|lower }}</label>
+                        <input id="f_q" type="text" name="q" value="{{ q }}" class="filter-field w-full" placeholder="Name, title or email">
+                    </div>
+                    <button type="submit" class="px-5 py-2 rounded-lg bg-cyan-700/30 text-cyan-300 border border-cyan-800/50 font-semibold text-sm hover:bg-cyan-700/40 transition-colors">
+                        <i class="fa-solid fa-magnifying-glass"></i> Search
+                    </button>
+                    {% if q %}
+                    <a href="?kind={{ kind }}" class="px-4 py-2 rounded-lg border border-slate-700/80 text-slate-300 hover:text-slate-100 hover:bg-slate-800/40 font-semibold text-sm transition-colors">Clear</a>
+                    {% endif %}
+                </div>
+            </form>
+
+            <div class="rounded-xl border border-slate-800/80 overflow-hidden" style="background-color: var(--bg-card);">
+                <div style="overflow-x:auto">
+                    <table class="log-table">
+                        <thead>
+                            <tr>
+                                <th>{{ kind_label }}</th>
+                                <th>Archived</th>
+                                <th>By</th>
+                                <th>Reason</th>
+                                <th style="text-align:right">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in rows %}
+                            <tr>
+                                <td style="min-width:220px">
+                                    <div class="text-slate-200 font-medium">{{ row.title }}</div>
+                                    {% if row.detail %}<div class="text-slate-500 text-xs mt-0.5">{{ row.detail }}</div>{% endif %}
+                                </td>
+                                <td class="mono text-slate-400 whitespace-nowrap">{{ row.archived_at|date:"M j, Y" }}<br><span class="text-slate-500">{{ row.archived_at|date:"H:i" }}</span></td>
+                                <td class="text-slate-300 whitespace-nowrap">{{ row.archived_by|default:"&mdash;" }}</td>
+                                <td class="text-slate-400" style="max-width:280px">{{ row.reason|default:"&mdash;" }}</td>
+                                <td>
+                                    <div class="flex items-center justify-end gap-2 flex-wrap">
+                                        <form method="post" action="{% url 'archive_restore' %}" class="inline"
+                                              data-confirm="Restore &quot;{{ row.title }}&quot;? It goes back to where it was archived from."
+                                              data-confirm-title="Restore record" data-confirm-label="Restore">
+                                            {% csrf_token %}
+                                            <input type="hidden" name="kind" value="{{ kind }}">
+                                            <input type="hidden" name="id" value="{{ row.id }}">
+                                            <button type="submit" class="px-3 py-1.5 rounded-lg bg-cyan-700/25 text-cyan-300 border border-cyan-800/50 hover:bg-cyan-700/40 text-xs font-semibold whitespace-nowrap">
+                                                <i class="fa-solid fa-rotate-left text-[10px]"></i> Restore
+                                            </button>
+                                        </form>
+                                        {% if row.blocker %}
+                                        <span class="px-3 py-1.5 rounded-lg border border-slate-800 text-slate-500 text-xs whitespace-nowrap cursor-help" title="{{ row.blocker }}, so it can only stay archived.">
+                                            <i class="fa-solid fa-lock text-[10px]"></i> Kept
+                                        </span>
+                                        {% else %}
+                                        <form method="post" action="{% url 'archive_erase' %}" class="inline"
+                                              data-confirm="Delete &quot;{{ row.title }}&quot; permanently? It is removed from the database and cannot be restored."
+                                              data-confirm-title="Delete permanently" data-confirm-label="Delete permanently">
+                                            {% csrf_token %}
+                                            <input type="hidden" name="kind" value="{{ kind }}">
+                                            <input type="hidden" name="id" value="{{ row.id }}">
+                                            <button type="submit" class="px-3 py-1.5 rounded-lg border border-rose-900/60 text-rose-400 hover:bg-rose-950/30 text-xs font-semibold whitespace-nowrap">
+                                                <i class="fa-solid fa-trash-can text-[10px]"></i> Delete permanently
+                                            </button>
+                                        </form>
+                                        {% endif %}
+                                    </div>
+                                </td>
+                            </tr>
+                            {% empty %}
+                            <tr>
+                                <td colspan="5" class="text-center text-slate-500 text-sm" style="padding:48px 14px">
+                                    {% if q %}
+                                        No archived {{ kind_label|lower }} match &ldquo;{{ q }}&rdquo;.
+                                    {% else %}
+                                        No archived {{ kind_label|lower }}. Records appear here when they are archived.
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="flex items-center justify-between px-5 py-4 border-t border-slate-800 text-xs text-slate-500 flex-wrap gap-3">
+                    <span class="font-medium">
+                        Showing <span class="text-slate-400">{{ page_obj|length }}</span>
+                        of <span class="text-slate-400">{{ page_obj.paginator.count }}</span>
+                        archived record{{ page_obj.paginator.count|pluralize }}
+                    </span>
+                    {% include 'admin/_pagination.html' with page=page_obj accent='cyan' qs=querystring %}
+                </div>
+            </div>
+
+        </main>
+    </div>
+
+    <script>
+        function toggleSidebar() {
+            document.querySelector('aside').classList.toggle('open');
+        }
+        {% if messages %}
+        document.addEventListener('DOMContentLoaded', function () {
+            {% for message in messages %}AylaDialog.toast("{{ message|escapejs }}");
+            {% endfor %}
+        });
+        {% endif %}
+    </script>
+</body>
+</html>

@@ -242,7 +242,7 @@
                             <div class="text-slate-500 mt-0.5">{{ r.patron.email }} &middot; requested {{ r.requested_at|date:"M j, Y" }}</div>
                         </div>
                         <div class="flex items-center gap-1.5 flex-shrink-0">
-                            <form method="post" action="{% url 'respond_to_reactivation' r.request_id %}" class="inline-block" data-confirm="Reactivate {{ r.patron.fullname|escapejs }}?">
+                            <form method="post" action="{% url 'respond_to_reactivation' r.request_id %}" class="inline-block" data-confirm="Reactivate {{ r.patron.fullname }}?">
                                 {% csrf_token %}
                                 <input type="hidden" name="action" value="approve">
                                 <button type="submit" class="rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2.5 py-1.5 text-[10px] font-semibold hover:bg-emerald-500/20 hover:text-emerald-100">Approve</button>
@@ -415,7 +415,7 @@
                                         <div class="flex items-center justify-center gap-1.5">
                                             {% if patron.account_status == 'Visitor' %}
                                             {# Visitors keep their visit history when they join. #}
-                                            <form method="post" action="{% url 'promote_visitor' patron.patron_id %}" class="inline-block" data-confirm="Move {{ patron.fullname|escapejs }} to Pending Registrations? You will check their physical ID before the account is activated.">
+                                            <form method="post" action="{% url 'promote_visitor' patron.patron_id %}" class="inline-block" data-confirm="Move {{ patron.fullname }} to Pending Registrations? You will check their physical ID before the account is activated.">
                                                 {% csrf_token %}
                                                 <button type="submit" class="text-[10px] font-bold px-2.5 py-1.5 rounded-lg bg-cyan-700/25 text-cyan-400 border border-cyan-800/70 hover:bg-cyan-700/45 transition-colors whitespace-nowrap">
                                                     <i class="fa-solid fa-user-plus text-[9px]"></i> Register as member
@@ -428,9 +428,9 @@
                                                     data-middle="{{ patron.middle_name }}"
                                                     data-last="{{ patron.last_name }}"
                                                     class="w-7 h-7 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 transition-colors flex items-center justify-center" aria-label="Edit"><i class="fa-solid fa-pencil text-[10px]"></i></button>
-                                            <form method="post" action="{% url 'admin_delete_patron' patron.patron_id %}" class="inline-block">
+                                            <form method="post" action="{% url 'admin_delete_patron' patron.patron_id %}" class="inline-block" data-confirm="Archive {{ patron.fullname }}? They can no longer sign in or borrow. Their history is kept, and they can be restored from the Archive." data-confirm-title="Archive patron" data-confirm-label="Archive">
                                                 {% csrf_token %}
-                                                <button type="submit" class="w-7 h-7 rounded border border-slate-800 text-rose-500/70 hover:text-rose-400 hover:bg-rose-950/20 transition-colors flex items-center justify-center" aria-label="Delete"><i class="fa-solid fa-trash-can text-[10px]"></i></button>
+                                                <button type="submit" class="w-7 h-7 rounded border border-slate-800 text-rose-500/70 hover:text-rose-400 hover:bg-rose-950/20 transition-colors flex items-center justify-center" aria-label="Archive" title="Archive"><i class="fa-solid fa-box-archive text-[10px]"></i></button>
                                             </form>
                                             {% endif %}
                                         </div>
@@ -808,7 +808,7 @@
             if (!rvPatron) return;
             const form = document.getElementById('reviewForm');
             if (action === 'reject') {
-                if (!await AylaDialog.confirm('Reject the registration of ' + rvPatron.name + '? Their application and uploaded ID will be deleted.')) return;
+                if (!await AylaDialog.confirm('Reject the registration of ' + rvPatron.name + '? Their application and uploaded ID will be kept in the Archive.')) return;
                 document.getElementById('rvReasonField').value = document.getElementById('rvReason').value.trim();
                 form.action = rvPatron.rejectUrl;
             } else {

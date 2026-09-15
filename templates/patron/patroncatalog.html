@@ -123,11 +123,12 @@
 <link rel="stylesheet" href="{% static 'css/patron.css' %}">
 <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
 <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha384-iw3OoTErCYJJB9mCa8LNS2hbsQ7M3C0EpIsO/H5+EGAkPGc6rk+V8i04oW/K5xq0" crossorigin="anonymous" referrerpolicy="no-referrer">
 </head>
 <body>
 <nav class="navbar">
   {# A guest has no Home to go back to, Home redirects here, so the arrow would be a loop. #}
-  {% if patron_signed_in %}<a href="{% url 'patron_dashboard' %}" class="back-btn">←</a>{% endif %}
+  {% if patron_signed_in %}<a href="{% url 'patron_dashboard' %}" class="back-btn" aria-label="Back"><i class="fa-solid fa-arrow-left" aria-hidden="true"></i></a>{% endif %}
   <div class="nav-title">Book Catalog</div>
   <button type="button" class="theme-toggle" data-theme-toggle></button>
 </nav>
@@ -137,7 +138,7 @@
   <form method="get" action="{% url 'patron_catalog' %}" id="catalogForm">
     <div class="search-row">
       <div class="search-box">
-        <span class="search-icon">🔍</span>
+        <span class="search-icon"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i></span>
         <input class="search-input" type="search" name="search" value="{{ search_query }}"
                placeholder="Search title, author, ISBN or subject" aria-label="Search the catalogue">
       </div>
@@ -186,7 +187,7 @@
   {% if active_filters %}
   <div class="active-row">
     {% for f in active_filters %}
-      <a class="active-chip" href="{% url 'patron_catalog' %}{{ f.remove }}" title="Remove this filter">{{ f.label }} <span aria-hidden="true">✕</span></a>
+      <a class="active-chip" href="{% url 'patron_catalog' %}{{ f.remove }}" title="Remove this filter">{{ f.label }} <i class="fa-solid fa-xmark" aria-hidden="true"></i></a>
     {% endfor %}
     <a class="clear-all" href="{% url 'patron_catalog' %}">Clear all</a>
   </div>
@@ -225,7 +226,7 @@
         <div class="book-meta">
           {% if row.genre_name %}<span class="meta-tag">{{ row.genre_name }}</span>{% endif %}
           {% if book.shelf_level %}
-            <span class="meta-tag">📍 {% if book.shelf_level.shelf %}{{ book.shelf_level.shelf.name }} · {% endif %}{{ book.shelf_level.label }}</span>
+            <span class="meta-tag"><i class="fa-solid fa-location-dot" aria-hidden="true"></i> {% if book.shelf_level.shelf %}{{ book.shelf_level.shelf.name }} · {% endif %}{{ book.shelf_level.label }}</span>
           {% else %}
             {# Shown, not hidden. It is in the building; the desk can fetch it. #}
             <span class="meta-tag meta-desk">Not yet shelved · ask at the desk</span>
@@ -237,7 +238,7 @@
     {% endwith %}
     {% empty %}
     <div class="empty">
-      <div class="empty-icon">📚</div>
+      <div class="empty-icon"><i class="fa-solid fa-book" aria-hidden="true"></i></div>
       {% if active_filters %}
         <p>No titles match {% if active_filters|length == 1 %}that filter{% else %}those filters{% endif %}.</p>
         <a class="btn" style="height:40px;" href="{% url 'patron_catalog' %}">Clear filters</a>
@@ -252,14 +253,14 @@
 {% include 'patron/_pager.html' with page=page qs=querystring %}
 
 <nav class="bottom-nav">
-  <a href="{% url 'patron_dashboard' %}" class="nav-item"><div class="nav-icon">🏠</div><div class="nav-label">Home</div></a>
-  <a href="{% url 'patron_catalog' %}" class="nav-item active"><div class="nav-icon">🔍</div><div class="nav-label">Search</div></a>
-  <a href="{% url 'patron_map' %}" class="nav-item"><div class="nav-icon">🗺️</div><div class="nav-label">Map</div></a>
+  <a href="{% url 'patron_dashboard' %}" class="nav-item"><div class="nav-icon"><i class="fa-solid fa-house" aria-hidden="true"></i></div><div class="nav-label">Home</div></a>
+  <a href="{% url 'patron_catalog' %}" class="nav-item active"><div class="nav-icon"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i></div><div class="nav-label">Search</div></a>
+  <a href="{% url 'patron_map' %}" class="nav-item"><div class="nav-icon"><i class="fa-solid fa-map" aria-hidden="true"></i></div><div class="nav-label">Map</div></a>
   {% if patron_signed_in %}
-  <a href="{% url 'patron_account' %}" class="nav-item"><div class="nav-icon">👤</div><div class="nav-label">Account</div></a>
+  <a href="{% url 'patron_account' %}" class="nav-item"><div class="nav-icon"><i class="fa-solid fa-user" aria-hidden="true"></i></div><div class="nav-label">Account</div></a>
   {% else %}
   {# Tab stays put for a visitor; tapping explains what an account is for. #}
-  <a href="{% url 'patron_login' %}" class="nav-item" onclick="showGuestPrompt(event)"><div class="nav-icon">👤</div><div class="nav-label">Account</div></a>
+  <a href="{% url 'patron_login' %}" class="nav-item" onclick="showGuestPrompt(event)"><div class="nav-icon"><i class="fa-solid fa-user" aria-hidden="true"></i></div><div class="nav-label">Account</div></a>
   {% endif %}
 </nav>
 
