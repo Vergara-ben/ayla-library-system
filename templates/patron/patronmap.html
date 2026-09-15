@@ -29,7 +29,7 @@
     font-size:12px; line-height:1.5;
   }
   .back-btn{width:36px;height:36px;border-radius:10px;border:1px solid var(--border);background:var(--surface2);display:flex;align-items:center;justify-content:center;cursor:pointer;text-decoration:none;color:var(--text);font-size:16px;}
-  .nav-title{font-family:'Syne',sans-serif;font-size:18px;font-weight:800;flex:1;}
+  .nav-title{font-family:'Syne',sans-serif;font-size:18px;font-weight:800;flex:0 0 auto;max-width:50%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .floor-toggle{display:flex;gap:4px;}
   .fl-btn{padding:6px 12px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--muted);font-size:12px;cursor:pointer;transition:all 0.2s;}
   .fl-btn.active{border-color:var(--accent);color:var(--accent);background:var(--tint-accent);}
@@ -207,10 +207,18 @@
 
   @media (max-width: 480px){
     .nav-title{font-size:14px;}
+    .floor-picker{flex:0 1 150px;min-width:84px;margin-right:4px;}
     .back-btn{width:32px;height:32px;font-size:14px;}
     .shelf-name{font-size:13px;}
     .shelf-path{font-size:11px;}
     .map-legend{display:none;}
+  }
+
+  /* Smallest phones: let the title give way so the header still fits. */
+  @media (max-width: 360px){
+    .navbar{gap:8px;padding:10px;}
+    .nav-title{flex:0 1 auto;min-width:0;}
+    .floor-picker{min-width:72px;}
   }
 </style>
     <link rel="stylesheet" href="{% static 'css/patron.css' %}">

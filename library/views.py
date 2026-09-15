@@ -890,6 +890,8 @@ def patron_account(request):
         'overdue_transactions': overdue_transactions,
         'active_loans': active_loans,
         'history': history,
+        # Made here: the site's security policy blocks QR images from other websites.
+        'qr_data_uri': _qr_data_uri(patron.qr_code) if patron.qr_code else None,
     }
     return render(request, 'patron/patronaccount.html', context)
 
@@ -3463,6 +3465,32 @@ def book_qr_png(request, book_id):
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
         log_admin_action(request, 'Download', 'Book', book.book_id,
                          f'Downloaded the QR code for "{book.title[:60]}"')
+    else:
+        response['Content-Disposition'] = 'inline'
+    return response
+
+
+@admin_or_module_required('inventory')
+def inventory_label_qr(request, inventory_id):
+    """Serve an inventory copy's label QR as a PNG, inline or as a download."""
+    record = InventoryRecord.objects.filter(inventory_id=inventory_id).first()
+    if record is None or not record.qr_label:
+        raise Http404('No label for this copy')
+
+    qr = qrcode.QRCode(
+        version=None,
+        error_correction=qrcode.constants.ERROR_CORRECT_M,
+        box_size=10,
+        border=2,
+    )
+    qr.add_data(record.qr_label)
+    qr.make(fit=True)
+    buffer = BytesIO()
+    qr.make_image(fill_color='black', back_color='white').save(buffer, format='PNG')
+
+    response = HttpResponse(buffer.getvalue(), content_type='image/png')
+    if request.GET.get('download'):
+        response['Content-Disposition'] = f'attachment; filename="copy_label_{record.inventory_id}.png"'
     else:
         response['Content-Disposition'] = 'inline'
     return response

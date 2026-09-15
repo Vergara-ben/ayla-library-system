@@ -144,7 +144,7 @@
     <div class="section-title" style="margin-bottom:14px">🎫 My Library QR Code</div>
     <div class="qr-section">
       <div class="qr-mini" style="width:110px;height:110px;padding:6px;">
-        <img id="patronQrImg" src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={{ patron.qr_code|urlencode }}" alt="My QR Code" style="width:100%;height:100%;">
+        <img id="patronQrImg" src="{{ qr_data_uri|default:'' }}" alt="My QR Code" style="width:100%;height:100%;">
       </div>
       <div class="qr-info">
         <div class="qr-title">Present this at the library desk</div>

@@ -414,13 +414,16 @@
             return true;
         }
 
+        // Label QR images are made by our own server.
+        const LABEL_QR_URL = "{% url 'inventory_label_qr' 0 %}";
         function openLabel(btn) {
             const code = btn.dataset.label || '';
-            document.getElementById('labelImg').src = 'https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=' + encodeURIComponent(code);
+            const src = LABEL_QR_URL.replace(/0\/$/, encodeURIComponent(btn.dataset.id) + '/');
+            document.getElementById('labelImg').src = src;
             document.getElementById('labelTitle').textContent = btn.dataset.title;
             document.getElementById('labelCode').textContent = code;
             const dl = document.getElementById('labelDownload');
-            dl.href = 'https://api.qrserver.com/v1/create-qr-code/?size=600x600&data=' + encodeURIComponent(code);
+            dl.href = src + '?download=1';
             dl.setAttribute('download', 'copy_label_' + btn.dataset.id + '.png');
             show('labelModal');
         }

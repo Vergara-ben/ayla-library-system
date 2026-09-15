@@ -80,6 +80,7 @@ urlpatterns = [
     path('admin-portal/inventory/condition/', views.update_copy_condition, name='update_copy_condition'),
     path('admin-portal/inventory/update/', views.update_inventory_record, name='update_inventory_record'),
     path('admin-portal/inventory/deaccession/', views.deaccession_copy, name='deaccession_copy'),
+    path('admin-portal/inventory/label-qr/<int:inventory_id>/', views.inventory_label_qr, name='inventory_label_qr'),
     path('admin-portal/inventory/search-by-qr/', views.search_inventory_by_qr, name='search_inventory_by_qr'),
     path('admin-portal/inventory/audit/sheet/', views.stock_audit_sheet, name='stock_audit_sheet'),
     path('admin-portal/inventory/audit/file/', views.stock_audit_file, name='stock_audit_file'),

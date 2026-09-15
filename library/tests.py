@@ -181,6 +181,60 @@ class HostingEndpointTests(TestCase):
         self.assertIn('Daily maintenance complete', r.json()['output'])
 
 
+class ServerMadeQRImageTests(TestCase):
+    """QR images come from our own server; the security policy blocks other websites."""
+
+    def setUp(self):
+        self.record = InventoryRecord.objects.create(title_hint='Box of donated books',
+                                                     qr_label='COPY-LABEL-TEST-1')
+
+    def _url(self, record=None, **params):
+        url = '/admin-portal/inventory/label-qr/%d/' % (record or self.record).inventory_id
+        return url + ('?download=1' if params.get('download') else '')
+
+    def _staff(self, modules):
+        return User.objects.create(
+            fullname='Staff Member', email='staff.%s@example.invalid' % (modules or 'none'),
+            password_hash=hash_password('SmokeTest123'),
+            role='Staff', account_status='Active', modules=modules)
+
+    def test_admin_gets_the_label_png(self):
+        r = _signed_in(_admin()).get(self._url())
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r['Content-Type'], 'image/png')
+        self.assertTrue(r.content.startswith(b'\x89PNG'))
+
+    def test_download_names_the_file(self):
+        r = _signed_in(_admin()).get(self._url(download=True))
+        self.assertEqual(r['Content-Disposition'],
+                         'attachment; filename="copy_label_%d.png"' % self.record.inventory_id)
+
+    def test_staff_with_stock_receiving_can_see_it(self):
+        r = _signed_in(self._staff('inventory')).get(self._url())
+        self.assertEqual(r.status_code, 200)
+
+    def test_staff_without_stock_receiving_and_strangers_cannot(self):
+        self.assertNotEqual(_signed_in(self._staff('books')).get(self._url()).status_code, 200)
+        self.assertEqual(Client().get(self._url()).status_code, 302)
+
+    def test_a_copy_without_a_label_has_no_image(self):
+        bare = InventoryRecord.objects.create(title_hint='Unlabelled')
+        self.assertEqual(_signed_in(_admin()).get(self._url(bare)).status_code, 404)
+
+    def test_patron_account_embeds_its_qr(self):
+        patron = Patron.objects.create(
+            fullname='Ana Cruz', first_name='Ana', last_name='Cruz', email='ana.qr@example.invalid',
+            patron_type='Student', account_status='Active', qr_code=str(uuid4()),
+            password_hash=hash_password('SmokeTest123'))
+        c = Client()
+        s = c.session
+        s['patron_id'] = patron.patron_id
+        s.save()
+        html = c.get('/patron/account/').content.decode()
+        self.assertIn('src="data:image/png;base64,', html)
+        self.assertNotIn('qrserver', html)
+
+
 class BackButtonAfterLogoutTests(TestCase):
     """Signed-in pages must not be served from the browser's cache after logout."""
 

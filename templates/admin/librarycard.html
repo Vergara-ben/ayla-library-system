@@ -208,6 +208,11 @@
     display: flex; justify-content: space-between; gap: 4mm;
   }
 
+  /* Shrink the card to fit a phone screen; the printed size does not change. */
+  @media screen {
+    .card { zoom: var(--card-zoom, 1); }
+  }
+
   /* Print. */
   @page { size: A4 landscape; margin: 12mm; }
 
@@ -349,6 +354,21 @@
       document.body.classList.toggle('only-front', which === 'front');
       document.body.classList.toggle('only-back', which === 'back');
     }
+
+    // Fit the card on narrow screens.
+    (function () {
+      const card = document.querySelector('.card');
+      if (!card) return;
+      const root = document.documentElement;
+      function fit() {
+        root.style.setProperty('--card-zoom', '1');
+        const room = root.clientWidth - 32;
+        const zoom = Math.min(1, room / card.offsetWidth);
+        root.style.setProperty('--card-zoom', zoom.toFixed(3));
+      }
+      fit();
+      window.addEventListener('resize', fit);
+    })();
 
     // Download link uses the same QR image.
     (function () {
