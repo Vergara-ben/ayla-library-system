@@ -95,3 +95,28 @@ class ContentSecurityPolicyMiddleware:
         if self.policy and 'Content-Security-Policy' not in response:
             response['Content-Security-Policy'] = self.policy
         return response
+
+
+class SignOutInactiveAccountsMiddleware:
+    """Sign out an account that is deactivated, suspended or archived while signed in."""
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        session = getattr(request, 'session', None)
+        if session is not None and (session.get('admin_id') or session.get('patron_id')):
+            from .models import Patron, User
+            admin_id = session.get('admin_id')
+            patron_id = session.get('patron_id')
+            ended = (
+                (admin_id and not User.objects.filter(
+                    admin_id=admin_id, account_status='Active').exists())
+                or (patron_id and not Patron.objects.filter(
+                    patron_id=patron_id, account_status='Active').exists())
+            )
+            if ended:
+                session.flush()
+                from django.contrib import messages
+                messages.error(request, 'Your account is no longer active, so you have been signed out.')
+        return self.get_response(request)

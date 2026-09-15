@@ -391,7 +391,8 @@ def desk_sign_out(request):
     if blocked:
         return blocked
 
-    log = PatronLog.objects.filter(log_id=request.POST.get('log_id')).first()
+    raw_id = (request.POST.get('log_id') or '').strip()
+    log = PatronLog.objects.filter(log_id=int(raw_id)).first() if raw_id.isdigit() else None
     if log is None:
         return JsonResponse({'success': False, 'error': 'That visit is no longer on file.'})
     if log.exit_time is not None:

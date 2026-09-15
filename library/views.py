@@ -96,7 +96,7 @@ def patron_login(request):
 
         locked = login_locked_message('patron', email)
         if locked:
-            return render(request, 'patron/patronlogin.html', {'error': locked})
+            return render(request, 'patron/patronlogin.html', {'email': email, 'error': locked})
 
         patron = Patron.all_objects.filter(email__iexact=email).first()
         if patron is None:
@@ -117,25 +117,25 @@ def patron_login(request):
             error = LOGIN_FAILED_TEXT
             if remaining is not None and 0 < remaining <= 2:
                 error += f' {remaining} attempt(s) left before this account is locked.'
-            return render(request, 'patron/patronlogin.html', {'error': error})
+            return render(request, 'patron/patronlogin.html', {'email': email, 'error': error})
 
         # Password is correct, so it is safe to show the real reason.
         clear_login_failures('patron', email)
 
         if patron.archived_at is not None:
             return render(request, 'patron/patronlogin.html',
-                          {'error': 'This account has been archived. Please contact the library.'})
+                          {'email': email, 'error': 'This account has been archived. Please contact the library.'})
 
         if patron.account_status == 'Pending':
             return render(request, 'patron/patronlogin.html',
-                          {'error': 'Your registration is awaiting administrator approval. You will receive an email once it is approved.'})
+                          {'email': email, 'error': 'Your registration is awaiting administrator approval. You will receive an email once it is approved.'})
 
         if patron.account_status == 'Inactive':
             return render(request, 'patron/patronlogin.html',
-                          {'error': 'Your account has been deactivated.', 'show_reactivate': True})
+                          {'email': email, 'error': 'Your account has been deactivated.', 'show_reactivate': True})
 
         if patron.account_status != 'Active':
-            return render(request, 'patron/patronlogin.html', {'error': 'Your account is suspended or inactive'})
+            return render(request, 'patron/patronlogin.html', {'email': email, 'error': 'Your account is suspended or inactive'})
 
         # Start a fresh session on sign-in.
         request.session.flush()
@@ -411,8 +411,10 @@ def patron_register(request):
     school = (request.POST.get('school') or '').strip()
 
     def _form_error(msg):
+        # Everything typed comes back except the passwords and the file.
         return render(request, 'patron/patronregister.html',
-                      {'stage': 'form', 'error': msg, 'known_schools': known_schools()})
+                      {'stage': 'form', 'error': msg, 'known_schools': known_schools(),
+                       'form': request.POST})
 
     if name_error:
         return _form_error(name_error)
@@ -738,15 +740,20 @@ def patron_book_details(request, book_id):
         'shelf': shelf,
         'room': room,
         'floor_plan': floor_plan,
+        # The shelf's floor is out of service or archived.
+        'floor_closed': bool(floor_plan and (not floor_plan.is_active or floor_plan.archived_at)),
+        # Navigation is paused while the floor is under renovation.
+        'floor_renovation': (floor_plan.renovation_notice or '').strip() if floor_plan else '',
     }
     return render(request, 'patron/patronbook-details.html', context)
 
 
 def patron_map(request):
     target = {}
-    book_id = request.GET.get('book_id')
-    if book_id:
-        book = Book.objects.select_related('shelf_level__shelf').filter(book_id=book_id).first()
+    book_id = (request.GET.get('book_id') or '').strip()
+    if book_id.isdigit():
+        book = (Book.objects.select_related('shelf_level__shelf__room__floor_plan')
+                .filter(book_id=int(book_id)).first())
         if book:
             target['book_id'] = book.book_id
             target['book_title'] = book.title
@@ -755,6 +762,15 @@ def patron_map(request):
             if shelf:
                 target['shelf_id'] = shelf.shelf_id
                 target['shelf_name'] = shelf.name
+                plan = shelf.room.floor_plan if shelf.room_id else None
+                if plan is not None and (not plan.is_active or plan.archived_at is not None):
+                    # The shelf is on a floor that is out of service.
+                    target['floor_closed'] = True
+                    target['floor_label'] = plan.floor_label
+                if plan is not None and (plan.renovation_notice or '').strip():
+                    # Navigation to a floor under renovation is paused.
+                    target['floor_renovation'] = plan.renovation_notice.strip()
+                    target['floor_label'] = plan.floor_label
                 # Which board, and how far along it.
                 target['level_label'] = level.label
                 target['level_number'] = level.level_number
@@ -916,7 +932,7 @@ def patron_request_extension(request):
     patron = get_object_or_404(Patron, patron_id=request.session.get('patron_id'))
 
     tx = Transaction.objects.filter(
-        transaction_id=request.POST.get('transaction_id'),
+        transaction_id=_posted_id(request, 'transaction_id'),
         patron=patron, transaction_type='Borrow', return_date__isnull=True,
     ).first()
     if tx is None:
@@ -1075,7 +1091,7 @@ def _portal_login(request, template, scope, expected_role, home, wrong_portal_te
 
     locked = login_locked_message(scope, email)
     if locked:
-        return render(request, template, {'error': locked})
+        return render(request, template, {'error': locked, 'email': email})
 
     user = User.objects.filter(email__iexact=email).first()
 
@@ -1098,12 +1114,12 @@ def _portal_login(request, template, scope, expected_role, home, wrong_portal_te
 
         # Tell the user if they used the wrong portal.
         if user is not None and password_ok and user.account_status == 'Active' and user.role != expected_role:
-            return render(request, template, {'error': wrong_portal_text})
+            return render(request, template, {'error': wrong_portal_text, 'email': email})
 
         error = LOGIN_FAILED_TEXT
         if remaining is not None and 0 < remaining <= 2:
             error += f' {remaining} attempt(s) left before this account is locked.'
-        return render(request, template, {'error': error})
+        return render(request, template, {'error': error, 'email': email})
 
     clear_login_failures(scope, email)
     # flush(), not cycle_key().
@@ -2521,7 +2537,7 @@ def adjust_due_date(request):
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
 
     tx = Transaction.objects.select_related('book', 'patron').filter(
-        transaction_id=request.POST.get('transaction_id'),
+        transaction_id=_posted_id(request, 'transaction_id'),
         transaction_type='Borrow', return_date__isnull=True,
     ).first()
     if tx is None:
@@ -5177,7 +5193,7 @@ def staff_donations(request):
 @granted_module_required('donations')
 def update_donation_status(request):
     if request.method == 'POST':
-        donation_id = request.POST.get('donation_id')
+        donation_id = _posted_id(request, 'donation_id')
         status = request.POST.get('status')
         
         donation = Donation.objects.filter(donation_id=donation_id).first()
@@ -5202,7 +5218,7 @@ def update_donation_status(request):
 @granted_module_required('donations')
 def delete_donation(request):
     if request.method == 'POST':
-        donation_id = request.POST.get('donation_id')
+        donation_id = _posted_id(request, 'donation_id')
         donation = Donation.objects.filter(donation_id=donation_id).first()
         if donation:
             detail = f'"{donation.book.title}" from {donation.donor_name}' if donation.book else donation.donor_name
@@ -5319,7 +5335,7 @@ def announcement_management(request):
 @admin_only_required
 def toggle_announcement(request):
     if request.method == 'POST':
-        announcement_id = request.POST.get('announcement_id')
+        announcement_id = _posted_id(request, 'announcement_id')
         announcement = Announcement.objects.filter(announcement_id=announcement_id).first()
         if announcement:
             announcement.is_active = not announcement.is_active
@@ -5334,7 +5350,7 @@ def toggle_announcement(request):
 @admin_only_required
 def delete_announcement(request):
     if request.method == 'POST':
-        announcement_id = request.POST.get('announcement_id')
+        announcement_id = _posted_id(request, 'announcement_id')
         announcement = Announcement.objects.filter(announcement_id=announcement_id).first()
         if announcement:
             title = announcement.title
@@ -5415,7 +5431,7 @@ def floorplan_management(request):
 @admin_only_required
 def set_active_floorplan(request):
     if request.method == 'POST':
-        floorplan_id = request.POST.get('floorplan_id')
+        floorplan_id = _posted_id(request, 'floorplan_id')
         floorplan = FloorPlan.objects.filter(floor_plan_id=floorplan_id).first()
         if floorplan:
             # A plain toggle.
@@ -5431,7 +5447,7 @@ def set_floorplan_scale(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
 
-    plan = FloorPlan.objects.filter(floor_plan_id=request.POST.get('floorplan_id')).first()
+    plan = FloorPlan.objects.filter(floor_plan_id=_posted_id(request, 'floorplan_id')).first()
     if plan is None:
         return JsonResponse({'success': False, 'error': 'Floor plan not found'})
 
@@ -5464,7 +5480,7 @@ def set_floorplan_canvas(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
 
-    plan = FloorPlan.objects.filter(floor_plan_id=request.POST.get('floorplan_id')).first()
+    plan = FloorPlan.objects.filter(floor_plan_id=_posted_id(request, 'floorplan_id')).first()
     if plan is None:
         return JsonResponse({'success': False, 'error': 'Floor plan not found'})
 
@@ -5611,7 +5627,7 @@ def set_floorplan_floor_number(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
 
-    plan = FloorPlan.objects.filter(floor_plan_id=request.POST.get('floorplan_id')).first()
+    plan = FloorPlan.objects.filter(floor_plan_id=_posted_id(request, 'floorplan_id')).first()
     if plan is None:
         return JsonResponse({'success': False, 'error': 'Floor plan not found'})
 
@@ -5637,7 +5653,7 @@ def set_floorplan_north(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
 
-    plan = FloorPlan.objects.filter(floor_plan_id=request.POST.get('floorplan_id')).first()
+    plan = FloorPlan.objects.filter(floor_plan_id=_posted_id(request, 'floorplan_id')).first()
     if plan is None:
         return JsonResponse({'success': False, 'error': 'Floor plan not found'})
 
@@ -5657,7 +5673,7 @@ def set_floorplan_north(request):
 @admin_only_required
 def toggle_renovation(request):
     if request.method == 'POST':
-        floorplan_id = request.POST.get('floorplan_id')
+        floorplan_id = _posted_id(request, 'floorplan_id')
         renovation_notice = request.POST.get('renovation_notice', '').strip()
         renovation_message = request.POST.get('renovation_message', '').strip()
         
@@ -5673,7 +5689,7 @@ def toggle_renovation(request):
 @admin_only_required
 def delete_floorplan(request):
     if request.method == 'POST':
-        plan = FloorPlan.objects.filter(floor_plan_id=request.POST.get('floorplan_id')).first()
+        plan = FloorPlan.objects.filter(floor_plan_id=_posted_id(request, 'floorplan_id')).first()
         if plan is not None:
             # Archived floors are out of service too.
             FloorPlan.objects.filter(pk=plan.pk).update(
@@ -5960,6 +5976,18 @@ def admin_reports(request):
     return render(request, 'admin/reports.html', context)
 
 
+def _posted_id(request, key):
+    """A numeric id from the POST body, or None for anything else."""
+    raw = (request.POST.get(key) or '').strip()
+    return int(raw) if raw.isdigit() else None
+
+
+def _query_id(request, key):
+    """A numeric id from the query string, or None for anything else."""
+    raw = (request.GET.get(key) or '').strip()
+    return int(raw) if raw.isdigit() else None
+
+
 def download_name(request, default, ext):
     """File name for a download, taken from the optional filename field."""
     import re
@@ -6240,7 +6268,7 @@ def assign_books_to_level(request):
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
 
     level = ShelfLevel.objects.filter(
-        shelf_level_id=request.POST.get('shelf_level_id')
+        shelf_level_id=_posted_id(request, 'shelf_level_id')
     ).first()
     if level is None:
         return JsonResponse({'success': False, 'error': 'Shelf level not found'})
@@ -6261,7 +6289,7 @@ def reorder_books_on_level(request):
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
 
     level = ShelfLevel.objects.filter(
-        shelf_level_id=request.POST.get('shelf_level_id')).first()
+        shelf_level_id=_posted_id(request, 'shelf_level_id')).first()
     if level is None:
         return JsonResponse({'success': False, 'error': 'Shelf level not found'})
 
@@ -6484,7 +6512,7 @@ def edit_room(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
     
-    room_id = request.POST.get('room_id')
+    room_id = _posted_id(request, 'room_id')
     name = request.POST.get('name')
     map_x = request.POST.get('map_x')
     map_y = request.POST.get('map_y')
@@ -6566,7 +6594,7 @@ def delete_room(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
     
-    room_id = request.POST.get('room_id')
+    room_id = _posted_id(request, 'room_id')
     if not room_id:
         return JsonResponse({'success': False, 'error': 'room_id is required'})
     
@@ -6588,7 +6616,7 @@ def add_stairway(request):
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
 
     floor_plan = FloorPlan.objects.filter(
-        floor_plan_id=request.POST.get('floor_plan_id')).first()
+        floor_plan_id=_posted_id(request, 'floor_plan_id')).first()
     if floor_plan is None:
         return JsonResponse({'success': False, 'error': 'Floor plan not found'})
 
@@ -6648,7 +6676,7 @@ def edit_stairway(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
 
-    st = Stairway.objects.filter(stairway_id=request.POST.get('stairway_id')).first()
+    st = Stairway.objects.filter(stairway_id=_posted_id(request, 'stairway_id')).first()
     if st is None:
         return JsonResponse({'success': False, 'error': 'Stairway not found'})
 
@@ -6697,7 +6725,7 @@ def edit_stairway(request):
 def delete_stairway(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
-    st = Stairway.objects.filter(stairway_id=request.POST.get('stairway_id')).first()
+    st = Stairway.objects.filter(stairway_id=_posted_id(request, 'stairway_id')).first()
     if st is None:
         return JsonResponse({'success': False, 'error': 'Stairway not found'})
     refusal = _locked_response(st, 'stairway')
@@ -6778,7 +6806,7 @@ def edit_obstacle(request):
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
 
     obstacle = Obstacle.objects.filter(
-        obstacle_id=request.POST.get('obstacle_id')).first()
+        obstacle_id=_posted_id(request, 'obstacle_id')).first()
     if obstacle is None:
         return JsonResponse({'success': False, 'error': 'Obstacle not found'})
 
@@ -6820,7 +6848,7 @@ def delete_obstacle(request):
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
 
     obstacle = Obstacle.objects.filter(
-        obstacle_id=request.POST.get('obstacle_id')).first()
+        obstacle_id=_posted_id(request, 'obstacle_id')).first()
     if obstacle is None:
         return JsonResponse({'success': False, 'error': 'Obstacle not found'})
 
@@ -6963,7 +6991,7 @@ def set_shelf_grid(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
 
-    shelf = Shelf.objects.filter(shelf_id=request.POST.get('shelf_id')).first()
+    shelf = Shelf.objects.filter(shelf_id=_posted_id(request, 'shelf_id')).first()
     if shelf is None:
         return JsonResponse({'success': False, 'error': 'Shelf not found'})
 
@@ -7011,7 +7039,7 @@ def edit_shelf(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
     
-    shelf_id = request.POST.get('shelf_id')
+    shelf_id = _posted_id(request, 'shelf_id')
     name = request.POST.get('name')
     map_x = request.POST.get('map_x')
     map_y = request.POST.get('map_y')
@@ -7381,7 +7409,7 @@ def move_door(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
 
-    door = Door.objects.filter(door_id=request.POST.get('door_id')).select_related('room').first()
+    door = Door.objects.filter(door_id=_posted_id(request, 'door_id')).select_related('room').first()
     if door is None:
         return JsonResponse({'success': False, 'error': 'Door not found'})
 
@@ -7410,7 +7438,7 @@ def edit_door(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
 
-    door = Door.objects.filter(door_id=request.POST.get('door_id')).first()
+    door = Door.objects.filter(door_id=_posted_id(request, 'door_id')).first()
     if door is None:
         return JsonResponse({'success': False, 'error': 'Door not found'})
 
@@ -7483,7 +7511,7 @@ def delete_door(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
 
-    door = Door.objects.filter(door_id=request.POST.get('door_id')).select_related('room').first()
+    door = Door.objects.filter(door_id=_posted_id(request, 'door_id')).select_related('room').first()
     if door is None:
         return JsonResponse({'success': False, 'error': 'Door not found'})
 
@@ -7502,7 +7530,7 @@ def flip_door(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
 
-    door = Door.objects.filter(door_id=request.POST.get('door_id')).first()
+    door = Door.objects.filter(door_id=_posted_id(request, 'door_id')).first()
     if door is None:
         return JsonResponse({'success': False, 'error': 'Door not found'})
 
@@ -7564,7 +7592,7 @@ def unplace_shelf(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
 
-    shelf_id = request.POST.get('shelf_id')
+    shelf_id = _posted_id(request, 'shelf_id')
     if not shelf_id:
         return JsonResponse({'success': False, 'error': 'shelf_id is required'})
 
@@ -7588,7 +7616,7 @@ def delete_shelf(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
     
-    shelf_id = request.POST.get('shelf_id')
+    shelf_id = _posted_id(request, 'shelf_id')
     if not shelf_id:
         return JsonResponse({'success': False, 'error': 'shelf_id is required'})
     
@@ -7662,7 +7690,7 @@ def edit_shelf_level(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
 
-    shelf_level_id = request.POST.get('shelf_level_id')
+    shelf_level_id = _posted_id(request, 'shelf_level_id')
     level_number = request.POST.get('level_number')
     category = request.POST.get('category')
 
@@ -7703,7 +7731,7 @@ def delete_shelf_level(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
     
-    shelf_level_id = request.POST.get('shelf_level_id')
+    shelf_level_id = _posted_id(request, 'shelf_level_id')
     if not shelf_level_id:
         return JsonResponse({'success': False, 'error': 'shelf_level_id is required'})
     
@@ -7891,7 +7919,7 @@ def generate_waypoints(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
 
-    plan = FloorPlan.objects.filter(floor_plan_id=request.POST.get('floor_plan_id')).first()
+    plan = FloorPlan.objects.filter(floor_plan_id=_posted_id(request, 'floor_plan_id')).first()
     if plan is None:
         return JsonResponse({'success': False, 'error': 'Floor plan not found'})
 
@@ -8035,7 +8063,7 @@ def _room_adjacency(floor_plan):
 @admin_or_module_required('shelf')
 def floor_plan_readiness(request):
     """What still stops this floor plan working, in one list."""
-    plan = FloorPlan.objects.filter(floor_plan_id=request.GET.get('floor_plan_id')).first()
+    plan = FloorPlan.objects.filter(floor_plan_id=_query_id(request, 'floor_plan_id')).first()
     if plan is None:
         return JsonResponse({'success': False, 'error': 'Floor plan not found'})
 
@@ -8650,7 +8678,7 @@ def delete_beacon(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
 
-    beacon_id = request.POST.get('beacon_id')
+    beacon_id = _posted_id(request, 'beacon_id')
     if not beacon_id:
         return JsonResponse({'success': False, 'error': 'beacon_id is required'})
 
@@ -8667,7 +8695,7 @@ def move_beacon(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
 
-    beacon = BLEBeacon.objects.filter(beacon_id=request.POST.get('beacon_id')).first()
+    beacon = BLEBeacon.objects.filter(beacon_id=_posted_id(request, 'beacon_id')).first()
     if beacon is None:
         return JsonResponse({'success': False, 'error': 'Beacon not found'})
 
@@ -8693,7 +8721,7 @@ def update_beacon(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
 
-    beacon = BLEBeacon.objects.filter(beacon_id=request.POST.get('beacon_id')).first()
+    beacon = BLEBeacon.objects.filter(beacon_id=_posted_id(request, 'beacon_id')).first()
     if beacon is None:
         return JsonResponse({'success': False, 'error': 'Beacon not found'})
 
@@ -8765,7 +8793,7 @@ def calibrate_beacon(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
 
-    beacon = BLEBeacon.objects.filter(beacon_id=request.POST.get('beacon_id')).first()
+    beacon = BLEBeacon.objects.filter(beacon_id=_posted_id(request, 'beacon_id')).first()
     if beacon is None:
         return JsonResponse({'success': False, 'error': 'Beacon not found'})
 
@@ -8847,7 +8875,7 @@ def edit_waypoint(request):
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
 
     waypoint = Waypoint.objects.filter(
-        waypoint_id=request.POST.get('waypoint_id')).select_related('linked_shelf').first()
+        waypoint_id=_posted_id(request, 'waypoint_id')).select_related('linked_shelf').first()
     if waypoint is None:
         return JsonResponse({'success': False, 'error': 'Waypoint not found'})
 
@@ -8897,7 +8925,7 @@ def move_waypoint(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
 
-    waypoint = Waypoint.objects.filter(waypoint_id=request.POST.get('waypoint_id')).first()
+    waypoint = Waypoint.objects.filter(waypoint_id=_posted_id(request, 'waypoint_id')).first()
     if waypoint is None:
         return JsonResponse({'success': False, 'error': 'Waypoint not found'})
 
@@ -8922,7 +8950,7 @@ def delete_waypoint(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
 
-    waypoint_id = request.POST.get('waypoint_id')
+    waypoint_id = _posted_id(request, 'waypoint_id')
     if not waypoint_id:
         return JsonResponse({'success': False, 'error': 'waypoint_id is required'})
 
@@ -9236,6 +9264,11 @@ def get_patron_map_data(request):
             if target_shelf is not None else None
         ),
         'renovation_notice': floor_plan.renovation_notice or '',
+        # Beacons on every floor in service, so the map can tell which floor the patron is on.
+        'all_beacons': [
+            dict(_beacon_payload(b), x=b.map_x, y=b.map_y, floor_plan_id=b.floor_plan_id)
+            for b in BLEBeacon.objects.filter(floor_plan__in=live_plans)
+        ],
         'rooms': rooms,
         # Tables, counters and pillars.
         'obstacles': [
@@ -9272,6 +9305,18 @@ def get_navigation_route(request):
             target_floor = shelf_floor
     if target_floor is None:
         return JsonResponse({'success': False, 'error': 'No floor plan is in service'})
+
+    # Navigation to a floor under renovation is paused.
+    if resolving_shelf is not None:
+        shelf_plan = FloorPlan.objects.filter(room__shelf=resolving_shelf).first()
+        notice = (shelf_plan.renovation_notice or '').strip() if shelf_plan else ''
+        if notice:
+            return JsonResponse({
+                'success': False,
+                'renovation': True,
+                'error': 'The %s is under renovation (%s), so navigation there is paused. '
+                         'Please ask at the front desk.' % (shelf_plan.floor_label, notice),
+            })
 
     # Which floor the patron is standing on.
     floor_plan = target_floor
@@ -9695,7 +9740,7 @@ def edit_patron_log(request):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
 
-    log = PatronLog.objects.filter(log_id=request.POST.get('log_id')).first()
+    log = PatronLog.objects.filter(log_id=_posted_id(request, 'log_id')).first()
     if log is None:
         return JsonResponse({'success': False, 'error': 'Log not found'})
 
@@ -9741,7 +9786,7 @@ def delete_patron_log(request):
     """Archive a visit log (form POST from the Log Management table)."""
     if request.method == 'POST':
         log = (PatronLog.objects.select_related('patron')
-               .filter(log_id=request.POST.get('log_id')).first())
+               .filter(log_id=_posted_id(request, 'log_id')).first())
         if log is not None:
             log.archive(_actor_name(request), 'Archived from Log Management')
             log_admin_action(request, 'Archive', 'Visit log', log.log_id,
@@ -10282,7 +10327,7 @@ def update_copy_condition(request):
         return redirect('inventory_management')
 
     record = InventoryRecord.objects.filter(
-        inventory_id=request.POST.get('inventory_id')).first()
+        inventory_id=_posted_id(request, 'inventory_id')).first()
     if record is None:
         messages.error(request, 'Inventory record not found.')
         return redirect('inventory_management')
@@ -10318,7 +10363,7 @@ def update_inventory_record(request):
         return redirect('inventory_management')
 
     record = InventoryRecord.objects.filter(
-        inventory_id=request.POST.get('inventory_id')).first()
+        inventory_id=_posted_id(request, 'inventory_id')).first()
     if record is None:
         messages.error(request, 'Inventory record not found.')
         return redirect('inventory_management')
@@ -10362,7 +10407,7 @@ def deaccession_copy(request):
         return redirect('inventory_management')
 
     record = InventoryRecord.objects.filter(
-        inventory_id=request.POST.get('inventory_id')).first()
+        inventory_id=_posted_id(request, 'inventory_id')).first()
     if record is None:
         messages.error(request, 'Inventory record not found.')
         return redirect('inventory_management')
@@ -10670,7 +10715,7 @@ def stock_audit_compare(request):
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
 
     shelf_id = (request.POST.get('shelf_id') or '').strip()
-    shelf = Shelf.objects.filter(shelf_id=shelf_id).first() if shelf_id else None
+    shelf = Shelf.objects.filter(shelf_id=int(shelf_id)).first() if shelf_id.isdigit() else None
     if shelf is None:
         return JsonResponse({'success': False, 'error': 'Pick a shelf to audit'})
 

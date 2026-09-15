@@ -7,6 +7,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Ayla Admin Panel - Floor Plan Management</title>
     <script src="{% static 'js/theme.js' %}"></script>
+    <script src="{% static 'js/session.js' %}"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="{% static 'js/tailwind-theme.js' %}"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha384-iw3OoTErCYJJB9mCa8LNS2hbsQ7M3C0EpIsO/H5+EGAkPGc6rk+V8i04oW/K5xq0" crossorigin="anonymous" referrerpolicy="no-referrer">
@@ -1878,7 +1879,7 @@
                 const hint = document.getElementById('mapModeHint');
                 if (hint) hint.innerHTML = '<strong class="text-cyan-400">Area select</strong>'
                         + ' — drag a box around what you want. Only elements fully inside are picked;'
-                        + ' locked ones are skipped. Press V or Esc to stop.';
+                        + ' locked ones can be unlocked but are not moved or deleted. Press V or Esc to stop.';
             }
             // Dragging draws the selection box in area mode, so the map does not pan.
             if (lmap) { if (mode === 'area') lmap.dragging.disable(); else lmap.dragging.enable(); }
@@ -5169,21 +5170,20 @@
         function selectInBox(box, additive) {
             leaveSingleEditing();
             if (!additive) clearGroupSelection(true);
-            let skipped = 0;
+            // Locked elements are picked too, so a locked group can be unlocked;
+            // moving and deleting still leave them alone.
             elementPoints(true).forEach(function (c) {
                 const inside = c.points.every(function (p) {
                     return p[0] >= box.minX && p[0] <= box.maxX && p[1] >= box.minY && p[1] <= box.maxY;
                 });
-                if (!inside) return;
-                if (isLocked(c.kind + ':' + c.id)) { skipped += 1; return; }
-                addGroupMember(c.kind, c.id);
+                if (inside) addGroupMember(c.kind, c.id);
             });
             if (!groupSel.size) {
                 clearInspector();
-                mapToast(skipped ? 'Only locked elements were inside the box.' : 'Nothing was fully inside the box.');
+                mapToast('Nothing was fully inside the box.');
                 return;
             }
-            renderGroupPanel(skipped);
+            renderGroupPanel(0);
         }
 
         // Mouse handling, ahead of Leaflet's own.

@@ -7,6 +7,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>AYLA Library — Register</title>
 <script src="{% static 'js/theme.js' %}"></script>
+<script src="{% static 'js/session.js' %}"></script>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="{% static 'css/theme.css' %}">
 <style>
@@ -261,7 +262,7 @@
   <form method="POST" action="{% url 'patron_register' %}" enctype="multipart/form-data">
     {% csrf_token %}
     <input type="hidden" name="action" value="register">
-    <input type="hidden" name="patron_type" id="patron_type_input" value="">
+    <input type="hidden" name="patron_type" id="patron_type_input" value="{{ form.patron_type|default:'' }}">
 
     <div class="card" id="formCard">
       <div id="step1">
@@ -269,32 +270,32 @@
         <div class="form-grid">
           <div class="form-group full">
             <label for="firstNameField">First Name</label>
-            <input type="text" id="firstNameField" name="first_name" placeholder="Maria" required>
+            <input type="text" id="firstNameField" name="first_name" placeholder="Maria" required value="{{ form.first_name|default:'' }}">
           </div>
           <div class="form-group" style="margin-bottom:16px">
             <label for="middleNameField">Middle Name <span style="font-weight:400;color:var(--muted)">(optional)</span></label>
-            <input type="text" id="middleNameField" name="middle_name" placeholder="Reyes">
+            <input type="text" id="middleNameField" name="middle_name" placeholder="Reyes" value="{{ form.middle_name|default:'' }}">
           </div>
           <div class="form-group" style="margin-bottom:16px">
             <label for="lastNameField">Surname</label>
-            <input type="text" id="lastNameField" name="last_name" placeholder="Santos" required>
+            <input type="text" id="lastNameField" name="last_name" placeholder="Santos" required value="{{ form.last_name|default:'' }}">
           </div>
           <div class="form-group full">
             <label for="email">Email Address</label>
-            <input type="email" id="email" name="email" placeholder="maria@school.edu" required>
+            <input type="email" id="email" name="email" placeholder="maria@school.edu" required value="{{ form.email|default:'' }}">
           </div>
           <div class="form-group full">
             <label for="contactNumber">Contact Number</label>
-            <input type="tel" id="contactNumber" name="contact_number" placeholder="+63 9XX XXX XXXX" required>
+            <input type="tel" id="contactNumber" name="contact_number" placeholder="+63 9XX XXX XXXX" required value="{{ form.contact_number|default:'' }}">
           </div>
           <div class="form-group full">
             <label for="address">Address</label>
-            <textarea id="address" name="address" placeholder="House No., Street, Barangay, City" rows="2" style="resize:none" required></textarea>
+            <textarea id="address" name="address" placeholder="House No., Street, Barangay, City" rows="2" style="resize:none" required>{{ form.address|default:'' }}</textarea>
           </div>
           {# School, shown once a type that has one has been chosen. #}
           <div class="form-group full" id="schoolGroup" style="display:none">
             <label for="schoolField">School <span style="font-weight:400;color:var(--muted)">(optional)</span></label>
-            <input type="text" id="schoolField" name="school" placeholder="Write your school's full name" list="knownSchools">
+            <input type="text" id="schoolField" name="school" placeholder="Write your school's full name" list="knownSchools" value="{{ form.school|default:'' }}">
             <datalist id="knownSchools">
               {% for s in known_schools %}<option value="{{ s }}"></option>{% endfor %}
             </datalist>
@@ -386,6 +387,14 @@ function selectType(el) {
     if (group.style.display === 'none') document.getElementById('schoolField').value = '';
   }
 }
+// After an error, show the patron type that was chosen.
+(function () {
+  const chosen = document.getElementById('patron_type_input').value;
+  if (!chosen) return;
+  document.querySelectorAll('.type-card').forEach(function (c) {
+    if (c.querySelector('.type-label').textContent.trim() === chosen) selectType(c);
+  });
+})();
 </script>
 </body>
 </html>

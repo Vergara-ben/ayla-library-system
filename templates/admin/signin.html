@@ -7,6 +7,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Ayla - Library Admin Control Panel</title>
     <script src="{% static 'js/theme.js' %}"></script>
+    <script src="{% static 'js/session.js' %}"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600&family=Playfair+Display:ital,wght@0,600;1,600&display=swap" rel="stylesheet">
@@ -439,7 +440,7 @@
                         <span class="input-wrapper-icon input-icon">
                             <i class="fa-solid fa-user" aria-hidden="true"></i>
                         </span>
-                        <input type="email" id="admin-id" name="email" class="form-input" placeholder="admin@school.edu.ph" required>
+                        <input type="email" id="admin-id" name="email" class="form-input" placeholder="admin@school.edu.ph" required value="{{ email|default:'' }}">
                     </div>
                 </div>
 
@@ -447,7 +448,7 @@
                     <label class="form-label" for="password">Password</label>
                     <div class="input-wrapper">
                         <span class="input-icon"><i class="fa-solid fa-lock" aria-hidden="true"></i></span>
-                        <input type="password" id="password" name="password" class="form-input" placeholder="Enter admin password" required>
+                        <input type="password" id="password" name="password" class="form-input" placeholder="Enter admin password"{% if email %} autofocus{% endif %} required>
                     </div>
                 </div>
 

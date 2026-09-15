@@ -74,6 +74,8 @@ MIDDLEWARE = [
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
+    # Signs out an account deactivated, suspended or archived mid-session.
+    'library.middleware.SignOutInactiveAccountsMiddleware',
     'library.middleware.ContentSecurityPolicyMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     # Suspends the portal in a browser that has been handed to the public.

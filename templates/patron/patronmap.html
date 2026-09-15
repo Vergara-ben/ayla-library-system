@@ -7,6 +7,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>AYLA Library — Floor Map</title>
 <script src="{% static 'js/theme.js' %}"></script>
+<script src="{% static 'js/session.js' %}"></script>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" integrity="sha384-c6Rcwz4e4CITMbu/NBmnNS8yN2sC3cUElMEMfP3vqqKFp7GOYaaBBCqmaWBjmkjb" crossorigin="anonymous" referrerpolicy="no-referrer"/>
 <link rel="stylesheet" href="{% static 'css/theme.css' %}">
@@ -23,6 +24,13 @@
     padding:7px 10px; font-family:inherit; font-size:12px; font-weight:600;
     cursor:pointer; max-width:150px;
   }
+  .map-notice{
+    position:fixed; left:50%; top:70px; transform:translateX(-50%); z-index:1200;
+    background:var(--surface); border:1px solid var(--accent); color:var(--text);
+    padding:9px 14px; border-radius:10px; font-size:13px; max-width:90vw; text-align:center;
+    box-shadow:0 6px 20px rgba(0,0,0,.25);
+  }
+  .floor-back{margin-left:6px;background:none;border:none;padding:0;color:var(--accent);font:inherit;font-weight:700;text-decoration:underline;cursor:pointer;}
   .floor-note{
     margin-top:8px; padding:10px 12px; border-radius:10px;
     background:var(--surface2); border:1px solid var(--border);
@@ -340,6 +348,25 @@ let patronPos = null;            // {x, y} in floor-plan pixels (top-left origin
 let displayedPos = null;         // {x, y} of wherever the marker is actually drawn right now
 let lastRoutePoints = null;      // the most recent full route the server returned
 
+// Floors: the one on screen and the one the patron is standing on can differ.
+const floorCache = {};           // floor_plan_id -> map data for that floor
+let allBeacons = [];             // beacons on every floor in service, each with its floor_plan_id
+let patronFloorId = null;        // where the beacons say the patron is
+let targetFloorId = null;        // the floor the target shelf is on
+let floorCandidate = null;       // a floor that is starting to win, before the map follows it
+let floorCandidateSince = 0;
+let floorChanging = false;
+let layersControl = null;
+let arrivalMarker = null;        // where the patron comes off the stairs, on another floor
+// A new floor must win for this long, by this many dB, before the map follows.
+const FLOOR_SWITCH_MS = 4000;
+const FLOOR_MARGIN_DB = 4;
+
+// Positioning uses the patron's own floor; the floor on screen until that is known.
+function posMap() {
+  return (patronFloorId !== null && floorCache[patronFloorId]) || mapData;
+}
+
 // Arrival distance.
 const ARRIVAL_M = 2.0;
 // Leaving distance.
@@ -514,7 +541,7 @@ const MOTION_THRESHOLD_M = 1.2;
 let recentFixes = [];
 
 function posJumpMaxPx() {
-  const ppm = mapData && mapData.pixels_per_meter;
+  const ppm = posMap() && posMap().pixels_per_meter;
   if (!ppm) return Infinity;     // no scale yet -- a cap in undefined units means nothing
   return MAX_WALK_SPEED_MPS * (TRILATERATE_INTERVAL_MS / 1000) * ppm;
 }
@@ -529,7 +556,7 @@ function meanOf(points) {
 function isActuallyMoving(pos) {
   recentFixes.push(pos);
   if (recentFixes.length > MOTION_WINDOW * 2) recentFixes.shift();
-  const ppm = mapData && mapData.pixels_per_meter;
+  const ppm = posMap() && posMap().pixels_per_meter;
   if (!ppm || recentFixes.length < MOTION_WINDOW * 2) return true;
   const older = meanOf(recentFixes.slice(0, MOTION_WINDOW));
   const newer = meanOf(recentFixes.slice(MOTION_WINDOW));
@@ -577,11 +604,147 @@ function findTargetFloor(data) {
   return targetFloorCache;
 }
 
+// Redraw another floor in place, so Bluetooth keeps scanning.
 function switchFloor(floorId) {
+  showFloor(Number(floorId));
+}
+
+// One floor's map data, fetched once.
+async function ensureFloorData(floorId) {
+  if (floorCache[floorId]) return floorCache[floorId];
+  const q = new URLSearchParams({ floor: floorId });
+  if (targetData.shelf_id) q.set('shelf', targetData.shelf_id);
+  let data;
+  try { data = await fetchJSON(NAV_DATA_URL + '?' + q.toString()); } catch (e) { return null; }
+  if (!data || !data.success || data.floor_plan_id !== floorId) return null;
+  floorCache[floorId] = data;
+  return data;
+}
+
+async function showFloor(floorId, notice) {
+  const data = await ensureFloorData(floorId);
+  if (!data) { setStatus('amber', 'That floor could not be loaded'); return; }
+  drawFloor(data);
   const params = new URLSearchParams(location.search);
   params.set('floor', floorId);
-  // Reload to switch floors.
-  location.search = params.toString();
+  history.replaceState(null, '', location.pathname + '?' + params.toString());
+  if (notice) showMapNotice(notice);
+  // The marker is drawn only on the floor the patron is on.
+  if (patronPos && shownFloorId === patronFloorId) { displayedPos = null; animateTo(patronPos); }
+  lastRoutedFrom = null;
+  computeRoute();
+}
+
+function floorLabelOf(floorId) {
+  const f = ((mapData && mapData.floors) || []).find(function (x) { return x.floor_plan_id === floorId; });
+  return f ? f.label : 'another floor';
+}
+
+function showMapNotice(text) {
+  let el = document.getElementById('mapNotice');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'mapNotice';
+    el.className = 'map-notice';
+    el.setAttribute('role', 'status');
+    document.body.appendChild(el);
+  }
+  el.textContent = text;
+  el.style.display = '';
+  clearTimeout(showMapNotice.timer);
+  showMapNotice.timer = setTimeout(function () { el.style.display = 'none'; }, 4000);
+}
+
+// A banner while looking at a floor the patron is not on.
+function renderViewState() {
+  let bar = document.getElementById('floorViewBar');
+  const away = patronFloorId !== null && shownFloorId !== patronFloorId;
+  if (!away) { if (bar) bar.remove(); return; }
+  if (!bar) {
+    const row = document.querySelector('.info-panel .btn-row');
+    bar = document.createElement('div');
+    bar.id = 'floorViewBar';
+    bar.className = 'floor-note';
+    if (row) row.parentNode.insertBefore(bar, row);
+  }
+  bar.textContent = '';
+  const text = document.createElement('span');
+  text.textContent = 'You are on the ' + floorLabelOf(patronFloorId) + '.';
+  const back = document.createElement('button');
+  back.type = 'button';
+  back.className = 'floor-back';
+  back.textContent = 'Back to my floor';
+  back.onclick = function () { showFloor(patronFloorId); };
+  bar.appendChild(text);
+  bar.appendChild(back);
+}
+
+// Which floor the beacons say the patron is on: the strongest two readings per floor.
+function floorScores(now) {
+  const heard = {};
+  allBeacons.forEach(function (b) {
+    const buf = rssiBuffers[b.beacon_id];
+    const seen = rssiLastSeen[b.beacon_id];
+    if (!buf || !buf.length || !seen || (now - seen) > BEACON_STALE_MS) return;
+    (heard[b.floor_plan_id] = heard[b.floor_plan_id] || []).push(median(buf));
+  });
+  const scores = {};
+  Object.keys(heard).forEach(function (f) {
+    const strongest = heard[f].sort(function (a, b) { return b - a; }).slice(0, 2);
+    scores[f] = strongest.reduce(function (s, v) { return s + v; }, 0) / strongest.length;
+  });
+  return scores;
+}
+
+function detectFloor() {
+  if (floorChanging) return;
+  const now = Date.now();
+  const scores = floorScores(now);
+  const floors = Object.keys(scores).map(Number).filter(function (f) { return !isNaN(f); });
+  if (!floors.length) return;
+  floors.sort(function (a, b) { return scores[b] - scores[a]; });
+  const top = floors[0];
+  if (patronFloorId === null) { setPatronFloor(top, true); return; }
+  if (top === patronFloorId) { floorCandidate = null; return; }
+  // Near the stairs both floors are heard; only a clear, lasting lead counts.
+  const here = scores[patronFloorId];
+  if (here != null && scores[top] - here < FLOOR_MARGIN_DB) { floorCandidate = null; return; }
+  if (floorCandidate !== top) { floorCandidate = top; floorCandidateSince = now; return; }
+  if (now - floorCandidateSince >= FLOOR_SWITCH_MS) { floorCandidate = null; setPatronFloor(top, false); }
+}
+
+async function setPatronFloor(floorId, first) {
+  floorChanging = true;
+  try {
+    const data = await ensureFloorData(floorId);
+    if (!data) return;
+    patronFloorId = floorId;
+    resetPositionState();
+    const notice = first ? ('You are on the ' + data.floor_label + '. The route starts here.')
+                         : ('You are on the ' + data.floor_label + ' now.');
+    if (shownFloorId !== floorId) {
+      await showFloor(floorId, notice);
+    } else {
+      if (!first) showMapNotice(notice);
+      renderViewState();
+    }
+  } finally {
+    floorChanging = false;
+  }
+}
+
+function resetPositionState() {
+  patronPos = null;
+  displayedPos = null;
+  lastSmoothPos = null;
+  stillAnchor = null;
+  recentFixes = [];
+  lastRoutedFrom = null;
+  hasArrived = false;
+  targetPoint = null;
+  solidShapes = null;
+  if (animRAF) { cancelAnimationFrame(animRAF); animRAF = null; }
+  if (patronMarker) { positionLayer.removeLayer(patronMarker); patronMarker = null; }
 }
 const NAV_ROUTE_URL = "{% url 'get_navigation_route' %}";
 
@@ -615,8 +778,29 @@ async function initMap() {
     setStatus('amber', 'No active map');
     return;
   }
+  floorCache[data.floor_plan_id] = data;
+  allBeacons = data.all_beacons || data.beacons || [];
+  targetFloorId = data.target_floor_id || null;
+
+  // Resize the map when the window changes.
+  let resizeTimer = null;
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => map.invalidateSize(), 150);
+  });
+  drawFloor(data);
+}
+
+// Draw one floor, replacing whatever floor was on the map.
+function drawFloor(data) {
   mapData = data;
   imgW = data.canvas_width; imgH = data.canvas_height;
+  [baseLayer, shelfLayer, sectionLayer, levelLayer, routeLayer, positionLayer]
+    .forEach(function (lyr) { lyr.clearLayers(); });
+  routeArrows = [];
+  stairHighlight = null;
+  arrivalMarker = null;
+  patronMarker = null;
   buildFloorPicker(data);
 
   const bounds = [[0, 0], [imgH, imgW]];
@@ -703,13 +887,6 @@ async function initMap() {
     ro.observe(mapEl);
   }
 
-  // Resize the map when the window changes.
-  let resizeTimer = null;
-  window.addEventListener('resize', () => {
-    clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(() => map.invalidateSize(), 150);
-  });
-
   // Layers 2-4: shelves, labels and levels
   data.shelves.forEach((s) => {
     const isTarget = targetData.shelf_id && s.shelf_id === targetData.shelf_id;
@@ -771,20 +948,22 @@ async function initMap() {
 
   // Waypoints and beacons are not shown to patrons.
 
-  [baseLayer, shelfLayer, sectionLayer, levelLayer, routeLayer, positionLayer]
-    .forEach((lyr) => lyr.addTo(map));
-
-  // Six independently toggleable layers.
-  L.control.layers(null, {
-    'Floor plan': baseLayer,
-    'Shelves': shelfLayer,
-    'Target label': sectionLayer,
-    'Target levels': levelLayer,
-    'Route': routeLayer,
-    'Your position': positionLayer,
-  }, { collapsed: true, position: 'topleft' }).addTo(map);
+  // Six independently toggleable layers, set up once.
+  if (!layersControl) {
+    [baseLayer, shelfLayer, sectionLayer, levelLayer, routeLayer, positionLayer]
+      .forEach((lyr) => lyr.addTo(map));
+    layersControl = L.control.layers(null, {
+      'Floor plan': baseLayer,
+      'Shelves': shelfLayer,
+      'Target label': sectionLayer,
+      'Target levels': levelLayer,
+      'Route': routeLayer,
+      'Your position': positionLayer,
+    }, { collapsed: true, position: 'topleft' }).addTo(map);
+  }
 
   shownFloorId = data.floor_plan_id || null;
+  renderViewState();
 
   if (targetData.shelf_name) {
     document.getElementById('shelfName').textContent = 'Target: ' + targetData.shelf_name;
@@ -792,8 +971,16 @@ async function initMap() {
     const onThisFloor = (data.shelves || []).some(function (sh) {
       return sh.shelf_id === targetData.shelf_id;
     });
-    if (onThisFloor) {
-      document.getElementById('shelfPath').textContent = 'Enable Bluetooth to start navigating';
+    if (targetData.floor_renovation) {
+      document.getElementById('shelfPath').textContent = targetData.shelf_name + ' is on the '
+        + (targetData.floor_label || 'another floor') + ', which is under renovation ('
+        + targetData.floor_renovation + '). Navigation there is paused. Please ask at the front desk.';
+    } else if (onThisFloor) {
+      document.getElementById('shelfPath').textContent = patronFloorId === null
+        ? 'Enable Bluetooth to start navigating' : 'Finding your position…';
+    } else if (targetData.floor_closed) {
+      document.getElementById('shelfPath').textContent = targetData.shelf_name + ' is on the '
+        + (targetData.floor_label || 'another floor') + ', which is closed right now. Please ask at the front desk.';
     } else {
       const home = findTargetFloor(data);
       document.getElementById('shelfPath').textContent = home
@@ -815,7 +1002,7 @@ function applyPositionThreshold(pos) {
   // Parked.
   if (!moving) {
     if (!stillAnchor) stillAnchor = lastSmoothPos;
-    const ppm = (mapData && mapData.pixels_per_meter) || 0;
+    const ppm = (posMap() && posMap().pixels_per_meter) || 0;
     const release = ppm ? STILL_HOLD_M * ppm : Infinity;
     if (Math.hypot(pos.x - stillAnchor.x, pos.y - stillAnchor.y) <= release) {
       lastSmoothPos = stillAnchor;
@@ -844,7 +1031,7 @@ const ANIM_MS = 900;   // just under the fix interval, so one animation finishes
 
 // Metres are what the thresholds are written in; the map is in canvas units.
 function metresToUnits(m) {
-  const ppm = mapData && mapData.pixels_per_meter;
+  const ppm = posMap() && posMap().pixels_per_meter;
   return (ppm && ppm > 0) ? m * ppm : null;
 }
 
@@ -854,13 +1041,14 @@ function distanceTo(pos, point) {
 
 // Called on every fix. Decides whether this one is worth acting on at all.
 function onPositionFix(pos) {
-  if (!targetData.shelf_id) return;
+  if (!targetData.shelf_id || targetData.floor_closed || targetData.floor_renovation) return;
 
   const arriveAt = metresToUnits(ARRIVAL_M);
   const leaveAt = metresToUnits(DEPARTURE_M);
   const gap = distanceTo(pos, targetPoint);
 
-  if (gap !== null && arriveAt !== null) {
+  // Arrival only counts on the floor the shelf is on.
+  if (gap !== null && arriveAt !== null && patronFloorId === targetFloorId) {
     if (!hasArrived && gap <= arriveAt) { showArrived(); return; }
     // Walking away from it resumes navigation, but only once clearly away.
     if (hasArrived && gap <= leaveAt) return;
@@ -905,8 +1093,9 @@ function setPatronPosition(pos) {
   // Clamped again after smoothing, not only before it.
   pos = clampToFloor(applyPositionThreshold(pos));
   patronPos = pos;
-  animateTo(pos);
   setStatus('green', 'BLE: Active');
+  // The marker is drawn only on the floor the patron is on.
+  if (shownFloorId === patronFloorId) animateTo(pos);
   onPositionFix(pos);
 }
 
@@ -946,20 +1135,29 @@ function renderDisplayedPosition() {
 // The facing arrow is gone.
 
 async function computeRoute() {
-  if (!patronPos || !targetData.shelf_id) return;
-  // from_floor is what makes this a cross-floor question.
-  let url = NAV_ROUTE_URL + '?start_x=' + patronPos.x + '&start_y=' + patronPos.y + '&target_shelf_id=' + targetData.shelf_id;
-  if (shownFloorId) url += '&from_floor=' + shownFloorId;
+  if (!patronPos || patronFloorId === null || !targetData.shelf_id) return;
+  if (targetData.floor_closed || targetData.floor_renovation) return;
+  // The walk starts where the patron is, on the floor they are on.
+  const url = NAV_ROUTE_URL + '?start_x=' + patronPos.x + '&start_y=' + patronPos.y
+            + '&target_shelf_id=' + targetData.shelf_id + '&from_floor=' + patronFloorId;
+  const viewing = shownFloorId;
   let r;
   try { r = await fetchJSON(url); } catch (e) { return; }
+  if (viewing !== shownFloorId) return;      // the floor changed while this was on its way
+  clearArrivalMarker();
   if (!r.success) {
+    drawRouteArrows(null);
     document.getElementById('shelfPath').textContent = r.error || 'No route found';
-    showFloorHandover(r);
+    showFloorHandover(shownFloorId === patronFloorId ? r : null);
     return;
   }
+  // Looking at another floor: draw that floor's part of the walk.
+  if (shownFloorId !== patronFloorId) { drawOtherFloorLeg(r); return; }
   lastRoutePoints = r.route;
-  // Remember the shelf position for arrival checks.
-  if (r.target_shelf && r.target_shelf.x != null) {
+  // Remember the shelf position for arrival checks, once it is on this floor.
+  if (r.cross_floor) {
+    targetPoint = null;
+  } else if (r.target_shelf && r.target_shelf.x != null) {
     targetPoint = { x: r.target_shelf.x, y: r.target_shelf.y };
   } else if (r.route && r.route.length) {
     const end = r.route[r.route.length - 1];
@@ -990,6 +1188,37 @@ async function computeRoute() {
       'Distance ≈ ' + asDistance(r.distance) + ' · ' + segs + ' segment(s)';
   }
   showFloorHandover(r);
+}
+
+function clearArrivalMarker() {
+  if (arrivalMarker) { routeLayer.removeLayer(arrivalMarker); arrivalMarker = null; }
+}
+
+// The part of the walk on the floor being looked at, from where the patron arrives on it.
+function drawOtherFloorLeg(r) {
+  showFloorHandover(null);
+  const path = document.getElementById('shelfPath');
+  const legs = r.legs || [];
+  const index = legs.findIndex(function (l) { return l.floor_plan_id === shownFloorId; });
+  if (index < 0 || !legs[index].points || legs[index].points.length < 2) {
+    drawRouteArrows(null);
+    path.textContent = r.stairs_only
+      ? 'The stairs to the ' + (mapData.floor_label || 'this floor') + ' are not linked on the map yet.'
+      : 'Your route does not pass through the ' + (mapData.floor_label || 'this floor') + '.';
+    return;
+  }
+  const leg = legs[index];
+  drawRouteArrows(leg.points);
+  const start = leg.points[0];
+  arrivalMarker = L.circleMarker(toLatLng(start.x, start.y), {
+    radius: 14, color: AylaTheme.color('--blue'), weight: 3,
+    fillColor: AylaTheme.color('--blue'), fillOpacity: 0.15,
+  }).bindTooltip('You arrive here', { direction: 'top' }).addTo(routeLayer);
+  const ppm = mapData && mapData.pixels_per_meter;
+  const far = ppm ? (Math.round((leg.distance / ppm) * 10) / 10) + ' m' : Math.round(leg.distance) + ' canvas units';
+  path.textContent = index === legs.length - 1
+    ? 'From the stairs: about ' + far + ' to ' + (targetData.shelf_name || 'the shelf') + '.'
+    : 'Across this floor: about ' + far + ' to the next stairs.';
 }
 
 // Stairs handover.
@@ -1200,7 +1429,7 @@ function matchBeacon(e) {
   const advUuids = (e.uuids || []).map(canonicalServiceUuid);
   const name = e.device && e.device.name;
 
-  for (const b of mapData.beacons) {
+  for (const b of allBeacons) {
     const type = b.advertisement_type || 'iBeacon';
     const bu = hexOnly(b.beacon_uuid);
 
@@ -1253,7 +1482,7 @@ const MIN_GEOMETRY_QUALITY = 0.01;   // see the collinearity guard below
 
 function roomPolygons() {
   // Walkable rooms (staff-only rooms excluded).
-  return (mapData.rooms || [])
+  return (posMap().rooms || [])
     .filter((r) => r.patron_access !== false)
     .map((r) => r.geometry).filter((g) => g && g.length >= 3);
 }
@@ -1285,22 +1514,26 @@ function nearestPointOnPolygon(x, y, poly) {
 // Obstacles a person cannot stand in.
 let solidShapes = null;
 
+let solidShapesFloor = null;
+
 function solids() {
-  if (solidShapes) return solidShapes;
+  const floor = posMap();
+  if (solidShapes && solidShapesFloor === floor) return solidShapes;
+  solidShapesFloor = floor;
   solidShapes = [];
-  (mapData.shelves || []).forEach(function (sh) {
+  (floor.shelves || []).forEach(function (sh) {
     const poly = (sh.footprint && sh.footprint.length >= 3) ? sh.footprint : sh.geometry;
     // Wall-mounted shelves do not block.
     if (poly && poly.length >= 3 && !sh.elevated) solidShapes.push(poly);
   });
-  (mapData.obstacles || []).forEach(function (o) {
+  (floor.obstacles || []).forEach(function (o) {
     if (o.geometry && o.geometry.length >= 3) solidShapes.push(o.geometry);
   });
-  (mapData.stairways || []).forEach(function (st) {
+  (floor.stairways || []).forEach(function (st) {
     if (st.geometry && st.geometry.length >= 3) solidShapes.push(st.geometry);
   });
   // Staff-only rooms, listed as obstacles as well as being left out of the walkable set.
-  (mapData.rooms || []).forEach(function (r) {
+  (floor.rooms || []).forEach(function (r) {
     if (r.patron_access === false && r.geometry && r.geometry.length >= 3) {
       solidShapes.push(r.geometry);
     }
@@ -1320,7 +1553,7 @@ function isClearFloor(p) {
 }
 
 function pushOffSolids(pos) {
-  const ppm = (mapData && mapData.pixels_per_meter) || 0;
+  const ppm = (posMap() && posMap().pixels_per_meter) || 0;
   const clear = ppm ? CLEARANCE_M * ppm : 4;
 
   for (const poly of solids()) {
@@ -1358,7 +1591,7 @@ const SEARCH_REACH_M = 5.0;
 const SEARCH_SPOKES = 16;
 
 function nearestClearPoint(pos) {
-  const ppm = (mapData && mapData.pixels_per_meter) || 0;
+  const ppm = (posMap() && posMap().pixels_per_meter) || 0;
   if (!ppm) return pos;
   const step = SEARCH_STEP_M * ppm;
   const rings = Math.ceil(SEARCH_REACH_M / SEARCH_STEP_M);
@@ -1386,7 +1619,9 @@ function clampToFloor(pos) {
 function clampToRooms(pos) {
   const polys = roomPolygons();
   if (!polys.length) {
-    return { x: Math.min(Math.max(pos.x, 0), imgW), y: Math.min(Math.max(pos.y, 0), imgH) };
+    const fm = posMap();
+    return { x: Math.min(Math.max(pos.x, 0), fm.canvas_width || imgW),
+             y: Math.min(Math.max(pos.y, 0), fm.canvas_height || imgH) };
   }
   for (const poly of polys) {
     if (pointInPolygon(pos.x, pos.y, poly)) return pos;
@@ -1397,7 +1632,7 @@ function clampToRooms(pos) {
     if (!best || q.d < best.d) { best = q; bestPoly = poly; }
   }
   // A hair inside rather than exactly on the line.
-  const ppm = (mapData && mapData.pixels_per_meter) || 0;
+  const ppm = (posMap() && posMap().pixels_per_meter) || 0;
   const inset = ppm ? 0.05 * ppm : 1;
   let cx = 0, cy = 0;
   bestPoly.forEach(function (p) { cx += p[0]; cy += p[1]; });
@@ -1433,15 +1668,22 @@ function solveFrom(used) {
 
 function trilaterate() {
   if (!mapData) return;
+  // First which floor, then where on it.
+  detectFloor();
+  const fm = patronFloorId !== null ? floorCache[patronFloorId] : null;
+  if (!fm) {
+    setStatus('amber', 'BLE: listening for beacons…');
+    return;
+  }
   // A map scale is required.
-  const scale = mapData.pixels_per_meter;
+  const scale = fm.pixels_per_meter;
   if (!scale || scale <= 0) {
     setStatus('amber', 'Map scale not set — ask an administrator');
     return;
   }
   const now = Date.now();
   const pts = [];
-  mapData.beacons.forEach((b) => {
+  (fm.beacons || []).forEach((b) => {
     const buf = rssiBuffers[b.beacon_id];
     const seen = rssiLastSeen[b.beacon_id];
     // Ignore beacons not heard recently.
@@ -1454,8 +1696,9 @@ function trilaterate() {
   });
   if (pts.length < 3) {
     // Explain why no position is shown.
-    setStatus('amber', 'BLE: ' + matchedBeacons.size + ' of '
-      + mapData.beacons.length + ' beacons seen — need 3 to fix a position');
+    const heard = (fm.beacons || []).filter(function (b) { return matchedBeacons.has(b.beacon_id); }).length;
+    setStatus('amber', 'BLE: ' + heard + ' of ' + (fm.beacons || []).length + ' beacons seen on the '
+      + fm.floor_label + ' — need 3 to fix a position');
     return;
   }
   // Use only the nearest beacons.

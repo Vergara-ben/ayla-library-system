@@ -245,7 +245,8 @@ def floorplan_bulk(request):
     """One endpoint for every group action in the floor plan editor."""
     if request.method != 'POST':
         return _fail('Only POST method allowed')
-    plan = FloorPlan.objects.filter(floor_plan_id=request.POST.get('floor_plan_id')).first()
+    raw_plan = (request.POST.get('floor_plan_id') or '').strip()
+    plan = FloorPlan.objects.filter(floor_plan_id=int(raw_plan)).first() if raw_plan.isdigit() else None
     if plan is None:
         return _fail('Floor plan not found')
 

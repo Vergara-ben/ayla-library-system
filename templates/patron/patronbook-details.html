@@ -7,6 +7,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>AYLA Library — Book Details</title>
 <script src="{% static 'js/theme.js' %}"></script>
+<script src="{% static 'js/session.js' %}"></script>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="{% static 'css/theme.css' %}">
 <style>
@@ -163,7 +164,13 @@
       </div>
     </div>
     {% if room %}<div class="detail-row"><div class="detail-key">Room</div><div class="detail-val">{{ room.name }}</div></div>{% endif %}
-    {% if floor_plan %}<div class="detail-row"><div class="detail-key">Floor Plan</div><div class="detail-val">Floor Plan {{ floor_plan.floor_plan_id }}</div></div>{% endif %}
+    {% if floor_plan %}<div class="detail-row"><div class="detail-key">Floor</div><div class="detail-val">{{ floor_plan.floor_label }}{% if floor_closed %} &middot; closed right now{% elif floor_renovation %} &middot; under renovation{% endif %}</div></div>{% endif %}
+    {% if shelf and floor_closed %}
+    <p class="unshelved-note">This book's floor is closed right now, so it cannot be reached on the map. Ask at the front desk and staff will get it for you.</p>
+    {% endif %}
+    {% if shelf and floor_renovation and not floor_closed %}
+    <p class="unshelved-note">This book's floor is under renovation ({{ floor_renovation }}), so navigation there is paused. Ask at the front desk and staff will get it for you.</p>
+    {% endif %}
     {% if not shelf %}
     {# Unshelved book note. #}
     <p class="unshelved-note">This book is in the library but has not been put on a shelf yet. Ask at the front desk and staff will get it for you.</p>
@@ -181,7 +188,9 @@
 
 <!-- BOTTOM -->
 <div class="bottom-action">
-  {% if shelf %}
+  {% if shelf and floor_closed or shelf and floor_renovation %}
+  <a class="btn-map btn-map-alt" href="{% url 'patron_catalog' %}">Back to the catalogue</a>
+  {% elif shelf %}
   <button class="btn-map" onclick="window.location.href='{% url 'patron_map' %}?book_id={{ book.book_id }}'">Navigate on Map</button>
   {% else %}
   {# No shelf, so no route. #}

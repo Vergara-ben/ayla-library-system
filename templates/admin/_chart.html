@@ -14,8 +14,8 @@
             <div class="p-5">
                 {% if chart.has_data %}
                 <svg viewBox="0 0 {{ chart.width }} {{ chart.height }}"
-                     width="100%" height="auto" preserveAspectRatio="xMidYMid meet"
-                     style="display:block; max-height:290px; overflow:visible;"
+                     width="100%" preserveAspectRatio="xMidYMid meet"
+                     style="display:block; height:auto; max-height:290px; overflow:visible;"
                      role="img"
                      aria-label="{{ chart.title }}. {{ chart.axis_note }}. Exact figures are listed in the tables below.">
 

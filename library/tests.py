@@ -273,6 +273,108 @@ class ArchiveTests(TestCase):
         self.assertEqual(Patron.all_objects.filter(email='ana@example.invalid').count(), 1)
 
 
+class FailedSignInKeepsEmailTests(TestCase):
+    """A wrong password empties only the password field."""
+
+    def test_patron_sign_in(self):
+        Patron.objects.create(first_name='Ana', last_name='Reyes', email='ana@example.invalid',
+                              patron_type='Student', password_hash=hash_password('SmokeTest123'))
+        r = Client().post('/patron/login/', {'email': 'ana@example.invalid', 'password': 'WrongPass999'})
+        self.assertContains(r, 'value="ana@example.invalid"')
+        self.assertNotContains(r, 'WrongPass999')
+
+    def test_administrator_sign_in(self):
+        _admin()
+        r = Client().post('/admin-portal/login/',
+                          {'email': 'smoke-admin@example.invalid', 'password': 'WrongPass999'})
+        self.assertContains(r, 'value="smoke-admin@example.invalid"')
+        self.assertNotContains(r, 'WrongPass999')
+
+    def test_staff_sign_in(self):
+        r = Client().post('/library-staff/login/',
+                          {'email': 'nobody@example.invalid', 'password': 'WrongPass999'})
+        self.assertContains(r, 'value="nobody@example.invalid"')
+
+
+class PreDeploymentGapTests(TestCase):
+    """Gaps found in the check before deploying."""
+
+    def test_a_deactivated_staff_account_is_signed_out(self):
+        staff = User.objects.create(
+            fullname='Desk Staff', email='desk-gap@example.invalid',
+            password_hash=hash_password('SmokeTest123'), role='Staff',
+            account_status='Active', modules='books')
+        client = _signed_in(staff)
+        User.objects.filter(pk=staff.pk).update(account_status='Inactive')
+        r = client.get('/library-staff/dashboard/')
+        self.assertEqual(r.status_code, 302)
+        self.assertNotIn('admin_id', client.session)
+
+    def test_a_suspended_patron_is_signed_out(self):
+        patron = Patron.objects.create(first_name='Ana', last_name='Reyes',
+                                       email='gap@example.invalid', patron_type='Student')
+        c = Client()
+        s = c.session
+        s['patron_id'] = patron.patron_id
+        s.save()
+        Patron.objects.filter(pk=patron.pk).update(account_status='Suspended')
+        r = c.get('/patron/account/')
+        self.assertEqual(r.status_code, 302)
+        self.assertNotIn('patron_id', c.session)
+
+    def test_registration_errors_keep_what_was_typed(self):
+        r = Client().post('/patron/register/', {
+            'action': 'register', 'first_name': 'Maria', 'last_name': 'Santos',
+            'email': 'maria@example.invalid', 'contact_number': '09171234567',
+            'address': 'Sala, Cabuyao', 'patron_type': 'Student', 'school': 'Sala High',
+            'password': 'LongEnough123', 'confirm_password': 'Different123'})
+        self.assertContains(r, 'Passwords do not match')
+        for value in ('Maria', 'Santos', 'maria@example.invalid', '09171234567',
+                      'Sala, Cabuyao', 'Sala High'):
+            self.assertContains(r, value)
+        self.assertNotContains(r, 'LongEnough123')
+
+    def test_a_non_number_id_is_not_a_server_error(self):
+        client = _signed_in(_admin(modules='logs,donations,transactions'))
+        for url, key in (('/admin-portal/delete-log/', 'log_id'),
+                         ('/admin-portal/edit-log/', 'log_id'),
+                         ('/admin-portal/delete-donation/', 'donation_id'),
+                         ('/admin-portal/delete-floorplan/', 'floorplan_id'),
+                         ('/admin-portal/toggle-announcement/', 'announcement_id'),
+                         ('/admin-portal/adjust-due-date/', 'transaction_id')):
+            r = client.post(url, {key: 'abc'})
+            self.assertLess(r.status_code, 500, url)
+
+    def _book_on_closed_floor(self):
+        plan = FloorPlan.objects.create(name='Annex', floor_number=3, is_active=False)
+        room = Room.objects.create(floor_plan=plan, name='Annex room', map_x=0, map_y=0)
+        shelf = Shelf.objects.create(room=room, name='Shelf Z', map_x=10, map_y=10)
+        level = ShelfLevel.objects.create(shelf=shelf, level_number=1)
+        return Book.objects.create(title='Closed Floor Book', author='X', shelf_level=level)
+
+    def test_book_details_say_the_floor_is_closed(self):
+        book = self._book_on_closed_floor()
+        r = Client().get('/patron/book-details/%d/' % book.book_id)
+        self.assertContains(r, 'closed right now')
+        self.assertNotContains(r, 'Navigate on Map')
+
+    def test_the_map_knows_the_floor_is_closed(self):
+        book = self._book_on_closed_floor()
+        r = Client().get('/patron/map/', {'book_id': book.book_id})
+        self.assertTrue(r.context['target']['floor_closed'])
+
+    def test_a_non_number_book_on_the_map_is_ignored(self):
+        self.assertEqual(Client().get('/patron/map/', {'book_id': 'abc'}).status_code, 200)
+
+    def test_charts_have_no_invalid_height(self):
+        with open(os.path.join('templates', 'admin', '_chart.html'), encoding='utf-8') as f:
+            self.assertNotIn('height="auto"', f.read())
+
+    def test_pages_load_the_session_notice(self):
+        r = _signed_in(_admin()).get('/admin-portal/dashboard/')
+        self.assertContains(r, 'js/session.js')
+
+
 class HostingEndpointTests(TestCase):
     """The health check and the daily task link used on Render."""
 
@@ -663,6 +765,56 @@ class EmailTransportTests(TestCase):
         with self.settings(EMAIL_BACKEND='django.core.mail.backends.smtp.EmailBackend',
                            EMAIL_HOST='127.0.0.1', EMAIL_PORT=1, EMAIL_TIMEOUT=1):
             self.assertFalse(send_email('Subject', 'Body', 'someone@example.invalid'))
+
+
+class FloorAwareNavigationTests(TestCase):
+    """The patron map knows every floor's beacons, and renovation pauses navigation."""
+
+    def setUp(self):
+        self.f1 = FloorPlan.objects.create(name='Ground', floor_number=1, is_active=True,
+                                           pixels_per_meter=10)
+        self.f2 = FloorPlan.objects.create(name='Upper', floor_number=2, is_active=True,
+                                           pixels_per_meter=10)
+        self.draft = FloorPlan.objects.create(name='Attic', floor_number=3, is_active=False)
+        for plan in (self.f1, self.f2, self.draft):
+            BLEBeacon.objects.create(floor_plan=plan, beacon_uuid=str(uuid4()), map_x=10, map_y=10)
+        room = Room.objects.create(floor_plan=self.f2, name='Upper Reading', map_x=500, map_y=200)
+        self.shelf = Shelf.objects.create(room=room, name='Shelf U1', map_x=500, map_y=210)
+        level = ShelfLevel.objects.create(shelf=self.shelf, level_number=1)
+        self.book = Book.objects.create(title='Upstairs Book', author='X', shelf_level=level)
+
+    def _renovate(self):
+        FloorPlan.objects.filter(pk=self.f2.pk).update(renovation_notice='Painting until Friday')
+
+    def test_map_data_lists_the_beacons_of_every_floor_in_service(self):
+        data = Client().get('/patron/map-data/', {'floor': self.f1.floor_plan_id}).json()
+        floors = sorted(b['floor_plan_id'] for b in data['all_beacons'])
+        self.assertEqual(floors, sorted([self.f1.floor_plan_id, self.f2.floor_plan_id]))
+        self.assertEqual(len(data['beacons']), 1)
+
+    def test_a_route_to_a_floor_under_renovation_is_refused(self):
+        self._renovate()
+        data = Client().get('/patron/navigation-route/', {
+            'start_x': 100, 'start_y': 200, 'target_shelf_id': self.shelf.shelf_id,
+            'from_floor': self.f1.floor_plan_id}).json()
+        self.assertFalse(data['success'])
+        self.assertTrue(data['renovation'])
+        self.assertIn('Painting until Friday', data['error'])
+
+    def test_book_details_pause_navigation_during_renovation(self):
+        self._renovate()
+        r = Client().get('/patron/book-details/%d/' % self.book.book_id)
+        self.assertContains(r, 'under renovation')
+        self.assertNotContains(r, 'Navigate on Map')
+
+    def test_the_map_knows_the_floor_is_under_renovation(self):
+        self._renovate()
+        r = Client().get('/patron/map/', {'book_id': self.book.book_id})
+        self.assertEqual(r.context['target']['floor_renovation'], 'Painting until Friday')
+
+    def test_without_renovation_navigation_is_offered(self):
+        r = Client().get('/patron/book-details/%d/' % self.book.book_id)
+        self.assertContains(r, 'Navigate on Map')
 
 
 class CrossFloorRoutingTests(TestCase):
