@@ -49,6 +49,11 @@ if DEBUG:
     ]
 
 
+# The admin, staff and desk pages open only from these internet addresses: comma-separated
+# addresses or ranges, e.g. 203.177.10.25 or 203.177.10.0/24. Empty leaves them open.
+PORTAL_ALLOWED_IPS = [v.strip() for v in os.environ.get('PORTAL_ALLOWED_IPS', '').split(',') if v.strip()]
+
+
 # Application definition
 
 INSTALLED_APPS = [
@@ -74,6 +79,8 @@ MIDDLEWARE = [
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
+    # Admin, staff and desk pages answer only on the library's internet connection.
+    'library.middleware.LibraryNetworkOnlyMiddleware',
     # Signs out an account deactivated, suspended or archived mid-session.
     'library.middleware.SignOutInactiveAccountsMiddleware',
     'library.middleware.ContentSecurityPolicyMiddleware',

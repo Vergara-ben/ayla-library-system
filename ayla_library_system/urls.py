@@ -1,5 +1,4 @@
 """URL configuration for ayla_library_system project."""
-from django.contrib import admin
 from django.urls import path, include, re_path
 from django.conf import settings
 from django.conf.urls.static import static
@@ -7,7 +6,6 @@ from django.views.generic import RedirectView
 from django.views.static import serve as serve_media
 
 urlpatterns = [
-    path('admin/', admin.site.urls),
     # Somebody typing the bare domain got a 404.
     path('', RedirectView.as_view(url='/patron/dashboard/', permanent=False)),
     path('', include('library.urls')),

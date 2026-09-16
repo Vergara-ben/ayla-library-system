@@ -18,6 +18,13 @@ def healthz(request):
     return HttpResponse('ok', content_type='text/plain')
 
 
+def network_address(request):
+    """The visitor's internet address, for setting PORTAL_ALLOWED_IPS from the library."""
+    from .middleware import client_ip
+    return HttpResponse('Your internet address: %s' % (client_ip(request) or 'unknown'),
+                        content_type='text/plain')
+
+
 @csrf_exempt
 @require_http_methods(['GET', 'POST'])
 def run_daily_task(request):

@@ -375,6 +375,70 @@ class PreDeploymentGapTests(TestCase):
         self.assertContains(r, 'js/session.js')
 
 
+class LibraryNetworkOnlyTests(TestCase):
+    """Admin, staff and desk pages answer only on the library's internet connection."""
+
+    LIBRARY = '203.0.113.5'
+    OUTSIDE = '198.51.100.7'
+    PORTAL_PAGES = ('/admin-portal/login/', '/library-staff/login/', '/admin-portal/signin/',
+                    '/desk/scan/', '/portal/change-password/', '/patron-id/some-id.png')
+
+    def _get(self, path, **extra):
+        return Client().get(path, **extra)
+
+    def test_without_a_list_the_portal_stays_open(self):
+        self.assertEqual(self._get('/admin-portal/login/', REMOTE_ADDR=self.OUTSIDE).status_code, 200)
+
+    def test_outside_the_library_every_portal_page_is_not_found(self):
+        with self.settings(PORTAL_ALLOWED_IPS=[self.LIBRARY]):
+            for path in self.PORTAL_PAGES:
+                self.assertEqual(self._get(path, REMOTE_ADDR=self.OUTSIDE).status_code, 404, path)
+
+    def test_inside_the_library_the_portal_opens(self):
+        with self.settings(PORTAL_ALLOWED_IPS=[self.LIBRARY]):
+            self.assertEqual(self._get('/admin-portal/login/', REMOTE_ADDR=self.LIBRARY).status_code, 200)
+            self.assertEqual(self._get('/library-staff/login/', REMOTE_ADDR=self.LIBRARY).status_code, 200)
+
+    def test_a_range_of_addresses_is_accepted(self):
+        with self.settings(PORTAL_ALLOWED_IPS=['203.0.113.0/24']):
+            self.assertEqual(self._get('/library-staff/login/', REMOTE_ADDR='203.0.113.77').status_code, 200)
+
+    def test_patron_pages_stay_public(self):
+        with self.settings(PORTAL_ALLOWED_IPS=[self.LIBRARY]):
+            for path in ('/patron/login/', '/patron/catalog/', '/patron/register/', '/healthz/'):
+                self.assertEqual(self._get(path, REMOTE_ADDR=self.OUTSIDE).status_code, 200, path)
+
+    def test_an_invalid_list_blocks_rather_than_opens(self):
+        with self.settings(PORTAL_ALLOWED_IPS=['not-an-address']):
+            self.assertEqual(self._get('/admin-portal/login/', REMOTE_ADDR=self.LIBRARY).status_code, 404)
+
+    def test_on_render_only_the_cloudflare_address_counts(self):
+        with self.settings(PORTAL_ALLOWED_IPS=[self.LIBRARY]), mock.patch.dict(os.environ, {'RENDER': 'true'}):
+            # A visitor pretending to be the library through X-Forwarded-For.
+            spoofed = self._get('/admin-portal/login/', REMOTE_ADDR='10.0.0.1',
+                                HTTP_X_FORWARDED_FOR=self.LIBRARY, HTTP_CF_CONNECTING_IP=self.OUTSIDE)
+            self.assertEqual(spoofed.status_code, 404)
+            real = self._get('/admin-portal/login/', REMOTE_ADDR='10.0.0.1', HTTP_CF_CONNECTING_IP=self.LIBRARY)
+            self.assertEqual(real.status_code, 200)
+            # Without Cloudflare's header nothing is trusted.
+            missing = self._get('/admin-portal/login/', REMOTE_ADDR=self.LIBRARY)
+            self.assertEqual(missing.status_code, 404)
+
+    def test_djangos_own_admin_is_gone(self):
+        self.assertEqual(self._get('/admin/').status_code, 404)
+
+    def test_error_pages_no_longer_offer_staff_sign_in(self):
+        for name in ('404.html', '500.html'):
+            with open(os.path.join('templates', name), encoding='utf-8') as f:
+                self.assertNotIn('Staff sign-in', f.read(), name)
+
+    def test_the_network_page_shows_the_visitor_address(self):
+        self.assertContains(self._get('/network/', REMOTE_ADDR=self.OUTSIDE), self.OUTSIDE)
+        with mock.patch.dict(os.environ, {'RENDER': 'true'}):
+            r = self._get('/network/', REMOTE_ADDR='10.0.0.1', HTTP_CF_CONNECTING_IP=self.LIBRARY)
+            self.assertContains(r, self.LIBRARY)
+
+
 class HostingEndpointTests(TestCase):
     """The health check and the daily task link used on Render."""
 

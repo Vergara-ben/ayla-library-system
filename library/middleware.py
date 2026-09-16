@@ -1,9 +1,12 @@
 """Request-level guards."""
 
+import ipaddress
 import logging
+import os
 import time
 
 from django.conf import settings
+from django.http import Http404
 from django.shortcuts import redirect
 
 from .desk import DESK_SESSION_KEY, desk_log_path
@@ -119,4 +122,54 @@ class SignOutInactiveAccountsMiddleware:
                 session.flush()
                 from django.contrib import messages
                 messages.error(request, 'Your account is no longer active, so you have been signed out.')
+        return self.get_response(request)
+
+# Pages for the library's own people, as opposed to patrons.
+PORTAL_PREFIXES = ('/admin-portal/', '/library-staff/', '/desk/', '/portal/', '/patron-id/')
+
+
+def client_ip(request):
+    """The visitor's internet address.
+
+    On Render every request arrives through Cloudflare, which writes the real address into
+    CF-Connecting-IP and replaces any value a visitor sends. X-Forwarded-For is not used,
+    because a visitor can put any address at the front of it.
+    """
+    if os.environ.get('RENDER', '').lower() == 'true':
+        return (request.META.get('HTTP_CF_CONNECTING_IP') or '').strip()
+    return (request.META.get('REMOTE_ADDR') or '').strip()
+
+
+class LibraryNetworkOnlyMiddleware:
+    """The admin, staff and desk pages open only on the library's own internet connection."""
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+        self._parsed = ((), [])
+
+    def _networks(self, raw):
+        if self._parsed[0] != raw:
+            networks = []
+            for entry in raw:
+                try:
+                    networks.append(ipaddress.ip_network(entry, strict=False))
+                except ValueError:
+                    logger.warning('PORTAL_ALLOWED_IPS: ignoring %r, which is not an address or range', entry)
+            self._parsed = (raw, networks)
+        return self._parsed[1]
+
+    def _allowed(self, address, raw):
+        try:
+            ip = ipaddress.ip_address(address)
+        except ValueError:
+            return False
+        if ip.version == 6 and ip.ipv4_mapped:
+            ip = ip.ipv4_mapped
+        return any(ip in network for network in self._networks(raw))
+
+    def __call__(self, request):
+        raw = tuple(getattr(settings, 'PORTAL_ALLOWED_IPS', ()) or ())
+        if raw and request.path.startswith(PORTAL_PREFIXES) and not self._allowed(client_ip(request), raw):
+            # The ordinary "not found" page, so the portal's existence is not confirmed.
+            raise Http404
         return self.get_response(request)

@@ -10,6 +10,7 @@ urlpatterns = [
     path('admin-portal/floor-plan/bulk/', floorplan_bulk.floorplan_bulk, name='floorplan_bulk'),
     # Hosting: uptime pings and the daily task trigger.
     path('healthz/', tasks.healthz, name='healthz'),
+    path('network/', tasks.network_address, name='network_address'),
     path('tasks/daily/', tasks.run_daily_task, name='run_daily_task'),
 
     path('patron/login/', views.patron_login, name='patron_login'),

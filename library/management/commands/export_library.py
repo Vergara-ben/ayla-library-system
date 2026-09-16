@@ -38,7 +38,7 @@ class Command(BaseCommand):
         # Serialise to a string first.
         buffer = io.StringIO()
         call_command('dumpdata', 'library', format='json', indent=1,
-                     exclude=exclude, stdout=buffer)
+                     exclude=exclude, use_base_manager=True, stdout=buffer)
         payload = buffer.getvalue()
 
         directory = os.path.dirname(os.path.abspath(path))
@@ -57,7 +57,7 @@ class Command(BaseCommand):
             label = '%s.%s' % (model._meta.app_label, model._meta.object_name)
             if label in exclude:
                 continue
-            count = model.objects.count()
+            count = model._base_manager.count()
             if count:
                 counts[model._meta.object_name] = count
 
