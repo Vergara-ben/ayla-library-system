@@ -64,6 +64,7 @@ def portal_redirect(request, name, *args, **kwargs):
         name = STAFF_PORTAL_MAP.get(name, name)
     return redirect(name, *args, **kwargs)
 from .audit import log_admin_action, log_patron_action, log_system_action
+from .templatetags.terms import TERMS_VERSION
 from .eligibility import check_patron_eligibility
 from .emails import (
     announcement_email,
@@ -336,6 +337,11 @@ def _read_credential_document(uploaded):
     return f'credential_{uuid4().hex}{ext}', _CREDENTIAL_TYPES[ext], data
 
 
+def terms_page(request):
+    """The terms and conditions, readable without an account."""
+    return render(request, 'patron/terms.html')
+
+
 def patron_register(request):
     """Online registration: form → email OTP → pending Administrator approval."""
     if request.method != 'POST':
@@ -426,6 +432,8 @@ def patron_register(request):
         return _form_error(length_error)
     if password != confirm_password:
         return _form_error('Passwords do not match')
+    if request.POST.get('accept_terms') != 'yes':
+        return _form_error('Please read and agree to the terms and conditions to register.')
 
     existing = Patron.all_objects.filter(email__iexact=email).first()
     if existing is not None:
@@ -475,6 +483,8 @@ def patron_register(request):
             otp_expires_at=timezone.now() + timedelta(minutes=10),
             otp_last_sent_at=timezone.now(),
             otp_verified=False,
+            terms_accepted_at=timezone.now(),
+            terms_version=TERMS_VERSION,
         )
         PatronCredential.objects.create(patron=patron, name=credential_name,
                                         content_type=credential_type, data=credential_data)
@@ -1276,18 +1286,31 @@ def _password_reset_view(request, portal):
         new_password = request.POST.get('new_password') or ''
         confirm_password = request.POST.get('confirm_password') or ''
 
+        # A mistake clears only the field that was wrong; the rest stays as typed.
+        def _retry(error, focus, **kept):
+            fields = {'code': code, 'new_password': new_password,
+                      'confirm_password': confirm_password}
+            fields.update(kept)
+            response = _render('otp', email=email, error=error, focus=focus, **fields)
+            # The typed passwords are in this page, so the browser must not keep a copy.
+            response['Cache-Control'] = 'no-cache, no-store, must-revalidate, private'
+            return response
+
         if not code:
-            return _render('otp', email=email, error='Enter the 6-digit code from your email.')
+            return _retry('Enter the 6-digit code from your email.', 'code')
         if new_password != confirm_password:
-            return _render('otp', email=email, error='The two passwords do not match.')
+            return _retry('The two passwords do not match.', 'confirm_password',
+                          confirm_password='')
         # The full policy, not just the length.
         policy_error = password_length_error(new_password)
         if policy_error:
-            return _render('otp', email=email, error=policy_error)
+            return _retry(policy_error, 'new_password', new_password='', confirm_password='')
 
         reset, error, exhausted = _redeem_reset_code(account_type, email, code)
         if error:
-            return _render('request' if exhausted else 'otp', email=email, error=error)
+            if exhausted:
+                return _render('request', email=email, error=error)
+            return _retry(error, 'code', code='')
 
         account = _find_reset_account(account_type, email)
         if account is None:
@@ -6080,15 +6103,28 @@ def admin_borrowing_rules(request):
 
 
 # Shelf management
+def _polygon_area(points):
+    """Signed shoelace area of an outline."""
+    return sum(points[i - 1][0] * points[i][1] - points[i][0] * points[i - 1][1]
+               for i in range(len(points))) / 2.0
+
+
 def _room_drawn_around(shelf, rooms):
     """The room a shelf is actually standing in, by where it is drawn."""
     if shelf.map_x is None or shelf.map_y is None:
         return None
-    for room in rooms:
-        geom = room.geometry or []
-        if len(geom) >= 3 and _point_in_polygon(shelf.map_x, shelf.map_y, geom):
+    # Only rooms on the shelf's own floor; the same spot upstairs is a different room.
+    floor_id = shelf.room.floor_plan_id if shelf.room_id else None
+    around = [room for room in rooms
+              if room.floor_plan_id == floor_id and len(room.geometry or []) >= 3
+              and _point_in_polygon(shelf.map_x, shelf.map_y, room.geometry)]
+    if not around:
+        return None
+    # Its own room when that one contains it, else the smallest, for a room drawn inside another.
+    for room in around:
+        if room.room_id == shelf.room_id:
             return room
-    return None
+    return min(around, key=lambda room: abs(_polygon_area(room.geometry)))
 
 
 def _shelf_room_mismatches():
@@ -7863,42 +7899,6 @@ def _polygon_gap(a, b):
     return best
 
 
-# How far into a room a doorway's waypoint stands.
-DOORWAY_STANDOFF = 45.0
-# A shelf is approached from its face, not its middle.
-SHELF_STANDOFF = 55.0
-
-
-def _polygon_bounds(poly):
-    xs = [p[0] for p in poly]
-    ys = [p[1] for p in poly]
-    return min(xs), min(ys), max(xs), max(ys)
-
-
-def _interior_point(poly):
-    """A point comfortably inside a room, even a concave one."""
-    cx, cy = _polygon_centroid(poly)
-    if _point_in_polygon(cx, cy, poly):
-        return cx, cy
-
-    min_x, min_y, max_x, max_y = _polygon_bounds(poly)
-    best, best_clear = None, -1.0
-    steps = 18
-    for i in range(1, steps):
-        for j in range(1, steps):
-            x = min_x + (max_x - min_x) * i / steps
-            y = min_y + (max_y - min_y) * j / steps
-            if not _point_in_polygon(x, y, poly):
-                continue
-            clear = min(_point_to_segment(x, y, poly[k][0], poly[k][1],
-                                          poly[(k + 1) % len(poly)][0],
-                                          poly[(k + 1) % len(poly)][1])
-                        for k in range(len(poly)))
-            if clear > best_clear:
-                best, best_clear = (x, y), clear
-    return best if best else (cx, cy)
-
-
 def _crosses_obstacle(floor_plan, ax, ay, bx, by):
     """Does this step walk through a table, counter or pillar?"""
     for o in Obstacle.objects.filter(floor_plan=floor_plan, is_active=True):
@@ -7916,6 +7916,8 @@ def _crosses_obstacle(floor_plan, ax, ay, bx, by):
 @admin_or_module_required('shelf')
 def generate_waypoints(request):
     """Lay a walkable network over the plan, and say what it could not reach."""
+    from . import routegen
+
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
 
@@ -7923,132 +7925,88 @@ def generate_waypoints(request):
     if plan is None:
         return JsonResponse({'success': False, 'error': 'Floor plan not found'})
 
-    # Skip staff-only rooms so routes never enter them.
-    drawn = [r for r in Room.objects.filter(floor_plan=plan, is_active=True)
+    rooms = [r for r in Room.objects.filter(floor_plan=plan, is_active=True)
              if r.geometry and len(r.geometry) >= 3]
-    rooms = [r for r in drawn if r.patron_access]
-    if not drawn:
+    if not rooms:
         return JsonResponse({'success': False,
                              'error': 'Draw at least one room before generating a route.'})
-    if not rooms:
+    # Staff-only rooms are drawn but never routed through.
+    if not any(r.patron_access for r in rooms):
         return JsonResponse({'success': False,
                              'error': 'Every room on this plan is marked staff-only, '
                                       'so there is nowhere a patron may be routed.'})
 
+    doors = list(Door.objects.filter(room__floor_plan=plan, is_active=True))
+    shelves = list(Shelf.objects.filter(room__floor_plan=plan, is_active=True,
+                                        map_x__isnull=False, map_y__isnull=False))
+    obstacles = list(Obstacle.objects.filter(floor_plan=plan, is_active=True))
+    stairways = list(Stairway.objects.filter(floor_plan=plan, is_active=True))
+    shape = routegen.PlanShape(plan, rooms, doors, shelves, obstacles, stairways)
+
     with transaction.atomic():
-        # Locked waypoints survive a regenerate.
-        removed = Waypoint.objects.filter(floor_plan=plan, is_generated=True, locked=False).count()
-        Waypoint.objects.filter(floor_plan=plan, is_generated=True, locked=False).delete()
+        # Waypoints placed by hand, and locked ones, survive a regenerate.
+        replaced_qs = Waypoint.objects.filter(floor_plan=plan, is_generated=True, locked=False)
+        removed = replaced_qs.count()
+        replaced_qs.delete()
+        kept = list(Waypoint.objects.filter(floor_plan=plan))
+        kept_ids = [w.waypoint_id for w in kept]
+        kept_links = list(WaypointConnection.objects.filter(
+            waypoint_from_id__in=kept_ids, waypoint_to_id__in=kept_ids
+        ).values_list('waypoint_from_id', 'waypoint_to_id'))
 
-        def room_at(x, y):
-            for room in rooms:
-                if _point_in_polygon(x, y, room.geometry):
-                    return room
-            return None
+        nodes, edges, report = routegen.build_network(
+            shape, doors, shelves, stairways, kept, kept_links)
 
-        # room_id -> [Waypoint]
-        by_room = dict((r.room_id, []) for r in rooms)
-        made = []
-
-        def place(x, y, room, label):
-            wp = Waypoint.objects.create(floor_plan=plan, map_x=x, map_y=y,
-                                         label=label, is_generated=True)
-            by_room[room.room_id].append(wp)
-            made.append(wp)
-            return wp
-
-        # One pair per doorway
-        door_pairs = []
-        for door in Door.objects.filter(room__floor_plan=plan, is_active=True):
-            rad = math.radians(door.rotation or 0)
-            # Across the wall, not along it.
-            nx, ny = -math.sin(rad), math.cos(rad)
-            sides = []
-            for sign in (1, -1):
-                x = door.map_x + nx * DOORWAY_STANDOFF * sign
-                y = door.map_y + ny * DOORWAY_STANDOFF * sign
-                room = room_at(x, y)
-                if room is not None:
-                    sides.append(place(x, y, room, 'Doorway'))
-            # The door connects two rooms.
-            if len(sides) == 2:
-                door_pairs.append((sides[0], sides[1]))
-
-        # One in the open middle of each room
-        for room in rooms:
-            x, y = _interior_point(room.geometry)
-            place(x, y, room, room.name)
-
-        # One in front of each shelf
-        for shelf in Shelf.objects.filter(room__floor_plan=plan).select_related('room'):
-            if shelf.map_x is None or shelf.map_y is None:
-                continue
-            rad = math.radians(shelf.rotation or 0)
-            placed = False
-            # Try the front side, then the back.
-            for sign in (1, -1):
-                x = shelf.map_x - math.sin(rad) * SHELF_STANDOFF * sign
-                y = shelf.map_y + math.cos(rad) * SHELF_STANDOFF * sign
-                room = room_at(x, y)
-                if room is not None:
-                    place(x, y, room, shelf.name or 'Shelf')
-                    placed = True
-                    break
-            if not placed:
-                continue
-
-        # Connect walkable points
-        links = 0
-        seen = set()
-
-        def join(a, b):
-            nonlocal links
-            key = (min(a.waypoint_id, b.waypoint_id), max(a.waypoint_id, b.waypoint_id))
-            if key in seen:
-                return
-            seen.add(key)
-            WaypointConnection.objects.create(
-                waypoint_from=a, waypoint_to=b,
-                distance=math.hypot(a.map_x - b.map_x, a.map_y - b.map_y))
-            links += 1
-
-        # Through each doorway: the one wall crossing that is legal.
-        for a, b in door_pairs:
-            join(a, b)
-
-        # Within a room, wherever the straight line is clear.
-        for room in rooms:
-            points = by_room[room.room_id]
-            for i in range(len(points)):
-                for j in range(i + 1, len(points)):
-                    a, b = points[i], points[j]
-                    if _walls_crossed(plan, a.map_x, a.map_y, b.map_x, b.map_y):
-                        continue
-                    if _crosses_obstacle(plan, a.map_x, a.map_y, b.map_x, b.map_y):
-                        continue
-                    join(a, b)
-
-        # Rooms with hand-placed waypoints count as reached.
-        manual = Waypoint.objects.filter(floor_plan=plan, is_generated=False)
-        unreachable = []
-        for room in rooms:
-            if by_room[room.room_id]:
-                continue
-            if any(_point_in_polygon(w.map_x, w.map_y, room.geometry) for w in manual):
-                continue
-            unreachable.append(room.name)
+        made = 0
+        for node in nodes:
+            if node.waypoint is None:
+                node.waypoint = Waypoint.objects.create(
+                    floor_plan=plan, map_x=round(node.x, 2), map_y=round(node.y, 2),
+                    label=node.label[:255], linked_shelf=node.shelf, is_generated=True)
+                made += 1
+        WaypointConnection.objects.bulk_create([
+            WaypointConnection(
+                waypoint_from=nodes[a].waypoint, waypoint_to=nodes[b].waypoint,
+                distance=math.hypot(nodes[a].x - nodes[b].x, nodes[a].y - nodes[b].y))
+            for a, b in edges
+        ])
 
     log_admin_action(request, 'Create', 'Waypoint', plan.floor_plan_id,
-                     f'Generated {len(made)} waypoints and {links} connections '
+                     f'Generated {made} waypoints and {len(edges)} connections '
                      f'on {plan.name}')
     return JsonResponse({
         'success': True,
-        'placed': len(made),
-        'connections': links,
+        'placed': made,
+        'connections': len(edges),
         'replaced': removed,
-        'kept_manual': manual.count(),
-        'unreachable': unreachable,
+        'kept_manual': len(kept),
+        'unreachable': report['rooms_without'],
+        'missed_shelves': report['missed_shelves'],
+        'pieces': report['pieces'],
+        'parts': report['parts'],
     })
+
+
+@admin_or_module_required('shelf')
+def clear_waypoints(request):
+    """Remove every waypoint on a floor plan, except locked ones."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
+
+    plan = FloorPlan.objects.filter(floor_plan_id=_posted_id(request, 'floor_plan_id')).first()
+    if plan is None:
+        return JsonResponse({'success': False, 'error': 'Floor plan not found'})
+
+    with transaction.atomic():
+        doomed = Waypoint.objects.filter(floor_plan=plan, locked=False)
+        removed = doomed.count()
+        # Their connections go with them.
+        doomed.delete()
+    locked = Waypoint.objects.filter(floor_plan=plan).count()
+    log_admin_action(request, 'Delete', 'Waypoint', plan.floor_plan_id,
+                     f'Cleared {removed} waypoints on {plan.name}'
+                     + (f' ({locked} locked kept)' if locked else ''))
+    return JsonResponse({'success': True, 'removed': removed, 'locked': locked})
 
 
 def _room_adjacency(floor_plan):

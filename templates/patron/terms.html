@@ -1,0 +1,36 @@
+{% load static terms %}
+<!DOCTYPE html>
+<html lang="en" data-module="patron" data-theme-floating>
+<head>
+<meta charset="UTF-8">
+<meta name="theme-color" content="#ffffff">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AYLA Library — Terms and Conditions</title>
+<script src="{% static 'js/theme.js' %}"></script>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{% static 'css/theme.css' %}">
+<link rel="stylesheet" href="{% static 'css/terms.css' %}">
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  body { margin: 0; font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--text); }
+  .page { max-width: 720px; margin: 0 auto; padding: 32px 20px 64px; }
+  .back-link { display: inline-flex; gap: 6px; color: var(--muted); font-size: 13px; text-decoration: none; margin-bottom: 24px; }
+  .back-link:hover { color: var(--accent); }
+  .logo { height: 42px; display: block; margin-bottom: 14px; }
+  h1 { font-family: 'Syne', sans-serif; font-size: 26px; font-weight: 800; margin: 0 0 6px; }
+  .sheet { background: var(--surface); border: 1px solid var(--glass-border); border-radius: 16px; padding: 24px 26px; margin-top: 20px; }
+  @media (max-width: 520px) { .sheet { padding: 18px 16px; } }
+</style>
+<link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
+</head>
+<body>
+<div class="page">
+  <a class="back-link" href="{% url 'patron_register' %}">&larr; Back to registration</a>
+  <img class="logo ayla-logo" src="{% static 'images/ayla-logo.png' %}" data-logo-light="{% static 'images/ayla-logo.png' %}" data-logo-dark="{% static 'images/ayla-logo-dark.png' %}" alt="AYLA">
+  <h1>Terms and Conditions</h1>
+  <div class="sheet">
+    {% terms_body %}
+  </div>
+</div>
+</body>
+</html>

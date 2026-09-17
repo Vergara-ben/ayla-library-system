@@ -856,6 +856,9 @@ class Patron(Archivable):
     )
     # Uploaded ID / proof of residency (media-relative path).
     credential_document = models.CharField(max_length=255, blank=True, null=True)
+    # When the terms and conditions were agreed to online, and which version.
+    terms_accepted_at = models.DateTimeField(blank=True, null=True)
+    terms_version = models.CharField(max_length=20, blank=True, default='')
 
     @property
     def credential_filename(self):

@@ -670,6 +670,10 @@
                             </div>
                         </div>
 
+                        <button id="btnClearWaypoints" type="button" onclick="clearWaypoints()" title="Remove every waypoint on this floor, except locked ones"
+                                class="map-tool-btn" style="color:var(--danger)">
+                            <i class="fa-solid fa-eraser"></i> Clear Waypoints
+                        </button>
                         <button id="btnGenerateRoute" type="button" onclick="generateRoute()" title="Lay a walkable network from the rooms, doors and shelves"
                                 class="map-tool-btn" style="color:var(--success)">
                             <i class="fa-solid fa-wand-magic-sparkles"></i> Generate Route
@@ -1546,6 +1550,7 @@
             editDoor: "{% url 'edit_door' %}",
             readiness: "{% url 'floor_plan_readiness' %}",
             generateWaypoints: "{% url 'generate_waypoints' %}",
+            clearWaypoints: "{% url 'clear_waypoints' %}",
             deleteDoor: "{% url 'delete_door' %}",
             flipDoor: "{% url 'flip_door' %}",
             placeShelf: "{% url 'place_shelf' %}",
@@ -4220,16 +4225,17 @@
         window.generateRoute = async function () {
             const existing = Object.keys(waypointMarkers).length;
             const warning = existing
-                ? '\n\nWaypoints you placed or moved by hand are kept. Any laid down by a '
-                  + 'previous run of this are replaced.'
+                ? '\n\nWaypoints you placed by hand, and locked ones, are kept and joined in. Any laid '
+                  + 'down by a previous run are replaced. Use Clear Waypoints first to start from nothing.'
                 : '';
             const yes = await AylaDialog.confirm(
                 'Lay a walkable route across this floor plan?',
                 { title: 'Generate route',
-                  detail: 'A pair of waypoints goes either side of every doorway, one in the '
-                        + 'open middle of each room, and one in front of each shelf. They are '
-                        + 'joined wherever the straight line between them is genuinely '
-                        + 'walkable — never through a wall, never through furniture.' + warning,
+                  detail: 'Lanes run about half a metre clear of every shelf, table and wall, with a '
+                        + 'waypoint every metre or so. Each shelf gets its own waypoint in front of it, '
+                        + 'on its side of the wall; doorways and stairs get one on each side. Waypoints '
+                        + 'are joined by short steps that never pass through a wall, shelf or furniture.'
+                        + warning,
                   confirmLabel: 'Generate' });
             if (!yes) return;
 
@@ -4242,12 +4248,37 @@
             if (r.kept_manual) parts.push(r.kept_manual + ' of yours kept');
             let msg = parts.join(', ') + '.';
             if (r.unreachable && r.unreachable.length) {
-                msg += '\n\nNothing could be placed in: ' + r.unreachable.join(', ')
-                     + '. A room with no door has no way in.';
+                msg += '\n\nNothing could be placed in: ' + r.unreachable.join(', ') + '.';
+            }
+            if (r.missed_shelves && r.missed_shelves.length) {
+                msg += '\n\nNo clear spot in front of: ' + r.missed_shelves.join(', ')
+                     + '. Move what is blocking it, or place a waypoint there by hand.';
+            }
+            if (r.parts && r.parts.length > 1) {
+                msg += '\n\nThe route is in ' + r.parts.length + ' separate parts, so a patron cannot walk '
+                     + 'between them: ' + r.parts.map(function (p) { return p.join(' + '); }).join(' | ')
+                     + '. Add a door where these rooms connect, then generate again.';
             }
             await AylaDialog.confirm(msg, {
                 title: 'Route generated', confirmLabel: 'Reload the map', cancelLabel: 'Stay' })
                 && window.location.reload();
+        };
+
+        window.clearWaypoints = async function () {
+            const count = Object.keys(waypointMarkers).length;
+            if (!count) { mapToast('There are no waypoints on this floor.'); return; }
+            const yes = await AylaDialog.confirm(
+                'Remove all ' + count + ' waypoint' + (count === 1 ? '' : 's') + ' on this floor?',
+                { title: 'Clear waypoints',
+                  detail: 'Every waypoint and connection on this floor is removed, including ones placed '
+                        + 'by hand. Locked waypoints stay. Until a route is generated again, patrons get '
+                        + 'no directions on this floor.',
+                  confirmLabel: 'Remove all' });
+            if (!yes) return;
+            const r = await postData(URLS.clearWaypoints, { floor_plan_id: floorPlanId });
+            if (!r.success) { mapToast(r.error || 'Could not clear the waypoints.', 'error'); return; }
+            reloadKeepingView(r.removed + ' waypoint' + (r.removed === 1 ? '' : 's') + ' removed'
+                + (r.locked ? ', ' + r.locked + ' locked kept.' : '.'), false);
         };
 
         // Showing and hiding whole kinds of thing while drawing.

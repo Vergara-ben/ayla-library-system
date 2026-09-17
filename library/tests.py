@@ -131,7 +131,7 @@ class PatronCredentialStorageTests(TestCase):
             'action': 'register', 'first_name': 'Ana', 'last_name': 'Cruz',
             'email': self.EMAIL, 'password': 'SmokeTest123',
             'confirm_password': 'SmokeTest123', 'patron_type': 'Parent',
-            'contact_number': '09171234567', 'address': 'Sala, Cabuyao',
+            'contact_number': '09171234567', 'address': 'Sala, Cabuyao', 'accept_terms': 'yes',
             'credential_document': SimpleUploadedFile('id.png', self.PNG, content_type='image/png'),
         })
         return Patron.objects.get(email=self.EMAIL)
@@ -2332,17 +2332,12 @@ class GeneratedRouteTests(TestCase):
 
     def test_a_room_with_no_door_is_reported_not_silently_skipped(self):
         Room.objects.create(
-            floor_plan=self.plan, name='Cupboard', map_x=900, map_y=200,
-            geometry=[[800, 100], [1000, 100], [1000, 300], [800, 300]])
+            floor_plan=self.plan, name='Cupboard', map_x=1100, map_y=250,
+            geometry=[[800, 100], [1400, 100], [1400, 400], [800, 400]])
         r = self._generate()
-        # It still gets its own middle waypoint, but nothing connects to it.
         self.assertTrue(r['success'], r)
-        cupboard = [w for w in Waypoint.objects.filter(floor_plan=self.plan)
-                    if w.label == 'Cupboard']
-        self.assertEqual(len(cupboard), 1)
-        self.assertFalse(
-            WaypointConnection.objects.filter(waypoint_from=cupboard[0]).exists()
-            or WaypointConnection.objects.filter(waypoint_to=cupboard[0]).exists())
+        # Either nothing fits in it, or what does is a part of its own.
+        self.assertTrue('Cupboard' in r['unreachable'] or ['Cupboard'] in r['parts'], r)
 
     def test_it_refuses_when_there_is_nothing_drawn(self):
         empty = FloorPlan.objects.create(name='Blank', floor_number=9)
@@ -2365,6 +2360,156 @@ class GeneratedRouteTests(TestCase):
             self.assertFalse(
                 _crosses_obstacle(self.plan, a.map_x, a.map_y, b.map_x, b.map_y),
                 'a generated connection walks through the table')
+
+
+class RouteGeneratorLayoutTests(TestCase):
+    """The generated network looks like one drawn by hand, and is safe to walk."""
+
+    def setUp(self):
+        from library.models import Stairway
+        self.user = _admin(modules='shelf')
+        self.client = _signed_in(self.user)
+        self.plan = FloorPlan.objects.create(name='Ground', floor_number=1,
+                                             is_active=True, pixels_per_meter=100)
+        # A 6 m x 4 m reading room, a 4 m x 4 m study through a door, and a store behind the top wall.
+        self.reading = Room.objects.create(
+            floor_plan=self.plan, name='Reading', map_x=300, map_y=200,
+            geometry=[[0, 0], [600, 0], [600, 400], [0, 400]])
+        self.study = Room.objects.create(
+            floor_plan=self.plan, name='Study', map_x=800, map_y=200,
+            geometry=[[600, 0], [1000, 0], [1000, 400], [600, 400]])
+        self.behind = Room.objects.create(
+            floor_plan=self.plan, name='Behind', map_x=300, map_y=-150,
+            geometry=[[0, -300], [600, -300], [600, 0], [0, 0]])
+        Door.objects.create(room=self.reading, room_b=self.study,
+                            map_x=600, map_y=200, width=90, rotation=90)
+        # Against the top wall; its rotation says the front faces the wall, which is wrong.
+        self.wall_shelf = Shelf.objects.create(room=self.reading, name='Wall shelf',
+                                               map_x=300, map_y=30, width=300, depth=40,
+                                               rotation=180)
+        self.table = Obstacle.objects.create(
+            floor_plan=self.plan, kind='Table', name='Table', map_x=300, map_y=250,
+            geometry=[[220, 220], [380, 220], [380, 280], [220, 280]])
+        self.free_shelf = Shelf.objects.create(room=self.study, name='Island shelf',
+                                               map_x=800, map_y=200, width=160, depth=40,
+                                               rotation=0)
+        self.stairs = Stairway.objects.create(
+            floor_plan=self.plan, name='Stairs', map_x=900, map_y=330,
+            geometry=[[840, 300], [960, 300], [960, 380], [840, 380]])
+
+    def _generate(self):
+        r = self.client.post('/admin-portal/generate-waypoints/',
+                             {'floor_plan_id': self.plan.floor_plan_id}).json()
+        self.assertTrue(r['success'], r)
+        return r
+
+    def _links(self):
+        wps = Waypoint.objects.filter(floor_plan=self.plan)
+        return list(WaypointConnection.objects.filter(
+            waypoint_from__in=wps, waypoint_to__in=wps).select_related('waypoint_from', 'waypoint_to'))
+
+    def _solids(self):
+        from library import routegen
+        return [routegen.Solid(self.wall_shelf.footprint(), 'shelf'),
+                routegen.Solid(self.free_shelf.footprint(), 'shelf'),
+                routegen.Solid(self.table.geometry, 'furniture'),
+                routegen.Solid(self.stairs.geometry, 'stairs')]
+
+    def test_every_shelf_gets_its_own_waypoint_on_its_side_of_the_wall(self):
+        from library.views import _point_in_polygon
+        from library import routegen
+        r = self._generate()
+        self.assertEqual(r['missed_shelves'], [])
+        for shelf, room in ((self.wall_shelf, self.reading), (self.free_shelf, self.study)):
+            linked = list(Waypoint.objects.filter(floor_plan=self.plan, linked_shelf=shelf))
+            self.assertEqual(len(linked), 1, shelf.name)
+            w = linked[0]
+            self.assertTrue(_point_in_polygon(w.map_x, w.map_y, room.geometry),
+                            '%s is reached from the wrong room' % shelf.name)
+            gap = routegen.Solid(shelf.footprint(), 'shelf').distance_to_point(w.map_x, w.map_y)
+            self.assertTrue(30 <= gap <= 70, '%s waypoint is %.0f from it' % (shelf.name, gap))
+
+    def test_nothing_is_placed_inside_or_walked_through_a_solid(self):
+        self._generate()
+        solids = self._solids()
+        for w in Waypoint.objects.filter(floor_plan=self.plan):
+            for solid in solids:
+                self.assertGreater(solid.distance_to_point(w.map_x, w.map_y), 20, w.label)
+        for c in self._links():
+            a = (c.waypoint_from.map_x, c.waypoint_from.map_y)
+            b = (c.waypoint_to.map_x, c.waypoint_to.map_y)
+            for solid in solids:
+                self.assertGreater(solid.distance_to_segment(a, b, 1000), 0,
+                                   'a connection runs through the %s' % solid.kind)
+
+    def test_no_connection_goes_through_a_wall(self):
+        from library.views import _walls_crossed
+        self._generate()
+        for c in self._links():
+            a, b = c.waypoint_from, c.waypoint_to
+            self.assertEqual(_walls_crossed(self.plan, a.map_x, a.map_y, b.map_x, b.map_y), [])
+
+    def test_steps_are_short_and_never_cross(self):
+        from library import routegen
+        self._generate()
+        links = self._links()
+        self.assertTrue(links)
+        for c in links:
+            a, b = c.waypoint_from, c.waypoint_to
+            self.assertLessEqual(math.hypot(a.map_x - b.map_x, a.map_y - b.map_y), 251)
+        for i, c in enumerate(links):
+            for d in links[i + 1:]:
+                ends = {c.waypoint_from_id, c.waypoint_to_id, d.waypoint_from_id, d.waypoint_to_id}
+                if len(ends) < 4:
+                    continue
+                self.assertIsNone(routegen.proper_crossing(
+                    (c.waypoint_from.map_x, c.waypoint_from.map_y),
+                    (c.waypoint_to.map_x, c.waypoint_to.map_y),
+                    (d.waypoint_from.map_x, d.waypoint_from.map_y),
+                    (d.waypoint_to.map_x, d.waypoint_to.map_y)), 'two connections cross')
+
+    def test_rooms_joined_by_a_door_are_one_part_and_a_doorless_room_is_named(self):
+        r = self._generate()
+        self.assertIn(['Reading', 'Study'], r['parts'])
+        self.assertIn(['Behind'], r['parts'])
+
+    def test_the_stairs_get_a_waypoint_beside_them(self):
+        from library import routegen
+        self._generate()
+        beside = [w for w in Waypoint.objects.filter(floor_plan=self.plan, label='Stairs')
+                  if routegen.Solid(self.stairs.geometry, 'stairs').distance_to_point(w.map_x, w.map_y) <= 70]
+        self.assertTrue(beside)
+
+    def test_a_route_to_a_shelf_ends_at_the_shelf_waypoint(self):
+        self._generate()
+        linked = Waypoint.objects.get(floor_plan=self.plan, linked_shelf=self.free_shelf)
+        data = self.client.get('/patron/navigation-route/', {
+            'target_shelf_id': self.free_shelf.shelf_id, 'start_x': 100, 'start_y': 350}).json()
+        self.assertTrue(data['success'], data)
+        self.assertEqual(data['goal_waypoint_id'], linked.waypoint_id)
+
+    def test_clearing_removes_every_waypoint_but_locked_ones(self):
+        self._generate()
+        mine = Waypoint.objects.create(floor_plan=self.plan, map_x=100, map_y=100, label='mine')
+        keep = Waypoint.objects.create(floor_plan=self.plan, map_x=120, map_y=120, label='locked',
+                                       locked=True)
+        r = self.client.post('/admin-portal/clear-waypoints/',
+                             {'floor_plan_id': self.plan.floor_plan_id}).json()
+        self.assertTrue(r['success'], r)
+        self.assertEqual(r['locked'], 1)
+        left = list(Waypoint.objects.filter(floor_plan=self.plan))
+        self.assertEqual(left, [keep])
+        self.assertFalse(Waypoint.objects.filter(pk=mine.pk).exists())
+        self.assertFalse(WaypointConnection.objects.filter(waypoint_from__floor_plan=self.plan).exists())
+
+    def test_clearing_needs_the_floor_plan_permission(self):
+        staff = _admin(email='other@example.invalid', modules='books')
+        staff.role = 'Staff'
+        staff.save()
+        outsider = _signed_in(staff)
+        Waypoint.objects.create(floor_plan=self.plan, map_x=100, map_y=100)
+        outsider.post('/admin-portal/clear-waypoints/', {'floor_plan_id': self.plan.floor_plan_id})
+        self.assertTrue(Waypoint.objects.filter(floor_plan=self.plan).exists())
 
 
 class BookLocationTests(TestCase):
@@ -3357,6 +3502,129 @@ class PrintSeveralFloorsTests(TestCase):
         self.assertNotIn('Print this floor', html)
 
 
+class PasswordResetKeepsTypingTests(TestCase):
+    """A mistake on the reset form clears only the field that was wrong."""
+
+    EMAIL = 'reset.keep@example.invalid'
+
+    def setUp(self):
+        from library.models import PasswordResetOTP
+        Patron.objects.create(fullname='Ana Cruz', first_name='Ana', last_name='Cruz',
+                              email=self.EMAIL, patron_type='Parent', account_status='Active',
+                              password_hash=hash_password('OldPassword123'))
+        PasswordResetOTP.objects.create(account_type='Patron', email=self.EMAIL, code='123456',
+                                        expires_at=timezone.now() + timedelta(minutes=10))
+
+    def _reset(self, **fields):
+        data = {'action': 'reset', 'email': self.EMAIL, 'code': '123456',
+                'new_password': 'NewPassword123', 'confirm_password': 'NewPassword123'}
+        data.update(fields)
+        return Client().post('/patron/forgot-password/', data)
+
+    def _value(self, html, name):
+        import re as _re
+        m = _re.search(r'name="%s"[^>]*value="([^"]*)"' % name, html)
+        return m.group(1) if m else None
+
+    def test_a_wrong_code_keeps_both_passwords(self):
+        r = self._reset(code='999999')
+        html = r.content.decode()
+        self.assertContains(r, 'Incorrect code')
+        self.assertEqual(self._value(html, 'code'), '')
+        self.assertEqual(self._value(html, 'new_password'), 'NewPassword123')
+        self.assertEqual(self._value(html, 'confirm_password'), 'NewPassword123')
+        self.assertIn('no-store', r['Cache-Control'])
+
+    def test_mismatched_passwords_keep_the_code_and_the_first_password(self):
+        html = self._reset(confirm_password='Different123').content.decode()
+        self.assertIn('do not match', html)
+        self.assertEqual(self._value(html, 'code'), '123456')
+        self.assertEqual(self._value(html, 'new_password'), 'NewPassword123')
+        self.assertEqual(self._value(html, 'confirm_password'), '')
+
+    def test_a_too_short_password_keeps_the_code(self):
+        html = self._reset(new_password='short', confirm_password='short').content.decode()
+        self.assertEqual(self._value(html, 'code'), '123456')
+        self.assertEqual(self._value(html, 'new_password'), '')
+
+    def test_the_first_visit_shows_no_typed_values(self):
+        html = Client().get('/patron/forgot-password/').content.decode()
+        self.assertNotIn('NewPassword123', html)
+
+
+class PasswordToggleTests(TestCase):
+    """Every password field in the system can be shown and hidden."""
+
+    def test_every_template_with_a_password_field_loads_the_toggle(self):
+        missing = []
+        for folder, _dirs, files in os.walk('templates'):
+            for name in files:
+                path = os.path.join(folder, name)
+                with open(path, encoding='utf-8') as f:
+                    html = f.read()
+                if 'type="password"' in html and 'password-toggle.js' not in html:
+                    missing.append(path)
+        self.assertEqual(missing, [])
+
+    def test_the_sign_in_page_serves_it(self):
+        r = Client().get('/patron/login/')
+        self.assertContains(r, 'js/password-toggle.js')
+
+
+class RegistrationTermsTests(TestCase):
+    """Registering online means agreeing to the terms and conditions."""
+
+    PNG = bytes([137, 80, 78, 71, 13, 10, 26, 10]) + b'0' * 80
+
+    def _register(self, email, **extra):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        data = {
+            'action': 'register', 'first_name': 'Ana', 'last_name': 'Cruz',
+            'email': email, 'password': 'SmokeTest123', 'confirm_password': 'SmokeTest123',
+            'patron_type': 'Parent', 'contact_number': '09171234567', 'address': 'Sala, Cabuyao',
+            'credential_document': SimpleUploadedFile('id.png', self.PNG, content_type='image/png'),
+        }
+        data.update(extra)
+        return Client().post('/patron/register/', data)
+
+    def test_the_form_asks_for_agreement(self):
+        html = Client().get('/patron/register/').content.decode()
+        self.assertIn('name="accept_terms"', html)
+        self.assertIn('Terms and Conditions', html)
+        self.assertIn('termsDialog', html)
+
+    def test_registering_without_agreeing_is_refused(self):
+        r = self._register('no.terms@example.invalid')
+        self.assertContains(r, 'agree to the terms and conditions')
+        self.assertFalse(Patron.all_objects.filter(email='no.terms@example.invalid').exists())
+
+    def test_agreeing_is_recorded_with_its_version(self):
+        from library.templatetags.terms import TERMS_VERSION
+        self._register('terms.ok@example.invalid', accept_terms='yes')
+        p = Patron.objects.get(email='terms.ok@example.invalid')
+        self.assertIsNotNone(p.terms_accepted_at)
+        self.assertEqual(p.terms_version, TERMS_VERSION)
+
+    def test_a_refused_form_keeps_the_box_ticked(self):
+        r = self._register('keep.tick@example.invalid', accept_terms='yes',
+                           confirm_password='Different123')
+        self.assertContains(r, 'Passwords do not match')
+        self.assertRegex(r.content.decode(), r'name="accept_terms" value="yes" required checked')
+
+    def test_the_terms_page_is_public_and_uses_the_borrowing_rules(self):
+        from library.models import BorrowingRule
+        rule = BorrowingRule.current()
+        rule.max_books_per_patron = 4
+        rule.loan_period_days = 9
+        rule.save()
+        r = Client().get('/terms/')
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        self.assertIn('Data Privacy Act of 2012', body)
+        self.assertIn('<strong>4</strong>', body)
+        self.assertIn('<strong>9</strong>', body)
+
+
 class ShelfRoomTests(TestCase):
     """Which room a shelf is filed under, and correcting it."""
 
@@ -3467,6 +3735,26 @@ class ShelfRoomTests(TestCase):
         self.assertIn('roomMismatchBar', html)
         self.assertIn('Wanderer', html)
         self.assertIn('Study Room', html)
+
+    def test_a_room_upstairs_at_the_same_spot_is_not_a_mismatch(self):
+        upstairs = FloorPlan.objects.create(name='First', floor_number=2, is_active=True)
+        Room.objects.create(floor_plan=upstairs, name='Attic', map_x=50, map_y=50,
+                            geometry=[[0, 0], [100, 0], [100, 100], [0, 100]])
+        self._shelf('Settled', 50, 50, self.left)
+        self.assertEqual(self._mismatches(), [])
+
+    def test_a_room_drawn_inside_the_filed_room_is_not_a_mismatch(self):
+        Room.objects.create(floor_plan=self.plan, name='Corner nook', map_x=25, map_y=25,
+                            geometry=[[10, 10], [40, 10], [40, 40], [10, 40]])
+        self._shelf('In the nook', 25, 25, self.left)
+        self.assertEqual(self._mismatches(), [])
+
+    def test_the_smallest_room_around_a_misfiled_shelf_is_named(self):
+        Room.objects.create(floor_plan=self.plan, name='Corner nook', map_x=125, map_y=25,
+                            geometry=[[110, 10], [140, 10], [140, 40], [110, 40]])
+        self._shelf('Wanderer', 125, 25, self.left)
+        rows = self._mismatches()
+        self.assertEqual([r['drawn'] for r in rows], ['Corner nook'])
 
 
 
@@ -3793,7 +4081,7 @@ class PatronSchoolTests(TestCase):
             'action': 'register', 'first_name': 'Ana', 'last_name': 'Cruz',
             'email': email, 'password': 'SmokeTest123',
             'confirm_password': 'SmokeTest123', 'patron_type': patron_type,
-            'contact_number': '09171234567', 'address': 'Sala, Cabuyao',
+            'contact_number': '09171234567', 'address': 'Sala, Cabuyao', 'accept_terms': 'yes',
             'credential_document': SimpleUploadedFile(
                 # A real PNG header.
                 'id.png', bytes([137, 80, 78, 71, 13, 10, 26, 10]) + b'0' * 80,

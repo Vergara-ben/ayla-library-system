@@ -1,0 +1,97 @@
+<div class="terms-body">
+  <p class="terms-updated">Last updated {{ version }}</p>
+
+  <h3>1. About these terms</h3>
+  <p>These terms apply to your Ayla Public Library account and to the library's services:
+    borrowing, the online catalogue, the indoor map and messages with library staff. By ticking
+    &ldquo;I agree&rdquo; when you register, you accept them.</p>
+
+  <h3>2. Your account</h3>
+  <ul>
+    <li>Give your real name and correct contact details, and keep them up to date.</li>
+    <li>Upload a valid ID. Library staff check it against your details before your account is
+      activated, and may reject an application they cannot verify.</li>
+    <li>One account per person. Your account and library card are personal; do not lend them
+      or share your password. You are responsible for what is done with your account.</li>
+    <li>Tell the library straight away if you think someone else has used your account.</li>
+  </ul>
+
+  <h3>3. Borrowing</h3>
+  <ul>
+    <li>You may borrow up to <strong>{{ rule.max_books_per_patron }}</strong>
+      book{{ rule.max_books_per_patron|pluralize }} at a time, for
+      <strong>{{ rule.loan_period_days }}</strong> day{{ rule.loan_period_days|pluralize }}.</li>
+    <li>Return books on or before the due date. You may ask for a due-date extension; the
+      library decides whether to grant it.</li>
+    <li>You cannot borrow while you have an overdue book or an unsettled lost book.</li>
+    <li>Handle books with care. Do not write in, mark, tear or remove pages from them.</li>
+  </ul>
+
+  <h3>4. Overdue, damaged and lost books</h3>
+  <ul>
+    {% if rule.fine_per_day > 0 %}
+    <li>An overdue book is charged <strong>&#8369;{{ rule.fine_per_day }}</strong> per day
+      {% if rule.grace_period_days %}after a grace period of {{ rule.grace_period_days }}
+      day{{ rule.grace_period_days|pluralize }}{% endif %}.</li>
+    {% else %}
+    <li>No overdue fine is charged at present, but overdue books stop you borrowing until they
+      are returned.</li>
+    {% endif %}
+    {% if rule.lost_book_fee > 0 %}
+    <li>A lost book is charged <strong>&#8369;{{ rule.lost_book_fee }}</strong>, or its
+      replacement, as the library decides.</li>
+    {% else %}
+    <li>A lost book must be replaced or paid for, as the library decides.</li>
+    {% endif %}
+    <li>A damaged book may be charged for repair or replacement.</li>
+  </ul>
+
+  <h3>5. Visiting the library</h3>
+  <ul>
+    <li>Your entry and exit are recorded when you scan in at the library's desk.</li>
+    <li>Follow the instructions of library staff, keep noise down, and stay out of staff-only
+      areas.</li>
+  </ul>
+
+  <h3>6. The indoor map</h3>
+  <ul>
+    <li>The map uses Bluetooth beacons to show roughly where you are. Your position is worked out
+      on your own phone and is used only to draw directions; it is not saved.</li>
+    <li>Positions and routes are approximate. Watch where you are walking and follow the
+      library's signs and staff.</li>
+  </ul>
+
+  <h3>7. Suspension</h3>
+  <p>The library may suspend or deactivate an account that breaks these terms, for example
+    for repeated overdue books, a lost book that is not settled, damage, or misuse of the
+    account. You may ask for a suspended account to be reactivated.</p>
+
+  <h3>8. Your personal information</h3>
+  <p>The library handles your information in line with the Data Privacy Act of 2012
+    (Republic Act No. 10173).</p>
+  <ul>
+    <li><strong>What is kept:</strong> your name, email address, contact number, address,
+      patron type and school, the ID you upload, your borrowing history, your visits, messages
+      you send to staff, and a record of catalogue searches and books you look up on the map.</li>
+    <li><strong>Why:</strong> to verify who you are, run your account and loans, send you
+      account and due-date emails, keep the library secure, and produce library statistics
+      that do not name you.</li>
+    <li><strong>Who sees it:</strong> authorised library staff only. It is stored with the
+      library's hosting and email providers, and is not sold or shared for advertising.</li>
+    <li><strong>Your rights:</strong> you may ask to see, correct or delete your information,
+      or withdraw your consent, by contacting the library. Some records, such as unreturned
+      loans, may have to be kept until they are settled.</li>
+  </ul>
+
+  <h3>9. Emails</h3>
+  <p>The library emails you about your account: verification codes, approval, due dates and
+    overdue books. These are part of the service and are not marketing.</p>
+
+  <h3>10. Changes</h3>
+  <p>The library may update these terms. The date at the top shows when they last changed.
+    Using your account after a change means you accept the new terms.</p>
+
+  <h3>11. Contact</h3>
+  <p>For questions about these terms or your information, ask at the library's front desk or
+    send a message to library staff from your account.</p>
+</div>

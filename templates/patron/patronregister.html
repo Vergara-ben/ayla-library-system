@@ -1,4 +1,4 @@
-{% load static %}
+{% load static terms %}
 <!DOCTYPE html>
 <html lang="en" data-module="patron" data-theme-floating>
 <head>
@@ -8,8 +8,10 @@
 <title>AYLA Library — Register</title>
 <script src="{% static 'js/theme.js' %}"></script>
 <script src="{% static 'js/session.js' %}"></script>
+<script src="{% static 'js/password-toggle.js' %}" defer></script>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="{% static 'css/theme.css' %}">
+<link rel="stylesheet" href="{% static 'css/terms.css' %}">
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   
@@ -340,11 +342,17 @@
             account is activated. Make sure your name is readable.
           </div>
         </div>
-        <div style="font-size:12px;color:var(--muted);background:var(--glass);border-radius:10px;padding:12px 14px;border:1px solid var(--glass-border);margin-bottom:8px">
-          <i class="fa-solid fa-clipboard-list" aria-hidden="true"></i> By registering, you agree to the library's borrowing policy and terms of use.
+        <div style="font-size:12px;color:var(--muted);background:var(--glass);border-radius:10px;padding:12px 14px;border:1px solid var(--glass-border);margin-bottom:12px">
+          <i class="fa-solid fa-clipboard-list" aria-hidden="true"></i>
           After email verification, library staff review your uploaded ID before your account
           is activated. You will be emailed once it is approved.
         </div>
+        <label class="terms-check" style="margin-bottom:8px">
+          <input type="checkbox" id="acceptTerms" name="accept_terms" value="yes" required {% if form.accept_terms == 'yes' %}checked{% endif %}>
+          <span>I have read and agree to the
+            <button type="button" class="terms-link" onclick="openTerms()">Terms and Conditions</button>,
+            including how the library handles my personal information.</span>
+        </label>
         <div class="btn-row">
           <button type="button" class="btn-secondary" onclick="goStep(2)">← Back</button>
           <button type="submit" class="btn-primary">Register <i class="fa-solid fa-check" aria-hidden="true"></i></button>
@@ -352,6 +360,18 @@
       </div>
     </div>
   </form>
+
+  <dialog id="termsDialog" class="terms-dialog" aria-labelledby="termsTitle">
+    <div class="terms-dialog-head">
+      <h2 id="termsTitle">Terms and Conditions</h2>
+      <button type="button" class="terms-dialog-close" onclick="closeTerms()" aria-label="Close"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
+    </div>
+    <div class="terms-dialog-scroll">{% terms_body %}</div>
+    <div class="terms-dialog-foot">
+      <button type="button" class="btn-secondary" onclick="closeTerms()">Close</button>
+      <button type="button" class="btn-primary" style="flex:0 0 auto;padding:12px 22px" onclick="agreeTerms()">I agree</button>
+    </div>
+  </dialog>
 
   <div class="card success-screen" id="successCard">
     <div class="success-icon"><i class="fa-solid fa-circle-check" aria-hidden="true"></i></div>
@@ -386,6 +406,15 @@ function selectType(el) {
     group.style.display = (type === 'Student' || type === 'Teacher') ? '' : 'none';
     if (group.style.display === 'none') document.getElementById('schoolField').value = '';
   }
+}
+function openTerms() {
+  const d = document.getElementById('termsDialog');
+  if (d && d.showModal) d.showModal(); else window.open('{% url 'terms_page' %}', '_blank');
+}
+function closeTerms() { document.getElementById('termsDialog').close(); }
+function agreeTerms() {
+  document.getElementById('acceptTerms').checked = true;
+  closeTerms();
 }
 // After an error, show the patron type that was chosen.
 (function () {
