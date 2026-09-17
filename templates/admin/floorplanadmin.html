@@ -393,7 +393,7 @@
         .map-dot.waypoint.selected { background: var(--warning); }
 
         /* Group selection and locks. */
-        .map-dot.multi-selected { box-shadow: 0 0 0 3px var(--warning); }
+        .map-dot.multi-selected { box-shadow: 0 0 0 3px var(--warning); cursor: move; }
         .map-dot.is-locked { cursor: default; opacity: .8; }
         .lock-badge {
             color: var(--text-muted); font-size: 10px; line-height: 14px; text-align: center;
@@ -1878,8 +1878,9 @@
             if (mode === 'area') {
                 const hint = document.getElementById('mapModeHint');
                 if (hint) hint.innerHTML = '<strong class="text-cyan-400">Area select</strong>'
-                        + ' — drag a box around what you want. Only elements fully inside are picked;'
-                        + ' locked ones can be unlocked but are not moved or deleted. Press V or Esc to stop.';
+                        + ' — drag a box around what you want, then drag any selected element to move them together.'
+                        + ' Only elements fully inside are picked; locked ones can be unlocked but are not moved or deleted.'
+                        + ' Press V or Esc to stop.';
             }
             // Dragging draws the selection box in area mode, so the map does not pan.
             if (lmap) { if (mode === 'area') lmap.dragging.disable(); else lmap.dragging.enable(); }
@@ -5064,10 +5065,11 @@
                     }
                     // A dash no other shape on the plan uses, so a selection never looks like a staff-only room.
                     layer.setStyle({ color: AylaTheme.color('--warning'), weight: 4, dashArray: '12,5' });
-                    if (layer._path) domKey.set(layer._path, key);
+                    if (layer._path) { domKey.set(layer._path, key); layer._path.style.cursor = 'move'; }
                 } else if (layer._aylaStyle) {
                     layer.setStyle(layer._aylaStyle);
                     layer._aylaStyle = null;
+                    if (layer._path) layer._path.style.cursor = '';
                 }
             });
         }
@@ -5211,10 +5213,12 @@
                 if (pendingPlacement()) return;
                 if (e.target.closest && e.target.closest('.geo-handle, .leaflet-control')) return;
 
-                if (!mode && !e.shiftKey && groupSel.size && inspectorSel && inspectorSel.kind === 'group') {
+                // Dragging a selected element moves the group, in Select and in Area select.
+                if ((!mode || mode === 'area') && !e.shiftKey && groupSel.size
+                    && inspectorSel && inspectorSel.kind === 'group') {
                     const key = keyFromTarget(e.target, container);
-                    if (key && groupSel.has(key)) { stopEvent(e); startGroupDrag(e); }
-                    return;
+                    if (key && groupSel.has(key)) { stopEvent(e); startGroupDrag(e); return; }
+                    if (!mode) return;
                 }
                 if (mode === 'area' || (!mode && e.shiftKey)) { stopEvent(e); startMarquee(e); }
             }, true);
@@ -5344,10 +5348,11 @@
         function onGroupDragUp() {
             document.removeEventListener('mousemove', onGroupDragMove, true);
             document.removeEventListener('mouseup', onGroupDragUp, true);
-            lmap.dragging.enable();
+            if (mode !== 'area') lmap.dragging.enable();
             const d = groupDrag;
             groupDrag = null;
             if (!d || !d.moved) return;
+            if (!unlockedMembers().length) { mapToast('Everything selected is locked.', 'error'); return; }
             suppressClick = true;
             setTimeout(function () { suppressClick = false; }, 0);
             commitGroupMove(d.dx, d.dy, d.base);
@@ -5383,7 +5388,7 @@
             }
             store(TOAST_KEY, message || null);
             store(GROUP_KEY, keepSelection && groupSel.size
-                ? { plan: floorPlanId, keys: Array.from(groupSel.keys()) } : null);
+                ? { plan: floorPlanId, keys: Array.from(groupSel.keys()), area: mode === 'area' } : null);
             window.location.reload();
         }
 
@@ -5399,6 +5404,8 @@
             const saved = stored(GROUP_KEY);
             store(GROUP_KEY, null);
             if (saved && saved.plan === floorPlanId && Array.isArray(saved.keys)) {
+                // Still in Area select after a move, so the group can be dragged again.
+                if (saved.area && mode !== 'area') window.setMode('area');
                 saved.keys.forEach(function (key) {
                     const parts = String(key).split(':');
                     if (elementData(parts[0], Number(parts[1]))) addGroupMember(parts[0], Number(parts[1]));
