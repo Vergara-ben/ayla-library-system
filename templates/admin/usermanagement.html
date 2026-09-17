@@ -34,19 +34,20 @@
             border-radius: 0.5rem; background: var(--bg-card); border: 1px solid var(--border-color);
             color: var(--text-primary); cursor: pointer; margin-right: 0.75rem;
         }
-        .field-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); margin-bottom: 6px; display: block; }
+        .field-label { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); margin-bottom: 6px; display: block; }
         .field-input {
             width: 100%; background: var(--bg-input); border: 1px solid var(--border-modal); border-radius: 8px;
-            padding: 9px 12px; font-size: 13px; color: var(--text-primary); outline: none;
+            padding: 9px 12px; font-size: 15px; color: var(--text-primary); outline: none;
         }
         .field-input:focus { border-color: var(--accent-strong); }
         /* Row +/- buttons, same as the shelf placement picker. */
-        .tbtn { width: 24px; height: 24px; border-radius: 6px; border: 1px solid var(--border-color); display: flex; align-items: center; justify-content: center; font-size: 10px; cursor: pointer; background: transparent; flex-shrink: 0; }
+        .tbtn { width: 24px; height: 24px; border-radius: 6px; border: 1px solid var(--border-color); display: flex; align-items: center; justify-content: center; font-size: 12px; cursor: pointer; background: transparent; flex-shrink: 0; }
         .tbtn.add { color: var(--accent); } .tbtn.add:hover { background: var(--tint-accent); }
         .tbtn.del { color: var(--danger); } .tbtn.del:hover { background: var(--tint-danger); }
     </style>
     <link rel="stylesheet" href="{% static 'css/admin-enhance.css' %}">
     <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
+    <link rel="stylesheet" href="{% static 'css/readability.css' %}">
     <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
     <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
     <script src="{% static 'js/ayla-dialog.js' %}"></script>

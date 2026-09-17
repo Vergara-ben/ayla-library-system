@@ -1,0 +1,152 @@
+{# Open or closed switch, shared by the admin and staff dashboards. #}
+<style>
+    .lib-status {
+        display: inline-flex;
+        align-items: center;
+        gap: 12px;
+        margin-top: 14px;
+        padding: 8px 14px 8px 8px;
+        border: 1px solid var(--border-color);
+        border-radius: 14px;
+        background-color: var(--bg-subtle);
+        max-width: 100%;
+    }
+    .lib-status.is-open {
+        border-color: var(--success);
+        background-color: var(--tint-success);
+    }
+    .lib-switch {
+        position: relative;
+        flex-shrink: 0;
+        width: 46px;
+        height: 26px;
+        border: none;
+        border-radius: 999px;
+        background-color: var(--border-color);
+        cursor: pointer;
+        transition: background-color 0.2s ease;
+    }
+    .lib-switch-knob {
+        position: absolute;
+        top: 3px;
+        left: 3px;
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        background-color: #fff;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+        transition: transform 0.2s ease;
+    }
+    .lib-status.is-open .lib-switch { background-color: var(--success); }
+    .lib-status.is-open .lib-switch-knob { transform: translateX(20px); }
+    .lib-switch:disabled { cursor: not-allowed; opacity: 0.55; }
+    .lib-switch[aria-busy="true"] { cursor: progress; }
+    .lib-status-text { display: flex; flex-direction: column; min-width: 0; }
+    .lib-status-label { font-size: 14px; font-weight: 600; color: var(--text-main); }
+    .lib-status-word { color: var(--text-muted); }
+    .lib-status.is-open .lib-status-word { color: var(--success); }
+    .lib-status-note { font-size: 12.5px; color: var(--text-muted); }
+    @media (prefers-reduced-motion: reduce) {
+        .lib-switch, .lib-switch-knob { transition: none; }
+    }
+</style>
+
+<div class="lib-status{% if library_status.is_open %} is-open{% endif %}" id="libStatus"
+     data-url="{% url 'library_status' %}"
+     data-seconds="{{ library_status.seconds_to_closing|default_if_none:'' }}">
+    <button type="button" class="lib-switch" id="libSwitch" role="switch"
+            aria-checked="{{ library_status.is_open|yesno:'true,false' }}"
+            aria-label="Library open" aria-describedby="libStatusNote"
+            {% if not library_status.is_open and not library_status.can_open %}disabled{% endif %}>
+        <span class="lib-switch-knob" aria-hidden="true"></span>
+    </button>
+    <div class="lib-status-text">
+        <span class="lib-status-label" id="libStatusLabel">Library is <span class="lib-status-word" id="libStatusWord">{{ library_status.is_open|yesno:'Open,Closed' }}</span></span>
+        <span class="lib-status-note" id="libStatusNote">{{ library_status.note }}</span>
+    </div>
+</div>
+
+<script>
+(function () {
+    var box = document.getElementById('libStatus');
+    if (!box) return;
+    var sw = document.getElementById('libSwitch');
+    var word = document.getElementById('libStatusWord');
+    var note = document.getElementById('libStatusNote');
+    var url = box.getAttribute('data-url');
+    var timer = null;
+    var busy = false;
+
+    function toast(message, kind) {
+        if (window.AylaDialog) window.AylaDialog.toast(message, kind);
+    }
+
+    function schedule(seconds) {
+        clearTimeout(timer);
+        // Re-read at closing time so the switch turns itself off.
+        if (seconds) timer = setTimeout(refresh, seconds * 1000);
+    }
+
+    function render(s) {
+        box.classList.toggle('is-open', !!s.is_open);
+        sw.setAttribute('aria-checked', s.is_open ? 'true' : 'false');
+        sw.disabled = !s.is_open && !s.can_open;
+        word.textContent = s.is_open ? 'Open' : 'Closed';
+        note.textContent = s.note;
+        schedule(s.seconds_to_closing);
+    }
+
+    function readJson(response) {
+        var type = response.headers.get('Content-Type') || '';
+        if (type.indexOf('application/json') === -1) throw new Error('signed out');
+        return response.json();
+    }
+
+    function refresh() {
+        fetch(url, { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
+            .then(readJson)
+            .then(function (s) { if (s.success) render(s); })
+            .catch(function () {});
+    }
+
+    sw.addEventListener('click', function () {
+        if (busy || sw.disabled) return;
+        var wantOpen = sw.getAttribute('aria-checked') !== 'true';
+        busy = true;
+        sw.setAttribute('aria-busy', 'true');
+
+        fetch(url, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {
+                'X-CSRFToken': '{{ csrf_token }}',
+                'Content-Type': 'application/x-www-form-urlencoded'
+            },
+            body: 'open=' + (wantOpen ? '1' : '0')
+        })
+            .then(readJson)
+            .then(function (s) {
+                render(s);
+                if (!s.success) {
+                    toast(s.error, 'error');
+                } else {
+                    toast(s.is_open ? 'The library is now marked open.' : 'The library is now marked closed.', 'success');
+                }
+            })
+            .catch(function () {
+                toast('Could not change the library status. Refresh the page and try again.', 'error');
+            })
+            .then(function () {
+                busy = false;
+                sw.removeAttribute('aria-busy');
+            });
+    });
+
+    // A dashboard left open overnight catches up when it is looked at again.
+    document.addEventListener('visibilitychange', function () {
+        if (!document.hidden) refresh();
+    });
+
+    schedule(Number(box.getAttribute('data-seconds')) || 0);
+})();
+</script>

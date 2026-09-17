@@ -164,7 +164,7 @@ header.h-16 {
 .page-title,
 header h2.logo-text {
     font-family: 'Inter', system-ui, sans-serif !important;
-    font-size: 13px !important;
+    font-size: 15px !important;
     font-weight: 700 !important;
     letter-spacing: .08em !important;
     text-transform: uppercase !important;
@@ -180,12 +180,7 @@ header h2.logo-text {
 
 /* Control sizes */
 
-/* Small text */
-[class*="text-[9px]"],
-[class*="text-[10px]"],
-[class*="text-[11px]"] {
-    font-size: 10px !important;
-}
+/* Small text sizes live in readability.css. */
 
 /* Two control sizes */
 
@@ -202,7 +197,7 @@ button.px-5.py-2\.5, a.px-5.py-2\.5 {
     min-height: 40px !important;
     padding: 0 18px !important;
     border-radius: var(--radius) !important;
-    font-size: 13px !important;
+    font-size: 15px !important;
     font-weight: 600 !important;
 }
 

@@ -109,6 +109,7 @@
     </style>
     <link rel="stylesheet" href="{% static 'css/admin-enhance.css' %}">
     <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
+    <link rel="stylesheet" href="{% static 'css/readability.css' %}">
     <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
     <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
     <script src="{% static 'js/ayla-dialog.js' %}"></script>
@@ -240,14 +241,14 @@
                         </form>
                         <form method="post" action="{% url 'desk_arm' %}" class="inline-block" data-confirm="Hand this computer to the patron? This browser stays on Log Management until you enter your account password.">
                             {% csrf_token %}
-                            <button type="submit" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-amber-500/90 text-[11px] font-semibold px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors">
+                            <button type="submit" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-amber-500 text-[11px] font-semibold px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors">
                                 <i class="fa-solid fa-desktop"></i> Desk Mode
                             </button>
                         </form>
-                        <a href="{% url 'download_log_template' %}" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-emerald-500/90 text-[11px] font-semibold px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors">
+                        <a href="{% url 'download_log_template' %}" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-emerald-500 text-[11px] font-semibold px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors">
                             <i class="fa-solid fa-file-excel"></i> Download Template
                         </a>
-                        <button onclick="document.getElementById('excelFileInput').click()" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-cyan-500/90 text-[11px] font-semibold px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors">
+                        <button onclick="document.getElementById('excelFileInput').click()" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-cyan-500 text-[11px] font-semibold px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors">
                             <i class="fa-solid fa-upload"></i> Import Excel
                         </button>
                         <input type="file" id="excelFileInput" accept=".xlsx" style="display: none;" onchange="uploadExcelFile(this)">
@@ -347,7 +348,7 @@
                                     <td class="py-4 px-6 text-slate-400">{{ log.school|default:"—" }}</td>
                                     <td class="py-4 px-6 text-slate-400">{{ log.purpose_of_visit|default:"—" }}</td>
                                     <td class="py-4 px-6 text-slate-300 font-medium">{{ log.entry_time|date:"M j, Y" }} · {{ log.entry_time|time:"h:i A" }}</td>
-                                    <td class="py-4 px-6 text-slate-300 font-medium">{% if log.exit_time %}{{ log.exit_time|date:"M j, Y" }} · {{ log.exit_time|time:"h:i A" }}{% if log.auto_closed %}<span class="block text-[9px] font-bold text-amber-500/90" title="Nobody signed this visit out. It was closed at the library's closing time, so the exit is an assumption rather than a record.">ASSUMED</span>{% endif %}{% else %}<span class="text-slate-600">—</span>{% endif %}</td>
+                                    <td class="py-4 px-6 text-slate-300 font-medium">{% if log.exit_time %}{{ log.exit_time|date:"M j, Y" }} · {{ log.exit_time|time:"h:i A" }}{% if log.auto_closed %}<span class="block text-[9px] font-bold text-amber-500" title="Nobody signed this visit out. It was closed at the library's closing time, so the exit is an assumption rather than a record.">ASSUMED</span>{% endif %}{% else %}<span class="text-slate-600">—</span>{% endif %}</td>
                                     <td class="py-4 px-6 text-center">
                                         {% if log.exit_time %}
                                             <span class="inline-block bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-0.5 rounded text-[10px] font-bold tracking-wide">Completed</span>
@@ -370,7 +371,7 @@
                                             <button type="button" onclick="deskSignOut(this)"
                                                     data-log-id="{{ log.log_id }}"
                                                     data-name="{{ log.patron.fullname }}"
-                                                    class="w-7 h-7 rounded border border-slate-800 text-cyan-500/80 hover:text-cyan-300 hover:bg-slate-800/40 transition-colors" title="Sign out">
+                                                    class="w-7 h-7 rounded border border-slate-800 text-cyan-500 hover:text-cyan-300 hover:bg-slate-800/40 transition-colors" title="Sign out">
                                                 <i class="fa-solid fa-right-from-bracket text-[10px]"></i>
                                             </button>
                                             {% endif %}
@@ -380,14 +381,14 @@
                                                     data-entry="{{ log.entry_time|date:'Y-m-d\TH:i' }}"
                                                     data-exit="{% if log.exit_time %}{{ log.exit_time|date:'Y-m-d\TH:i' }}{% endif %}"
                                                     onclick="openEditLog(this)"
-                                                    class="w-7 h-7 rounded border border-slate-800 text-amber-500/70 hover:text-amber-400 hover:bg-amber-950/20 transition-colors" title="Edit Log">
+                                                    class="w-7 h-7 rounded border border-slate-800 text-amber-500 hover:text-amber-400 hover:bg-amber-950/20 transition-colors" title="Edit Log">
                                                 <i class="fa-solid fa-pen text-[10px]"></i>
                                             </button>
-                                            <form method="post" action="{% url 'delete_patron_log' %}" class="inline" data-confirm="Archive this visit log? It is left out of the visit counts, and an Administrator can restore it from the Archive." data-confirm-title="Archive visit log" data-confirm-label="Archive">
+                                            <form method="post" action="{% url 'delete_patron_log' %}" class="inline" data-confirm="Delete this visit log? It is left out of the visit counts." data-confirm-title="Delete visit log" data-confirm-label="Delete">
                                                 {% csrf_token %}
                                                 <input type="hidden" name="log_id" value="{{ log.log_id }}">
-                                                <button type="submit" class="w-7 h-7 rounded border border-slate-800 text-rose-500/70 hover:text-rose-400 hover:bg-rose-950/20 transition-colors" title="Archive Log" aria-label="Archive Log">
-                                                    <i class="fa-solid fa-box-archive text-[10px]"></i>
+                                                <button type="submit" class="w-7 h-7 rounded border border-slate-800 text-rose-500 hover:text-rose-400 hover:bg-rose-950/20 transition-colors" title="Delete log" aria-label="Delete log">
+                                                    <i class="fa-solid fa-trash-can text-[10px]"></i>
                                                 </button>
                                             </form>
                                         </div>

@@ -68,6 +68,7 @@
     </style>
     <link rel="stylesheet" href="{% static 'css/admin-enhance.css' %}">
     <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
+    <link rel="stylesheet" href="{% static 'css/readability.css' %}">
     <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
     <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
     <script src="{% static 'js/ayla-dialog.js' %}"></script>
@@ -125,7 +126,7 @@
                         <button type="submit" class="bg-cyan-700/30 text-cyan-400 border border-cyan-800/80 hover:bg-cyan-700/50 text-xs font-bold px-4 py-2.5 rounded-lg flex items-center gap-2 transition-colors">
                             <i class="fa-solid fa-arrows-rotate text-[11px]"></i> Generate
                         </button>
-                        <button type="submit" formaction="{% url 'admin_report_excel' %}" {% if not generated %}disabled title="Generate the report first"{% endif %} class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-emerald-500/90 text-xs font-bold px-4 py-2.5 rounded-lg flex items-center gap-2 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-slate-900">
+                        <button type="submit" formaction="{% url 'admin_report_excel' %}" {% if not generated %}disabled title="Generate the report first"{% endif %} class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-emerald-500 text-xs font-bold px-4 py-2.5 rounded-lg flex items-center gap-2 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-slate-900">
                             <i class="fa-solid fa-file-excel text-[11px]"></i> Export Excel
                         </button>
                         <button type="submit" formaction="{% url 'admin_report_pdf' %}" {% if not generated %}disabled title="Generate the report first"{% endif %} class="bg-cyan-700 hover:bg-cyan-600 text-white text-xs font-bold px-4 py-2.5 rounded-lg flex items-center gap-2 transition-colors shadow-md disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-cyan-700">
@@ -143,7 +144,7 @@
             <div>
                 <h3 class="text-xl font-bold text-slate-100">{{ report.title }}</h3>
                 <p class="text-sm text-slate-400">{{ report.subtitle }}</p>
-                <p class="text-xs text-cyan-400/80 mt-1 font-medium">{{ report.period_label }}</p>
+                <p class="text-xs text-cyan-400 mt-1 font-medium">{{ report.period_label }}</p>
             </div>
 
             <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">

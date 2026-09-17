@@ -27,7 +27,7 @@
             position: absolute; z-index: 500; left: 0; top: 0;
             background: var(--bg-modal, #101826); color: var(--text-primary, #e2e8f0);
             border: 1px solid var(--border-color, #334155); border-radius: 8px;
-            padding: 5px 9px; font-size: 11.5px; line-height: 1.5;
+            padding: 5px 9px; font-size: 13px; line-height: 1.5;
             pointer-events: none; white-space: nowrap;
             box-shadow: 0 4px 14px rgba(0,0,0,.35);
         }
@@ -123,10 +123,10 @@
             padding: 8px 9px; border-radius: 8px;
             border: 1px solid transparent; background: none; cursor: pointer;
             color: var(--text-muted);
-            font-size: 11px; font-weight: 700; text-align: left; white-space: nowrap;
+            font-size: 13px; font-weight: 700; text-align: left; white-space: nowrap;
             transition: background-color .12s ease, color .12s ease;
         }
-        .rail-btn i { width: 14px; text-align: center; font-size: 12px; }
+        .rail-btn i { width: 14px; text-align: center; font-size: 14px; }
         .rail-btn:hover { background: var(--bg-card); color: var(--text-primary); }
         .rail-btn.mode-active {
             background: var(--accent-strong); color: var(--on-accent);
@@ -134,7 +134,7 @@
         }
         .rail-sep { height: 1px; background: var(--border-color); margin: 5px 2px; }
         .rail-head {
-            font-size: 9px; font-weight: 700; letter-spacing: .09em;
+            font-size: 12px; font-weight: 700; letter-spacing: .09em;
             text-transform: uppercase; color: var(--text-muted);
             padding: 4px 9px 2px;
         }
@@ -142,7 +142,7 @@
         @media (max-width: 1400px) {
             .rail-btn span { display: none; }
             .rail-btn { justify-content: center; padding: 9px 8px; }
-            .rail-head { text-align: center; padding: 4px 0 2px; font-size: 8px; }
+            .rail-head { text-align: center; padding: 4px 0 2px; font-size: 12px; }
         }
 
         /* Grouped menus in the header */
@@ -154,7 +154,7 @@
             background: var(--bg-modal); box-shadow: 0 18px 40px rgb(0 0 0 / .35);
         }
         .map-menu-title {
-            font-size: 9px; font-weight: 700; letter-spacing: .09em;
+            font-size: 12px; font-weight: 700; letter-spacing: .09em;
             text-transform: uppercase; color: var(--text-muted); padding: 2px 6px 6px;
         }
         .map-menu .see-btn, .map-menu .mode-btn {
@@ -163,22 +163,22 @@
         }
         .map-menu .see-btn::before {
             content: '\f00c'; font-family: 'Font Awesome 6 Free'; font-weight: 900;
-            font-size: 9px; opacity: 0; width: 10px;
+            font-size: 12px; opacity: 0; width: 10px;
         }
         .map-menu .see-btn.on::before { opacity: 1; }
         .map-tool-btn {
             display: inline-flex; align-items: center; gap: 6px;
             background: var(--bg-card); border: 1px solid var(--border-color);
             color: var(--text-muted); border-radius: 8px;
-            font-size: 11px; font-weight: 700; padding: 6px 10px; cursor: pointer;
+            font-size: 13px; font-weight: 700; padding: 6px 10px; cursor: pointer;
             transition: color .12s ease, border-color .12s ease;
         }
         .map-tool-btn:hover { color: var(--text-primary); border-color: var(--accent-cyan); }
-        .map-tool-btn i { font-size: 10px; }
+        .map-tool-btn i { font-size: 12px; }
         .map-canvas-col { min-width: 0; }
         .map-foot {
             display: flex; flex-wrap: wrap; align-items: center; gap: 14px;
-            margin-top: 8px; font-size: 10px; color: var(--text-muted);
+            margin-top: 8px; font-size: 12px; color: var(--text-muted);
         }
         .leaflet-container {
             background: var(--bg-sidebar);
@@ -196,7 +196,7 @@
         }
         .leaflet-popup-content {
             margin: 10px 12px;
-            font-size: 12px;
+            font-size: 14px;
             line-height: 1.5;
         }
         /* Panel action buttons, one per row. */
@@ -213,7 +213,7 @@
             width: 100%;
             padding: 6px 10px;
             border-radius: 6px;
-            font-size: 11px;
+            font-size: 13px;
             font-weight: 600;
             text-align: left;
             cursor: pointer;
@@ -222,12 +222,12 @@
             color: var(--text-primary);
             transition: background-color .12s ease, color .12s ease;
         }
-        .map-action-btn i { width: 12px; font-size: 10px; opacity: .8; }
+        .map-action-btn i { width: 12px; font-size: 12px; opacity: .8; }
         .map-action-btn:hover { background: var(--tint-accent); color: var(--accent); }
         .map-action-btn.danger { color: var(--danger); }
         .map-action-btn.danger:hover { background: var(--tint-danger); color: var(--danger); }
-        .map-popup-title { font-weight: 700; font-size: 12px; }
-        .map-popup-sub { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+        .map-popup-title { font-weight: 700; font-size: 14px; }
+        .map-popup-sub { font-size: 13px; color: var(--text-muted); margin-top: 2px; }
 
         /* Docked properties panel. */
         .map-workspace {
@@ -248,7 +248,7 @@
             background-color: var(--bg-card);
             border: 1px solid var(--border-color);
             color: var(--text-muted);
-            font-size: 10px; font-weight: 700; letter-spacing: .02em;
+            font-size: 12px; font-weight: 700; letter-spacing: .02em;
             padding: 4px 8px; border-radius: 7px; transition: all .15s;
         }
         .see-btn:hover { color: var(--text-primary); }
@@ -261,7 +261,7 @@
             border: 1px solid var(--warning);
             border-radius: 8px; padding: 9px 10px; margin: 8px 0;
             background-color: rgba(245, 158, 11, .08);
-            font-size: 11px; line-height: 1.5; color: var(--text-primary);
+            font-size: 13px; line-height: 1.5; color: var(--text-primary);
         }
 
         .readiness {
@@ -277,8 +277,8 @@
             background: none; border: 0; text-align: left;
         }
         .readiness-head:hover { background-color: rgba(148, 163, 184, .06); }
-        .readiness-summary { font-size: 11px; font-weight: 700; letter-spacing: .02em; }
-        .readiness-chevron { font-size: 10px; color: var(--text-muted); }
+        .readiness-summary { font-size: 13px; font-weight: 700; letter-spacing: .02em; }
+        .readiness-chevron { font-size: 12px; color: var(--text-muted); }
         .readiness-body { border-top: 1px solid var(--border-color); padding: 4px 0; }
         .readiness-item { display: flex; gap: 9px; padding: 7px 12px; align-items: flex-start; }
         .readiness-item + .readiness-item { border-top: 1px solid rgba(148, 163, 184, .10); }
@@ -289,9 +289,9 @@
         .readiness-dot.warning { background-color: var(--warning); }
         /* Not a fault. */
         .readiness-dot.info { background-color: var(--text-muted); }
-        .readiness-text { font-size: 11px; font-weight: 600; color: var(--text-primary); }
-        .readiness-detail { font-size: 10px; color: var(--text-muted); line-height: 1.5; margin-top: 2px; }
-        .readiness-counts { font-size: 10px; color: var(--text-muted); font-weight: 500; }
+        .readiness-text { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+        .readiness-detail { font-size: 12px; color: var(--text-muted); line-height: 1.5; margin-top: 2px; }
+        .readiness-counts { font-size: 12px; color: var(--text-muted); font-weight: 500; }
 
         .map-inspector {
             border: 1px solid var(--border-color);
@@ -311,7 +311,7 @@
             background: var(--bg-subtle);
         }
         .map-inspector-kind {
-            font-size: 10px;
+            font-size: 12px;
             font-weight: 700;
             letter-spacing: .09em;
             text-transform: uppercase;
@@ -319,18 +319,18 @@
         }
         .map-inspector-close {
             background: none; border: none; cursor: pointer;
-            color: var(--text-muted); font-size: 12px; padding: 0 2px;
+            color: var(--text-muted); font-size: 14px; padding: 0 2px;
         }
         .map-inspector-close:hover { color: var(--danger); }
         .map-inspector-body { padding: 12px; }
-        .map-inspector-empty { font-size: 11px; color: var(--text-muted); line-height: 1.55; }
+        .map-inspector-empty { font-size: 13px; color: var(--text-muted); line-height: 1.55; }
         .map-inspector-title {
-            font-size: 13px; font-weight: 700; color: var(--text-primary);
+            font-size: 15px; font-weight: 700; color: var(--text-primary);
             margin-bottom: 10px; word-break: break-word;
         }
         .insp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
         .insp-field label {
-            display: block; font-size: 9px; font-weight: 700; letter-spacing: .07em;
+            display: block; font-size: 12px; font-weight: 700; letter-spacing: .07em;
             text-transform: uppercase; color: var(--text-muted); margin-bottom: 3px;
         }
         /* Style selects and text areas like inputs. */
@@ -338,7 +338,7 @@
         .insp-field select,
         .insp-field textarea {
             width: 100%; background: var(--bg-input); border: 1px solid var(--border-color);
-            border-radius: 6px; padding: 6px 8px; font-size: 12px; font-family: inherit;
+            border-radius: 6px; padding: 6px 8px; font-size: 14px; font-family: inherit;
             color: var(--text-primary); outline: none;
         }
         .insp-field textarea { resize: vertical; line-height: 1.45; }
@@ -350,14 +350,14 @@
         .insp-rot-row { display: flex; gap: 4px; margin-bottom: 10px; }
         .insp-rot-btn {
             flex: 1; padding: 5px 0; border-radius: 6px; cursor: pointer;
-            font-size: 10px; font-weight: 700;
+            font-size: 12px; font-weight: 700;
             border: 1px solid var(--border-color); background: var(--bg-subtle);
             color: var(--text-muted);
         }
         .insp-rot-btn:hover { border-color: var(--accent); color: var(--accent); }
         .insp-rot-btn.active { background: var(--tint-accent); color: var(--accent); border-color: var(--accent); }
-        .insp-note { font-size: 10px; color: var(--text-muted); line-height: 1.5; margin-top: 8px; }
-        .insp-saved { font-size: 10px; font-weight: 700; color: var(--success); margin-top: 8px; min-height: 13px; }
+        .insp-note { font-size: 12px; color: var(--text-muted); line-height: 1.5; margin-top: 8px; }
+        .insp-saved { font-size: 12px; font-weight: 700; color: var(--success); margin-top: 8px; min-height: 13px; }
 
         /* Resize handles. */
         .geo-handle {
@@ -396,25 +396,25 @@
         .map-dot.multi-selected { box-shadow: 0 0 0 3px var(--warning); cursor: move; }
         .map-dot.is-locked { cursor: default; opacity: .8; }
         .lock-badge {
-            color: var(--text-muted); font-size: 10px; line-height: 14px; text-align: center;
+            color: var(--text-muted); font-size: 12px; line-height: 14px; text-align: center;
             text-shadow: 0 0 3px var(--bg-card), 0 0 3px var(--bg-card);
         }
         .select-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin-bottom: 8px; }
         .select-bar-label {
-            font-size: 9px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase;
+            font-size: 12px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase;
             color: var(--text-muted); margin-right: 2px;
         }
-        .select-bar-tip { margin-left: auto; font-size: 10px; color: var(--text-muted); }
+        .select-bar-tip { margin-left: auto; font-size: 12px; color: var(--text-muted); }
         .group-counts { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
         .group-chip {
-            font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 999px;
+            font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px;
             background: var(--bg-subtle); border: 1px solid var(--border-color); color: var(--text-primary);
         }
         .insp-lock {
             display: flex; align-items: center; justify-content: space-between; gap: 8px;
             padding: 6px 8px; margin-bottom: 10px; border-radius: 8px;
             border: 1px solid var(--border-color); background: var(--bg-subtle);
-            font-size: 11px; font-weight: 600; color: var(--text-primary);
+            font-size: 13px; font-weight: 600; color: var(--text-primary);
         }
         .insp-lock i { margin-right: 5px; color: var(--text-muted); }
         .insp-lock.on { border-color: var(--warning); background: rgba(245, 158, 11, .08); }
@@ -425,17 +425,18 @@
             display: flex; flex-direction: column; align-items: center; gap: 4px;
             padding: 10px 6px; border-radius: 10px; cursor: pointer;
             border: 1px solid var(--border-color); background: var(--bg-input);
-            color: var(--text-muted); font-size: 10px; font-weight: 600;
+            color: var(--text-muted); font-size: 12px; font-weight: 600;
             line-height: 1.2; text-align: center; transition: all .12s ease;
         }
         .stair-shape i { font-size: 15px; }
         .stair-shape:hover { color: var(--text-primary); border-color: var(--text-muted); }
         .stair-shape.on {
-            color: #fb7185; border-color: #be123c; background: rgba(190, 18, 60, .12);
+            color: rgb(var(--tw-rose-400)); border-color: #be123c; background: rgba(190, 18, 60, .12);
         }
     </style>
     <link rel="stylesheet" href="{% static 'css/admin-enhance.css' %}">
     <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
+    <link rel="stylesheet" href="{% static 'css/readability.css' %}">
     <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
     <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
     <script src="{% static 'js/ayla-dialog.js' %}"></script>
@@ -567,19 +568,19 @@
                                                 <i class="fa-solid fa-power-off text-[10px]"></i>
                                             </button>
                                             {% else %}
-                                            <button type="submit" class="w-7 h-7 rounded border border-slate-800 text-emerald-500/70 hover:text-emerald-400 hover:bg-emerald-950/20 transition-colors" title="Set Active">
+                                            <button type="submit" class="w-7 h-7 rounded border border-slate-800 text-emerald-500 hover:text-emerald-400 hover:bg-emerald-950/20 transition-colors" title="Set Active">
                                                 <i class="fa-solid fa-check text-[10px]"></i>
                                             </button>
                                             {% endif %}
                                         </form>
-                                        <button data-floorplan-id="{{ floorplan.floor_plan_id }}" data-notice="{{ floorplan.renovation_notice|default:"" }}" data-message="{{ floorplan.renovation_message|default:"" }}" onclick="openRenovationModalFromData(this)" class="w-7 h-7 rounded border border-slate-800 text-amber-500/70 hover:text-amber-400 hover:bg-amber-950/20 transition-colors" title="Toggle Renovation">
+                                        <button data-floorplan-id="{{ floorplan.floor_plan_id }}" data-notice="{{ floorplan.renovation_notice|default:"" }}" data-message="{{ floorplan.renovation_message|default:"" }}" onclick="openRenovationModalFromData(this)" class="w-7 h-7 rounded border border-slate-800 text-amber-500 hover:text-amber-400 hover:bg-amber-950/20 transition-colors" title="Toggle Renovation">
                                             <i class="fa-solid fa-hammer text-[10px]"></i>
                                         </button>
-                                        <form method="post" action="{% url 'delete_floorplan' %}" class="inline" data-confirm="Archive this floor plan? It is taken out of service and hidden, and can be restored from the Archive." data-confirm-title="Archive floor plan" data-confirm-label="Archive">
+                                        <form method="post" action="{% url 'delete_floorplan' %}" class="inline" data-confirm="Delete this floor plan? It is taken out of service and hidden." data-confirm-title="Delete floor plan" data-confirm-label="Delete">
                                             {% csrf_token %}
                                             <input type="hidden" name="floorplan_id" value="{{ floorplan.floor_plan_id }}">
-                                            <button type="submit" class="w-7 h-7 rounded border border-slate-800 text-rose-500/70 hover:text-rose-400 hover:bg-rose-950/20 transition-colors" title="Archive" aria-label="Archive">
-                                                <i class="fa-solid fa-box-archive text-[10px]"></i>
+                                            <button type="submit" class="w-7 h-7 rounded border border-slate-800 text-rose-500 hover:text-rose-400 hover:bg-rose-950/20 transition-colors" title="Delete" aria-label="Delete">
+                                                <i class="fa-solid fa-trash-can text-[10px]"></i>
                                             </button>
                                         </form>
                                     </div>
@@ -818,13 +819,13 @@
                                 <span class="text-[10px] text-slate-500">({{ room.map_x }}, {{ room.map_y }})</span>
                             </div>
                             <div class="flex items-center gap-2">
-                                <button onclick="openEditRoomModalFromData(this.closest('.flex.items-center.justify-between'))" class="text-amber-500/70 hover:text-amber-400 text-xs" title="Edit Room">
+                                <button onclick="openEditRoomModalFromData(this.closest('.flex.items-center.justify-between'))" class="text-amber-500 hover:text-amber-400 text-xs" title="Edit Room">
                                     <i class="fa-solid fa-pen"></i>
                                 </button>
                                 <form method="post" action="{% url 'delete_room' %}" class="inline" data-confirm="Delete this room and all its shelves?">
                                     {% csrf_token %}
                                     <input type="hidden" name="room_id" value="{{ room.room_id }}">
-                                    <button type="submit" class="text-rose-500/70 hover:text-rose-400 text-xs" aria-label="Delete">
+                                    <button type="submit" class="text-rose-500 hover:text-rose-400 text-xs" aria-label="Delete">
                                         <i class="fa-solid fa-trash-can"></i>
                                     </button>
                                 </form>
@@ -855,7 +856,7 @@
                                 <form method="post" action="{% url 'delete_shelf' %}" class="inline" data-confirm="Delete this shelf and all its shelf levels?">
                                     {% csrf_token %}
                                     <input type="hidden" name="shelf_id" value="{{ shelf.shelf_id }}">
-                                    <button type="submit" class="text-rose-500/70 hover:text-rose-400 text-xs" aria-label="Delete">
+                                    <button type="submit" class="text-rose-500 hover:text-rose-400 text-xs" aria-label="Delete">
                                         <i class="fa-solid fa-trash-can"></i>
                                     </button>
                                 </form>
@@ -885,7 +886,7 @@
                                     <form method="post" action="{% url 'delete_shelf_level' %}" class="inline" data-confirm="Delete this shelf level?">
                                         {% csrf_token %}
                                         <input type="hidden" name="shelf_level_id" value="{{ level.shelf_level_id }}">
-                                        <button type="submit" class="text-rose-500/70 hover:text-rose-400 text-xs" aria-label="Delete">
+                                        <button type="submit" class="text-rose-500 hover:text-rose-400 text-xs" aria-label="Delete">
                                             <i class="fa-solid fa-trash-can"></i>
                                         </button>
                                     </form>
@@ -1635,7 +1636,7 @@
                 el = document.createElement('div');
                 el.id = 'mapToast';
                 el.style.cssText = 'position:fixed;left:50%;bottom:28px;transform:translateX(-50%);'
-                    + 'z-index:9999;padding:10px 18px;border-radius:10px;font-size:12.5px;'
+                    + 'z-index:9999;padding:10px 18px;border-radius:10px;font-size:14px;'
                     + 'font-weight:700;box-shadow:0 8px 24px rgba(0,0,0,.25);pointer-events:none;'
                     + 'transition:opacity .25s;';
                 document.body.appendChild(el);

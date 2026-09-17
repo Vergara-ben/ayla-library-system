@@ -42,12 +42,12 @@
         }
         .figure-value { font-size: 1.5rem; line-height: 1.15; font-weight: 700; margin-top: .4rem; }
         .figure-value.neutral { color: var(--text-primary); }
-        .figure-value.good    { color: #34d399; }
-        .figure-value.warn    { color: #fbbf24; }
-        .figure-value.bad     { color: #fb7185; }
+        .figure-value.good    { color: rgb(var(--tw-emerald-400)); }
+        .figure-value.warn    { color: rgb(var(--tw-amber-500)); }
+        .figure-value.bad     { color: rgb(var(--tw-rose-400)); }
         /* Which period a figure belongs to, said on the figure. */
         .figure-scope {
-            font-size: 9px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+            font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
             border-radius: 999px; padding: 1px 6px; border: 1px solid rgb(71 85 105 / .5);
             color: var(--text-muted);
         }
@@ -58,12 +58,12 @@
         .tab {
             flex: 1 1 0; display: flex; align-items: center; justify-content: center; gap: .5rem;
             padding: .6rem .9rem; border-radius: .5rem; cursor: pointer;
-            font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+            font-size: 13px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
             color: var(--text-muted); background: transparent; border: 0;
             transition: background-color .15s, color .15s;
         }
         .tab:hover { color: var(--text-primary); background-color: rgb(51 65 85 / .35); }
-        .tab[aria-selected="true"] { color: #fff; background-color: #0e7490; }
+        .tab[aria-selected="true"] { color: #fff; background-color: rgb(var(--tw-cyan-700)); }
         .panel { display: none; }
         .panel.on { display: block; }
 
@@ -75,6 +75,7 @@
     </style>
     <link rel="stylesheet" href="{% static 'css/admin-enhance.css' %}">
     <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
+    <link rel="stylesheet" href="{% static 'css/readability.css' %}">
     <script src="{% static 'js/ayla-dialog.js' %}"></script>
 </head>
 <body class="flex h-screen overflow-hidden">
@@ -99,7 +100,7 @@
             <div class="headline">
                 {% for f in headline %}
                 <div class="figure-tile">
-                    <div class="flex items-start justify-between gap-2">
+                    <div class="flex flex-wrap items-start justify-between gap-x-2 gap-y-1">
                         <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">{{ f.label }}</p>
                         <span class="figure-scope" title="{% if f.scope == 'period' %}Counted over the dates chosen below{% else %}True as of now, whatever dates are chosen{% endif %}">{% if f.scope == 'period' %}period{% else %}now{% endif %}</span>
                     </div>
@@ -182,7 +183,7 @@
                                 averaged over {{ occupancy.days_measured }} day{{ occupancy.days_measured|pluralize }}.
                             </p>
                             {% if occupancy.excluded_visits %}
-                            <p class="text-[10px] text-amber-500/90 mt-1.5">
+                            <p class="text-[10px] text-amber-500 mt-1.5">
                                 {{ occupancy.excluded_visits }} visit{{ occupancy.excluded_visits|pluralize }} left out:
                                 nobody signed them out, so the exit time was guessed at closing and
                                 counting them would invent occupancy that was never observed.
@@ -211,7 +212,7 @@
                     <p class="text-[11px] text-slate-400">
                         {{ unshelved.shelved }} of {{ unshelved.total }} copies are on a shelf.
                         {% if unshelved.count %}
-                        <span class="text-amber-500/90">{{ unshelved.count }} ({{ unshelved.share }}%) are not, so nobody can be sent to them.</span>
+                        <span class="text-amber-500">{{ unshelved.count }} ({{ unshelved.share }}%) are not, so nobody can be sent to them.</span>
                         {% endif %}
                     </p>
                     {% if shelves.empty_shelves %}
@@ -269,7 +270,7 @@
 
                 {% if not borrowed_books.total %}
                 <div class="rounded-xl border border-amber-800/50 px-4 py-3" style="background-color: var(--bg-card);">
-                    <p class="text-[11px] text-amber-500/90">
+                    <p class="text-[11px] text-amber-500">
                         <i class="fa-solid fa-circle-info"></i>
                         No loans recorded in this period, so these charts have nothing to draw.
                         They fill in as soon as books start being borrowed at the desk.

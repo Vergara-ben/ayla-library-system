@@ -18,6 +18,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@400;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{% static 'css/theme.css' %}">
+    <link rel="stylesheet" href="{% static 'css/readability.css' %}">
     <style>
         body {
             font-family: 'Inter', sans-serif;
@@ -329,7 +330,7 @@
             <h3 id="resultName" class="text-3xl font-bold text-slate-100 mt-2 leading-tight"></h3>
             <p id="resultTime" class="text-lg text-slate-300 mt-3 tabular-nums"></p>
             <p id="resultMessage" class="text-[13px] text-slate-400 mt-5 leading-relaxed max-w-sm mx-auto"></p>
-            <p id="resultNote" class="hidden text-[12px] text-amber-300/90 mt-4 leading-relaxed max-w-sm mx-auto rounded-xl border border-amber-700/40 bg-amber-500/10 px-4 py-3"></p>
+            <p id="resultNote" class="hidden text-[12px] text-amber-300 mt-4 leading-relaxed max-w-sm mx-auto rounded-xl border border-amber-700/40 bg-amber-500/10 px-4 py-3"></p>
             <button type="button" onclick="kioskFinish()"
                     class="mt-8 w-full bg-cyan-700 hover:bg-cyan-600 text-white font-bold text-base px-6 py-4 rounded-xl">
                 Done

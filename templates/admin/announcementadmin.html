@@ -75,6 +75,7 @@
     </style>
     <link rel="stylesheet" href="{% static 'css/admin-enhance.css' %}">
     <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
+    <link rel="stylesheet" href="{% static 'css/readability.css' %}">
     <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
     <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
     <script src="{% static 'js/ayla-dialog.js' %}"></script>
@@ -139,10 +140,10 @@
                         <h4 class="text-sm font-bold text-slate-200 tracking-wide">Announcements</h4>
                     </div>
                     <div class="flex items-center gap-2 self-end sm:self-auto">
-                        <a href="{% url 'download_announcement_template' %}" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-emerald-500/90 text-[11px] font-semibold px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors">
+                        <a href="{% url 'download_announcement_template' %}" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-emerald-500 text-[11px] font-semibold px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors">
                             <i class="fa-solid fa-file-excel"></i> Download Template
                         </a>
-                        <button onclick="document.getElementById('excelFileInput').click()" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-cyan-500/90 text-[11px] font-semibold px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors">
+                        <button onclick="document.getElementById('excelFileInput').click()" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-cyan-500 text-[11px] font-semibold px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors">
                             <i class="fa-solid fa-upload"></i> Import Excel
                         </button>
                         <input type="file" id="excelFileInput" accept=".xlsx" style="display: none;" onchange="uploadExcelFile(this)">
@@ -187,10 +188,10 @@
                                                 <i class="fa-solid fa-power-off text-[10px]"></i>
                                             </button>
                                         </form>
-                                        <form method="post" action="{% url 'delete_announcement' %}" class="inline" data-confirm="Archive this announcement? Patrons stop seeing it, and it can be restored from the Archive." data-confirm-title="Archive announcement" data-confirm-label="Archive">
+                                        <form method="post" action="{% url 'delete_announcement' %}" class="inline" data-confirm="Delete this announcement? Patrons stop seeing it." data-confirm-title="Delete announcement" data-confirm-label="Delete">
                                             {% csrf_token %}
                                             <input type="hidden" name="announcement_id" value="{{ announcement.announcement_id }}">
-                                            <button type="submit" class="w-7 h-7 rounded border border-slate-800 text-rose-500/70 hover:text-rose-400 hover:bg-rose-950/20 transition-colors" aria-label="Archive" title="Archive"><i class="fa-solid fa-box-archive text-[10px]"></i></button>
+                                            <button type="submit" class="w-7 h-7 rounded border border-slate-800 text-rose-500 hover:text-rose-400 hover:bg-rose-950/20 transition-colors" aria-label="Delete" title="Delete"><i class="fa-solid fa-trash-can text-[10px]"></i></button>
                                         </form>
                                     </div>
                                 </td>

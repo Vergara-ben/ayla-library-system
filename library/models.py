@@ -1269,6 +1269,30 @@ class BorrowingRule(models.Model):
         return days_late * self.fine_per_day
 
 
+class LibraryStatus(models.Model):
+    """Whether the library is open, switched from the dashboard."""
+
+    CLOSING_TIME = time(17, 0)
+
+    is_open = models.BooleanField(default=False)
+    changed_at = models.DateTimeField(default=timezone.now)
+    changed_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        db_column='admin_id'
+    )
+    # True when the 5 PM rule closed it, not a person.
+    auto_closed = models.BooleanField(default=False)
+
+    class Meta:
+        db_table = 'Library_Status'
+
+    def __str__(self):
+        return 'Open' if self.is_open else 'Closed'
+
+
 # System logs (admin audit trail)
 class SystemLog(models.Model):
     """Activity log: who did what, in every portal."""

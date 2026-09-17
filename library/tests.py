@@ -148,7 +148,7 @@ class PatronCredentialStorageTests(TestCase):
         self.assertEqual(r['Content-Type'], 'image/png')
         self.assertEqual(r.content, self.PNG)
 
-    def test_rejecting_the_application_archives_it_with_the_id(self):
+    def test_rejecting_the_application_keeps_it_with_the_id(self):
         from .models import PatronCredential
         p = self._register()
         _signed_in(_admin(modules='patrons')).post('/admin-portal/reject-patron/%d/' % p.patron_id)
@@ -157,8 +157,8 @@ class PatronCredentialStorageTests(TestCase):
         self.assertTrue(PatronCredential.objects.exists())
 
 
-class ArchiveTests(TestCase):
-    """Deleting archives: the row stays in the database, hidden, and can be restored."""
+class DeletedRecordsStayTests(TestCase):
+    """Deleting hides a record from the system; the row stays in the database."""
 
     def setUp(self):
         self.user = _admin(modules='patrons,books,donations,logs')
@@ -167,44 +167,38 @@ class ArchiveTests(TestCase):
                                             email='ana@example.invalid', patron_type='Student')
         self.book = Book.objects.create(title='Noli Me Tangere', author='Rizal', genre='FIC')
 
-    def _archive_page(self, kind, q=''):
-        return self.client.get('/admin-portal/archive/', {'kind': kind, 'q': q})
-
     def _returned_loan(self):
         return Transaction.objects.create(book=self.book, patron=self.patron,
                                           transaction_type='Borrow',
                                           return_date=timezone.localdate())
 
-    def test_archiving_a_patron_keeps_the_row_and_the_history(self):
+    def test_deleting_a_patron_keeps_the_row_and_the_history(self):
         tx = self._returned_loan()
         self.client.post('/admin-portal/delete-patron/%d/' % self.patron.patron_id)
         self.assertFalse(Patron.objects.filter(pk=self.patron.pk).exists())
-        archived = Patron.all_objects.get(pk=self.patron.pk)
-        self.assertIsNotNone(archived.archived_at)
-        self.assertEqual(archived.archived_by, 'Smoke Admin')
+        kept = Patron.all_objects.get(pk=self.patron.pk)
+        self.assertIsNotNone(kept.archived_at)
+        self.assertEqual(kept.archived_by, 'Smoke Admin')
         self.assertTrue(Transaction.objects.filter(pk=tx.pk).exists())
-        self.assertContains(self._archive_page('patrons'), 'Reyes')
+        self.assertTrue(SystemLog.objects.filter(action='Delete', entity_type='Patron').exists())
 
-    def test_a_patron_with_books_out_is_not_archived(self):
+    def test_a_patron_with_books_out_is_not_deleted(self):
         Transaction.objects.create(book=self.book, patron=self.patron, transaction_type='Borrow')
         self.client.post('/admin-portal/delete-patron/%d/' % self.patron.patron_id)
         self.assertTrue(Patron.objects.filter(pk=self.patron.pk).exists())
 
-    def test_a_borrowed_book_is_not_archived(self):
+    def test_a_borrowed_book_is_not_deleted(self):
         self.book.status = 'Borrowed'
         self.book.save()
         self.client.post('/admin-portal/delete-book/%d/' % self.book.book_id)
         self.assertTrue(Book.objects.filter(pk=self.book.pk).exists())
 
-    def test_restoring_puts_the_record_back(self):
+    def test_a_deleted_book_leaves_the_catalogue_but_not_the_database(self):
         self.client.post('/admin-portal/delete-book/%d/' % self.book.book_id)
         self.assertFalse(Book.objects.filter(pk=self.book.pk).exists())
-        self.assertContains(self._archive_page('books'), 'Noli Me Tangere')
-        self.client.post('/admin-portal/archive/restore/', {'kind': 'books', 'id': self.book.book_id})
-        self.assertIsNone(Book.objects.get(pk=self.book.pk).archived_at)
-        self.assertTrue(SystemLog.objects.filter(action='Restore', entity_type='Book').exists())
+        self.assertTrue(Book.all_objects.filter(pk=self.book.pk, archived_at__isnull=False).exists())
 
-    def test_a_signed_in_patron_who_is_archived_is_signed_out(self):
+    def test_a_signed_in_patron_who_is_deleted_is_signed_out(self):
         c = Client()
         s = c.session
         s['patron_id'] = self.patron.patron_id
@@ -214,63 +208,41 @@ class ArchiveTests(TestCase):
         self.assertEqual(r.status_code, 302)
         self.assertIn('/patron/login/', r['Location'])
 
-    def test_a_book_with_history_can_only_stay_archived(self):
-        self._returned_loan()
-        self.book.archive('Smoke Admin')
-        self.client.post('/admin-portal/archive/erase/', {'kind': 'books', 'id': self.book.book_id})
-        self.assertTrue(Book.all_objects.filter(pk=self.book.pk).exists())
-        self.assertEqual(Transaction.objects.count(), 1)
-
-    def test_a_record_nothing_depends_on_can_be_deleted_for_good(self):
-        self.book.archive('Smoke Admin')
-        self.client.post('/admin-portal/archive/erase/', {'kind': 'books', 'id': self.book.book_id})
-        self.assertFalse(Book.all_objects.filter(pk=self.book.pk).exists())
-
-    def test_a_record_that_is_not_archived_cannot_be_erased(self):
-        self.client.post('/admin-portal/archive/erase/', {'kind': 'books', 'id': self.book.book_id})
-        self.assertTrue(Book.objects.filter(pk=self.book.pk).exists())
-
-    def test_the_archive_is_for_the_administrator_only(self):
-        staff = User.objects.create(
-            fullname='Desk Staff', email='desk-archive@example.invalid',
-            password_hash=hash_password('SmokeTest123'), role='Staff',
-            account_status='Active', modules='books')
-        r = _signed_in(staff).get('/admin-portal/archive/')
-        self.assertNotEqual(r.status_code, 200)
-
-    def test_a_visit_log_is_archived_and_left_out_of_counts(self):
+    def test_a_visit_log_is_left_out_of_counts(self):
         log = PatronLog.objects.create(patron=self.patron)
         self.client.post('/admin-portal/delete-log/', {'log_id': log.log_id})
         self.assertEqual(PatronLog.objects.count(), 0)
         self.assertEqual(PatronLog.all_objects.count(), 1)
-        self.assertContains(self._archive_page('logs'), 'Reyes')
 
-    def test_archiving_a_floor_plan_takes_it_out_of_service(self):
+    def test_deleting_a_floor_plan_takes_it_out_of_service(self):
         plan = FloorPlan.objects.create(name='Mezzanine', floor_number=2, is_active=True)
         self.client.post('/admin-portal/delete-floorplan/', {'floorplan_id': plan.pk})
-        archived = FloorPlan.all_objects.get(pk=plan.pk)
-        self.assertIsNotNone(archived.archived_at)
-        self.assertFalse(archived.is_active)
-        self.assertContains(self._archive_page('floorplans'), 'Mezzanine')
+        kept = FloorPlan.all_objects.get(pk=plan.pk)
+        self.assertIsNotNone(kept.archived_at)
+        self.assertFalse(kept.is_active)
 
-    def test_a_rejected_registration_can_be_restored_to_pending(self):
+    def test_a_rejected_registration_stays_on_record(self):
         pending = Patron.objects.create(
             first_name='New', last_name='Applicant', email='new@example.invalid',
             patron_type='Student', account_status='Pending', otp_verified=True)
         self.client.post('/admin-portal/reject-patron/%d/' % pending.patron_id,
                          {'reason': 'Blurry ID'})
+        self.assertFalse(Patron.objects.filter(pk=pending.pk).exists())
         self.assertIn('Blurry ID', Patron.all_objects.get(pk=pending.pk).archive_reason)
-        self.assertContains(self._archive_page('registrations'), 'Applicant')
-        self.client.post('/admin-portal/archive/restore/',
-                         {'kind': 'registrations', 'id': pending.pk})
-        self.assertTrue(Patron.objects.filter(pk=pending.pk, account_status='Pending').exists())
 
-    def test_an_archived_email_is_still_taken(self):
+    def test_a_deleted_patrons_email_is_still_taken(self):
         self.patron.archive('Smoke Admin')
-        r = self.client.post('/admin-portal/add-patron/', {
+        self.client.post('/admin-portal/add-patron/', {
             'first_name': 'Other', 'last_name': 'Person', 'email': 'ana@example.invalid',
             'patron_type': 'Student', 'password': 'SmokeTest123', 'id_confirmed': 'on'})
         self.assertEqual(Patron.all_objects.filter(email='ana@example.invalid').count(), 1)
+
+    def test_there_is_no_archive_page(self):
+        for url in ('/admin-portal/archive/', '/admin-portal/archive/restore/',
+                    '/admin-portal/archive/erase/'):
+            self.assertEqual(self.client.get(url).status_code, 404, url)
+        html = self.client.get('/admin-portal/dashboard/').content.decode()
+        self.assertNotIn('Archive', html)
 
 
 class FailedSignInKeepsEmailTests(TestCase):
@@ -3571,6 +3543,35 @@ class PasswordToggleTests(TestCase):
         self.assertContains(r, 'js/password-toggle.js')
 
 
+class ReadabilityTests(TestCase):
+    """The librarians' pages use the larger, higher-contrast text."""
+
+    def test_every_admin_staff_and_desk_page_loads_the_readability_sheet(self):
+        missing = []
+        for folder in ('templates/admin', 'templates/library_staff', 'templates/desk'):
+            for name in os.listdir(folder):
+                path = os.path.join(folder, name)
+                with open(path, encoding='utf-8') as f:
+                    html = f.read()
+                # Full pages only; the library card is printed, not read on screen.
+                if '<html' in html and name != 'librarycard.html' and 'readability.css' not in html:
+                    missing.append(path)
+        self.assertEqual(missing, [])
+
+    def test_no_fixed_text_under_twelve_pixels_on_those_pages(self):
+        import re as _re
+        tiny = []
+        for folder in ('templates/admin', 'templates/library_staff', 'templates/desk'):
+            for name in os.listdir(folder):
+                if name == 'librarycard.html':
+                    continue
+                with open(os.path.join(folder, name), encoding='utf-8') as f:
+                    for size in _re.findall(r'font-size:\s*(\d+(?:\.\d+)?)px', f.read()):
+                        if float(size) < 12:
+                            tiny.append('%s: %spx' % (name, size))
+        self.assertEqual(tiny, [])
+
+
 class RegistrationTermsTests(TestCase):
     """Registering online means agreeing to the terms and conditions."""
 
@@ -6174,7 +6175,7 @@ class DeleteBooksTests(TestCase):
         self.assertEqual(r['loan_records'], 3)
 
     def test_archiving_keeps_the_loan_history(self):
-        """The copy is hidden in the Archive; its loan records stay."""
+        """The copy is hidden but kept in the database; its loan records stay."""
         book = self._book('Has history')
         Transaction.objects.create(book=book, patron=self.patron,
                                    transaction_type='Borrow')
@@ -7510,3 +7511,96 @@ class PortalMapBookSearchTests(TestCase):
         r = _signed_in(_admin()).get('/admin-portal/indoor-map/')
         self.assertEqual(r.status_code, 200)
         self.assertIn('id="findPanel"', r.content.decode())
+
+
+class LibraryStatusTests(TestCase):
+    """The open or closed switch on the dashboards, and the 5 PM auto-close."""
+
+    URL = '/portal/library-status/'
+
+    def _at(self, hour, minute=0, days_ago=0):
+        day = timezone.localdate() - timedelta(days=days_ago)
+        return timezone.make_aware(datetime.combine(day, datetime.min.time()).replace(hour=hour, minute=minute))
+
+    def _staff(self):
+        return User.objects.create(
+            fullname='Desk Staff', email='status.staff@example.invalid',
+            password_hash=hash_password('SmokeTest123'),
+            role='Staff', account_status='Active', modules='')
+
+    def _set_open(self, when):
+        from .models import LibraryStatus
+        LibraryStatus.objects.update_or_create(
+            pk=1, defaults={'is_open': True, 'changed_at': when, 'auto_closed': False})
+
+    def test_staff_can_open_and_close_the_library(self):
+        from .models import LibraryStatus
+        client = _signed_in(self._staff())
+        with mock.patch('django.utils.timezone.now', return_value=self._at(9)):
+            r = client.post(self.URL, {'open': '1'})
+            self.assertTrue(r.json()['success'])
+            self.assertTrue(r.json()['is_open'])
+            self.assertTrue(LibraryStatus.objects.get(pk=1).is_open)
+
+            r = client.post(self.URL, {'open': '0'})
+            self.assertFalse(r.json()['is_open'])
+        status = LibraryStatus.objects.get(pk=1)
+        self.assertFalse(status.is_open)
+        self.assertEqual(status.changed_by.fullname, 'Desk Staff')
+        self.assertEqual(SystemLog.objects.filter(entity_type='Library Status').count(), 2)
+
+    def test_left_open_past_five_it_closes_itself_once(self):
+        from .models import LibraryStatus
+        from .openstatus import current_status
+        self._set_open(self._at(8, 30))
+        with mock.patch('django.utils.timezone.now', return_value=self._at(16, 59)):
+            self.assertTrue(current_status().is_open)
+        with mock.patch('django.utils.timezone.now', return_value=self._at(17, 1)):
+            self.assertFalse(current_status().is_open)
+            current_status()
+        status = LibraryStatus.objects.get(pk=1)
+        self.assertTrue(status.auto_closed)
+        self.assertIsNone(status.changed_by)
+        self.assertEqual(timezone.localtime(status.changed_at).hour, 17)
+        self.assertEqual(SystemLog.objects.filter(action='Auto-close',
+                                                  entity_type='Library Status').count(), 1)
+
+    def test_left_open_from_yesterday_is_closed_this_morning(self):
+        from .openstatus import current_status
+        self._set_open(self._at(10, days_ago=1))
+        with mock.patch('django.utils.timezone.now', return_value=self._at(7)):
+            self.assertFalse(current_status().is_open)
+
+    def test_it_cannot_be_opened_after_closing_time(self):
+        from .models import LibraryStatus
+        client = _signed_in(_admin())
+        with mock.patch('django.utils.timezone.now', return_value=self._at(17, 30)):
+            r = client.post(self.URL, {'open': '1'})
+        self.assertFalse(r.json()['success'])
+        self.assertFalse(r.json()['can_open'])
+        self.assertFalse(LibraryStatus.objects.get(pk=1).is_open)
+
+    def test_a_stranger_cannot_switch_it(self):
+        from .models import LibraryStatus
+        r = Client().post(self.URL, {'open': '1'})
+        self.assertEqual(r.status_code, 302)
+        self.assertFalse(LibraryStatus.objects.filter(is_open=True).exists())
+
+    def test_both_dashboards_show_the_switch(self):
+        admin_page = _signed_in(_admin()).get('/admin-portal/dashboard/')
+        staff_page = _signed_in(self._staff()).get('/library-staff/dashboard/')
+        for page in (admin_page, staff_page):
+            self.assertEqual(page.status_code, 200)
+            self.assertIn('id="libSwitch"', page.content.decode())
+
+    def test_patrons_see_the_status(self):
+        patron = Patron.objects.create(first_name='Ana', last_name='Reyes',
+                                       email='status.patron@example.invalid', patron_type='Student')
+        client = Client()
+        s = client.session
+        s['patron_id'] = patron.patron_id
+        s.save()
+        with mock.patch('django.utils.timezone.now', return_value=self._at(10)):
+            self.assertIn('Library closed right now', client.get('/patron/dashboard/').content.decode())
+            self._set_open(self._at(9))
+            self.assertIn('Library open now', client.get('/patron/dashboard/').content.decode())

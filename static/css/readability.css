@@ -1,0 +1,151 @@
+/* readability.css: larger text and 7:1 text contrast for the admin, staff and desk pages. */
+
+/* Text sizes: nothing under 12px, ordinary text at 14-15px. */
+:is(html[data-module="admin"], html[data-module="staff"]) :is(.text-\[8px\], .text-\[9px\], .text-\[10px\]) {
+    font-size: 12px !important;
+}
+:is(html[data-module="admin"], html[data-module="staff"]) .text-\[11px\] {
+    font-size: 13px !important;
+}
+:is(html[data-module="admin"], html[data-module="staff"]) :is(.text-xs, .text-\[12px\]) {
+    font-size: 14px !important;
+}
+:is(html[data-module="admin"], html[data-module="staff"]) :is(.text-sm, .text-\[13px\]) {
+    font-size: 15px !important;
+}
+/* Room between lines to match, unless the element sets its own. */
+:is(html[data-module="admin"], html[data-module="staff"]) .text-xs:not([class*="leading-"]) {
+    line-height: 20px !important;
+}
+:is(html[data-module="admin"], html[data-module="staff"]) .text-sm:not([class*="leading-"]) {
+    line-height: 22px !important;
+}
+/* Wide letter-spacing makes small capitals harder to read, not easier. */
+:is(html[data-module="admin"], html[data-module="staff"]) .tracking-widest {
+    letter-spacing: .06em;
+}
+
+/* Text colours, light theme: every grey and status colour at 7:1 or better on the page surfaces. */
+:is(html[data-module="admin"], html[data-module="staff"]):not([data-theme="dark"]) {
+    --tw-slate-400: 51 62 79;
+    --tw-slate-500: 62 73 91;
+    --tw-slate-600: 69 79 95;
+    --tw-cyan-200: 0 34 102;
+    --tw-cyan-300: 0 34 102;
+    --tw-violet-200: 0 34 102;
+    --tw-violet-300: 0 34 102;
+    --tw-emerald-300: 3 90 65;
+    --tw-emerald-400: 3 90 65;
+    --tw-emerald-500: 3 90 65;
+    --tw-emerald-600: 3 90 65;
+    --tw-emerald-700: 3 90 65;
+    --tw-green-300: 15 90 43;
+    --tw-green-400: 15 90 43;
+    --tw-green-500: 15 90 43;
+    --tw-green-600: 15 90 43;
+    --tw-green-700: 15 90 43;
+    --tw-rose-300: 156 15 49;
+    --tw-rose-400: 156 15 49;
+    --tw-rose-500: 156 15 49;
+    --tw-rose-600: 156 15 49;
+    --tw-rose-700: 156 15 49;
+    --tw-red-300: 157 24 24;
+    --tw-red-400: 157 24 24;
+    --tw-red-500: 157 24 24;
+    --tw-red-600: 157 24 24;
+    --tw-red-700: 157 24 24;
+    --tw-amber-300: 129 60 6;
+    --tw-amber-400: 129 60 6;
+    --tw-amber-500: 129 60 6;
+    --tw-amber-600: 129 60 6;
+    --tw-yellow-400: 114 69 5;
+    --tw-yellow-500: 114 69 5;
+    --tw-yellow-600: 116 67 12;
+    --tw-orange-400: 141 47 9;
+    --tw-orange-500: 138 52 7;
+    --tw-orange-600: 138 52 7;
+    --tw-blue-300: 25 67 186;
+    --tw-blue-400: 25 67 186;
+    --tw-blue-500: 27 72 171;
+    --tw-blue-600: 27 72 171;
+    --tw-blue-700: 25 67 186;
+    --tw-teal-400: 11 89 83;
+    --tw-teal-500: 8 89 81;
+    --tw-teal-600: 8 89 81;
+    --tw-purple-400: 112 30 183;
+    --tw-purple-500: 110 38 176;
+    --tw-pink-400: 154 19 75;
+    --tw-pink-500: 150 27 82;
+    --tw-indigo-400: 65 54 196;
+    --tw-indigo-500: 65 58 188;
+
+    --text-muted: #3e495b;
+    --text-secondary: #3e495b;
+    /* Badge text only; the status fills used on maps keep their colours. */
+    --status-returned: #035a41;
+    --status-borrowed: #813c06;
+}
+
+/* Text colours, dark theme: the same, lighter. */
+:is(html[data-module="admin"], html[data-module="staff"])[data-theme="dark"] {
+    --tw-slate-400: 190 200 214;
+    --tw-slate-500: 175 184 198;
+    --tw-slate-600: 175 184 197;
+    --tw-cyan-400: 133 186 251;
+    --tw-cyan-500: 144 184 250;
+    --tw-violet-400: 133 186 251;
+    --tw-violet-500: 144 184 250;
+    --tw-emerald-500: 78 203 162;
+    --tw-green-500: 71 207 121;
+    --tw-rose-400: 252 154 168;
+    --tw-rose-500: 249 156 172;
+    --tw-red-400: 250 158 158;
+    --tw-red-500: 247 159 159;
+    --tw-amber-500: 246 166 30;
+    --tw-orange-400: 252 162 89;
+    --tw-orange-500: 251 162 99;
+    --tw-blue-400: 133 186 251;
+    --tw-blue-500: 144 184 250;
+    --tw-teal-500: 78 201 188;
+    --tw-purple-400: 208 164 253;
+    --tw-purple-500: 208 164 251;
+    --tw-pink-400: 247 153 202;
+    --tw-pink-500: 245 155 199;
+    --tw-indigo-400: 169 177 250;
+    --tw-indigo-500: 175 176 248;
+
+    --text-muted: #afb8c6;
+    --text-secondary: #afb8c6;
+}
+
+/* Hints inside empty fields stay softer than typed text, but still readable. */
+:is(html[data-module="admin"], html[data-module="staff"]) :is(.placeholder-slate-500, .placeholder-slate-600, .placeholder-slate-700)::placeholder {
+    color: rgb(100 112 130);
+}
+:is(html[data-module="admin"], html[data-module="staff"])[data-theme="dark"] :is(.placeholder-slate-500, .placeholder-slate-600, .placeholder-slate-700)::placeholder {
+    color: rgb(140 153 173);
+}
+
+/* Bigger text needs more room: headings and buttons stay on one line, and wide tables scroll
+   sideways instead of squeezing each column to a word per line. */
+:is(html[data-module="admin"], html[data-module="staff"]) th {
+    white-space: nowrap;
+}
+:is(html[data-module="admin"], html[data-module="staff"]) :is(button, a):is(.px-2, .px-2\.5, .px-3, .px-4, .px-5) {
+    white-space: nowrap;
+}
+:is(html[data-module="admin"], html[data-module="staff"]) .overflow-x-auto > table td {
+    min-width: 8.5rem;
+}
+:is(html[data-module="admin"], html[data-module="staff"]) .overflow-x-auto > table td:is(:has(> input[type="checkbox"]), :empty) {
+    min-width: 0;
+}
+:is(html[data-module="admin"], html[data-module="staff"]) .overflow-x-auto > table :is(th, td).px-6 {
+    padding-left: 16px;
+    padding-right: 16px;
+}
+/* Card toolbars wrap onto a second row rather than running off the card. */
+:is(html[data-module="admin"], html[data-module="staff"]) main :is(.p-4, .p-5, .px-4, .px-5).border-b.flex,
+:is(html[data-module="admin"], html[data-module="staff"]) main :is(.p-4, .p-5, .px-4, .px-5).border-b.flex > .flex {
+    flex-wrap: wrap;
+}
