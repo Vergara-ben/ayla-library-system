@@ -4,11 +4,12 @@ from django.db.models import (Count, F, IntegerField, Max, Min, OuterRef, Q,
                               Subquery)
 from django.db import transaction
 from django.utils import timezone
-from django.core.exceptions import SuspiciousFileOperation
+from django.core.exceptions import SuspiciousFileOperation, ValidationError
+from django.core.validators import validate_email
 from django.http import HttpResponse, JsonResponse, Http404
 from django.conf import settings
 from django.core.paginator import Paginator
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from io import BytesIO
 from decimal import Decimal, InvalidOperation
 import json
@@ -1750,6 +1751,7 @@ def admin_add_book(request):
                 cover_img_url=cover_img_url if cover_img_url else None,
                 qr_code=qr_code
             )
+            _add_existing_copy(book, request)
             log_admin_action(request, 'Create', 'Book', book.book_id, f'Added "{book.title}"')
 
             if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
@@ -2392,6 +2394,7 @@ def admin_delete_book(request, book_id):
                 messages.error(request, f'"{title}" is out on loan. Return it before deleting it.')
             else:
                 book.archive(_actor_name(request), 'Archived from Manage Books')
+                _remove_books_from_stock([book.book_id], request, 'Deleted from Manage Books')
                 log_admin_action(request, 'Delete', 'Book', book_id, f'Deleted "{title}"')
                 messages.success(request, f'"{title}" was deleted.')
     return portal_redirect(request, 'admin_management')
@@ -3426,6 +3429,16 @@ CONDITION_WORDS = {
 }
 
 
+# Other words for a material type that a sheet might use.
+MATERIAL_TYPE_WORDS = {
+    'books': 'Book', 'textbook': 'Book', 'novel': 'Book',
+    'magazines': 'Magazine', 'journals': 'Journal', 'periodical': 'Journal',
+    'comics': 'Comic', 'graphicnovel': 'Comic', 'manga': 'Comic',
+    'newspapers': 'Newspaper', 'encyclopedia': 'Reference', 'dictionary': 'Reference',
+    'researchpaper': 'Thesis', 'dissertation': 'Thesis',
+}
+
+
 def parse_condition(raw):
     """The condition a sheet means, or None when it says nothing recognisable."""
     text = ''.join(ch for ch in str(raw or '').lower() if ch.isalnum())
@@ -3748,6 +3761,15 @@ def patron_details_json(request, patron_id):
     return JsonResponse({'success': True, 'patron': _patron_qr_payload(patron)})
 
 
+def _book_for_code(code):
+    """The book a scanned code belongs to: its own QR, or the label on its inventory copy."""
+    books = Book.objects.select_related('shelf_level', 'shelf_level__shelf')
+    book = books.filter(qr_code=code).first()
+    if book is None:
+        book = books.filter(inventory_records__qr_label=code).first()
+    return book
+
+
 @granted_module_required('transactions')
 def resolve_transaction_qr(request):
     """One lookup for one scanner: is this a library card or a book label?"""
@@ -3761,8 +3783,7 @@ def resolve_transaction_qr(request):
         return JsonResponse({'success': True, 'kind': 'patron',
                              'patron': _patron_qr_payload(patron)})
 
-    book = (Book.objects.filter(qr_code=code)
-            .select_related('shelf_level', 'shelf_level__shelf').first())
+    book = _book_for_code(code)
     if book is not None:
         return JsonResponse({'success': True, 'kind': 'book',
                              'book': _book_qr_payload(book)})
@@ -3780,7 +3801,7 @@ def search_book_by_qr(request):
     if not qr_code:
         return JsonResponse({'success': False, 'error': 'QR code is required'})
     
-    book = Book.objects.filter(qr_code=qr_code).select_related('shelf_level', 'shelf_level__shelf').first()
+    book = _book_for_code(qr_code)
     if book is None:
         return JsonResponse({'success': False, 'error': 'Book not found'})
 
@@ -3803,24 +3824,27 @@ def search_patron_by_qr(request):
 
 @granted_module_required('books')
 def download_book_template(request):
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Book Import Template"
-    
+    materials = ', '.join(value for value, _label in Book.MATERIAL_TYPE_CHOICES)
+    conditions = ', '.join(value for value, _label in Book.CONDITION_CHOICES)
     # Matched by name, so order does not matter and extra columns are ignored.
-    headers = ['Title', 'Author', 'Publication Year', 'ISBN', 'Genre',
-               'Condition', 'Code Label', 'Quantity', 'Location', 'Slot']
-    ws.append(headers)
-    # Condition, Code Label and Slot may all be left empty.
-    ws.append(['Example Book Title', 'Surname, First', 2019, '9780000000000',
-               'Fiction', 'Good', '', 2, 'Shelf A Column 1 Level 2', ''])
-    ws.append(['Pride and Prejudice', 'Austen, Jane', 1963, '', 'Fiction',
-               'Worn', 'FIC A31p 1963', 1, 'A C1 L2', ''])
-    
-    response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-    response['Content-Disposition'] = 'attachment; filename=book_import_template.xlsx'
-    wb.save(response)
-    return response
+    return _template_response('book_import_template.xlsx', 'Books', [
+        ('Title', True, 'The title as printed on the book.', 'Pride and Prejudice'),
+        ('Author', True, 'Surname, First or First Surname. Several authors can share one cell.',
+         'Austen, Jane'),
+        ('Publication Year', False, 'Four digits.', 1963),
+        ('ISBN', False, 'The ISBN or accession number. Leave blank if there is none.', ''),
+        ('Genre', False, 'Any wording. Its first three letters start the code label.', 'Fiction'),
+        ('Material Type', False, 'One of: %s. Blank means Book.' % materials, 'Book'),
+        ('Condition', False, 'One of: %s. Blank means Good.' % conditions, 'Worn'),
+        ('Code Label', False, 'The call number on the spine. Leave blank to have it worked out.',
+         'FIC A31p 1963'),
+        ('Quantity', False, 'How many copies, 1 to 50. Blank means 1.', 1),
+        ('Location', False, 'The shelf board, long or short: Shelf A Column 1 Level 2, A C1 L2, '
+                            'Table 1 Top. A board that does not exist yet is listed before '
+                            'anything is saved.', 'Shelf A Column 1 Level 2'),
+        ('Slot', False, 'Position on the board counted from the left. Blank follows the sheet '
+                        'order.', ''),
+    ], text_columns=('ISBN', 'Code Label'))
 
 
 # Limit upload size before parsing the workbook.
@@ -3883,6 +3907,207 @@ def check_import_size(worksheet):
         return (f'That sheet has {rows:,} rows. Please import at most '
                 f'{MAX_IMPORT_ROWS:,} at a time.')
     return None
+
+
+# Row problems listed in an import's result before "and N more".
+MAX_IMPORT_PROBLEMS_LISTED = 10
+
+SHEET_DATE_FORMATS = ('%Y-%m-%d', '%m/%d/%Y', '%m/%d/%y', '%m-%d-%Y',
+                      '%b %d, %Y', '%B %d, %Y', '%d %b %Y', '%d %B %Y')
+SHEET_TIME_FORMATS = ('%H:%M:%S', '%H:%M', '%I:%M %p', '%I:%M:%S %p', '%I:%M%p')
+
+
+def _sheet_key(text):
+    return ''.join(ch for ch in str(text or '').lower() if ch.isalnum())
+
+
+def _cell_text(value):
+    """A cell as trimmed text, with 3.0 read as 3 and "N/A" read as blank."""
+    if value is None:
+        return ''
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
+    text = str(value).strip()
+    return '' if text.lower() in ('n/a', 'na', 'none', '-', '--') else text
+
+
+def _sheet_date(value):
+    """A date from a real Excel date or a typed one, or None."""
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    text = ' '.join(_cell_text(value).split())
+    for fmt in SHEET_DATE_FORMATS:
+        try:
+            return datetime.strptime(text, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _sheet_datetime(value):
+    """A local date and time from a real Excel value or a typed one, or None."""
+    moment = value if isinstance(value, datetime) else None
+    if moment is None:
+        text = ' '.join(_cell_text(value).split())
+        if len(text) > 10 and text[10] == 'T':
+            text = text[:10] + ' ' + text[11:]
+        for date_fmt in SHEET_DATE_FORMATS:
+            for time_fmt in SHEET_TIME_FORMATS:
+                try:
+                    moment = datetime.strptime(text, date_fmt + ' ' + time_fmt)
+                    break
+                except ValueError:
+                    continue
+            if moment is not None:
+                break
+    if moment is None:
+        return None
+    # Excel keeps times as fractions of a day, so round to the second.
+    if moment.microsecond:
+        moment = moment.replace(microsecond=0) + timedelta(seconds=round(moment.microsecond / 1e6))
+    return moment if timezone.is_aware(moment) else timezone.make_aware(moment)
+
+
+def _sheet_choice(value, choices, aliases=None):
+    """The choice a cell means, matched on its value or label, or None."""
+    key = _sheet_key(value)
+    if not key:
+        return None
+    for stored, label in choices:
+        if key in (_sheet_key(stored), _sheet_key(label)):
+            return stored
+    return (aliases or {}).get(key)
+
+
+def _find_import_sheet(workbook, aliases, required):
+    """The sheet whose first row has the required columns, and where each column is.
+
+    required is a list of groups; a sheet needs at least one column from each group.
+    """
+    sheets = [workbook.active] + [s for s in workbook.worksheets if s is not workbook.active]
+    first_header = None
+    for sheet in sheets:
+        header = next(sheet.iter_rows(min_row=1, max_row=1, values_only=True), None) or ()
+        if first_header is None:
+            first_header = header
+        columns = {}
+        for index, cell in enumerate(header):
+            field = aliases.get(_sheet_key(cell))
+            if field and field not in columns:
+                columns[field] = index
+        if all(any(name in columns for name in group) for group in required):
+            return sheet, columns, header
+    return None, None, first_header or ()
+
+
+def _open_import_sheet(request, aliases, required, required_label):
+    """(sheet, columns, None) for an uploaded import, or (None, None, error response)."""
+    if request.method != 'POST':
+        return None, None, JsonResponse({'success': False, 'error': 'Only POST method allowed'})
+    uploaded = request.FILES.get('excel_file')
+    upload_error = check_import_upload(uploaded)
+    if upload_error:
+        return None, None, JsonResponse({'success': False, 'error': upload_error})
+
+    workbook = openpyxl.load_workbook(uploaded, data_only=True)
+    sheet, columns, header = _find_import_sheet(workbook, aliases, required)
+    if sheet is None:
+        found = ', '.join(str(h) for h in header if h) or '(none)'
+        return None, None, JsonResponse({
+            'success': False,
+            'error': ('Could not find the %s column(s). Download the template again and keep '
+                      'its first row as it is. Headers found: %s' % (required_label, found))})
+    size_error = check_import_size(sheet)
+    if size_error:
+        return None, None, JsonResponse({'success': False, 'error': size_error})
+    return sheet, columns, None
+
+
+def _sheet_rows(sheet, columns):
+    """(sheet row number, {field: cell value}) for each row that is not blank."""
+    for row_no, row in enumerate(sheet.iter_rows(min_row=2, values_only=True), start=2):
+        values = {field: (row[index] if index < len(row) else None)
+                  for field, index in columns.items()}
+        if any(_cell_text(v) for v in values.values()):
+            yield row_no, values
+
+
+def _import_message(summary, notes, problems):
+    """The summary sentence, then each row that could not be imported."""
+    text = '. '.join([summary] + [note for note in notes if note]) + '.'
+    if problems:
+        text += '\n\nCould not import %d row(s):\n' % len(problems)
+        text += '\n'.join(problems[:MAX_IMPORT_PROBLEMS_LISTED])
+        if len(problems) > MAX_IMPORT_PROBLEMS_LISTED:
+            text += '\n...and %d more.' % (len(problems) - MAX_IMPORT_PROBLEMS_LISTED)
+    return text
+
+
+def _run_import(what, request, body):
+    """Run an import in one database transaction, so a fault saves none of it."""
+    try:
+        with transaction.atomic():
+            return body(request)
+    except Exception as exc:
+        return import_failed(what, exc)
+
+
+def _sheet_patron(values):
+    """The patron a row names by patron_id or card number: (patron, problem)."""
+    raw_id = _cell_text(values.get('patron_id')).lstrip('#')
+    raw_card = _cell_text(values.get('card_number'))
+    if raw_id:
+        if not raw_id.isdigit():
+            return None, 'patron_id "%s" is not a number' % raw_id
+        patron = Patron.objects.filter(patron_id=int(raw_id)).first()
+        return (patron, None) if patron else (None, 'no patron has ID %s' % raw_id)
+    if raw_card:
+        digits = ''.join(ch for ch in raw_card if ch.isdigit())
+        patron = Patron.objects.filter(card_number=digits).first() if digits else None
+        return (patron, None) if patron else (None, 'no patron has card number %s' % raw_card)
+    return None, None
+
+
+def _template_response(filename, sheet_title, columns, text_columns=()):
+    """A template: headers on the first sheet, how to fill each one in on the second.
+
+    columns is a list of (header, required, what to write, example).
+    """
+    from openpyxl.styles import Font
+    from openpyxl.utils import get_column_letter
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = sheet_title
+    ws.append([header for header, _required, _help, _example in columns])
+    for index, (header, _required, _help, _example) in enumerate(columns, start=1):
+        letter = get_column_letter(index)
+        ws[letter + '1'].font = Font(bold=True)
+        ws.column_dimensions[letter].width = max(14, len(header) + 4)
+        if header in text_columns:
+            # Text, so Excel keeps leading zeros.
+            for row in range(2, 1002):
+                ws[letter + str(row)].number_format = '@'
+    ws.freeze_panes = 'A2'
+
+    guide = wb.create_sheet('How to fill in')
+    guide.append(['Column', 'Required', 'What to write', 'Example'])
+    for header, required, help_text, example in columns:
+        guide.append([header, 'Yes' if required else 'No', help_text, example])
+    for cell in guide[1]:
+        cell.font = Font(bold=True)
+    for letter, width in (('A', 20), ('B', 10), ('C', 70), ('D', 30)):
+        guide.column_dimensions[letter].width = width
+    guide.append([])
+    guide.append(['Fill in the first sheet only. Rows on this sheet are never imported.'])
+
+    response = HttpResponse(
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    response['Content-Disposition'] = 'attachment; filename=' + filename
+    wb.save(response)
+    return response
 
 
 # Accept both long and short location formats.
@@ -3953,8 +4178,11 @@ def _next_slot(counter, level):
     return slot
 
 
-def _resolve_written_location(text):
-    """The exact board a written location names, created if it is missing."""
+def _resolve_written_location(text, created=None):
+    """The exact board a written location names, created if it is missing.
+
+    A board made here is appended to created, so the import can say so.
+    """
     name, level_no, column_no, is_top, is_under = parse_location(text)
     if not (level_no or column_no or is_top or is_under):
         return None
@@ -3977,14 +4205,21 @@ def _resolve_written_location(text):
         found = _matching_board(levels, level_no or 1, column_no)
         if found is not None:
             return found
+        # A table's only board is its top, whatever a sheet calls it.
+        if level_no in (None, 1) and column_no in (None, 1) and levels.count() == 1:
+            only = levels.first()
+            if only.is_top:
+                return only
 
-    # Create the location if it does not exist.
-    return ShelfLevel.objects.create(
+    board = ShelfLevel.objects.create(
         shelf=shelf,
         level_number=level_no or (levels.aggregate(n=Max('level_number'))['n'] or 0) + 1,
         column_number=column_no,
         is_top=is_top,
         is_under=is_under)
+    if created is not None:
+        created.append('%s %s' % (shelf.name, board.label))
+    return board
 
 
 def _matching_board(levels, level_no, column_no):
@@ -4003,14 +4238,14 @@ def _matching_board(levels, level_no, column_no):
     return None
 
 
-def _resolve_storage_area(name):
-    """Find the shelf level a sheet's "Storage Area" refers to, creating it once."""
+def _resolve_storage_area(name, created=None):
+    """Find the shelf level a sheet's "Storage Area" refers to, or None."""
     label = (name or '').strip()
     if not label:
         return None
 
     # A written position takes priority over category names.
-    precise = _resolve_written_location(label)
+    precise = _resolve_written_location(label, created)
     if precise is not None:
         return precise
 
@@ -4018,18 +4253,18 @@ def _resolve_storage_area(name):
     if level is not None:
         return level
 
-    shelf = Shelf.objects.filter(name__iexact=label).first()
+    shelf = _shelf_by_written_name(label)
     if shelf is not None:
         level = ShelfLevel.objects.filter(shelf=shelf).order_by('level_number').first()
         if level is not None:
             return level
-        return ShelfLevel.objects.create(shelf=shelf, level_number=1, category=label)
+        level = ShelfLevel.objects.create(shelf=shelf, level_number=1)
+        if created is not None:
+            created.append('%s %s' % (shelf.name, level.label))
+        return level
 
-    shelf = Shelf.objects.order_by('shelf_id').first()
-    if shelf is None:
-        return None
-    next_level = (ShelfLevel.objects.filter(shelf=shelf).count() or 0) + 1
-    return ShelfLevel.objects.create(shelf=shelf, level_number=next_level, category=label)
+    # Unknown text is reported, never turned into a board on some other shelf.
+    return None
 
 
 class _PreviewOnly(Exception):
@@ -4090,6 +4325,7 @@ def delete_books(request):
         Book.objects.filter(book_id__in=deletable_ids).update(
             archived_at=timezone.now(), archived_by=_actor_name(request)[:255],
             archive_reason='Deleted from Manage Books')
+        _remove_books_from_stock(deletable_ids, request, 'Deleted from Manage Books')
         log_admin_action(
             request, 'Delete', 'Book',
             detail='Deleted %d book(s)%s%s' % (
@@ -4175,7 +4411,8 @@ def import_books(request):
                 raise _PreviewOnly(_import_books_body(request))
         except _PreviewOnly as done:
             return done.payload
-    return _import_books_body(request)
+    with transaction.atomic():
+        return _import_books_body(request)
 
 
 def _import_books_body(request):
@@ -4220,6 +4457,8 @@ def _import_books_body(request):
         'quantity': 'quantity', 'qty': 'quantity', 'copies': 'quantity',
         'numberofcopies': 'quantity',
         'condition': 'condition', 'bookcondition': 'condition', 'state': 'condition',
+        'materialtype': 'material_type', 'material': 'material_type',
+        'format': 'material_type', 'itemtype': 'material_type', 'mediatype': 'material_type',
         # The spine number.
         'codelabel': 'call_number', 'callnumber': 'call_number',
         'callno': 'call_number', 'spinelabel': 'call_number',
@@ -4231,9 +4470,6 @@ def _import_books_body(request):
         'sequence': 'shelf_slot', 'seq': 'shelf_slot',
     }
 
-    def norm(text):
-        return ''.join(ch for ch in str(text or '').lower() if ch.isalnum())
-
     def clean(value):
         text = str(value).strip() if value is not None else ''
         # Sheets write "N/A", "none" or "-" for a blank; treat them as blank.
@@ -4241,26 +4477,18 @@ def _import_books_body(request):
 
     try:
         wb = openpyxl.load_workbook(excel_file, data_only=True)
-        ws = wb.active
-        size_error = check_import_size(ws)
-        if size_error:
-            return JsonResponse({'success': False, 'error': size_error})
-
-        header_row = next(ws.iter_rows(min_row=1, max_row=1, values_only=True), None)
-        if not header_row:
-            return JsonResponse({'success': False, 'error': 'The sheet is empty.'})
-
-        columns = {}
-        for index, cell in enumerate(header_row):
-            field = HEADER_ALIASES.get(norm(cell))
-            if field and field not in columns:
-                columns[field] = index
-
-        if 'title' not in columns or 'author' not in columns:
+        # The first sheet with Title and Author, so the guide sheet is never read.
+        ws, columns, header_row = _find_import_sheet(wb, HEADER_ALIASES, [('title',), ('author',)])
+        if ws is None:
+            if not any(header_row):
+                return JsonResponse({'success': False, 'error': 'The sheet is empty.'})
             found = ', '.join(str(h) for h in header_row if h) or '(none)'
             return JsonResponse({'success': False, 'error':
                                  'Could not find a Title and Author column. '
                                  'Headers found: ' + found})
+        size_error = check_import_size(ws)
+        if size_error:
+            return JsonResponse({'success': False, 'error': size_error})
 
         def field(row, name):
             idx = columns.get(name)
@@ -4271,6 +4499,10 @@ def _import_books_body(request):
         created_ids = []
         unmatched_areas = set()
         unreadable_conditions = set()
+        unreadable_materials = set()
+        # Boards named by the sheet that did not exist, in the order first met.
+        new_boards = []
+        skipped_example = 0
 
         # The next free position on each board this import touches.
         next_slot = {}
@@ -4298,6 +4530,9 @@ def _import_books_body(request):
         copies_of_existing = 0
 
         for row_no, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+            # Empty rows, like the template's pre-formatted ones, are not skipped rows.
+            if not any(clean(value) for value in row):
+                continue
             title = field(row, 'title')
             author = field(row, 'author')
             if not title or not author:
@@ -4306,6 +4541,10 @@ def _import_books_body(request):
             # A totals row at the foot of a sheet has no real title.
             if title.lower().startswith('total'):
                 skipped_blank += 1
+                continue
+            # The sample row older templates shipped with.
+            if (title.lower(), author.lower()) == ('example book title', 'surname, first'):
+                skipped_example += 1
                 continue
 
             isbn = field(row, 'ISBN')
@@ -4358,6 +4597,14 @@ def _import_books_body(request):
                     unreadable_conditions.add(str(raw_condition).strip()[:40])
                 condition = 'Good'
 
+            raw_material = field(row, 'material_type')
+            material_type = _sheet_choice(raw_material, Book.MATERIAL_TYPE_CHOICES,
+                                          MATERIAL_TYPE_WORDS)
+            if material_type is None:
+                if raw_material:
+                    unreadable_materials.add(str(raw_material).strip()[:40])
+                material_type = 'Book'
+
             quantity = 1
             raw_qty = field(row, 'quantity')
             if raw_qty:
@@ -4373,7 +4620,7 @@ def _import_books_body(request):
             if shelf_level is None:
                 area = field(row, 'storage_area')
                 if area:
-                    shelf_level = _resolve_storage_area(area)
+                    shelf_level = _resolve_storage_area(area, new_boards)
                     if shelf_level is None:
                         unmatched_areas.add(area)
 
@@ -4394,8 +4641,9 @@ def _import_books_body(request):
                     title=title,
                     author=author,
                     publication_year=publication_year,
-                    ISBN=isbn if (copy_no == 0 and not clash) else None,
+                    ISBN=(isbn or None) if (copy_no == 0 and not clash) else None,
                     genre=field(row, 'genre') or None,
+                    material_type=material_type,
                     condition=condition,
                     # Blank is the normal case: Book.save() derives it.
                     call_number=field(row, 'call_number') or None,
@@ -4403,6 +4651,7 @@ def _import_books_body(request):
                     status='Available',
                     qr_code=str(uuid4()),
                 )
+                _add_existing_copy(book, request, reason='Imported from the existing collection')
                 imported += 1
                 created_ids.append(book.book_id)
                 if copy_no > 0:
@@ -4431,8 +4680,20 @@ def _import_books_body(request):
             parts.append('could not read the condition "'
                          + '", "'.join(sorted(unreadable_conditions)[:5])
                          + '" — filed as Good')
+        if unreadable_materials:
+            parts.append('could not read the material type "'
+                         + '", "'.join(sorted(unreadable_materials)[:5])
+                         + '" — filed as Book')
+        if skipped_example:
+            parts.append(f'{skipped_word} {skipped_example} sample row(s) left from the template')
         if unmatched_areas:
-            parts.append('could not match storage area: ' + ', '.join(sorted(unmatched_areas)))
+            parts.append('could not match storage area: ' + ', '.join(sorted(unmatched_areas))
+                         + ' — those books have no shelf yet')
+        if new_boards:
+            parts.append(f'{"will add" if preview else "added"} {len(new_boards)} new shelf '
+                         f'board(s) the sheet names but the library did not have: '
+                         + ', '.join(new_boards[:10])
+                         + ('' if len(new_boards) <= 10 else f' and {len(new_boards) - 10} more'))
 
         payload = {
             'success': True,
@@ -4451,265 +4712,377 @@ def _import_books_body(request):
             'clashes': clashes if preview else [],
             'clashes_truncated': clashes_total > len(clashes),
             'copies_of_existing': copies_of_existing,
+            'new_boards': new_boards,
         }
         return JsonResponse(payload)
 
     except Exception as exc:
+        # Undo any rows already written; the caller's atomic block is ours.
+        transaction.set_rollback(True)
         return import_failed('Book import', exc)
 
 
 @admin_module_required('patrons')
 def download_patron_template(request):
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Patron Import Template"
-    
-    headers = ['first_name', 'middle_name', 'last_name', 'patron_type', 'email',
-               'contact_number', 'address', 'account_status']
-    ws.append(headers)
-    
-    response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-    response['Content-Disposition'] = 'attachment; filename=patron_import_template.xlsx'
-    wb.save(response)
-    return response
+    types = ', '.join(value for value, _label in Patron.PATRON_TYPE_CHOICES)
+    statuses = ', '.join(value for value, _label in Patron.STATUS_CHOICES)
+    return _template_response('patron_import_template.xlsx', 'Patrons', [
+        ('first_name', True, 'Given name.', 'Maria'),
+        ('middle_name', False, 'Middle name or initial.', 'Santos'),
+        ('last_name', True, 'Surname.', 'Cruz'),
+        ('patron_type', False, 'One of: %s. Blank means Student.' % types, 'Student'),
+        ('email', True, 'Each patron needs their own. It is how they sign in.',
+         'maria.cruz@example.com'),
+        ('contact_number', False, 'Mobile number with its leading 0.', '09171234567'),
+        ('address', False, 'Home address.', 'Taytay, Rizal'),
+        ('school', False, 'Where they study or teach.', 'Rizal High School'),
+        ('account_status', False, 'One of: %s. Blank means Active.' % statuses, 'Active'),
+    ], text_columns=('contact_number',))
+
+
+PATRON_IMPORT_COLUMNS = {
+    'firstname': 'first_name', 'first': 'first_name', 'givenname': 'first_name',
+    'middlename': 'middle_name', 'middle': 'middle_name', 'middleinitial': 'middle_name',
+    'mi': 'middle_name',
+    'lastname': 'last_name', 'last': 'last_name', 'surname': 'last_name',
+    'familyname': 'last_name',
+    'fullname': 'fullname', 'name': 'fullname', 'patronname': 'fullname',
+    'patrontype': 'patron_type', 'type': 'patron_type',
+    'email': 'email', 'emailaddress': 'email',
+    'contactnumber': 'contact_number', 'contact': 'contact_number', 'mobile': 'contact_number',
+    'mobilenumber': 'contact_number', 'phone': 'contact_number',
+    'phonenumber': 'contact_number', 'cellphone': 'contact_number',
+    'address': 'address', 'homeaddress': 'address',
+    'school': 'school', 'schoolname': 'school', 'institution': 'school',
+    'accountstatus': 'account_status', 'status': 'account_status',
+}
+
+PATRON_TYPE_WORDS = {
+    'faculty': 'Teacher', 'instructor': 'Teacher', 'professor': 'Teacher',
+    'guardian': 'Parent', 'pupil': 'Student', 'learner': 'Student',
+    'visitor': 'General Visitor', 'guest': 'General Visitor', 'public': 'General Visitor',
+    'general': 'General Visitor',
+}
+
+
+def _sheet_contact_number(value):
+    """A mobile number typed as a number loses its leading 0 in Excel; put it back."""
+    text = _cell_text(value)
+    if isinstance(value, (int, float)) and len(text) == 10 and text.startswith('9'):
+        return '0' + text
+    return text
 
 
 @admin_module_required('patrons')
 def import_patrons(request):
-    if request.method != 'POST':
-        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
-    
-    if 'excel_file' not in request.FILES:
-        return JsonResponse({'success': False, 'error': 'No file uploaded'})
-    
-    excel_file = request.FILES['excel_file']
+    return _run_import('Patron import', request, _import_patron_rows)
 
-    # Name, size and magic bytes, not just the extension.
-    upload_error = check_import_upload(excel_file)
-    if upload_error:
-        return JsonResponse({'success': False, 'error': upload_error})
-    
-    try:
-        wb = openpyxl.load_workbook(excel_file)
-        ws = wb.active
-        size_error = check_import_size(ws)
-        if size_error:
-            return JsonResponse({'success': False, 'error': size_error})
-        
-        imported_count = 0
-        skipped_count = 0
-        
-        for row in ws.iter_rows(min_row=2):
-            # Old single-name templates still import.
-            first_name = (row[0].value or '') if row[0].value else ''
-            middle_name = (row[1].value or '') if len(row) > 1 and row[1].value else ''
-            last_name = (row[2].value or '') if len(row) > 2 and row[2].value else ''
-            if not last_name and first_name and ' ' in str(first_name).strip():
-                first_name, middle_name, last_name = parse_name(str(first_name))
-            fullname = compose_name(str(first_name), str(middle_name), str(last_name))
-            patron_type = row[3].value
-            email = row[4].value
-            contact_number = row[5].value
-            address = row[6].value if len(row) > 6 else None
-            account_status = row[7].value if len(row) > 7 else None
-            
-            if not fullname or not email:
-                continue
-            
-            if Patron.all_objects.filter(email=email).exists():
-                skipped_count += 1
-                continue
-            
-            patron = Patron.objects.create(
-                fullname=fullname,
-                first_name=str(first_name).strip(),
-                middle_name=str(middle_name).strip(),
-                last_name=str(last_name).strip(),
-                patron_type=patron_type if patron_type else 'Student',
-                email=email,
-                contact_number=contact_number,
-                address=address,
-                account_status=account_status if account_status else 'Active',
-                registration_date=timezone.now(),
-                registration_channel='On-site',
-                qr_code=str(uuid4()),
-                otp_verified=True,
-            )
-            
-            imported_count += 1
-        
-        return JsonResponse({
-            'success': True,
-            'message': f'Successfully imported {imported_count} patrons. Skipped {skipped_count} duplicates.'
-        })
-        
-    except Exception as exc:
-        return import_failed('Patron import', exc)
+
+def _import_patron_rows(request):
+    sheet, columns, error = _open_import_sheet(
+        request, PATRON_IMPORT_COLUMNS,
+        [('first_name', 'last_name', 'fullname'), ('email',)], 'name and email')
+    if error:
+        return error
+
+    type_names = ', '.join(value for value, _label in Patron.PATRON_TYPE_CHOICES)
+    status_names = ', '.join(value for value, _label in Patron.STATUS_CHOICES)
+    imported = already = 0
+    problems = []
+    emails_this_sheet = set()
+
+    for row_no, values in _sheet_rows(sheet, columns):
+        first = _cell_text(values.get('first_name'))
+        middle = _cell_text(values.get('middle_name'))
+        last = _cell_text(values.get('last_name'))
+        # Older sheets put the whole name in one cell.
+        if not (first or last):
+            first, middle, last = parse_name(_cell_text(values.get('fullname')))
+        elif first and not (middle or last) and ' ' in first:
+            first, middle, last = parse_name(first)
+        if not (first or last):
+            problems.append('Row %d: no name' % row_no)
+            continue
+
+        email = _cell_text(values.get('email'))
+        if not email:
+            problems.append('Row %d: %s has no email' % (row_no, compose_name(first, middle, last)))
+            continue
+        try:
+            validate_email(email)
+        except ValidationError:
+            problems.append('Row %d: "%s" is not an email address' % (row_no, email))
+            continue
+        if (email.lower() in emails_this_sheet
+                or Patron.all_objects.filter(email__iexact=email).exists()):
+            already += 1
+            continue
+
+        raw_type = _cell_text(values.get('patron_type'))
+        patron_type = (_sheet_choice(raw_type, Patron.PATRON_TYPE_CHOICES, PATRON_TYPE_WORDS)
+                       if raw_type else 'Student')
+        if patron_type is None:
+            problems.append('Row %d: patron type "%s" is not one of %s'
+                            % (row_no, raw_type, type_names))
+            continue
+
+        raw_status = _cell_text(values.get('account_status'))
+        account_status = (_sheet_choice(raw_status, Patron.STATUS_CHOICES)
+                          if raw_status else 'Active')
+        if account_status is None:
+            problems.append('Row %d: account status "%s" is not one of %s'
+                            % (row_no, raw_status, status_names))
+            continue
+
+        Patron.objects.create(
+            first_name=first,
+            middle_name=middle,
+            last_name=last,
+            fullname=compose_name(first, middle, last),
+            patron_type=patron_type,
+            email=email,
+            contact_number=_sheet_contact_number(values.get('contact_number')) or None,
+            address=_cell_text(values.get('address')) or None,
+            school=_cell_text(values.get('school')) or None,
+            account_status=account_status,
+            registration_channel='On-site',
+            qr_code=str(uuid4()),
+            otp_verified=True,
+            # No password yet: they set one with Forgot password.
+            password_hash=hash_password(None),
+        )
+        emails_this_sheet.add(email.lower())
+        imported += 1
+
+    notes = ['Skipped %d already registered with the same email' % already if already else '']
+    return JsonResponse({
+        'success': True,
+        'message': _import_message('Imported %d patron(s)' % imported, notes, problems),
+        'imported': imported,
+        'problems': len(problems),
+    })
 
 
 @admin_module_required('inventory')
 def download_donation_template(request):
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Donation Import Template"
-    
-    headers = ['donor_name', 'date_donated', 'title', 'author', 'ISBN', 'genre', 'publication_year']
-    ws.append(headers)
-    
-    response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-    response['Content-Disposition'] = 'attachment; filename=donation_import_template.xlsx'
-    wb.save(response)
-    return response
+    materials = ', '.join(value for value, _label in Book.MATERIAL_TYPE_CHOICES)
+    return _template_response('donation_import_template.xlsx', 'Donations', [
+        ('donor_name', True, 'Who gave the books.', 'Barangay Council'),
+        ('date_donated', False, 'An Excel date, 2026-09-01 or 09/01/2026. Blank means today.',
+         '2026-09-01'),
+        ('title', True, 'The title as printed on the book.', 'Noli Me Tangere'),
+        ('author', False, 'Surname, First or First Surname.', 'Rizal, Jose'),
+        ('ISBN', False, 'Used to recognise a title the library already has.', ''),
+        ('genre', False, 'Any wording.', 'Classic Philippine Literature'),
+        ('publication_year', False, 'Four digits.', 1961),
+        ('material_type', False, 'One of: %s. Blank means Book.' % materials, 'Book'),
+        ('quantity', False, 'How many copies of this title, 1 to 100. Blank means 1.', 2),
+    ], text_columns=('ISBN',))
+
+
+DONATION_IMPORT_COLUMNS = {
+    'donorname': 'donor_name', 'donor': 'donor_name', 'donatedby': 'donor_name',
+    'datedonated': 'date_donated', 'donationdate': 'date_donated',
+    'donateddate': 'date_donated', 'date': 'date_donated',
+    'title': 'title', 'booktitle': 'title',
+    'author': 'author', 'authors': 'author',
+    'isbn': 'isbn', 'isbn13': 'isbn', 'isbn10': 'isbn',
+    'genre': 'genre', 'category': 'genre', 'subject': 'genre',
+    'publicationyear': 'publication_year', 'yearpublished': 'publication_year',
+    'year': 'publication_year',
+    'materialtype': 'material_type', 'material': 'material_type', 'format': 'material_type',
+    'quantity': 'quantity', 'qty': 'quantity', 'copies': 'quantity',
+}
 
 
 @admin_module_required('inventory')
 def import_donations(request):
-    if request.method != 'POST':
-        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
-    
-    if 'excel_file' not in request.FILES:
-        return JsonResponse({'success': False, 'error': 'No file uploaded'})
-    
-    excel_file = request.FILES['excel_file']
+    return _run_import('Donation import', request, _import_donation_rows)
 
-    # Name, size and magic bytes, not just the extension.
-    upload_error = check_import_upload(excel_file)
-    if upload_error:
-        return JsonResponse({'success': False, 'error': upload_error})
-    
-    try:
-        wb = openpyxl.load_workbook(excel_file)
-        ws = wb.active
-        size_error = check_import_size(ws)
-        if size_error:
-            return JsonResponse({'success': False, 'error': size_error})
-        
-        imported_count = 0
-        skipped_count = 0
-        
-        for row in ws.iter_rows(min_row=2):
-            donor_name = row[0].value
-            date_donated = row[1].value
-            title = row[2].value
-            author = row[3].value
-            isbn = row[4].value
-            genre = row[5].value
-            # Spreadsheets predating this column simply produce None.
-            material_type = (str(row[7].value).strip() if len(row) > 7 and row[7].value else 'Book')
-            if material_type not in {c[0] for c in Book.MATERIAL_TYPE_CHOICES}:
-                material_type = 'Book'
-            publication_year = row[6].value
-            
-            if not donor_name or not title or not author:
-                continue
-            
-            book = Book.objects.create(
-                title=title,
-                author=author,
-                ISBN=isbn,
-                genre=genre,
-                material_type=material_type,
-                publication_year=int(publication_year) if publication_year else None,
-                status='Available'
-            )
-            
-            donated_on = date_donated if date_donated else timezone.localdate()
-            donation = Donation.objects.create(
-                donor_name=donor_name,
-                date_donated=donated_on,
-                book=book,
-                status='Received'
-            )
 
-            # Record imported books in inventory.
+def _import_donation_rows(request):
+    """Receive each row the way the Receive Stock form does."""
+    sheet, columns, error = _open_import_sheet(
+        request, DONATION_IMPORT_COLUMNS, [('donor_name',), ('title',)], 'donor_name and title')
+    if error:
+        return error
+
+    admin = User.objects.filter(admin_id=request.session.get('admin_id')).first()
+    today = timezone.localdate()
+    titles = copies = new_titles = already = 0
+    unreadable_materials = set()
+    problems = []
+    # Rows this sheet has already received, so a title listed twice is not a repeat.
+    received_now = set()
+
+    for row_no, values in _sheet_rows(sheet, columns):
+        donor = _cell_text(values.get('donor_name'))
+        title = _cell_text(values.get('title'))
+        if not donor:
+            problems.append('Row %d: no donor name' % row_no)
+            continue
+        if not title:
+            problems.append('Row %d: no title' % row_no)
+            continue
+
+        raw_date = values.get('date_donated')
+        donated = _sheet_date(raw_date) if _cell_text(raw_date) else today
+        if donated is None:
+            problems.append('Row %d: "%s" is not a date. Use 2026-09-01 or 09/01/2026'
+                            % (row_no, _cell_text(raw_date)))
+            continue
+        if donated > today:
+            problems.append('Row %d: the donation date %s is in the future' % (row_no, donated))
+            continue
+
+        raw_quantity = _cell_text(values.get('quantity'))
+        try:
+            quantity = int(raw_quantity) if raw_quantity else 1
+        except ValueError:
+            quantity = 0
+        if not 1 <= quantity <= 100:
+            problems.append('Row %d: quantity must be between 1 and 100' % row_no)
+            continue
+
+        raw_material = _cell_text(values.get('material_type'))
+        material_type = _sheet_choice(raw_material, Book.MATERIAL_TYPE_CHOICES, MATERIAL_TYPE_WORDS)
+        if material_type is None:
+            if raw_material:
+                unreadable_materials.add(raw_material[:40])
+            material_type = 'Book'
+
+        item = {
+            'title': title,
+            'author': _cell_text(values.get('author')),
+            'isbn': _cell_text(values.get('isbn')),
+            'genre': _cell_text(values.get('genre')),
+            'material_type': material_type,
+            'publication_year': _cell_text(values.get('publication_year')),
+        }
+        try:
+            book, is_new = _resolve_intake_book(item, 'Donation')
+        except ValueError as exc:
+            problems.append('Row %d: %s' % (row_no, exc))
+            continue
+
+        key = (book.pk, donor.lower(), donated)
+        # Copies have book records of their own, so the title identifies a repeat.
+        if key not in received_now and InventoryRecord.objects.filter(
+                book__title__iexact=book.title, book__author__iexact=book.author,
+                source='Donation', donor_name__iexact=donor,
+                donated_date=donated).exists():
+            already += 1
+            continue
+        received_now.add(key)
+
+        # All copies of a donated title share one donation row.
+        donation_row = None
+        for copy_no in range(quantity):
+            copy_book = _intake_book_for_copy(book, is_new and copy_no == 0, 'Donation', 'Good')
             record = InventoryRecord.objects.create(
-                book=book,
+                book=copy_book,
                 source='Donation',
-                donor_name=donor_name,
-                donated_date=donated_on if not hasattr(donated_on, 'date') else donated_on.date(),
+                donor_name=donor,
+                donated_date=donated,
                 processing_stage='Received',
+                donation=donation_row,
                 condition='Good',
                 status='In Stock',
-                qr_label=str(uuid4()),
-                donation=donation,
+                qr_label=_copy_label(copy_book),
+                received_by=admin,
             )
             _record_movement(record, 'Received', request,
                              reason='Received via donation import',
                              source='Donation import', after='Good')
+            if donation_row is None:
+                donation_row = _sync_donation_row(record)
+        titles += 1
+        copies += quantity
+        new_titles += 1 if is_new else 0
 
-            imported_count += 1
-        
-        return JsonResponse({
-            'success': True,
-            'message': f'Successfully imported {imported_count} donations.'
-        })
-        
-    except Exception as exc:
-        return import_failed('Donation import', exc)
+    summary = 'Received %d donated copy(ies) across %d title(s)' % (copies, titles)
+    if new_titles:
+        summary += ' (%d new to the catalogue)' % new_titles
+    notes = [
+        ('Skipped %d row(s) already imported for the same donor, date and title' % already
+         if already else ''),
+        ('Could not read the material type "%s", so those were filed as Book'
+         % '", "'.join(sorted(unreadable_materials)[:5]) if unreadable_materials else ''),
+    ]
+    return JsonResponse({
+        'success': True,
+        'message': _import_message(summary, notes, problems),
+        'imported': titles,
+        'problems': len(problems),
+    })
 
 
 @admin_only_required
 def download_announcement_template(request):
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Announcement Import Template"
-    
-    headers = ['title', 'message']
-    ws.append(headers)
-    
-    response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-    response['Content-Disposition'] = 'attachment; filename=announcement_import_template.xlsx'
-    wb.save(response)
-    return response
+    return _template_response('announcement_import_template.xlsx', 'Announcements', [
+        ('title', True, 'A short headline, up to 255 characters.', 'Library closed on Friday'),
+        ('message', True, 'What patrons should know.',
+         'The library is closed for the holiday and opens again on Monday.'),
+    ])
+
+
+ANNOUNCEMENT_IMPORT_COLUMNS = {
+    'title': 'title', 'subject': 'title', 'heading': 'title', 'headline': 'title',
+    'message': 'message', 'body': 'message', 'content': 'message', 'details': 'message',
+    'text': 'message',
+}
 
 
 @admin_only_required
 def import_announcements(request):
-    if request.method != 'POST':
-        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
-    
-    if 'excel_file' not in request.FILES:
-        return JsonResponse({'success': False, 'error': 'No file uploaded'})
-    
-    excel_file = request.FILES['excel_file']
+    return _run_import('Announcement import', request, _import_announcement_rows)
 
-    # Name, size and magic bytes, not just the extension.
-    upload_error = check_import_upload(excel_file)
-    if upload_error:
-        return JsonResponse({'success': False, 'error': upload_error})
-    
-    try:
-        wb = openpyxl.load_workbook(excel_file)
-        ws = wb.active
-        size_error = check_import_size(ws)
-        if size_error:
-            return JsonResponse({'success': False, 'error': size_error})
-        
-        imported_count = 0
-        
-        for row in ws.iter_rows(min_row=2):
-            title = row[0].value
-            message = row[1].value
-            
-            if not title or not message:
-                continue
-            
-            announcement = Announcement.objects.create(
-                title=title,
-                message=message,
-                is_active=True,
-                posted_by=request.user
-            )
-            
-            imported_count += 1
-        
-        return JsonResponse({
-            'success': True,
-            'message': f'Successfully imported {imported_count} announcements.'
-        })
-        
-    except Exception as exc:
-        return import_failed('Announcement import', exc)
+
+def _import_announcement_rows(request):
+    sheet, columns, error = _open_import_sheet(
+        request, ANNOUNCEMENT_IMPORT_COLUMNS, [('title',), ('message',)], 'title and message')
+    if error:
+        return error
+
+    # This portal signs people in itself, so the poster comes from the session.
+    poster = User.objects.filter(admin_id=request.session.get('admin_id')).first()
+    if poster is None:
+        return JsonResponse({'success': False,
+                             'error': 'Your session has expired. Please sign in again.'})
+
+    imported = already = 0
+    problems = []
+    posted_now = set()
+    for row_no, values in _sheet_rows(sheet, columns):
+        title = _cell_text(values.get('title'))
+        message = _cell_text(values.get('message'))
+        if not title:
+            problems.append('Row %d: no title' % row_no)
+            continue
+        if not message:
+            problems.append('Row %d: "%s" has no message' % (row_no, title[:60]))
+            continue
+        if len(title) > 255:
+            problems.append('Row %d: the title is longer than 255 characters' % row_no)
+            continue
+        if ((title, message) in posted_now
+                or Announcement.objects.filter(title=title, message=message).exists()):
+            already += 1
+            continue
+
+        Announcement.objects.create(title=title, message=message, is_active=True,
+                                    posted_by=poster)
+        posted_now.add((title, message))
+        imported += 1
+
+    notes = ['Skipped %d already posted with the same title and message' % already
+             if already else '']
+    return JsonResponse({
+        'success': True,
+        'message': _import_message('Imported %d announcement(s)' % imported, notes, problems),
+        'imported': imported,
+        'problems': len(problems),
+    })
 
 
 # Shared by Manage Books and Transactions.
@@ -5026,12 +5399,16 @@ def update_donation_status(request):
             donation.status = status
             donation.save()
 
-            # Only mark the book Available if nothing else claims it.
-            if status == 'Shelved' and donation.book:
-                claimed = donation.book.status in ('Borrowed', 'Overdue', 'Being Read', 'Lost')
-                if not claimed:
-                    donation.book.status = 'Available'
-                    donation.book.save()
+            # Only mark a book Available if nothing else claims it.
+            if status == 'Shelved':
+                books = {copy.book for copy in donation.inventory_copies.select_related('book')
+                         if copy.book is not None}
+                if donation.book:
+                    books.add(donation.book)
+                for book in books:
+                    if book.status not in ('Borrowed', 'Overdue', 'Being Read', 'Lost', 'Missing'):
+                        book.status = 'Available'
+                        book.save()
             # Update the matching inventory copies.
             donation.inventory_copies.update(processing_stage=status)
             log_admin_action(request, 'Update', 'Donation', donation.donation_id,
@@ -5530,193 +5907,298 @@ def delete_floorplan(request):
 # Transaction Import/Export
 @granted_module_required('transactions')
 def download_transaction_template(request):
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Transaction Import Template"
-    
-    headers = ['patron_id', 'book_id', 'transaction_type', 'transaction_date', 'due_date', 'return_date']
-    ws.append(headers)
-    
-    response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-    response['Content-Disposition'] = 'attachment; filename=transaction_import_template.xlsx'
-    wb.save(response)
-    return response
+    return _template_response('transaction_import_template.xlsx', 'Transactions', [
+        ('patron_id', False, 'The number after # on Manage Patrons. Or use card_number instead.', ''),
+        ('card_number', False, 'The 7-digit library card number, when patron_id is blank. '
+                               'A Borrow needs one of the two.', '7482051'),
+        ('book_id', True, 'The number shown as BOOK-123 on the book details page.', 123),
+        ('transaction_type', True, 'Borrow, Return or In-Library Reading. A Return closes the '
+                                   "book's open Borrow.", 'Borrow'),
+        ('transaction_date', False, 'The day it happened: an Excel date, 2026-09-01 or '
+                                    '09/01/2026. Blank means today.', '2026-09-01'),
+        ('due_date', False, 'For a Borrow. Blank uses the loan period in Borrowing Rules.',
+         '2026-09-15'),
+        ('return_date', False, 'For a Borrow that has already come back, or the day of a Return.',
+         ''),
+    ], text_columns=('card_number',))
+
+
+TRANSACTION_IMPORT_COLUMNS = {
+    'patronid': 'patron_id', 'patron': 'patron_id',
+    'cardnumber': 'card_number', 'card': 'card_number', 'cardno': 'card_number',
+    'librarycard': 'card_number',
+    'bookid': 'book_id', 'book': 'book_id',
+    'transactiontype': 'transaction_type', 'type': 'transaction_type',
+    'transactiondate': 'transaction_date', 'date': 'transaction_date',
+    'borrowdate': 'transaction_date', 'dateborrowed': 'transaction_date',
+    'duedate': 'due_date', 'due': 'due_date',
+    'returndate': 'return_date', 'datereturned': 'return_date', 'returned': 'return_date',
+}
+
+TRANSACTION_TYPE_WORDS = {
+    'borrowed': 'Borrow', 'loan': 'Borrow', 'checkout': 'Borrow',
+    'returned': 'Return', 'checkin': 'Return',
+    'reading': 'In-Library Reading', 'inlibrary': 'In-Library Reading',
+    'readinlibrary': 'In-Library Reading',
+}
+
+
+def _sheet_book(values):
+    """The book a row names by its ID, written 123 or BOOK-123: (book, problem)."""
+    raw = _cell_text(values.get('book_id'))
+    if not raw:
+        return None, 'no book_id'
+    digits = raw.upper().replace('BOOK-', '').lstrip('#')
+    if not digits.isdigit():
+        return None, 'book_id "%s" is not a number' % raw
+    book = Book.objects.filter(book_id=int(digits)).first()
+    return (book, None) if book else (None, 'no book has ID %s' % raw)
 
 
 @granted_module_required('transactions')
 def import_transactions(request):
-    if request.method != 'POST':
-        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
-    
-    if 'excel_file' not in request.FILES:
-        return JsonResponse({'success': False, 'error': 'No file uploaded'})
-    
-    excel_file = request.FILES['excel_file']
+    return _run_import('Transaction import', request, _import_transaction_rows)
 
-    # Name, size and magic bytes, not just the extension.
-    upload_error = check_import_upload(excel_file)
-    if upload_error:
-        return JsonResponse({'success': False, 'error': upload_error})
-    
-    try:
-        wb = openpyxl.load_workbook(excel_file)
-        ws = wb.active
-        size_error = check_import_size(ws)
-        if size_error:
-            return JsonResponse({'success': False, 'error': size_error})
-        
-        imported_count = 0
-        skipped_count = 0
-        
-        admin_id = request.session.get('admin_id')
-        admin = User.objects.filter(admin_id=admin_id).first()
-        
-        for row in ws.iter_rows(min_row=2):
-            patron_id = row[0].value
-            book_id = row[1].value
-            transaction_type = row[2].value
-            transaction_date = row[3].value
-            due_date = row[4].value
-            return_date = row[5].value
-            
-            if not book_id or not transaction_type:
+
+def _import_transaction_rows(request):
+    """Record each row the way the Transactions page would have."""
+    sheet, columns, error = _open_import_sheet(
+        request, TRANSACTION_IMPORT_COLUMNS, [('book_id',), ('transaction_type',)],
+        'book_id and transaction_type')
+    if error:
+        return error
+
+    admin = User.objects.filter(admin_id=request.session.get('admin_id')).first()
+    rule = BorrowingRule.current()
+    today = timezone.localdate()
+    counts = {'Borrow': 0, 'Return': 0, 'In-Library Reading': 0}
+    already = 0
+    problems = []
+
+    for row_no, values in _sheet_rows(sheet, columns):
+        book, problem = _sheet_book(values)
+        if problem:
+            problems.append('Row %d: %s' % (row_no, problem))
+            continue
+
+        raw_type = _cell_text(values.get('transaction_type'))
+        kind = _sheet_choice(raw_type, Transaction.TRANSACTION_TYPE_CHOICES, TRANSACTION_TYPE_WORDS)
+        if kind is None:
+            problems.append('Row %d: type "%s" is not Borrow, Return or In-Library Reading'
+                            % (row_no, raw_type))
+            continue
+
+        patron, problem = _sheet_patron(values)
+        if problem:
+            problems.append('Row %d: %s' % (row_no, problem))
+            continue
+
+        dates = {}
+        for field in ('transaction_date', 'due_date', 'return_date'):
+            raw = values.get(field)
+            dates[field] = _sheet_date(raw) if _cell_text(raw) else None
+            if _cell_text(raw) and dates[field] is None:
+                problem = '%s "%s" is not a date. Use 2026-09-01 or 09/01/2026' % (
+                    field, _cell_text(raw))
+                break
+        if problem:
+            problems.append('Row %d: %s' % (row_no, problem))
+            continue
+        on = dates['transaction_date'] or today
+        returned = dates['return_date']
+        if on > today or (returned and returned > today):
+            problems.append('Row %d: a date is in the future' % row_no)
+            continue
+
+        if kind == 'Borrow':
+            if patron is None:
+                problems.append('Row %d: a Borrow needs patron_id or card_number' % row_no)
                 continue
-            
-            patron = None
-            if patron_id:
-                patron = Patron.objects.filter(patron_id=patron_id).first()
-            
-            book = Book.objects.filter(book_id=book_id).first()
-            if not book:
-                skipped_count += 1
+            due = dates['due_date'] or on + timedelta(days=rule.loan_period_days)
+            if due < on or (returned and returned < on):
+                problems.append('Row %d: the due or return date is before the borrow date'
+                                % row_no)
                 continue
-            
-            # Parse dates
-            from datetime import datetime
-            trans_date = None
-            if transaction_date:
-                if isinstance(transaction_date, datetime):
-                    trans_date = transaction_date.date()
+            if Transaction.objects.filter(book=book, patron=patron, transaction_type='Borrow',
+                                          transaction_date=on).exists():
+                already += 1
+                continue
+            if returned is None and (
+                    book.status != 'Available'
+                    or Transaction.objects.filter(book=book, transaction_type='Borrow',
+                                                  return_date__isnull=True).exists()):
+                problems.append('Row %d: "%s" is %s, so it cannot be out on this loan'
+                                % (row_no, book.title, book.status.lower()))
+                continue
+
+            settled_on = returned or today
+            overdue = settled_on > due
+            loan = Transaction.objects.create(patron=patron, book=book, processed_by=admin,
+                                              transaction_type='Borrow', due_date=due,
+                                              return_date=returned)
+            # transaction_date is stamped on create, so the sheet's day goes in after.
+            Transaction.objects.filter(pk=loan.pk).update(
+                transaction_date=on, overdue_flag=overdue,
+                fine_amount=rule.compute_fine(due, settled_on))
+            if returned is None:
+                book.status = 'Overdue' if overdue else 'Borrowed'
+                book.save(update_fields=['status'])
+
+        elif kind == 'Return':
+            returned = returned or on
+            loans = Transaction.objects.filter(book=book, transaction_type='Borrow')
+            if patron is not None:
+                loans = loans.filter(patron=patron)
+            loan = loans.filter(return_date__isnull=True).order_by('-transaction_date').first()
+            if loan is None:
+                if loans.filter(return_date=returned).exists():
+                    already += 1
                 else:
-                    trans_date = datetime.strptime(str(transaction_date), '%Y-%m-%d').date()
-            
-            due_d = None
-            if due_date:
-                if isinstance(due_date, datetime):
-                    due_d = due_date.date()
-                else:
-                    due_d = datetime.strptime(str(due_date), '%Y-%m-%d').date()
-            
-            ret_date = None
-            if return_date:
-                if isinstance(return_date, datetime):
-                    ret_date = return_date.date()
-                else:
-                    ret_date = datetime.strptime(str(return_date), '%Y-%m-%d').date()
-            
-            Transaction.objects.create(
-                patron=patron,
-                book=book,
-                processed_by=admin,
-                transaction_type=transaction_type,
-                transaction_date=trans_date or timezone.localdate(),
-                due_date=due_d,
-                return_date=ret_date
-            )
-            
-            imported_count += 1
-        
-        return JsonResponse({
-            'success': True,
-            'message': f'Successfully imported {imported_count} transactions. Skipped {skipped_count} invalid entries.'
-        })
-        
-    except Exception as exc:
-        return import_failed('Transaction import', exc)
+                    problems.append('Row %d: "%s" has no open loan to return'
+                                    % (row_no, book.title))
+                continue
+            if returned < loan.transaction_date:
+                problems.append('Row %d: the return date is before "%s" was borrowed on %s'
+                                % (row_no, book.title, loan.transaction_date))
+                continue
+            loan.return_date = returned
+            loan.overdue_flag = bool(loan.due_date and returned > loan.due_date)
+            loan.fine_amount = rule.compute_fine(loan.due_date, returned)
+            loan.save(update_fields=['return_date', 'overdue_flag', 'fine_amount'])
+            if book.status in ('Borrowed', 'Overdue'):
+                book.status = 'Available'
+                book.save(update_fields=['status'])
+
+        else:
+            if Transaction.objects.filter(book=book, patron=patron,
+                                          transaction_type='In-Library Reading',
+                                          transaction_date=on).exists():
+                already += 1
+                continue
+            reading = Transaction.objects.create(patron=patron, book=book, processed_by=admin,
+                                                 transaction_type='In-Library Reading',
+                                                 return_date=returned)
+            Transaction.objects.filter(pk=reading.pk).update(transaction_date=on)
+
+        counts[kind] += 1
+
+    summary = 'Imported %d borrow(s), %d return(s) and %d in-library reading(s)' % (
+        counts['Borrow'], counts['Return'], counts['In-Library Reading'])
+    notes = ['Skipped %d row(s) already recorded' % already if already else '']
+    return JsonResponse({
+        'success': True,
+        'message': _import_message(summary, notes, problems),
+        'imported': sum(counts.values()),
+        'problems': len(problems),
+    })
 
 
 # Log Import/Export
 @admin_login_required
 def download_log_template(request):
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Log Import Template"
-    
-    headers = ['patron_id', 'school', 'purpose_of_visit', 'entry_time', 'exit_time']
-    ws.append(headers)
+    return _template_response('log_import_template.xlsx', 'Visits', [
+        ('patron_id', False, 'The number after # on Manage Patrons. Or use card_number instead.', ''),
+        ('card_number', False, 'The 7-digit library card number, when patron_id is blank.',
+         '7482051'),
+        ('school', False, "Blank uses the school on the patron's record.", 'Rizal High School'),
+        ('purpose_of_visit', False, 'One of: %s, or your own words.' % ', '.join(PURPOSE_CHOICES),
+         'Study'),
+        ('entry_time', True, 'An Excel date and time, 2026-09-01 08:30 or 09/01/2026 8:30 AM.',
+         '2026-09-01 08:30'),
+        ('exit_time', False, 'Written the same way. Blank if they did not sign out.',
+         '2026-09-01 10:00'),
+    ], text_columns=('card_number',))
 
-    response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-    response['Content-Disposition'] = 'attachment; filename=log_import_template.xlsx'
-    wb.save(response)
-    return response
+
+LOG_IMPORT_COLUMNS = {
+    'patronid': 'patron_id', 'patron': 'patron_id',
+    'cardnumber': 'card_number', 'card': 'card_number', 'cardno': 'card_number',
+    'librarycard': 'card_number',
+    'school': 'school', 'schoolname': 'school',
+    'purposeofvisit': 'purpose_of_visit', 'purpose': 'purpose_of_visit',
+    'reason': 'purpose_of_visit',
+    'entrytime': 'entry_time', 'entry': 'entry_time', 'timein': 'entry_time',
+    'signin': 'entry_time', 'arrival': 'entry_time',
+    'exittime': 'exit_time', 'exit': 'exit_time', 'timeout': 'exit_time',
+    'signout': 'exit_time', 'departure': 'exit_time',
+}
 
 
 @admin_login_required
 def import_logs(request):
-    if request.method != 'POST':
-        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
-    
-    if 'excel_file' not in request.FILES:
-        return JsonResponse({'success': False, 'error': 'No file uploaded'})
-    
-    excel_file = request.FILES['excel_file']
+    return _run_import('Log import', request, _import_log_rows)
 
-    # Name, size and magic bytes, not just the extension.
-    upload_error = check_import_upload(excel_file)
-    if upload_error:
-        return JsonResponse({'success': False, 'error': upload_error})
-    
-    try:
-        wb = openpyxl.load_workbook(excel_file)
-        ws = wb.active
-        size_error = check_import_size(ws)
-        if size_error:
-            return JsonResponse({'success': False, 'error': size_error})
-        
-        imported_count = 0
-        skipped_count = 0
-        
-        from datetime import datetime
 
-        def _parse_dt(value):
-            if not value:
-                return None
-            if isinstance(value, datetime):
-                return value
-            return datetime.strptime(str(value), '%Y-%m-%d %H:%M:%S')
+def _import_log_rows(request):
+    sheet, columns, error = _open_import_sheet(
+        request, LOG_IMPORT_COLUMNS, [('patron_id', 'card_number'), ('entry_time',)],
+        'patron_id or card_number, and entry_time')
+    if error:
+        return error
 
-        for row in ws.iter_rows(min_row=2):
-            patron_id = row[0].value
-            school = row[1].value
-            purpose = row[2].value
-            entry_time = row[3].value
-            exit_time = row[4].value
+    now = timezone.now()
+    purposes = {_sheet_key(purpose): purpose for purpose in PURPOSE_CHOICES}
+    imported = already = 0
+    problems = []
+    entered_now = set()
 
-            if not patron_id:
+    def shown(moment):
+        return timezone.localtime(moment).strftime('%Y-%m-%d %H:%M')
+
+    for row_no, values in _sheet_rows(sheet, columns):
+        patron, problem = _sheet_patron(values)
+        if problem or patron is None:
+            problems.append('Row %d: %s' % (row_no, problem or 'no patron_id or card_number'))
+            continue
+
+        raw_entry = _cell_text(values.get('entry_time'))
+        entry = _sheet_datetime(values.get('entry_time')) if raw_entry else None
+        if entry is None:
+            problems.append('Row %d: %s' % (row_no, (
+                'entry_time "%s" is not a date and time. Use 2026-09-01 08:30' % raw_entry
+                if raw_entry else 'no entry_time')))
+            continue
+        if entry > now:
+            problems.append('Row %d: entry_time %s is in the future' % (row_no, shown(entry)))
+            continue
+
+        exit_at = None
+        raw_exit = _cell_text(values.get('exit_time'))
+        if raw_exit:
+            exit_at = _sheet_datetime(values.get('exit_time'))
+            if exit_at is None:
+                problems.append('Row %d: exit_time "%s" is not a date and time. '
+                                'Use 2026-09-01 10:00' % (row_no, raw_exit))
+                continue
+            if exit_at < entry:
+                problems.append('Row %d: exit_time is before entry_time' % row_no)
                 continue
 
-            patron = Patron.objects.filter(patron_id=patron_id).first()
-            if not patron:
-                skipped_count += 1
-                continue
+        # One person cannot arrive twice at the same moment.
+        key = (patron.pk, entry)
+        if key in entered_now or PatronLog.objects.filter(patron=patron, entry_time=entry).exists():
+            already += 1
+            continue
+        entered_now.add(key)
 
-            PatronLog.objects.create(
-                patron=patron,
-                school=school or None,
-                purpose_of_visit=purpose or None,
-                entry_time=_parse_dt(entry_time) or timezone.now(),
-                exit_time=_parse_dt(exit_time),
-            )
+        purpose = _cell_text(values.get('purpose_of_visit'))
+        PatronLog.objects.create(
+            patron=patron,
+            school=_cell_text(values.get('school')) or patron.school or None,
+            purpose_of_visit=purposes.get(_sheet_key(purpose), purpose)[:255] or None,
+            entry_time=entry,
+            exit_time=exit_at,
+        )
+        imported += 1
 
-            imported_count += 1
-        
-        return JsonResponse({
-            'success': True,
-            'message': f'Successfully imported {imported_count} logs. Skipped {skipped_count} invalid entries.'
-        })
-        
-    except Exception as exc:
-        return import_failed('Log import', exc)
+    notes = ['Skipped %d visit(s) already recorded for the same patron and entry time' % already
+             if already else '']
+    return JsonResponse({
+        'success': True,
+        'message': _import_message('Imported %d visit(s)' % imported, notes, problems),
+        'imported': imported,
+        'problems': len(problems),
+    })
 
 
 # Analytics
@@ -9759,6 +10241,7 @@ def _inventory_stats():
         'lost_count': in_stock.filter(condition='Lost').count(),
         'withdrawn_count': in_stock.filter(condition='Withdrawn').count(),
         'removed_count': qs.filter(status='Removed').count(),
+        'missing_count': qs.filter(status='Missing').count(),
         'uncatalogued': qs.filter(book__isnull=True, status='In Stock').count(),
     }
 
@@ -9941,6 +10424,99 @@ def _resolve_intake_book(item, source):
     return book, True
 
 
+def _copy_label(book):
+    """A copy's label is its book's own QR, so each book carries one code."""
+    if not book.qr_code:
+        book.qr_code = str(uuid4())
+        book.save(update_fields=['qr_code'])
+    if InventoryRecord.objects.filter(qr_label=book.qr_code).exists():
+        return str(uuid4())
+    return book.qr_code
+
+
+def _intake_book_for_copy(book, reuse, source, condition):
+    """The book record one received copy belongs to: the new title itself, or a record of its own."""
+    if reuse:
+        if condition == 'Damaged' and book.condition != 'Damaged':
+            book.condition = 'Damaged'
+            book.save(update_fields=['condition'])
+        return book
+    return Book.objects.create(
+        title=book.title,
+        author=book.author,
+        publication_year=book.publication_year,
+        genre=book.genre,
+        material_type=book.material_type,
+        call_number=book.call_number,
+        cover_img_url=book.cover_img_url,
+        condition='Damaged' if condition == 'Damaged' else 'Good',
+        status='Donated' if source == 'Donation' else 'Available',
+        qr_code=str(uuid4()),
+        shelf_level=None,
+    )
+
+
+def _add_existing_copy(book, request, reason='Catalogued from the existing collection'):
+    """Count a book catalogued in Manage Books into stock as the one copy it describes."""
+    if book.inventory_records.exists():
+        return None
+    condition = 'Lost' if book.status == 'Lost' else (
+        'Damaged' if book.condition == 'Damaged' else 'Good')
+    missing = book.status == 'Missing'
+    record = InventoryRecord.objects.create(
+        book=book,
+        source='Existing',
+        condition=condition,
+        status='Missing' if missing else 'In Stock',
+        qr_label=_copy_label(book),
+        missing_since=book.missing_since if missing else None,
+        received_by=User.objects.filter(admin_id=request.session.get('admin_id')).first(),
+    )
+    _record_movement(record, 'ExistingStock', request, reason=reason,
+                     source='Existing collection', after=condition)
+    return record
+
+
+WITHDRAWN_REASON = 'Withdrawn from circulation'
+
+
+def _match_book_to_copy(book, before, after, request):
+    """Keep the catalogue record in step with its copy's condition."""
+    if after == 'Lost':
+        book.status = 'Lost'
+        book.save(update_fields=['status'])
+        return
+    if after == 'Withdrawn':
+        if not book.is_archived:
+            book.archive(_actor_name(request), WITHDRAWN_REASON)
+        return
+
+    if before == 'Withdrawn' and book.is_archived and book.archive_reason == WITHDRAWN_REASON:
+        book.restore()
+    fields = []
+    still_owed = Transaction.objects.filter(book=book, transaction_type='Borrow',
+                                            return_date__isnull=True).exists()
+    if before == 'Lost' and book.status == 'Lost' and not still_owed:
+        book.status = 'Available'
+        fields.append('status')
+    wanted = 'Damaged' if after == 'Damaged' else ('Worn' if book.condition == 'Worn' else 'Good')
+    if book.condition != wanted:
+        book.condition = wanted
+        fields.append('condition')
+    if fields:
+        book.save(update_fields=fields)
+
+
+def _remove_books_from_stock(book_ids, request, reason):
+    """Deleted books leave stock too, so the counts in both places agree."""
+    for record in (InventoryRecord.objects.filter(book_id__in=book_ids)
+                   .exclude(status='Removed')):
+        record.status = 'Removed'
+        record.save(update_fields=['status'])
+        _record_movement(record, 'Deaccession', request, reason=reason,
+                         source='Manage Books', before=record.condition, after=record.condition)
+
+
 @admin_or_module_required('inventory')
 def receive_stock(request):
     """Intake a delivery: one source, one or many titles, many copies each."""
@@ -10025,9 +10601,12 @@ def receive_stock(request):
                     new_titles += 1
                 # All copies of a donated title share one donation row.
                 donation_row = None
-                for _ in range(quantity):
+                for copy_no in range(quantity):
+                    # Each copy is a book record of its own; a new title's first copy is the new record.
+                    copy_book = _intake_book_for_copy(book, was_created and copy_no == 0,
+                                                      source, condition)
                     record = InventoryRecord.objects.create(
-                        book=book,
+                        book=copy_book,
                         source=source,
                         supplier=supplier,
                         po_number=po_number,
@@ -10037,7 +10616,7 @@ def receive_stock(request):
                         donation=donation_row,
                         condition=condition,
                         status='In Stock',
-                        qr_label=str(uuid4()),   # copy-level label, not the catalogue QR
+                        qr_label=_copy_label(copy_book),
                         received_by=admin,
                         notes=notes or None,
                     )
@@ -10106,10 +10685,19 @@ def update_copy_condition(request):
         messages.warning(request, 'That copy is already recorded as ' + new_condition + '.')
         return redirect('inventory_management')
 
+    book = Book.all_objects.filter(book_id=record.book_id).first() if record.book_id else None
+    if (book is not None and new_condition in ('Lost', 'Withdrawn')
+            and book.status in ('Borrowed', 'Overdue')):
+        messages.error(request, '"' + record.display_title + '" is out on loan. Use Mark Lost on '
+                                'the loan, or return the book first.')
+        return redirect('inventory_management')
+
     record.condition = new_condition
     record.save(update_fields=['condition'])
     _record_movement(record, 'ConditionChange', request, reason=reason,
                      source='Staff inspection', before=before, after=new_condition)
+    if book is not None:
+        _match_book_to_copy(book, before, new_condition, request)
     log_admin_action(request, 'Update', 'Inventory', record.inventory_id,
                      '"' + record.display_title + '" condition ' + before + ' to ' + new_condition)
     messages.success(request, record.display_title + ': ' + before + ' to ' + new_condition + '.')
@@ -10129,7 +10717,14 @@ def update_inventory_record(request):
         return redirect('inventory_management')
 
     book_id = (request.POST.get('book_id') or '').strip()
-    record.book = Book.objects.filter(book_id=book_id).first() if book_id else None
+    book = Book.objects.filter(book_id=book_id).first() if book_id else None
+    # One book record describes one copy.
+    if book is not None and (InventoryRecord.objects.filter(book=book).exclude(status='Removed')
+                             .exclude(inventory_id=record.inventory_id).exists()):
+        messages.error(request, '"' + book.title + '" (book #' + str(book.book_id) + ') already '
+                                'has its own copy in inventory. Pick the book record for this copy.')
+        return redirect('inventory_management')
+    record.book = book
     record.title_hint = (request.POST.get('title_hint') or '').strip() or None
     source = (request.POST.get('source') or record.source).strip()
     if source in dict(InventoryRecord.SOURCE_CHOICES):
@@ -10179,11 +10774,18 @@ def deaccession_copy(request):
     if record.status == 'Removed':
         messages.warning(request, 'That copy has already been removed.')
         return redirect('inventory_management')
+    book = record.book
+    if book is not None and book.status in ('Borrowed', 'Overdue'):
+        messages.error(request, '"' + book.title + '" is out on loan. Return it before removing it.')
+        return redirect('inventory_management')
 
     record.status = 'Removed'
     record.save(update_fields=['status'])
     _record_movement(record, 'Deaccession', request, reason=reason, source=record.source,
                      before=record.condition, after=record.condition)
+    # The copy was never really held, so its book record goes too.
+    if book is not None and not book.is_archived:
+        book.archive(_actor_name(request), ('Deaccessioned: ' + reason)[:500])
     log_admin_action(request, 'Delete', 'Inventory', record.inventory_id,
                      'Deaccessioned "' + record.display_title + '" - ' + reason)
     messages.success(request, record.display_title + ' removed from inventory.')
@@ -10197,9 +10799,12 @@ def search_inventory_by_qr(request):
     if not qr_label:
         return JsonResponse({'success': False, 'error': 'QR label is required'})
 
-    record = (InventoryRecord.objects
-              .select_related('book', 'book__shelf_level', 'book__shelf_level__shelf')
-              .filter(qr_label=qr_label).first())
+    copies = (InventoryRecord.objects
+              .select_related('book', 'book__shelf_level', 'book__shelf_level__shelf'))
+    record = copies.filter(qr_label=qr_label).first()
+    if record is None:
+        # A copy labelled before labels and book QRs were one code.
+        record = copies.filter(book__qr_code=qr_label).exclude(status='Removed').first()
     if record is None:
         return JsonResponse({'success': False, 'error': 'No inventory copy matches that label'})
 
@@ -10306,6 +10911,7 @@ def stock_audit_file(request):
     now = timezone.now()
     today = timezone.localdate()
     flagged = recovered = 0
+    board = ('%s %s' % (level.shelf.name if level.shelf else '', level.label)).strip()
 
     with transaction.atomic():
         for book in Book.objects.filter(book_id__in=missing):
@@ -10318,6 +10924,19 @@ def stock_audit_file(request):
             book.status = 'Missing'
             book.save(update_fields=['status', 'audit_misses', 'missing_since'])
             flagged += 1
+            # The stock record follows, so Missing Stock and the movement history see it.
+            for record in book.inventory_records.exclude(status='Removed'):
+                record.audit_misses = (record.audit_misses or 0) + 1
+                fields = ['audit_misses']
+                if record.status != 'Missing':
+                    record.status = 'Missing'
+                    record.missing_since = record.missing_since or today
+                    fields += ['status', 'missing_since']
+                    _record_movement(record, 'AuditAdjustment', request,
+                                     reason='Not found in the shelf count of ' + board,
+                                     source='Stock audit', before=record.condition,
+                                     after=record.condition)
+                record.save(update_fields=fields)
 
         for book in Book.objects.filter(book_id__in=seen):
             fields = ['last_seen']
@@ -10330,6 +10949,15 @@ def stock_audit_file(request):
                 fields += ['status', 'missing_since', 'audit_misses']
                 recovered += 1
             book.save(update_fields=fields)
+            for record in book.inventory_records.filter(status='Missing'):
+                record.status = 'In Stock'
+                record.missing_since = None
+                record.audit_misses = 0
+                record.save(update_fields=['status', 'missing_since', 'audit_misses'])
+                _record_movement(record, 'Found', request,
+                                 reason='Found in the shelf count of ' + board,
+                                 source='Stock audit', before=record.condition,
+                                 after=record.condition)
 
         audit = StockAudit.objects.create(
             shelf=level.shelf,
@@ -10655,6 +11283,10 @@ def write_off_missing(request):
                                   if since else '')),
                 source='Write-off of missing stock',
                 before='Missing', after='Lost')
+            # The catalogue stops offering it.
+            if record.book_id:
+                (Book.all_objects.filter(book_id=record.book_id)
+                 .exclude(status__in=('Borrowed', 'Overdue')).update(status='Lost'))
             written_off += 1
 
     log_admin_action(request, 'Update', 'Inventory', None,

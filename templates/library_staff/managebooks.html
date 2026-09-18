@@ -1116,7 +1116,7 @@
             String(data.message || '').split('. ').forEach(function (part) {
                 const t = part.trim().replace(/\.$/, '');
                 if (!t) return;
-                const bad = /skip|could not/i.test(t);
+                const bad = /skip|could not|new shelf board/i.test(t);
                 html += importLine(bad ? 'fa-circle-exclamation' : 'fa-circle-check',
                                    bad ? 'text-amber-400' : 'text-emerald-400', esc(t) + '.');
             });

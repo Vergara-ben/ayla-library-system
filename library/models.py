@@ -1391,6 +1391,8 @@ class InventoryRecord(models.Model):
     SOURCE_CHOICES = [
         ('Purchase', 'Shipment'),
         ('Donation', 'Donation'),
+        # Already in the library, catalogued in Manage Books rather than received.
+        ('Existing', 'Existing collection'),
     ]
 
     CONDITION_CHOICES = [
@@ -1512,6 +1514,8 @@ class StockMovement(models.Model):
         ('Found', 'Found During Audit'),
         ('Correction', 'Correction'),
         ('Deaccession', 'Deaccession'),
+        # A book the library already owned, counted into stock when it was catalogued.
+        ('ExistingStock', 'Existing Stock'),
     ]
 
     movement_id = models.AutoField(primary_key=True)

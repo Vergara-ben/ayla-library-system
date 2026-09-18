@@ -170,7 +170,7 @@
                                         <input type="text" id="rcvGenre" class="field-input" placeholder="Fiction, Reference, ...">
                                     </div>
                                 </div>
-                                <p class="text-[10px] text-slate-500">A title that is not catalogued yet is added to the catalogue when this delivery is received. Matching ISBNs are reused, so a repeat delivery adds copies rather than a duplicate record.</p>
+                                <p class="text-[10px] text-slate-500">A title that is not catalogued yet is added to the catalogue when this delivery is received. Every copy gets its own book record and QR label under the matching title, so the catalogue and the stock count agree.</p>
                             </div>
 
                             <div class="grid grid-cols-2 gap-3">
@@ -258,7 +258,7 @@
                                 <p class="text-xs font-bold text-slate-200 truncate">{{ r.display_title }}</p>
                                 <p class="text-[10px] text-slate-500">
                                     Copy #{{ r.inventory_id }} ·
-                                    {% if r.source == 'Donation' %}Donation{% else %}Shipment{% endif %}
+                                    {{ r.get_source_display }}
                                     {% if r.source_detail %} · {{ r.source_detail }}{% endif %}
                                     {% if r.processing_stage %} · {{ r.processing_stage }}{% endif %}
                                 </p>

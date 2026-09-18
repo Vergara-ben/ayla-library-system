@@ -461,7 +461,7 @@
                                     </div>
                                 </td>
                                 <td class="py-4 px-6 text-slate-400">
-                                    {% if r.source == 'Donation' %}Donation{% else %}Shipment{% endif %}
+                                    {{ r.get_source_display }}
                                     {% if r.source_detail %}<span class="block text-[10px] text-slate-600">{{ r.source_detail }}</span>{% endif %}
                                     {% if r.processing_stage %}<span class="block text-[10px] text-purple-400">{{ r.processing_stage }}</span>{% endif %}
                                 </td>
@@ -613,7 +613,7 @@
                                 <input type="text" id="rcvGenre" class="field-input" placeholder="Fiction, Reference, ...">
                             </div>
                         </div>
-                        <p class="text-[10px] text-slate-500">A title that is not catalogued yet is added to the catalogue when this delivery is received. Matching ISBNs are reused, so a repeat delivery adds copies rather than a duplicate record.</p>
+                        <p class="text-[10px] text-slate-500">A title that is not catalogued yet is added to the catalogue when this delivery is received. Every copy gets its own book record and QR label under the matching title, so the catalogue and the stock count agree.</p>
                     </div>
 
                     <div class="grid grid-cols-2 gap-3">
@@ -930,16 +930,20 @@
             document.getElementById('editId').value = btn.dataset.id;
             document.getElementById('editBook').value = btn.dataset.book || '';
             document.getElementById('editHint').value = btn.dataset.hint || '';
-            const isDonation = (btn.dataset.source || 'Purchase') === 'Donation';
-            document.getElementById('editSource').value = btn.dataset.source || 'Purchase';
-            document.getElementById('editSourceLabel').value = isDonation ? 'Donation' : 'Shipment';
+            const source = btn.dataset.source || 'Purchase';
+            const isDonation = source === 'Donation';
+            // A copy from the existing collection has neither shipment nor donation details.
+            const isExisting = source === 'Existing';
+            document.getElementById('editSource').value = source;
+            document.getElementById('editSourceLabel').value =
+                isDonation ? 'Donation' : (isExisting ? 'Existing collection' : 'Shipment');
             document.getElementById('editSupplier').value = btn.dataset.supplier || '';
             document.getElementById('editPo').value = btn.dataset.po || '';
             document.getElementById('editDonor').value = btn.dataset.donor || '';
             if (btn.dataset.stage) document.getElementById('editStage').value = btn.dataset.stage;
             // Only the fields belonging to this copy's intake are shown.
-            document.getElementById('editShipmentWrap').classList.toggle('hidden', isDonation);
-            document.getElementById('editPoWrap').classList.toggle('hidden', isDonation);
+            document.getElementById('editShipmentWrap').classList.toggle('hidden', isDonation || isExisting);
+            document.getElementById('editPoWrap').classList.toggle('hidden', isDonation || isExisting);
             document.getElementById('editDonorWrap').classList.toggle('hidden', !isDonation);
             document.getElementById('editStageWrap').classList.toggle('hidden', !isDonation);
             document.getElementById('editNotes').value = btn.dataset.notes || '';
@@ -1110,6 +1114,14 @@
             const r = await fetch("{% url 'search_book_by_qr' %}?qr_code=" + encodeURIComponent(label),
                                   { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
             const d = await r.json();
+            // An older copy label still names a book on this board.
+            const owner = d.success && sheet.books.find(function (b) { return b.book_id === d.book.book_id; });
+            if (owner) {
+                sheet.marks[owner.book_id] = 'here';
+                renderSheet();
+                status.innerHTML = '<span class="text-emerald-400">Ticked ' + esc(owner.title) + '.</span>';
+                return;
+            }
             status.innerHTML = d.success
                 ? '<span class="text-amber-400">' + esc(d.book.title) + ' belongs on '
                   + esc(d.book.shelf_level) + ', not this board.</span>'
