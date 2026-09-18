@@ -123,6 +123,7 @@
     </style>
     <link rel="stylesheet" href="{% static 'css/admin-enhance.css' %}">
     <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
+    <link rel="stylesheet" href="{% static 'css/readability.css' %}">
     <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
     <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
     <script src="{% static 'js/ayla-dialog.js' %}"></script>
@@ -275,12 +276,12 @@
                 </div>
                 <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
                     <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">With Borrows</p>
-                    <p class="text-3xl font-bold text-amber-500/90 mt-2">{{ patrons_with_borrows }}</p>
+                    <p class="text-3xl font-bold text-amber-500 mt-2">{{ patrons_with_borrows }}</p>
                     <p class="text-[10px] text-slate-500 mt-1">Currently borrowing</p>
                 </div>
                 <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
                     <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">With Overdue</p>
-                    <p class="text-3xl font-bold text-rose-500/90 mt-2">{{ patrons_overdue }}</p>
+                    <p class="text-3xl font-bold text-rose-500 mt-2">{{ patrons_overdue }}</p>
                     <p class="text-[10px] text-slate-500 mt-1">Past due date</p>
                 </div>
             </div>
@@ -298,10 +299,10 @@
                             <a href="{% url 'admin_manage_patron' %}?view=visitors" class="px-3 py-1.5 rounded-md text-[11px] font-bold transition-colors {% if show_visitors %}bg-cyan-700/30 text-cyan-400 border border-cyan-800/50{% else %}text-slate-400 hover:text-slate-200{% endif %}">Visitors{% if visitor_count %} ({{ visitor_count }}){% endif %}</a>
                         </div>
                     <div class="flex items-center gap-2 self-end sm:self-auto">
-                        <a href="{% url 'download_patron_template' %}" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-emerald-500/90 text-[11px] font-semibold px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors">
+                        <a href="{% url 'download_patron_template' %}" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-emerald-500 text-[11px] font-semibold px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors">
                             <i class="fa-solid fa-file-excel"></i> Download Template
                         </a>
-                        <button onclick="document.getElementById('excelFileInput').click()" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-cyan-500/90 text-[11px] font-semibold px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors">
+                        <button onclick="document.getElementById('excelFileInput').click()" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-cyan-500 text-[11px] font-semibold px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors">
                             <i class="fa-solid fa-upload"></i> Import Excel
                         </button>
                         <input type="file" id="excelFileInput" accept=".xlsx" style="display: none;" onchange="uploadExcelFile(this)">
@@ -424,15 +425,15 @@
                                                 </button>
                                             </form>
                                             {% else %}
-                                            <a title="Library card" href="{% url 'patron_library_card' patron.patron_id %}" target="_blank" class="w-7 h-7 rounded border border-slate-800 text-emerald-500/80 hover:text-emerald-300 hover:bg-slate-800/40 transition-colors flex items-center justify-center"><i class="fa-solid fa-id-card text-[10px]"></i></a>
+                                            <a title="Library card" href="{% url 'patron_library_card' patron.patron_id %}" target="_blank" class="w-7 h-7 rounded border border-slate-800 text-emerald-500 hover:text-emerald-300 hover:bg-slate-800/40 transition-colors flex items-center justify-center"><i class="fa-solid fa-id-card text-[10px]"></i></a>
                                             <button onclick="openModal('edit', '{{ patron.patron_id }}')"
                                                     data-first="{{ patron.first_name }}"
                                                     data-middle="{{ patron.middle_name }}"
                                                     data-last="{{ patron.last_name }}"
                                                     class="w-7 h-7 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 transition-colors flex items-center justify-center" aria-label="Edit"><i class="fa-solid fa-pencil text-[10px]"></i></button>
-                                            <form method="post" action="{% url 'admin_delete_patron' patron.patron_id %}" class="inline-block" data-confirm="Archive {{ patron.fullname }}? They can no longer sign in or borrow. Their history is kept, and they can be restored from the Archive." data-confirm-title="Archive patron" data-confirm-label="Archive">
+                                            <form method="post" action="{% url 'admin_delete_patron' patron.patron_id %}" class="inline-block" data-confirm="Delete {{ patron.fullname }}? They can no longer sign in or borrow. Their history is kept." data-confirm-title="Delete patron" data-confirm-label="Delete">
                                                 {% csrf_token %}
-                                                <button type="submit" class="w-7 h-7 rounded border border-slate-800 text-rose-500/70 hover:text-rose-400 hover:bg-rose-950/20 transition-colors flex items-center justify-center" aria-label="Archive" title="Archive"><i class="fa-solid fa-box-archive text-[10px]"></i></button>
+                                                <button type="submit" class="w-7 h-7 rounded border border-slate-800 text-rose-500 hover:text-rose-400 hover:bg-rose-950/20 transition-colors flex items-center justify-center" aria-label="Delete" title="Delete"><i class="fa-solid fa-trash-can text-[10px]"></i></button>
                                             </form>
                                             {% endif %}
                                         </div>
@@ -810,7 +811,7 @@
             if (!rvPatron) return;
             const form = document.getElementById('reviewForm');
             if (action === 'reject') {
-                if (!await AylaDialog.confirm('Reject the registration of ' + rvPatron.name + '? Their application and uploaded ID will be kept in the Archive.')) return;
+                if (!await AylaDialog.confirm('Reject the registration of ' + rvPatron.name + '? Their application and uploaded ID are kept on record.')) return;
                 document.getElementById('rvReasonField').value = document.getElementById('rvReason').value.trim();
                 form.action = rvPatron.rejectUrl;
             } else {

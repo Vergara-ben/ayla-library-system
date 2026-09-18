@@ -30,13 +30,13 @@
         }
 
         /* Tree */
-        .tree { font-size: 13px; }
+        .tree { font-size: 15px; }
         /* Drawn bottom board at the bottom, the way the bay stands. */
         .elev { display: flex; flex-direction: column-reverse; gap: 3px; }
         .elev-row { display: flex; gap: 3px; align-items: stretch; }
         .elev-rownum {
             width: 46px; flex: none; display: flex; align-items: center;
-            font-size: 9px; font-weight: 700; letter-spacing: .04em;
+            font-size: 12px; font-weight: 700; letter-spacing: .04em;
             color: var(--text-muted); text-transform: uppercase;
         }
         .elev-cell {
@@ -44,7 +44,7 @@
             border: 1px solid var(--border-color);
             background: var(--bg-subtle);
             display: flex; align-items: center; justify-content: center;
-            font-size: 10px; font-weight: 600; color: var(--text-muted);
+            font-size: 12px; font-weight: 600; color: var(--text-muted);
             transition: all .12s;
         }
         .elev-cell:hover {
@@ -73,15 +73,15 @@
             background: var(--tint-accent);
             box-shadow: inset 3px 0 0 0 var(--accent);
         }
-        .chev { width: 14px; flex-shrink: 0; text-align: center; color: var(--text-muted); cursor: pointer; transition: transform .15s; font-size: 10px; }
+        .chev { width: 14px; flex-shrink: 0; text-align: center; color: var(--text-muted); cursor: pointer; transition: transform .15s; font-size: 12px; }
         .chev.open { transform: rotate(90deg); }
         .chev.leaf { visibility: hidden; cursor: default; }
         .tname { color: var(--text-primary); font-weight: 500; white-space: nowrap; }
-        .tmeta { color: var(--text-muted); font-size: 11px; white-space: nowrap; }
+        .tmeta { color: var(--text-muted); font-size: 13px; white-space: nowrap; }
         .tactions { display: none; align-items: center; gap: 4px; }
         .trow:hover .tactions { display: flex; }
         .spacer { margin-left: auto; }
-        .tbtn { width: 24px; height: 24px; border-radius: 6px; border: 1px solid var(--border-color); display: flex; align-items: center; justify-content: center; font-size: 10px; cursor: pointer; background: transparent; }
+        .tbtn { width: 24px; height: 24px; border-radius: 6px; border: 1px solid var(--border-color); display: flex; align-items: center; justify-content: center; font-size: 12px; cursor: pointer; background: transparent; }
         .tbtn.add { color: var(--accent); } .tbtn.add:hover { background: var(--tint-accent); }
         .tbtn.edit { color: var(--warning); } .tbtn.edit:hover { background: var(--tint-warning); }
         .tbtn.del { color: var(--danger); } .tbtn.del:hover { background: var(--tint-danger); }
@@ -98,6 +98,7 @@
     </style>
     <link rel="stylesheet" href="{% static 'css/admin-enhance.css' %}">
     <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
+    <link rel="stylesheet" href="{% static 'css/readability.css' %}">
     <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
     <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
     <script src="{% static 'js/ayla-dialog.js' %}"></script>

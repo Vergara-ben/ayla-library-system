@@ -530,7 +530,7 @@ def _stock_levels(start, end):
 
     # Group copies by title.
     groups = {}
-    totals = {'Good': 0, 'Damaged': 0, 'Lost': 0, 'Withdrawn': 0}
+    totals = {'Good': 0, 'Damaged': 0, 'Missing': 0, 'Lost': 0, 'Withdrawn': 0}
     removed = 0
     for r in records:
         if r.status == 'Removed':
@@ -541,11 +541,13 @@ def _stock_levels(start, end):
             'title': key,
             'location': r.shelf_location or 'Not shelved',
             'catalogued': r.book is not None,
-            'Good': 0, 'Damaged': 0, 'Lost': 0, 'Withdrawn': 0,
+            'Good': 0, 'Damaged': 0, 'Missing': 0, 'Lost': 0, 'Withdrawn': 0,
         })
-        if r.condition in g:
-            g[r.condition] += 1
-            totals[r.condition] += 1
+        # A copy not found in a stock count is not on hand, whatever its condition.
+        bucket = 'Missing' if r.status == 'Missing' else r.condition
+        if bucket in g:
+            g[bucket] += 1
+            totals[bucket] += 1
 
     rows = []
     for g in groups.values():
@@ -554,7 +556,7 @@ def _stock_levels(start, end):
             g['title'],
             'Yes' if g['catalogued'] else 'No',
             g['location'],
-            g['Good'], g['Damaged'], g['Lost'], g['Withdrawn'], on_hand,
+            g['Good'], g['Damaged'], g['Missing'], g['Lost'], g['Withdrawn'], on_hand,
         ])
 
     return {
@@ -562,29 +564,30 @@ def _stock_levels(start, end):
         'title': 'Stock Levels Report',
         'subtitle': 'Physical copies held, by title and condition',
         'columns': ['Title', 'Catalogued', 'Shelf Location',
-                    'Good', 'Damaged', 'Lost', 'Withdrawn', 'On Hand'],
+                    'Good', 'Damaged', 'Missing', 'Lost', 'Withdrawn', 'On Hand'],
         'rows': rows,
         'summary': [
             ('Titles Held', len(rows)),
             ('Copies On Hand', totals['Good'] + totals['Damaged']),
             ('Good', totals['Good']),
             ('Damaged', totals['Damaged']),
+            ('Missing', totals['Missing']),
             ('Lost', totals['Lost']),
             ('Withdrawn', totals['Withdrawn']),
             ('Deaccessioned', removed),
         ],
         'chart': _chart(
-            [(k, totals[k]) for k in ('Good', 'Damaged', 'Lost', 'Withdrawn')],
+            [(k, totals[k]) for k in ('Good', 'Damaged', 'Missing', 'Lost', 'Withdrawn')],
             kind='bar',
-            title='Copies by condition',
+            title='Copies by state',
             note='The state of the physical collection. Largest group marked.',
             empty_note='No copies are on record yet.',
             highlight=max(totals, key=lambda k: totals[k]) if any(totals.values()) else None,
-            axis_note='Condition · vertical axis is number of physical copies',
+            axis_note='Condition, or Missing after a stock count · vertical axis is number of physical copies',
         ),
         'breakdown': {
             'By condition': [(k, str(totals[k]))
-                             for k in ('Good', 'Damaged', 'Lost', 'Withdrawn')],
+                             for k in ('Good', 'Damaged', 'Missing', 'Lost', 'Withdrawn')],
         },
     }
 

@@ -29,11 +29,11 @@
         .log-table { width: 100%; border-collapse: collapse; }
         .log-table th {
             text-align: left;
-            font-size: 10px;
+            font-size: 12px;
             letter-spacing: .08em;
             text-transform: uppercase;
             font-weight: 700;
-            color: var(--text-muted, #64748b);
+            color: var(--text-muted);
             padding: 10px 14px;
             border-bottom: 1px solid var(--border-color);
             white-space: nowrap;
@@ -41,15 +41,15 @@
         .log-table td {
             padding: 11px 14px;
             border-bottom: 1px solid var(--border-color);
-            font-size: 13px;
+            font-size: 15px;
             vertical-align: top;
         }
         .log-table tr:last-child td { border-bottom: none; }
-        .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+        .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 14px; }
 
         .role-pill {
             display: inline-block;
-            font-size: 10px;
+            font-size: 12px;
             font-weight: 700;
             letter-spacing: .05em;
             padding: 2px 8px;
@@ -57,17 +57,17 @@
             border: 1px solid transparent;
             white-space: nowrap;
         }
-        .role-Admin  { background: rgba(6,182,212,.12);  color: #22d3ee; border-color: rgba(14,116,144,.5); }
-        .role-Staff  { background: rgba(139,92,246,.12); color: #a78bfa; border-color: rgba(109,40,217,.5); }
-        .role-Patron { background: rgba(16,185,129,.12); color: #34d399; border-color: rgba(5,150,105,.5); }
-        .role-System { background: rgba(100,116,139,.15); color: #94a3b8; border-color: rgba(71,85,105,.5); }
+        .role-Admin  { background: rgba(6,182,212,.12);  color: rgb(var(--tw-cyan-400)); border-color: rgba(14,116,144,.5); }
+        .role-Staff  { background: rgba(139,92,246,.12); color: rgb(var(--tw-violet-400)); border-color: rgba(109,40,217,.5); }
+        .role-Patron { background: rgba(16,185,129,.12); color: rgb(var(--tw-emerald-400)); border-color: rgba(5,150,105,.5); }
+        .role-System { background: rgba(100,116,139,.15); color: var(--text-muted); border-color: rgba(71,85,105,.5); }
 
         .filter-field {
             background-color: var(--bg-input);
             border: 1px solid var(--border-color);
             border-radius: 8px;
             padding: 8px 12px;
-            font-size: 13px;
+            font-size: 15px;
             color: var(--text-primary);
         }
         .filter-field:focus { outline: none; border-color: #0e7490; }
@@ -86,6 +86,7 @@
     </style>
     <link rel="stylesheet" href="{% static 'css/admin-enhance.css' %}">
     <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
+    <link rel="stylesheet" href="{% static 'css/readability.css' %}">
     <script src="{% static 'js/ayla-dialog.js' %}"></script>
 </head>
 <body class="flex h-screen overflow-hidden">

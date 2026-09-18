@@ -80,7 +80,7 @@
 
         .brand-text span {
             display: block;
-            font-size: 10px;
+            font-size: 12px;
             color: var(--text-muted);
             letter-spacing: 1px;
             margin-top: 2px;
@@ -92,7 +92,7 @@
         }
 
         .menu-label {
-            font-size: 10px;
+            font-size: 12px;
             font-weight: 700;
             text-transform: uppercase;
             letter-spacing: 1.5px;
@@ -112,7 +112,7 @@
             padding: 12px 14px;
             color: var(--text-muted);
             text-decoration: none;
-            font-size: 14px;
+            font-size: 15px;
             font-weight: 500;
             border-radius: 8px;
             transition: all 0.2s ease;
@@ -144,7 +144,7 @@
         .badge-count {
             background-color: var(--danger);
             color: white;
-            font-size: 10px;
+            font-size: 12px;
             font-weight: 700;
             padding: 2px 8px;
             border-radius: 10px;
@@ -169,7 +169,7 @@
         }
 
         .page-title {
-            font-size: 14px;
+            font-size: 15px;
             font-weight: 700;
             text-transform: uppercase;
             letter-spacing: 1.5px;
@@ -185,7 +185,7 @@
             background-color: var(--tint-accent);
             border: 1px solid var(--accent-border);
             color: var(--accent-violet);
-            font-size: 10px;
+            font-size: 12px;
             font-weight: 700;
             padding: 4px 10px;
             border-radius: 4px;
@@ -211,7 +211,7 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 11px;
+            font-size: 13px;
             font-weight: 700;
             color: var(--accent);
             border: 1px solid var(--accent-border);
@@ -275,13 +275,13 @@
         .leaflet-popup-content h3 {
             color: var(--accent-violet);
             margin: 0 0 8px 0;
-            font-size: 14px;
+            font-size: 15px;
         }
 
         .leaflet-popup-content p {
             color: var(--text-muted);
             margin: 0;
-            font-size: 12px;
+            font-size: 14px;
         }
 
         /* Filter controls styling */
@@ -307,7 +307,7 @@
 
         .filter-item label {
             color: var(--text-main);
-            font-size: 13px;
+            font-size: 15px;
             cursor: pointer;
             display: flex;
             align-items: center;
@@ -331,7 +331,7 @@
         }
 
         .floor-switch .fs-cap {
-            font-size: 9px;
+            font-size: 12px;
             font-weight: 700;
             letter-spacing: .1em;
             text-transform: uppercase;
@@ -348,7 +348,7 @@
             background: transparent;
             color: var(--text-main);
             font-family: inherit;
-            font-size: 13px;
+            font-size: 15px;
             font-weight: 700;
             cursor: pointer;
             transition: background-color .15s ease, color .15s ease;
@@ -379,7 +379,7 @@
             border-radius: 8px;
             background-color: var(--bg-dark);
             border: 1px solid var(--border-color);
-            font-size: 12px;
+            font-size: 14px;
             font-weight: 600;
             color: var(--text-main);
         }
@@ -393,7 +393,7 @@
             background: transparent;
             color: var(--accent-violet);
             font-family: inherit;
-            font-size: 12px;
+            font-size: 14px;
             font-weight: 700;
             cursor: pointer;
         }
@@ -419,7 +419,7 @@
         }
 
         .map-error p {
-            font-size: 13px;
+            font-size: 15px;
             line-height: 1.6;
             margin-bottom: 16px;
         }
@@ -449,7 +449,7 @@
         }
 
         .panel-meta {
-            font-size: 11px;
+            font-size: 13px;
             font-weight: 700;
             color: var(--warning);
             text-transform: uppercase;
@@ -469,7 +469,7 @@
         }
 
         .panel-sub-label {
-            font-size: 12px;
+            font-size: 14px;
             color: var(--text-muted);
             margin-bottom: 24px;
         }
@@ -498,7 +498,7 @@
 
         /* --- LOCATING PANEL --- */
         .step-text {
-            font-size: 13px;
+            font-size: 15px;
             color: var(--text-muted);
             line-height: 1.5;
         }
@@ -525,6 +525,7 @@
     </style>
     <link rel="stylesheet" href="{% static 'css/admin-enhance.css' %}">
     <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
+    <link rel="stylesheet" href="{% static 'css/readability.css' %}">
     <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
     <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
     <script src="{% static 'js/ayla-dialog.js' %}"></script>
@@ -647,11 +648,11 @@
                         border: 1px solid var(--border-color); border-radius: 8px;
                         font-family: inherit; outline: none;
                     }
-                    .mf-input { padding: 9px 11px; font-size: 13px; margin-top: 4px; }
+                    .mf-input { padding: 9px 11px; font-size: 15px; margin-top: 4px; }
                     .mf-input:focus, .mf-select:focus { border-color: var(--accent); }
                     .mf-filters { display: grid; grid-template-columns: 1fr; gap: 6px; margin-top: 6px; }
-                    .mf-select { padding: 7px 9px; font-size: 12px; }
-                    .mf-count { font-size: 11px; color: var(--text-muted); margin: 8px 2px 4px; min-height: 14px; }
+                    .mf-select { padding: 7px 9px; font-size: 14px; }
+                    .mf-count { font-size: 13px; color: var(--text-muted); margin: 8px 2px 4px; min-height: 14px; }
                     .mf-results { display: flex; flex-direction: column; gap: 6px; max-height: 360px; overflow-y: auto; }
                     .mf-item {
                         display: block; text-align: left; text-decoration: none; color: var(--text-primary);
@@ -660,19 +661,19 @@
                     }
                     a.mf-item:hover { border-color: var(--accent); }
                     .mf-top { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; }
-                    .mf-title { font-size: 12px; font-weight: 700; line-height: 1.3; }
-                    .mf-sub { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
-                    .mf-where { font-size: 11px; margin-top: 5px; color: var(--text-muted); }
+                    .mf-title { font-size: 14px; font-weight: 700; line-height: 1.3; }
+                    .mf-sub { font-size: 13px; color: var(--text-muted); margin-top: 2px; }
+                    .mf-where { font-size: 13px; margin-top: 5px; color: var(--text-muted); }
                     .mf-where.go { color: var(--accent); font-weight: 600; }
-                    .mf-badge { flex-shrink: 0; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 5px; white-space: nowrap; }
+                    .mf-badge { flex-shrink: 0; font-size: 12px; font-weight: 700; padding: 2px 6px; border-radius: 5px; white-space: nowrap; }
                     .mf-badge.in { background: var(--tint-success); color: var(--success); }
                     .mf-badge.out { background: var(--tint-warning); color: var(--warning); }
                     .mf-more {
                         width: 100%; margin-top: 6px; padding: 8px; border-radius: 8px; cursor: pointer;
                         border: 1px solid var(--border-color); background: var(--bg-subtle);
-                        color: var(--text-primary); font-size: 12px; font-weight: 600;
+                        color: var(--text-primary); font-size: 14px; font-weight: 600;
                     }
-                    .mf-empty { font-size: 12px; color: var(--text-muted); text-align: center; padding: 14px 6px; }
+                    .mf-empty { font-size: 14px; color: var(--text-muted); text-align: center; padding: 14px 6px; }
                 </style>
 
             </div>

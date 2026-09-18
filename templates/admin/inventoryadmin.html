@@ -36,13 +36,13 @@
             main { padding: 1rem; }
         }
 
-        .field-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); margin-bottom: 6px; display: block; }
+        .field-label { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); margin-bottom: 6px; display: block; }
         .field-input {
             width: 100%; background: var(--bg-input); border: 1px solid var(--border-modal);
-            border-radius: 8px; padding: 9px 12px; font-size: 13px; color: var(--text-primary); outline: none;
+            border-radius: 8px; padding: 9px 12px; font-size: 15px; color: var(--text-primary); outline: none;
         }
         .field-input:focus { border-color: var(--accent-strong); }
-        .tab-btn { padding: 8px 16px; border-radius: 8px; font-size: 12px; font-weight: 700; }
+        .tab-btn { padding: 8px 16px; border-radius: 8px; font-size: 14px; font-weight: 700; }
         .tab-btn.active { background: var(--tint-accent); color: var(--accent); border: 1px solid var(--accent-border); }
         .tab-btn:not(.active) { color: var(--text-muted); border: 1px solid transparent; }
         .tab-btn:not(.active):hover { color: var(--text-primary); background: var(--bg-subtle); }
@@ -64,33 +64,34 @@
         .arow.locked { cursor: default; opacity: .55; }
         .arow.locked:hover { background: transparent; }
         .apos {
-            width: 30px; flex: 0 0 auto; text-align: right; font-size: 10px;
+            width: 30px; flex: 0 0 auto; text-align: right; font-size: 12px;
             font-variant-numeric: tabular-nums; color: var(--text-muted);
         }
         .atick {
             width: 20px; height: 20px; flex: 0 0 auto; border-radius: 6px;
             border: 1px solid var(--border-color); display: flex;
-            align-items: center; justify-content: center; font-size: 10px;
+            align-items: center; justify-content: center; font-size: 12px;
         }
-        .arow.here .atick { border-color: #10b981; color: #10b981; }
+        .arow.here .atick { border-color: rgb(var(--tw-emerald-500)); color: rgb(var(--tw-emerald-500)); }
         .arow.bulk .atick { border-color: rgba(16, 185, 129, .45); color: rgba(16, 185, 129, .55); }
         .arow.gone .atick { border-color: #e11d48; color: #e11d48; }
         .atitle {
-            flex: 1 1 auto; min-width: 0; font-size: 12px; color: var(--text-primary);
+            flex: 1 1 auto; min-width: 0; font-size: 14px; color: var(--text-primary);
             white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
         }
-        .ameta { font-size: 10px; color: var(--text-muted); flex: 0 0 auto; }
-        .anote { font-size: 10px; flex: 0 0 auto; }
+        .ameta { font-size: 12px; color: var(--text-muted); flex: 0 0 auto; }
+        .anote { font-size: 12px; flex: 0 0 auto; }
         .agone {
             width: 22px; height: 22px; flex: 0 0 auto; border-radius: 6px;
             border: 1px solid var(--border-color); background: transparent;
-            color: var(--text-muted); font-size: 10px; cursor: pointer;
+            color: var(--text-muted); font-size: 12px; cursor: pointer;
         }
         .agone:hover { color: #e11d48; border-color: #e11d48; background: rgba(225,29,72,.1); }
         @media (max-width: 640px) { .ameta, .anote { display: none; } }
     </style>
     <link rel="stylesheet" href="{% static 'css/admin-enhance.css' %}">
     <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
+    <link rel="stylesheet" href="{% static 'css/readability.css' %}">
     <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
     <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
     <script src="{% static 'js/ayla-dialog.js' %}"></script>
@@ -166,10 +167,10 @@
                     </div>
                     <div class="flex items-center gap-2">
                         {# Bulk donation intake. #}
-                        <a href="{% url 'download_donation_template' %}" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-emerald-500/90 text-[11px] font-semibold px-3 py-2 rounded-lg flex items-center gap-2 transition-colors" title="Spreadsheet layout for a bulk donation">
+                        <a href="{% url 'download_donation_template' %}" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-emerald-500 text-[11px] font-semibold px-3 py-2 rounded-lg flex items-center gap-2 transition-colors" title="Spreadsheet layout for a bulk donation">
                             <i class="fa-solid fa-file-excel"></i> Donation Template
                         </a>
-                        <button type="button" onclick="document.getElementById('donationExcelInput').click()" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-cyan-500/90 text-[11px] font-semibold px-3 py-2 rounded-lg flex items-center gap-2 transition-colors" title="Receive many donated titles at once">
+                        <button type="button" onclick="document.getElementById('donationExcelInput').click()" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-cyan-500 text-[11px] font-semibold px-3 py-2 rounded-lg flex items-center gap-2 transition-colors" title="Receive many donated titles at once">
                             <i class="fa-solid fa-upload"></i> Import Donations
                         </button>
                         <input type="file" id="donationExcelInput" accept=".xlsx" style="display:none" onchange="uploadDonationExcel(this)">
@@ -460,7 +461,7 @@
                                     </div>
                                 </td>
                                 <td class="py-4 px-6 text-slate-400">
-                                    {% if r.source == 'Donation' %}Donation{% else %}Shipment{% endif %}
+                                    {{ r.get_source_display }}
                                     {% if r.source_detail %}<span class="block text-[10px] text-slate-600">{{ r.source_detail }}</span>{% endif %}
                                     {% if r.processing_stage %}<span class="block text-[10px] text-purple-400">{{ r.processing_stage }}</span>{% endif %}
                                 </td>
@@ -612,7 +613,7 @@
                                 <input type="text" id="rcvGenre" class="field-input" placeholder="Fiction, Reference, ...">
                             </div>
                         </div>
-                        <p class="text-[10px] text-slate-500">A title that is not catalogued yet is added to the catalogue when this delivery is received. Matching ISBNs are reused, so a repeat delivery adds copies rather than a duplicate record.</p>
+                        <p class="text-[10px] text-slate-500">A title that is not catalogued yet is added to the catalogue when this delivery is received. Every copy gets its own book record and QR label under the matching title, so the catalogue and the stock count agree.</p>
                     </div>
 
                     <div class="grid grid-cols-2 gap-3">
@@ -929,16 +930,20 @@
             document.getElementById('editId').value = btn.dataset.id;
             document.getElementById('editBook').value = btn.dataset.book || '';
             document.getElementById('editHint').value = btn.dataset.hint || '';
-            const isDonation = (btn.dataset.source || 'Purchase') === 'Donation';
-            document.getElementById('editSource').value = btn.dataset.source || 'Purchase';
-            document.getElementById('editSourceLabel').value = isDonation ? 'Donation' : 'Shipment';
+            const source = btn.dataset.source || 'Purchase';
+            const isDonation = source === 'Donation';
+            // A copy from the existing collection has neither shipment nor donation details.
+            const isExisting = source === 'Existing';
+            document.getElementById('editSource').value = source;
+            document.getElementById('editSourceLabel').value =
+                isDonation ? 'Donation' : (isExisting ? 'Existing collection' : 'Shipment');
             document.getElementById('editSupplier').value = btn.dataset.supplier || '';
             document.getElementById('editPo').value = btn.dataset.po || '';
             document.getElementById('editDonor').value = btn.dataset.donor || '';
             if (btn.dataset.stage) document.getElementById('editStage').value = btn.dataset.stage;
             // Only the fields belonging to this copy's intake are shown.
-            document.getElementById('editShipmentWrap').classList.toggle('hidden', isDonation);
-            document.getElementById('editPoWrap').classList.toggle('hidden', isDonation);
+            document.getElementById('editShipmentWrap').classList.toggle('hidden', isDonation || isExisting);
+            document.getElementById('editPoWrap').classList.toggle('hidden', isDonation || isExisting);
             document.getElementById('editDonorWrap').classList.toggle('hidden', !isDonation);
             document.getElementById('editStageWrap').classList.toggle('hidden', !isDonation);
             document.getElementById('editNotes').value = btn.dataset.notes || '';
@@ -1109,6 +1114,14 @@
             const r = await fetch("{% url 'search_book_by_qr' %}?qr_code=" + encodeURIComponent(label),
                                   { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
             const d = await r.json();
+            // An older copy label still names a book on this board.
+            const owner = d.success && sheet.books.find(function (b) { return b.book_id === d.book.book_id; });
+            if (owner) {
+                sheet.marks[owner.book_id] = 'here';
+                renderSheet();
+                status.innerHTML = '<span class="text-emerald-400">Ticked ' + esc(owner.title) + '.</span>';
+                return;
+            }
             status.innerHTML = d.success
                 ? '<span class="text-amber-400">' + esc(d.book.title) + ' belongs on '
                   + esc(d.book.shelf_level) + ', not this board.</span>'

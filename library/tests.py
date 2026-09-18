@@ -14,7 +14,8 @@ from django.utils import timezone
 
 from .auth_utils import hash_password, password_length_error
 from .models import (
-    BLEBeacon, Book, BorrowingRule, Door, FloorPlan, LoginAttempt, Obstacle, Patron, Room,
+    Announcement, BLEBeacon, Book, BorrowingRule, Donation, Door, FloorPlan, LoginAttempt,
+    Obstacle, Patron, Room,
     InventoryRecord, Obstacle, PatronLog, Shelf, ShelfLevel, Stairway, SystemLog,
     Transaction, User,
     Waypoint,
@@ -148,7 +149,7 @@ class PatronCredentialStorageTests(TestCase):
         self.assertEqual(r['Content-Type'], 'image/png')
         self.assertEqual(r.content, self.PNG)
 
-    def test_rejecting_the_application_archives_it_with_the_id(self):
+    def test_rejecting_the_application_keeps_it_with_the_id(self):
         from .models import PatronCredential
         p = self._register()
         _signed_in(_admin(modules='patrons')).post('/admin-portal/reject-patron/%d/' % p.patron_id)
@@ -157,8 +158,8 @@ class PatronCredentialStorageTests(TestCase):
         self.assertTrue(PatronCredential.objects.exists())
 
 
-class ArchiveTests(TestCase):
-    """Deleting archives: the row stays in the database, hidden, and can be restored."""
+class DeletedRecordsStayTests(TestCase):
+    """Deleting hides a record from the system; the row stays in the database."""
 
     def setUp(self):
         self.user = _admin(modules='patrons,books,donations,logs')
@@ -167,44 +168,38 @@ class ArchiveTests(TestCase):
                                             email='ana@example.invalid', patron_type='Student')
         self.book = Book.objects.create(title='Noli Me Tangere', author='Rizal', genre='FIC')
 
-    def _archive_page(self, kind, q=''):
-        return self.client.get('/admin-portal/archive/', {'kind': kind, 'q': q})
-
     def _returned_loan(self):
         return Transaction.objects.create(book=self.book, patron=self.patron,
                                           transaction_type='Borrow',
                                           return_date=timezone.localdate())
 
-    def test_archiving_a_patron_keeps_the_row_and_the_history(self):
+    def test_deleting_a_patron_keeps_the_row_and_the_history(self):
         tx = self._returned_loan()
         self.client.post('/admin-portal/delete-patron/%d/' % self.patron.patron_id)
         self.assertFalse(Patron.objects.filter(pk=self.patron.pk).exists())
-        archived = Patron.all_objects.get(pk=self.patron.pk)
-        self.assertIsNotNone(archived.archived_at)
-        self.assertEqual(archived.archived_by, 'Smoke Admin')
+        kept = Patron.all_objects.get(pk=self.patron.pk)
+        self.assertIsNotNone(kept.archived_at)
+        self.assertEqual(kept.archived_by, 'Smoke Admin')
         self.assertTrue(Transaction.objects.filter(pk=tx.pk).exists())
-        self.assertContains(self._archive_page('patrons'), 'Reyes')
+        self.assertTrue(SystemLog.objects.filter(action='Delete', entity_type='Patron').exists())
 
-    def test_a_patron_with_books_out_is_not_archived(self):
+    def test_a_patron_with_books_out_is_not_deleted(self):
         Transaction.objects.create(book=self.book, patron=self.patron, transaction_type='Borrow')
         self.client.post('/admin-portal/delete-patron/%d/' % self.patron.patron_id)
         self.assertTrue(Patron.objects.filter(pk=self.patron.pk).exists())
 
-    def test_a_borrowed_book_is_not_archived(self):
+    def test_a_borrowed_book_is_not_deleted(self):
         self.book.status = 'Borrowed'
         self.book.save()
         self.client.post('/admin-portal/delete-book/%d/' % self.book.book_id)
         self.assertTrue(Book.objects.filter(pk=self.book.pk).exists())
 
-    def test_restoring_puts_the_record_back(self):
+    def test_a_deleted_book_leaves_the_catalogue_but_not_the_database(self):
         self.client.post('/admin-portal/delete-book/%d/' % self.book.book_id)
         self.assertFalse(Book.objects.filter(pk=self.book.pk).exists())
-        self.assertContains(self._archive_page('books'), 'Noli Me Tangere')
-        self.client.post('/admin-portal/archive/restore/', {'kind': 'books', 'id': self.book.book_id})
-        self.assertIsNone(Book.objects.get(pk=self.book.pk).archived_at)
-        self.assertTrue(SystemLog.objects.filter(action='Restore', entity_type='Book').exists())
+        self.assertTrue(Book.all_objects.filter(pk=self.book.pk, archived_at__isnull=False).exists())
 
-    def test_a_signed_in_patron_who_is_archived_is_signed_out(self):
+    def test_a_signed_in_patron_who_is_deleted_is_signed_out(self):
         c = Client()
         s = c.session
         s['patron_id'] = self.patron.patron_id
@@ -214,63 +209,41 @@ class ArchiveTests(TestCase):
         self.assertEqual(r.status_code, 302)
         self.assertIn('/patron/login/', r['Location'])
 
-    def test_a_book_with_history_can_only_stay_archived(self):
-        self._returned_loan()
-        self.book.archive('Smoke Admin')
-        self.client.post('/admin-portal/archive/erase/', {'kind': 'books', 'id': self.book.book_id})
-        self.assertTrue(Book.all_objects.filter(pk=self.book.pk).exists())
-        self.assertEqual(Transaction.objects.count(), 1)
-
-    def test_a_record_nothing_depends_on_can_be_deleted_for_good(self):
-        self.book.archive('Smoke Admin')
-        self.client.post('/admin-portal/archive/erase/', {'kind': 'books', 'id': self.book.book_id})
-        self.assertFalse(Book.all_objects.filter(pk=self.book.pk).exists())
-
-    def test_a_record_that_is_not_archived_cannot_be_erased(self):
-        self.client.post('/admin-portal/archive/erase/', {'kind': 'books', 'id': self.book.book_id})
-        self.assertTrue(Book.objects.filter(pk=self.book.pk).exists())
-
-    def test_the_archive_is_for_the_administrator_only(self):
-        staff = User.objects.create(
-            fullname='Desk Staff', email='desk-archive@example.invalid',
-            password_hash=hash_password('SmokeTest123'), role='Staff',
-            account_status='Active', modules='books')
-        r = _signed_in(staff).get('/admin-portal/archive/')
-        self.assertNotEqual(r.status_code, 200)
-
-    def test_a_visit_log_is_archived_and_left_out_of_counts(self):
+    def test_a_visit_log_is_left_out_of_counts(self):
         log = PatronLog.objects.create(patron=self.patron)
         self.client.post('/admin-portal/delete-log/', {'log_id': log.log_id})
         self.assertEqual(PatronLog.objects.count(), 0)
         self.assertEqual(PatronLog.all_objects.count(), 1)
-        self.assertContains(self._archive_page('logs'), 'Reyes')
 
-    def test_archiving_a_floor_plan_takes_it_out_of_service(self):
+    def test_deleting_a_floor_plan_takes_it_out_of_service(self):
         plan = FloorPlan.objects.create(name='Mezzanine', floor_number=2, is_active=True)
         self.client.post('/admin-portal/delete-floorplan/', {'floorplan_id': plan.pk})
-        archived = FloorPlan.all_objects.get(pk=plan.pk)
-        self.assertIsNotNone(archived.archived_at)
-        self.assertFalse(archived.is_active)
-        self.assertContains(self._archive_page('floorplans'), 'Mezzanine')
+        kept = FloorPlan.all_objects.get(pk=plan.pk)
+        self.assertIsNotNone(kept.archived_at)
+        self.assertFalse(kept.is_active)
 
-    def test_a_rejected_registration_can_be_restored_to_pending(self):
+    def test_a_rejected_registration_stays_on_record(self):
         pending = Patron.objects.create(
             first_name='New', last_name='Applicant', email='new@example.invalid',
             patron_type='Student', account_status='Pending', otp_verified=True)
         self.client.post('/admin-portal/reject-patron/%d/' % pending.patron_id,
                          {'reason': 'Blurry ID'})
+        self.assertFalse(Patron.objects.filter(pk=pending.pk).exists())
         self.assertIn('Blurry ID', Patron.all_objects.get(pk=pending.pk).archive_reason)
-        self.assertContains(self._archive_page('registrations'), 'Applicant')
-        self.client.post('/admin-portal/archive/restore/',
-                         {'kind': 'registrations', 'id': pending.pk})
-        self.assertTrue(Patron.objects.filter(pk=pending.pk, account_status='Pending').exists())
 
-    def test_an_archived_email_is_still_taken(self):
+    def test_a_deleted_patrons_email_is_still_taken(self):
         self.patron.archive('Smoke Admin')
-        r = self.client.post('/admin-portal/add-patron/', {
+        self.client.post('/admin-portal/add-patron/', {
             'first_name': 'Other', 'last_name': 'Person', 'email': 'ana@example.invalid',
             'patron_type': 'Student', 'password': 'SmokeTest123', 'id_confirmed': 'on'})
         self.assertEqual(Patron.all_objects.filter(email='ana@example.invalid').count(), 1)
+
+    def test_there_is_no_archive_page(self):
+        for url in ('/admin-portal/archive/', '/admin-portal/archive/restore/',
+                    '/admin-portal/archive/erase/'):
+            self.assertEqual(self.client.get(url).status_code, 404, url)
+        html = self.client.get('/admin-portal/dashboard/').content.decode()
+        self.assertNotIn('Archive', html)
 
 
 class FailedSignInKeepsEmailTests(TestCase):
@@ -1268,6 +1241,16 @@ class QRLabelSheetTests(TestCase):
 
         sheet = self._sheet(data['created_ids'])
         self.assertTrue(sheet.content.startswith(b'%PDF'))
+
+
+def _template_filled_from_guide(client, url):
+    """A downloaded template's headers, plus one row of the examples on its guide sheet."""
+    import openpyxl
+    wb = openpyxl.load_workbook(io.BytesIO(client.get(url).content))
+    headers = [cell.value for cell in wb.worksheets[0][1]]
+    examples = {row[0]: row[3] for row in wb['How to fill in'].iter_rows(min_row=2, values_only=True)
+                if row and row[0]}
+    return [headers, [examples.get(header) for header in headers]]
 
 
 class EveryAdminEndpointIsGuardedTests(TestCase):
@@ -3571,6 +3554,35 @@ class PasswordToggleTests(TestCase):
         self.assertContains(r, 'js/password-toggle.js')
 
 
+class ReadabilityTests(TestCase):
+    """The librarians' pages use the larger, higher-contrast text."""
+
+    def test_every_admin_staff_and_desk_page_loads_the_readability_sheet(self):
+        missing = []
+        for folder in ('templates/admin', 'templates/library_staff', 'templates/desk'):
+            for name in os.listdir(folder):
+                path = os.path.join(folder, name)
+                with open(path, encoding='utf-8') as f:
+                    html = f.read()
+                # Full pages only; the library card is printed, not read on screen.
+                if '<html' in html and name != 'librarycard.html' and 'readability.css' not in html:
+                    missing.append(path)
+        self.assertEqual(missing, [])
+
+    def test_no_fixed_text_under_twelve_pixels_on_those_pages(self):
+        import re as _re
+        tiny = []
+        for folder in ('templates/admin', 'templates/library_staff', 'templates/desk'):
+            for name in os.listdir(folder):
+                if name == 'librarycard.html':
+                    continue
+                with open(os.path.join(folder, name), encoding='utf-8') as f:
+                    for size in _re.findall(r'font-size:\s*(\d+(?:\.\d+)?)px', f.read()):
+                        if float(size) < 12:
+                            tiny.append('%s: %spx' % (name, size))
+        self.assertEqual(tiny, [])
+
+
 class RegistrationTermsTests(TestCase):
     """Registering online means agreeing to the terms and conditions."""
 
@@ -4700,11 +4712,16 @@ class CatalogueImportTests(TestCase):
         return self.client.post('/admin-portal/import-books/', data).json()
 
     def test_the_template_can_be_filled_in_and_imported_straight_back(self):
-        rows = self._template()
+        rows = _template_filled_from_guide(self.client, '/admin-portal/download-book-template/')
         r = self._import(rows)
         self.assertTrue(r['success'], r)
         self.assertEqual(Book.objects.filter(condition='Worn').count(), 1)
         self.assertTrue(Book.objects.filter(call_number='FIC A31p 1963').exists())
+
+    def test_the_template_as_downloaded_imports_nothing(self):
+        r = self._import(self._template())
+        self.assertTrue(r['success'], r)
+        self.assertEqual(Book.objects.count(), 0, 'sample rows were imported as books')
 
     def test_a_blank_code_label_is_worked_out(self):
         r = self._import([['Title', 'Author', 'Genre', 'Publication Year'],
@@ -4854,15 +4871,17 @@ class LocationParsingTests(TestCase):
         self.assertTrue(Book.objects.get(title='Emma').shelf_level.is_top)
 
     def test_the_template_round_trips_with_its_own_locations(self):
-        import io as _io
-        import openpyxl
-        tpl = self.client.get('/admin-portal/download-book-template/')
-        rows = list(openpyxl.load_workbook(_io.BytesIO(tpl.content)).active.iter_rows(values_only=True))
-        self.assertIn('Location', rows[0])
-        r = self._import(rows)
+        headers, example = _template_filled_from_guide(
+            self.client, '/admin-portal/download-book-template/')
+        self.assertIn('Location', headers)
+        short = list(example)
+        short[headers.index('Title')] = 'Emma'
+        short[headers.index('Location')] = 'A C1 L2'
+        r = self._import([headers, example, short])
         self.assertTrue(r['success'], r)
-        # Both example rows name the same board, one long and one short.
+        # The guide's long form and the short form name the same board.
         placed = [b.location_label() for b in Book.objects.all() if b.shelf_level]
+        self.assertEqual(len(placed), 2)
         self.assertTrue(placed, 'nothing was shelved by the import')
         for where in placed:
             self.assertEqual(where, 'Shelf A Column 1 Level 2')
@@ -6174,7 +6193,7 @@ class DeleteBooksTests(TestCase):
         self.assertEqual(r['loan_records'], 3)
 
     def test_archiving_keeps_the_loan_history(self):
-        """The copy is hidden in the Archive; its loan records stay."""
+        """The copy is hidden but kept in the database; its loan records stay."""
         book = self._book('Has history')
         Transaction.objects.create(book=book, patron=self.patron,
                                    transaction_type='Borrow')
@@ -7510,3 +7529,640 @@ class PortalMapBookSearchTests(TestCase):
         r = _signed_in(_admin()).get('/admin-portal/indoor-map/')
         self.assertEqual(r.status_code, 200)
         self.assertIn('id="findPanel"', r.content.decode())
+
+
+class LibraryStatusTests(TestCase):
+    """The open or closed switch on the dashboards, and the 5 PM auto-close."""
+
+    URL = '/portal/library-status/'
+
+    def _at(self, hour, minute=0, days_ago=0):
+        day = timezone.localdate() - timedelta(days=days_ago)
+        return timezone.make_aware(datetime.combine(day, datetime.min.time()).replace(hour=hour, minute=minute))
+
+    def _staff(self):
+        return User.objects.create(
+            fullname='Desk Staff', email='status.staff@example.invalid',
+            password_hash=hash_password('SmokeTest123'),
+            role='Staff', account_status='Active', modules='')
+
+    def _set_open(self, when):
+        from .models import LibraryStatus
+        LibraryStatus.objects.update_or_create(
+            pk=1, defaults={'is_open': True, 'changed_at': when, 'auto_closed': False})
+
+    def test_staff_can_open_and_close_the_library(self):
+        from .models import LibraryStatus
+        client = _signed_in(self._staff())
+        with mock.patch('django.utils.timezone.now', return_value=self._at(9)):
+            r = client.post(self.URL, {'open': '1'})
+            self.assertTrue(r.json()['success'])
+            self.assertTrue(r.json()['is_open'])
+            self.assertTrue(LibraryStatus.objects.get(pk=1).is_open)
+
+            r = client.post(self.URL, {'open': '0'})
+            self.assertFalse(r.json()['is_open'])
+        status = LibraryStatus.objects.get(pk=1)
+        self.assertFalse(status.is_open)
+        self.assertEqual(status.changed_by.fullname, 'Desk Staff')
+        self.assertEqual(SystemLog.objects.filter(entity_type='Library Status').count(), 2)
+
+    def test_left_open_past_five_it_closes_itself_once(self):
+        from .models import LibraryStatus
+        from .openstatus import current_status
+        self._set_open(self._at(8, 30))
+        with mock.patch('django.utils.timezone.now', return_value=self._at(16, 59)):
+            self.assertTrue(current_status().is_open)
+        with mock.patch('django.utils.timezone.now', return_value=self._at(17, 1)):
+            self.assertFalse(current_status().is_open)
+            current_status()
+        status = LibraryStatus.objects.get(pk=1)
+        self.assertTrue(status.auto_closed)
+        self.assertIsNone(status.changed_by)
+        self.assertEqual(timezone.localtime(status.changed_at).hour, 17)
+        self.assertEqual(SystemLog.objects.filter(action='Auto-close',
+                                                  entity_type='Library Status').count(), 1)
+
+    def test_left_open_from_yesterday_is_closed_this_morning(self):
+        from .openstatus import current_status
+        self._set_open(self._at(10, days_ago=1))
+        with mock.patch('django.utils.timezone.now', return_value=self._at(7)):
+            self.assertFalse(current_status().is_open)
+
+    def test_it_cannot_be_opened_after_closing_time(self):
+        from .models import LibraryStatus
+        client = _signed_in(_admin())
+        with mock.patch('django.utils.timezone.now', return_value=self._at(17, 30)):
+            r = client.post(self.URL, {'open': '1'})
+        self.assertFalse(r.json()['success'])
+        self.assertFalse(r.json()['can_open'])
+        self.assertFalse(LibraryStatus.objects.get(pk=1).is_open)
+
+    def test_a_stranger_cannot_switch_it(self):
+        from .models import LibraryStatus
+        r = Client().post(self.URL, {'open': '1'})
+        self.assertEqual(r.status_code, 302)
+        self.assertFalse(LibraryStatus.objects.filter(is_open=True).exists())
+
+    def test_both_dashboards_show_the_switch(self):
+        admin_page = _signed_in(_admin()).get('/admin-portal/dashboard/')
+        staff_page = _signed_in(self._staff()).get('/library-staff/dashboard/')
+        for page in (admin_page, staff_page):
+            self.assertEqual(page.status_code, 200)
+            self.assertIn('id="libSwitch"', page.content.decode())
+
+    def test_patrons_see_the_status(self):
+        patron = Patron.objects.create(first_name='Ana', last_name='Reyes',
+                                       email='status.patron@example.invalid', patron_type='Student')
+        client = Client()
+        s = client.session
+        s['patron_id'] = patron.patron_id
+        s.save()
+        with mock.patch('django.utils.timezone.now', return_value=self._at(10)):
+            self.assertIn('Library closed right now', client.get('/patron/dashboard/').content.decode())
+            self._set_open(self._at(9))
+            self.assertIn('Library open now', client.get('/patron/dashboard/').content.decode())
+
+
+class SpreadsheetImportTests(TestCase):
+    """Each template's import saves what the rest of the system expects."""
+
+    def setUp(self):
+        self.user = _admin(modules='books,patrons,inventory,transactions,logs')
+        self.client = _signed_in(self.user)
+        self.today = timezone.localdate()
+
+    def _upload(self, url, rows, active_guide=False):
+        import openpyxl
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        wb = openpyxl.Workbook()
+        for row in rows:
+            wb.active.append(row)
+        if active_guide:
+            guide = wb.create_sheet('How to fill in', 0)
+            guide.append(['Column', 'Required', 'What to write', 'Example'])
+            wb.active = 0
+        buf = io.BytesIO()
+        wb.save(buf)
+        upload = SimpleUploadedFile(
+            'sheet.xlsx', buf.getvalue(),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        return self.client.post(url, {'excel_file': upload}).json()
+
+    def _patron(self, **extra):
+        values = dict(first_name='Ana', last_name='Reyes', email='ana.import@example.invalid',
+                      patron_type='Student')
+        values.update(extra)
+        return Patron.objects.create(**values)
+
+    def _day(self, days_ago):
+        return self.today - timedelta(days=days_ago)
+
+    # Templates
+
+    def test_every_template_is_headers_only_with_a_guide(self):
+        import openpyxl
+        for url in ('/admin-portal/download-book-template/',
+                    '/admin-portal/download-patron-template/',
+                    '/admin-portal/download-donation-template/',
+                    '/admin-portal/download-announcement-template/',
+                    '/admin-portal/download-transaction-template/',
+                    '/admin-portal/download-log-template/'):
+            wb = openpyxl.load_workbook(io.BytesIO(self.client.get(url).content))
+            sheet = wb.worksheets[0]
+            filled = [row for row in sheet.iter_rows(min_row=2, values_only=True)
+                      if any(value not in (None, '') for value in row)]
+            self.assertEqual(filled, [], '%s ships rows that would be imported' % url)
+            headers = [cell.value for cell in sheet[1]]
+            listed = [row[0] for row in wb['How to fill in'].iter_rows(min_row=2, values_only=True)
+                      if row and row[0] in headers]
+            self.assertEqual(listed, headers, url)
+
+    def test_a_template_filled_in_like_excel_reports_no_blank_rows(self):
+        import openpyxl
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        for url, target, values in (
+                ('/admin-portal/download-book-template/', '/admin-portal/import-books/',
+                 {'Title': 'Emma', 'Author': 'Austen, Jane', 'ISBN': '0385262787'}),
+                ('/admin-portal/download-patron-template/', '/admin-portal/import-patrons/',
+                 {'first_name': 'Ana', 'last_name': 'Cruz', 'email': 'ana.cruz@example.invalid',
+                  'contact_number': '09171234567'})):
+            wb = openpyxl.load_workbook(io.BytesIO(self.client.get(url).content))
+            sheet = wb.worksheets[0]
+            headers = [cell.value for cell in sheet[1]]
+            for header, value in values.items():
+                sheet.cell(row=2, column=headers.index(header) + 1, value=value)
+            buf = io.BytesIO()
+            wb.save(buf)
+            r = self.client.post(target, {'excel_file': SimpleUploadedFile('t.xlsx', buf.getvalue())}).json()
+            self.assertTrue(r['success'], r)
+            self.assertNotIn('skip', r['message'].lower(), url)
+            self.assertNotIn('Could not', r['message'], url)
+        self.assertEqual(Book.objects.get().ISBN, '0385262787')
+        self.assertEqual(Patron.objects.get().contact_number, '09171234567')
+
+    def test_a_workbook_saved_on_its_guide_sheet_still_imports(self):
+        r = self._upload('/admin-portal/import-announcements/',
+                         [['title', 'message'], ['Closed Friday', 'Holiday.']], active_guide=True)
+        self.assertTrue(r['success'], r)
+        self.assertEqual(Announcement.objects.count(), 1)
+
+    # Announcements
+
+    def test_announcements_import_and_are_not_posted_twice(self):
+        rows = _template_filled_from_guide(self.client,
+                                           '/admin-portal/download-announcement-template/')
+        r = self._upload('/admin-portal/import-announcements/', rows)
+        self.assertTrue(r['success'], r)
+        self.assertEqual(Announcement.objects.get().posted_by, self.user)
+        r = self._upload('/admin-portal/import-announcements/', rows)
+        self.assertIn('Skipped 1', r['message'])
+        self.assertEqual(Announcement.objects.count(), 1)
+
+    # Transactions
+
+    def test_a_borrow_keeps_the_sheet_date_and_marks_the_book_out(self):
+        patron = self._patron()
+        book = Book.objects.create(title='Noli', author='Rizal', genre='FIC')
+        r = self._upload('/admin-portal/import-transactions/', [
+            ['card_number', 'book_id', 'transaction_type', 'transaction_date'],
+            [patron.card_number, 'BOOK-%d' % book.book_id, 'borrow', self._day(3)],
+        ])
+        self.assertTrue(r['success'], r)
+        loan = Transaction.objects.get()
+        rule = BorrowingRule.current()
+        self.assertEqual(loan.transaction_type, 'Borrow')
+        self.assertEqual(loan.transaction_date, self._day(3))
+        self.assertEqual(loan.due_date, self._day(3) + timedelta(days=rule.loan_period_days))
+        book.refresh_from_db()
+        self.assertEqual(book.status, 'Borrowed')
+
+    def test_an_open_overdue_borrow_is_flagged_and_fined(self):
+        rule = BorrowingRule.current()
+        rule.fine_per_day = 5
+        rule.save()
+        patron = self._patron()
+        book = Book.objects.create(title='Noli', author='Rizal', genre='FIC')
+        self._upload('/admin-portal/import-transactions/', [
+            ['patron_id', 'book_id', 'transaction_type', 'transaction_date', 'due_date'],
+            [patron.patron_id, book.book_id, 'Borrow', self._day(20), self._day(10)],
+        ])
+        loan = Transaction.objects.get()
+        self.assertTrue(loan.overdue_flag)
+        self.assertEqual(loan.fine_amount, rule.compute_fine(self._day(10), self.today))
+        book.refresh_from_db()
+        self.assertEqual(book.status, 'Overdue')
+
+    def test_a_return_closes_the_loan_and_a_repeat_upload_changes_nothing(self):
+        patron = self._patron()
+        book = Book.objects.create(title='Noli', author='Rizal', genre='FIC')
+        rows = [
+            ['patron_id', 'book_id', 'transaction_type', 'transaction_date', 'return_date'],
+            [patron.patron_id, book.book_id, 'Borrow', self._day(9), ''],
+            [patron.patron_id, book.book_id, 'Returned', '', self._day(2)],
+        ]
+        r = self._upload('/admin-portal/import-transactions/', rows)
+        self.assertIn('1 borrow(s), 1 return(s)', r['message'])
+        loan = Transaction.objects.get()
+        self.assertEqual(loan.return_date, self._day(2))
+        book.refresh_from_db()
+        self.assertEqual(book.status, 'Available')
+
+        r = self._upload('/admin-portal/import-transactions/', rows)
+        self.assertIn('Skipped 2', r['message'])
+        self.assertEqual(Transaction.objects.count(), 1)
+
+    def test_an_unknown_type_is_reported_by_row(self):
+        book = Book.objects.create(title='Noli', author='Rizal', genre='FIC')
+        r = self._upload('/admin-portal/import-transactions/', [
+            ['book_id', 'transaction_type'],
+            [book.book_id, 'lent'],
+        ])
+        self.assertTrue(r['success'], r)
+        self.assertIn('Row 2: type "lent"', r['message'])
+        self.assertEqual(Transaction.objects.count(), 0)
+
+    # Donations
+
+    def test_donated_books_can_be_scanned_and_are_not_received_twice(self):
+        rows = [
+            ['donor_name', 'date_donated', 'title', 'author', 'material_type', 'quantity'],
+            ['Brgy. Council', '09/01/2026', 'Noli Me Tangere', 'Rizal, Jose', 'magazine', 2],
+        ]
+        r = self._upload('/admin-portal/import-donations/', rows)
+        self.assertTrue(r['success'], r)
+        books = Book.objects.all()
+        self.assertEqual(books.count(), 2, 'each donated copy is a book record of its own')
+        for book in books:
+            self.assertTrue(book.qr_code)
+            self.assertEqual(book.status, 'Donated')
+            self.assertEqual(book.material_type, 'Magazine')
+            self.assertEqual(InventoryRecord.objects.filter(book=book).count(), 1)
+        self.assertEqual(Donation.objects.get().date_donated, date(2026, 9, 1))
+
+        r = self._upload('/admin-portal/import-donations/', rows)
+        self.assertIn('Skipped 1', r['message'])
+        self.assertEqual(InventoryRecord.objects.count(), 2)
+        self.assertEqual(Book.objects.count(), 2)
+
+    def test_a_bad_date_skips_only_its_row(self):
+        r = self._upload('/admin-portal/import-donations/', [
+            ['donor_name', 'date_donated', 'title'],
+            ['Council', self._day(1), 'El Filibusterismo'],
+            ['Council', 'last week', 'Florante at Laura'],
+        ])
+        self.assertTrue(r['success'], r)
+        self.assertIn('Row 3: "last week" is not a date', r['message'])
+        self.assertEqual(list(Book.objects.values_list('title', flat=True)), ['El Filibusterismo'])
+
+    def test_a_fault_part_way_saves_nothing(self):
+        from library import views
+        real = views._sync_donation_row
+        calls = []
+
+        def fail_second(record):
+            calls.append(record)
+            if len(calls) == 2:
+                raise RuntimeError('disk full')
+            return real(record)
+
+        with mock.patch.object(views, '_sync_donation_row', side_effect=fail_second):
+            r = self._upload('/admin-portal/import-donations/', [
+                ['donor_name', 'title'],
+                ['Council', 'El Filibusterismo'],
+                ['Council', 'Florante at Laura'],
+            ])
+        self.assertFalse(r['success'])
+        self.assertEqual(Book.objects.count(), 0)
+        self.assertEqual(InventoryRecord.objects.count(), 0)
+
+    # Patrons
+
+    def test_patron_values_are_read_the_way_people_type_them(self):
+        r = self._upload('/admin-portal/import-patrons/', [
+            ['first_name', 'last_name', 'patron_type', 'email', 'contact_number', 'school',
+             'account_status'],
+            ['Maria', 'Cruz', 'student', 'Maria.Cruz@example.invalid', 9171234567,
+             'Rizal High School', 'active'],
+            ['Jose', 'Rizal', 'Faculty', 'maria.cruz@example.invalid', '', '', ''],
+            ['Juan', 'Luna', 'Janitor', 'juan@example.invalid', '', '', ''],
+        ])
+        self.assertTrue(r['success'], r)
+        maria = Patron.objects.get(last_name='Cruz')
+        self.assertEqual(maria.patron_type, 'Student')
+        self.assertEqual(maria.account_status, 'Active')
+        self.assertEqual(maria.contact_number, '09171234567')
+        self.assertEqual(maria.school, 'Rizal High School')
+        self.assertTrue(maria.password_hash)
+        self.assertFalse(Patron.objects.filter(last_name='Rizal').exists(), 'same email twice')
+        self.assertIn('Row 4: patron type "Janitor"', r['message'])
+
+    # Visit logs
+
+    def test_visits_are_not_doubled_and_times_can_be_typed(self):
+        patron = self._patron(school='Rizal High School')
+        day = self._day(2).isoformat()
+        rows = [
+            ['card_number', 'purpose_of_visit', 'entry_time', 'exit_time'],
+            [patron.card_number, 'study', day + ' 08:30', day + ' 10:00'],
+            [patron.card_number, 'Reading', day + ' 13:15', day + ' 12:00'],
+        ]
+        r = self._upload('/admin-portal/import-logs/', rows)
+        self.assertTrue(r['success'], r)
+        self.assertIn('Row 3: exit_time is before entry_time', r['message'])
+        visit = PatronLog.objects.get()
+        self.assertEqual(visit.purpose_of_visit, 'Study')
+        self.assertEqual(visit.school, 'Rizal High School')
+        self.assertEqual(timezone.localtime(visit.entry_time).strftime('%H:%M'), '08:30')
+
+        r = self._upload('/admin-portal/import-logs/', rows)
+        self.assertIn('Skipped 1', r['message'])
+        self.assertEqual(PatronLog.objects.count(), 1)
+
+    # Books
+
+    def _shelves(self):
+        plan = FloorPlan.objects.create(name='Ground', floor_number=1, is_active=True)
+        room = Room.objects.create(floor_plan=plan, name='Main', map_x=0, map_y=0)
+        table = Shelf.objects.create(room=room, name='Table 1', map_x=0, map_y=0)
+        top = ShelfLevel.objects.create(shelf=table, level_number=1, is_top=True)
+        shelf = Shelf.objects.create(room=room, name='Shelf A', map_x=0, map_y=0)
+        ShelfLevel.objects.create(shelf=shelf, level_number=2, column_number=1)
+        return top
+
+    def test_a_table_named_by_level_uses_its_top(self):
+        top = self._shelves()
+        before = ShelfLevel.objects.count()
+        r = self._upload('/admin-portal/import-books/', [
+            ['Title', 'Author', 'Location'], ['Atlas', 'Grolier', 'Table 1 Level 1']])
+        self.assertTrue(r['success'], r)
+        self.assertEqual(Book.objects.get().shelf_level, top)
+        self.assertEqual(ShelfLevel.objects.count(), before)
+
+    def test_a_new_board_is_named_in_the_preview(self):
+        self._shelves()
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        import openpyxl
+        wb = openpyxl.Workbook()
+        wb.active.append(['Title', 'Author', 'Location'])
+        wb.active.append(['Atlas', 'Grolier', 'Shelf A Level 9'])
+        buf = io.BytesIO()
+        wb.save(buf)
+        upload = SimpleUploadedFile('b.xlsx', buf.getvalue())
+        r = self.client.post('/admin-portal/import-books/',
+                             {'excel_file': upload, 'preview': '1'}).json()
+        self.assertEqual(r['new_boards'], ['Shelf A Level 9'])
+        self.assertIn('new shelf board', r['message'])
+        self.assertFalse(ShelfLevel.objects.filter(level_number=9).exists(), 'preview saved it')
+
+    def test_an_unknown_location_is_reported_not_invented(self):
+        self._shelves()
+        before = ShelfLevel.objects.count()
+        r = self._upload('/admin-portal/import-books/', [
+            ['Title', 'Author', 'Location'], ['Atlas', 'Grolier', 'Filipiniana corner']])
+        self.assertIn('could not match storage area: Filipiniana corner', r['message'])
+        self.assertIsNone(Book.objects.get().shelf_level)
+        self.assertEqual(ShelfLevel.objects.count(), before)
+
+    def test_material_type_and_old_sample_rows(self):
+        r = self._upload('/admin-portal/import-books/', [
+            ['Title', 'Author', 'Material Type', 'ISBN'],
+            ['Example Book Title', 'Surname, First', '', '9780000000000'],
+            ['Liwayway', 'Various', 'magazine', ''],
+        ])
+        self.assertIn('1 sample row(s)', r['message'])
+        book = Book.objects.get()
+        self.assertEqual(book.material_type, 'Magazine')
+        self.assertIsNone(book.ISBN)
+
+
+class OneCopyPerBookTests(TestCase):
+    """A book record is one physical copy, and it is counted in stock exactly once."""
+
+    def setUp(self):
+        self.user = _admin(modules='books,inventory,donations')
+        self.client = _signed_in(self.user)
+        plan = FloorPlan.objects.create(name='Ground', floor_number=1, is_active=True)
+        room = Room.objects.create(floor_plan=plan, name='Main', map_x=0, map_y=0)
+        self.shelf = Shelf.objects.create(room=room, name='Shelf A', map_x=0, map_y=0)
+        self.level = ShelfLevel.objects.create(shelf=self.shelf, level_number=1)
+
+    def _movements(self, **kw):
+        from library.models import StockMovement
+        return StockMovement.objects.filter(**kw)
+
+    def _add_book(self, title='Noli Me Tangere', **extra):
+        data = {'title': title, 'author': 'Rizal, Jose', 'genre': 'Fiction'}
+        data.update(extra)
+        self.client.post('/admin-portal/add-book/', data)
+        return Book.objects.filter(title=title).order_by('-book_id').first()
+
+    def _receive(self, items, source='Purchase', **extra):
+        data = {'source': source, 'items': json.dumps(items)}
+        data.update(extra)
+        return self.client.post('/admin-portal/inventory/receive/', data)
+
+    def _stock_levels(self):
+        from library.reports import build_report
+        today = timezone.localdate()
+        report = build_report('stock_levels', today, today)
+        columns = report['columns']
+        return {row[0]: dict(zip(columns, row)) for row in report['rows']}
+
+    # Every way a book is created
+
+    def test_a_book_added_in_manage_books_is_counted_into_stock(self):
+        book = self._add_book()
+        record = InventoryRecord.objects.get(book=book)
+        self.assertEqual(record.source, 'Existing')
+        self.assertEqual(record.status, 'In Stock')
+        self.assertEqual(record.qr_label, book.qr_code, 'one code on the book, not two')
+        self.assertEqual(self._movements(inventory_record=record).get().action, 'ExistingStock')
+
+    def test_an_imported_quantity_makes_that_many_books_each_with_one_copy(self):
+        import openpyxl
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        wb = openpyxl.Workbook()
+        wb.active.append(['Title', 'Author', 'Quantity'])
+        wb.active.append(['Florante at Laura', 'Balagtas', 3])
+        buf = io.BytesIO()
+        wb.save(buf)
+        up = SimpleUploadedFile(
+            'b.xlsx', buf.getvalue(),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        r = self.client.post('/admin-portal/import-books/', {'excel_file': up}).json()
+        self.assertTrue(r['success'], r)
+        books = Book.objects.filter(title='Florante at Laura')
+        self.assertEqual(books.count(), 3)
+        for book in books:
+            self.assertEqual(InventoryRecord.objects.filter(book=book).count(), 1)
+
+    def test_receiving_copies_of_a_new_title_makes_a_book_record_per_copy(self):
+        self._receive([{'title': 'El Filibusterismo', 'author': 'Rizal', 'quantity': 3}])
+        books = Book.objects.filter(title='El Filibusterismo')
+        self.assertEqual(books.count(), 3)
+        records = InventoryRecord.objects.filter(book__in=books)
+        self.assertEqual(records.count(), 3)
+        self.assertEqual({r.qr_label for r in records}, {b.qr_code for b in books})
+        self.assertEqual(self._movements(action='Received').count(), 3)
+
+    def test_receiving_more_copies_of_a_catalogued_title_leaves_the_first_alone(self):
+        original = self._add_book('Ibong Adarna', shelf_level=self.level.shelf_level_id)
+        self._receive([{'book_id': original.book_id, 'quantity': 2}])
+        self.assertEqual(Book.objects.filter(title='Ibong Adarna').count(), 3)
+        self.assertEqual(InventoryRecord.objects.filter(book=original).count(), 1)
+        self.assertEqual(Book.objects.get(pk=original.pk).shelf_level_id, self.level.shelf_level_id)
+
+    def test_stock_levels_and_manage_books_count_the_same_copies(self):
+        self._add_book('Ibong Adarna')
+        self._add_book('Ibong Adarna')
+        self._receive([{'title': 'Ibong Adarna', 'author': 'Rizal, Jose', 'quantity': 2}])
+        row = self._stock_levels()['Ibong Adarna']
+        self.assertEqual(row['On Hand'], Book.objects.filter(title='Ibong Adarna').count())
+        self.assertEqual(row['On Hand'], 4)
+
+    # Stock counts and write-offs
+
+    def test_a_book_missing_from_a_shelf_count_is_missing_in_stock_too(self):
+        book = self._add_book('Doctrina Christiana', shelf_level=self.level.shelf_level_id)
+        r = self.client.post('/admin-portal/inventory/audit/file/', {
+            'level': self.level.shelf_level_id, 'missing_ids': [book.book_id]}).json()
+        self.assertTrue(r['success'], r)
+        record = InventoryRecord.objects.get(book=book)
+        self.assertEqual(record.status, 'Missing')
+        self.assertEqual(self._movements(inventory_record=record, action='AuditAdjustment').count(), 1)
+        row = self._stock_levels()['Doctrina Christiana']
+        self.assertEqual((row['Missing'], row['On Hand']), (1, 0))
+
+        # It turns up at the next count.
+        self.client.post('/admin-portal/inventory/audit/file/', {
+            'level': self.level.shelf_level_id, 'found_ids': [book.book_id]})
+        record.refresh_from_db()
+        self.assertEqual(record.status, 'In Stock')
+        self.assertEqual(self._movements(inventory_record=record, action='Found').count(), 1)
+
+    def test_a_second_missed_count_does_not_log_a_second_movement(self):
+        book = self._add_book('Doctrina Christiana', shelf_level=self.level.shelf_level_id)
+        for _ in range(2):
+            self.client.post('/admin-portal/inventory/audit/file/', {
+                'level': self.level.shelf_level_id, 'missing_ids': [book.book_id]})
+        record = InventoryRecord.objects.get(book=book)
+        self.assertEqual(record.audit_misses, 2)
+        self.assertEqual(self._movements(inventory_record=record, action='AuditAdjustment').count(), 1)
+
+    def test_writing_off_a_missing_copy_marks_its_book_lost(self):
+        book = self._add_book('Doctrina Christiana', shelf_level=self.level.shelf_level_id)
+        self.client.post('/admin-portal/inventory/audit/file/', {
+            'level': self.level.shelf_level_id, 'missing_ids': [book.book_id]})
+        record = InventoryRecord.objects.get(book=book)
+        self.client.post('/admin-portal/inventory/write-off-missing/', {
+            'inventory_ids': [record.inventory_id], 'reason': 'Not found in two counts'})
+        self.assertEqual(Book.objects.get(pk=book.pk).status, 'Lost')
+
+    # Removing books
+
+    def test_deleting_a_book_takes_its_copy_out_of_stock(self):
+        book = self._add_book()
+        self.client.post('/admin-portal/delete-book/%d/' % book.book_id)
+        record = InventoryRecord.objects.get(book_id=book.book_id)
+        self.assertEqual(record.status, 'Removed')
+        self.assertEqual(self._movements(inventory_record=record, action='Deaccession').count(), 1)
+        self.assertNotIn('Noli Me Tangere', self._stock_levels())
+
+    def test_deaccessioning_a_copy_takes_its_book_out_of_the_catalogue(self):
+        book = self._add_book()
+        record = InventoryRecord.objects.get(book=book)
+        self.client.post('/admin-portal/inventory/deaccession/', {
+            'inventory_id': record.inventory_id, 'reason': 'Entered twice'})
+        self.assertFalse(Book.objects.filter(pk=book.pk).exists())
+
+    def test_a_copy_on_loan_cannot_be_deaccessioned(self):
+        book = self._add_book()
+        Book.objects.filter(pk=book.pk).update(status='Borrowed')
+        record = InventoryRecord.objects.get(book=book)
+        self.client.post('/admin-portal/inventory/deaccession/', {
+            'inventory_id': record.inventory_id, 'reason': 'Entered twice'})
+        record.refresh_from_db()
+        self.assertEqual(record.status, 'In Stock')
+
+    def test_the_book_follows_its_copy_condition(self):
+        book = self._add_book()
+        record = InventoryRecord.objects.get(book=book)
+
+        def mark(condition):
+            self.client.post('/admin-portal/inventory/condition/', {
+                'inventory_id': record.inventory_id, 'condition': condition, 'reason': 'Checked'})
+
+        mark('Damaged')
+        self.assertEqual(Book.objects.get(pk=book.pk).condition, 'Damaged')
+        mark('Withdrawn')
+        self.assertFalse(Book.objects.filter(pk=book.pk).exists(), 'withdrawn copies leave the catalogue')
+        mark('Good')
+        restored = Book.objects.get(pk=book.pk)
+        self.assertEqual(restored.condition, 'Good')
+        mark('Lost')
+        self.assertEqual(Book.objects.get(pk=book.pk).status, 'Lost')
+
+    # Donations
+
+    def test_shelving_a_donation_makes_every_donated_copy_available(self):
+        self._receive([{'title': 'Mga Ibong Mandaragit', 'author': 'Hernandez', 'quantity': 2}],
+                      source='Donation', donor_name='Brgy. Council',
+                      donated_date=timezone.localdate().isoformat())
+        donation = Donation.objects.get()
+        self.client.post('/admin-portal/update-donation-status/', {
+            'donation_id': donation.donation_id, 'status': 'Shelved'})
+        self.assertEqual(set(Book.objects.filter(title='Mga Ibong Mandaragit')
+                             .values_list('status', flat=True)), {'Available'})
+
+    # One code per copy
+
+    def test_an_older_copy_label_still_finds_its_book(self):
+        book = self._add_book()
+        InventoryRecord.objects.filter(book=book).update(qr_label='OLD-LABEL-1')
+        r = self.client.get('/admin-portal/search-book-by-qr/', {'qr_code': 'OLD-LABEL-1'}).json()
+        self.assertTrue(r['success'], r)
+        self.assertEqual(r['book']['book_id'], book.book_id)
+        r = self.client.get('/admin-portal/inventory/search-by-qr/', {'qr_label': book.qr_code}).json()
+        self.assertTrue(r['success'], r)
+
+    def test_a_copy_cannot_be_linked_to_a_book_that_has_its_own(self):
+        first = self._add_book('Noli Me Tangere')
+        second = self._add_book('El Filibusterismo')
+        record = InventoryRecord.objects.get(book=second)
+        self.client.post('/admin-portal/inventory/update/', {
+            'inventory_id': record.inventory_id, 'book_id': first.book_id, 'source': 'Existing'})
+        record.refresh_from_db()
+        self.assertEqual(record.book_id, second.book_id)
+
+    # The migration for data already saved
+
+    def test_the_migration_splits_shared_copies_and_counts_in_the_rest(self):
+        import importlib
+        from django.apps import apps
+        migration = importlib.import_module('library.migrations.0066_every_book_one_copy')
+
+        shared = Book.objects.create(title='Shared', author='X', qr_code='SHARED',
+                                     shelf_level=self.level)
+        for label in ('LBL-1', 'LBL-2', 'LBL-3'):
+            InventoryRecord.objects.create(book=shared, status='In Stock', condition='Good',
+                                           qr_label=label)
+        catalogued = Book.objects.create(title='Catalogued', author='Y', qr_code='CAT-1')
+
+        migration.give_every_book_one_copy(apps, None)
+
+        copies = Book.objects.filter(title='Shared')
+        self.assertEqual(copies.count(), 3)
+        for book in copies:
+            self.assertEqual(InventoryRecord.objects.filter(book=book).count(), 1)
+            self.assertEqual(book.shelf_level_id, self.level.shelf_level_id)
+        # The label already stuck on a copy becomes its book's QR.
+        self.assertTrue(Book.objects.filter(title='Shared', qr_code='LBL-2').exists())
+
+        record = InventoryRecord.objects.get(book=catalogued)
+        self.assertEqual((record.source, record.qr_label), ('Existing', 'CAT-1'))
+
+        # Running it again changes nothing.
+        migration.give_every_book_one_copy(apps, None)
+        self.assertEqual(InventoryRecord.objects.count(), 4)
+        self.assertEqual(Book.objects.count(), 4)

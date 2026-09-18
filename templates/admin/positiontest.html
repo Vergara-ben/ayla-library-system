@@ -30,22 +30,23 @@
             .mobile-menu-btn { display: flex !important; }
             main { padding: 1rem; }
         }
-        .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
-        .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 10px; font-weight: 700; letter-spacing: .04em; }
-        .p-ok { background: rgba(16,185,129,.15); color: #10b981; }
-        .p-warn { background: rgba(245,158,11,.15); color: #f59e0b; }
-        .p-bad { background: rgba(239,68,68,.15); color: #ef4444; }
-        .p-idle { background: rgba(148,163,184,.15); color: #94a3b8; }
+        .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+        .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 700; letter-spacing: .04em; }
+        .p-ok { background: rgba(16,185,129,.15); color: rgb(var(--tw-emerald-500)); }
+        .p-warn { background: rgba(245,158,11,.15); color: rgb(var(--tw-amber-500)); }
+        .p-bad { background: rgba(239,68,68,.15); color: rgb(var(--tw-rose-500)); }
+        .p-idle { background: rgba(148,163,184,.15); color: var(--text-muted); }
         table.diag { width: 100%; border-collapse: collapse; }
-        table.diag th { text-align: left; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); padding: 6px 8px; border-bottom: 1px solid var(--border-color); }
-        table.diag td { padding: 7px 8px; border-bottom: 1px solid var(--border-color); font-size: 12px; vertical-align: top; }
-        .btn { padding: 8px 14px; border-radius: 8px; font-size: 12px; font-weight: 700; letter-spacing: .03em; border: 1px solid transparent; cursor: pointer; }
+        table.diag th { text-align: left; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); padding: 6px 8px; border-bottom: 1px solid var(--border-color); }
+        table.diag td { padding: 7px 8px; border-bottom: 1px solid var(--border-color); font-size: 14px; vertical-align: top; }
+        .btn { padding: 8px 14px; border-radius: 8px; font-size: 14px; font-weight: 700; letter-spacing: .03em; border: 1px solid transparent; cursor: pointer; }
         .btn-primary { background: #0e7490; color: #ecfeff; }
         .btn-primary:disabled { opacity: .45; cursor: not-allowed; }
         .btn-ghost { background: transparent; color: var(--text-muted); border-color: var(--border-color); }
     </style>
     <link rel="stylesheet" href="{% static 'css/admin-enhance.css' %}">
     <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
+    <link rel="stylesheet" href="{% static 'css/readability.css' %}">
     <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
     <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
     <script src="{% static 'js/ayla-dialog.js' %}"></script>
@@ -602,7 +603,7 @@ window.captureNorth = function () {
   document.getElementById('northReadout').innerHTML =
     'On the map that direction is <span class="mono text-slate-300">' + bearing.toFixed(1)
     + '\u00b0</span>; your compass says <span class="mono text-slate-300">' + liveCompass.toFixed(1)
-    + '\u00b0</span> &rarr; offset <span class="mono" style="color:#10b981">' + pendingNorth.toFixed(1)
+    + '\u00b0</span> &rarr; offset <span class="mono" style="color:rgb(var(--tw-emerald-500))">' + pendingNorth.toFixed(1)
     + '\u00b0</span>. <span class="text-slate-500">Currently saved: '
     + (mapData.north_offset_deg || 0).toFixed(1) + '\u00b0</span>';
 };
@@ -779,8 +780,8 @@ function renderCalibration() {
     const err = (trueD != null && measured != null) ? measured - trueD : null;
     // Error colours.
     const errColour = err == null ? ''
-      : (Math.abs(err) > 1 ? 'color:#ef4444'
-      : (Math.abs(err) > 0.5 ? 'color:#f59e0b' : 'color:#10b981'));
+      : (Math.abs(err) > 1 ? 'color:rgb(var(--tw-rose-500))'
+      : (Math.abs(err) > 0.5 ? 'color:rgb(var(--tw-amber-500))' : 'color:rgb(var(--tw-emerald-500))'));
     const f = calFits[id] || {};
     let fitCell = '<span class="text-slate-600">-</span>';
     let fitNote = '';
@@ -789,7 +790,7 @@ function renderCalibration() {
       fitCell = '<span class="mono">' + f.tx + ' / ' + f.n + '</span>';
       fitNote = '<span class="pill ' + (f.r2 > 0.8 ? 'p-ok' : 'p-idle') + '">R2 '
               + Math.round(f.r2 * 100) + '%</span>';
-      action = '<button class="btn btn-ghost" style="padding:2px 8px;font-size:11px" '
+      action = '<button class="btn btn-ghost" style="padding:2px 8px;font-size:13px" '
              + 'onclick="applyFit(' + id + ')">Apply</button>';
     } else if (f.count) {
       fitNote = '<span class="text-slate-500 text-xs">need 3+ distances</span>';

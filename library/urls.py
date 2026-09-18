@@ -4,6 +4,7 @@ from . import desk
 from . import chat
 from . import tasks
 from . import floorplan_bulk
+from . import openstatus
 
 urlpatterns = [
     # Floor plan editor: move, delete, lock and undo several elements at once.
@@ -38,6 +39,8 @@ urlpatterns = [
     path('admin-portal/forgot-password/', views.admin_forgot_password, name='admin_forgot_password'),
     # One endpoint for both portals: it acts on whoever is signed in.
     path('portal/change-password/', views.portal_change_password, name='portal_change_password'),
+    # Open or closed switch on both dashboards.
+    path('portal/library-status/', openstatus.library_status, name='library_status'),
     path('admin-portal/logout/', views.admin_logout, name='admin_logout'),
     path('admin-portal/dashboard/', views.admin_dashboard, name='admin_dashboard'),
     path('admin-portal/signin/', views.admin_signin, name='admin_signin'),
@@ -192,10 +195,6 @@ urlpatterns = [
     path('admin-portal/log-register/', views.entry_log_register, name='entry_log_register'),
     path('admin-portal/edit-log/', views.edit_patron_log, name='edit_patron_log'),
     path('admin-portal/delete-log/', views.delete_patron_log, name='delete_patron_log'),
-    # Archive: records hidden instead of deleted.
-    path('admin-portal/archive/', views.archive_page, name='archive_page'),
-    path('admin-portal/archive/restore/', views.archive_restore, name='archive_restore'),
-    path('admin-portal/archive/erase/', views.archive_erase, name='archive_erase'),
     # Reports
     path('admin-portal/analytics/', views.admin_analytics, name='admin_analytics'),
     path('admin-portal/reports/', views.admin_reports, name='admin_reports'),
