@@ -221,7 +221,7 @@
                             <tr><th>Label</th><th>Type</th><th>Identity</th><th>Tx / n</th><th>Height</th><th>Position</th><th>Heard</th></tr>
                         </thead>
                         <tbody id="configBody">
-                            <tr><td colspan="6" class="text-slate-500 text-xs p-4">Loading&hellip;</td></tr>
+                            <tr><td colspan="7" class="text-slate-500 text-xs p-4">Loading&hellip;</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -496,7 +496,7 @@ async function loadMap() {
 function renderConfig() {
   const body = document.getElementById('configBody');
   if (!mapData.beacons.length) {
-    body.innerHTML = '<tr><td colspan="6" class="text-amber-500 text-xs p-4">'
+    body.innerHTML = '<tr><td colspan="7" class="text-amber-500 text-xs p-4">'
       + 'No beacons are configured on the active floor plan.</td></tr>';
     return;
   }

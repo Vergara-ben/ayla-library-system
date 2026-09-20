@@ -618,8 +618,8 @@
             <section class="hero-banner">
                 <div>
                     <span class="hero-welcome-tag">Admin Dashboard</span>
-                    <h1 class="hero-title">Good morning, Admin</h1>
-                    <p class="hero-subtitle">Monday, December 10, 2024 • <span>{{ visitors_today }} patrons currently in the library</span></p>
+                    <h1 class="hero-title">{{ greeting }}, {{ admin.fullname|default:"Admin" }}</h1>
+                    <p class="hero-subtitle">{{ today|date:"l, F j, Y" }} • <span>{{ visitors_today }} visit{{ visitors_today|pluralize }} logged today</span> • <span>{{ patrons_inside }} still inside</span></p>
                     {% include 'admin/_librarystatus.html' %}
                 </div>
                 <div class="hero-actions">
@@ -648,7 +648,7 @@
                 <div class="stat-card">
                     <h4 class="stat-label">Total Patrons</h4>
                     <div class="stat-value">{{ total_patrons }}</div>
-                    <div class="stat-indicator">Registered users</div>
+                    <div class="stat-indicator">All patron records, walk-ins included</div>
                 </div>
             </section>
 

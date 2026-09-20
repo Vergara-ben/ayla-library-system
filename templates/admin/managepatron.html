@@ -299,6 +299,14 @@
                             <a href="{% url 'admin_manage_patron' %}?view=visitors" class="px-3 py-1.5 rounded-md text-[11px] font-bold transition-colors {% if show_visitors %}bg-cyan-700/30 text-cyan-400 border border-cyan-800/50{% else %}text-slate-400 hover:text-slate-200{% endif %}">Visitors{% if visitor_count %} ({{ visitor_count }}){% endif %}</a>
                         </div>
                     <div class="flex items-center gap-2 self-end sm:self-auto">
+                        {% if unverified_count %}
+                        <form method="post" action="{% url 'verify_unverified_patrons' %}" class="inline-block" data-confirm="Record the ID check on all {{ unverified_count }} member record(s) that have none? Do this only if you have seen their IDs — every check is saved under your name." data-confirm-title="Record ID check for all" data-confirm-label="Record all">
+                            {% csrf_token %}
+                            <button type="submit" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-amber-500 text-[11px] font-semibold px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors" title="For records brought in by import, which arrive with no ID check">
+                                <i class="fa-solid fa-id-card"></i> Record ID check for all ({{ unverified_count }})
+                            </button>
+                        </form>
+                        {% endif %}
                         <a href="{% url 'download_patron_template' %}" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-emerald-500 text-[11px] font-semibold px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors">
                             <i class="fa-solid fa-file-excel"></i> Download Template
                         </a>
@@ -346,7 +354,7 @@
                                 <th class="py-3 px-6">Patron</th>
                                 <th class="py-3 px-6 w-32">ID Number</th>
                                 <th class="py-3 px-6 w-24">Type</th>
-                                <th class="py-3 px-6">Course / Dept.</th>
+                                <th class="py-3 px-6">School</th>
                                 <th class="py-3 px-6">Email</th>
                                 <th class="py-3 px-6 w-32">Contact</th>
                                 <th class="py-3 px-6 w-32">Registered</th>
@@ -382,7 +390,7 @@
                                     <td class="py-4 px-6">
                                         <span class="bg-blue-950/50 text-blue-400 border border-blue-900/40 px-2 py-0.5 rounded text-[10px] font-bold tracking-wide">{{ patron.patron_type|capfirst }}</span>
                                     </td>
-                                    <td class="py-4 px-6 text-slate-400">{{ patron.address }}</td>
+                                    <td class="py-4 px-6 text-slate-400">{{ patron.school|default:"&mdash;" }}</td>
                                     <td class="py-4 px-6 font-mono text-slate-500">{{ patron.email }}</td>
                                     <td class="py-4 px-6 text-slate-400">{{ patron.contact_number|default:"-" }}</td>
                                     <td class="py-4 px-6 text-slate-400">
@@ -398,8 +406,19 @@
                                             <span class="block text-[10px] text-slate-600">{{ patron.identity_verified_at|date:"M d, Y" }}</span>
                                             {% if patron.identity_verified_by %}<span class="block text-[10px] text-slate-600">by {{ patron.identity_verified_by.fullname }}</span>{% endif %}
                                             {% if patron.credential_document %}<a href="/patron-id/{{ patron.credential_filename }}" target="_blank" class="text-cyan-400 hover:text-cyan-300 text-[10px] font-bold underline">View ID</a>{% endif %}
+                                            <form method="post" action="{% url 'set_patron_identity' patron.patron_id %}" class="block mt-1" data-confirm="Clear the ID check on {{ patron.fullname }}? Their record will read as not verified until someone checks their ID again." data-confirm-title="Clear ID check" data-confirm-label="Clear">
+                                                {% csrf_token %}
+                                                <input type="hidden" name="verified" value="0">
+                                                <button type="submit" class="text-[10px] text-slate-500 hover:text-rose-400 underline">Undo</button>
+                                            </form>
                                         {% else %}
                                             <span class="text-slate-600">Not verified</span>
+                                            {% if patron.account_status != 'Visitor' %}
+                                            <form method="post" action="{% url 'set_patron_identity' patron.patron_id %}" class="block mt-1" data-confirm="Record that {{ patron.fullname }} presented their ID? Do this once you have seen it — the check is saved under your name." data-confirm-title="Record ID check" data-confirm-label="Record check">
+                                                {% csrf_token %}
+                                                <button type="submit" class="text-[10px] font-bold px-2 py-1 rounded-lg bg-cyan-700/25 text-cyan-400 border border-cyan-800/70 hover:bg-cyan-700/45 transition-colors whitespace-nowrap"><i class="fa-solid fa-id-card text-[9px]"></i> Record ID check</button>
+                                            </form>
+                                            {% endif %}
                                         {% endif %}
                                     </td>
                                     <td class="py-4 px-6 text-center font-semibold text-slate-400">
@@ -441,7 +460,7 @@
                                 </tr>
                             {% empty %}
                                 <tr>
-                                    <td colspan="8" class="py-6 px-6 text-center text-slate-500">No patrons found.</td>
+                                    <td colspan="11" class="py-6 px-6 text-center text-slate-500">No patrons found.</td>
                                 </tr>
                             {% endfor %}
                         </tbody>

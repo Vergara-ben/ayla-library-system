@@ -306,14 +306,16 @@
                                         {% endif %}
                                     </td>
                                     <td class="py-4 px-6 text-center">
-                                        {% if tx.overdue_flag %}
+                                        {% if tx.status_label == 'Overdue' %}
                                             <span class="inline-block bg-rose-500/10 text-rose-400 border border-rose-500/20 px-2 py-0.5 rounded text-[10px] font-medium min-w-[76px]">Overdue</span>
-                                        {% elif tx.return_date %}
+                                        {% elif tx.status_label == 'Returned late' %}
+                                            <span class="inline-block bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded text-[10px] font-medium min-w-[76px]" title="Returned after the due date">Returned late</span>
+                                        {% elif tx.status_label == 'Returned' %}
                                             <span class="inline-block bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded text-[10px] font-medium min-w-[76px]">Returned</span>
-                                        {% elif tx.transaction_type == 'Borrow' %}
+                                        {% elif tx.status_label == 'Borrowed' %}
                                             <span class="inline-block bg-amber-500/10 text-amber-500 border border-amber-500/20 px-2 py-0.5 rounded text-[10px] font-medium min-w-[76px]">Borrowed</span>
                                         {% else %}
-                                            <span class="inline-block bg-slate-800/50 text-slate-400 border border-slate-700/40 px-2 py-0.5 rounded text-[10px] font-medium min-w-[76px]">{{ tx.transaction_type }}</span>
+                                            <span class="inline-block bg-slate-800/50 text-slate-400 border border-slate-700/40 px-2 py-0.5 rounded text-[10px] font-medium min-w-[76px]">{{ tx.status_label }}</span>
                                         {% endif %}
                                     </td>
                                     <td class="py-4 px-6 text-slate-400">

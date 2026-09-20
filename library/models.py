@@ -1478,11 +1478,10 @@ class InventoryRecord(models.Model):
     @property
     def shelf_location(self):
         """Where the catalogue says this copy lives, or None if unshelved."""
-        level = self.book.shelf_level if self.book else None
-        if level is None:
+        if self.book is None or self.book.shelf_level is None:
             return None
-        shelf = level.shelf
-        return f"{shelf.name} · Level {level.level_number}" if shelf else f"Level {level.level_number}"
+        # The catalogue's own wording, so a top or a column is not called Level 1.
+        return self.book.location_label() or None
 
     @property
     def counts_as_held(self):

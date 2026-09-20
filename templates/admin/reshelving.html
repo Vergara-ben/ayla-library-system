@@ -110,8 +110,8 @@
                                 <td class="py-3.5 px-6 text-slate-400">{{ book.author }}</td>
                                 <td class="py-3.5 px-6 text-slate-400">
                                     {% if book.shelf_level %}
-                                        {{ book.shelf_level.shelf.name }} &middot; Level {{ book.shelf_level.level_number }}
-                                        {% if book.shelf_level.category %}<span class="text-slate-500">&middot; {{ book.shelf_level.category }}</span>{% endif %}
+                                        {{ book.location }}
+                                        {% if book.shelf_slot %}<span class="text-slate-500">&middot; slot {{ book.shelf_slot }}</span>{% endif %}
                                     {% else %}
                                         <span class="text-amber-500">No shelf assigned</span>
                                     {% endif %}

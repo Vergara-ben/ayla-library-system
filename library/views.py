@@ -1448,6 +1448,14 @@ def portal_change_password(request):
     return JsonResponse({'success': False, 'error': 'Invalid action.'})
 
 
+def _greeting_now():
+    """Morning, afternoon or evening, by the library's own clock."""
+    hour = timezone.localtime(timezone.now()).hour
+    if hour < 12:
+        return 'Good morning'
+    return 'Good afternoon' if hour < 18 else 'Good evening'
+
+
 @admin_only_required
 def admin_dashboard(request):
     admin_id = request.session.get('admin_id')
@@ -1473,10 +1481,13 @@ def admin_dashboard(request):
 
     # PatronLog visit count for today (one session row per visit)
     visitors_today = PatronLog.objects.filter(entry_time__date=today).count()
-
+    patrons_inside = PatronLog.objects.filter(exit_time__isnull=True).count()
 
     context = {
         'admin': admin,
+        'today': today,
+        'greeting': _greeting_now(),
+        'patrons_inside': patrons_inside,
         # Book status counts
         'books_available': books_available,
         'books_borrowed': books_borrowed,
@@ -1511,9 +1522,13 @@ def staff_dashboard(request):
 
     recent_transactions = Transaction.objects.select_related('patron', 'book').order_by('-transaction_date')[:5]
     visitors_today = PatronLog.objects.filter(entry_time__date=today).count()
+    patrons_inside = PatronLog.objects.filter(exit_time__isnull=True).count()
 
     context = {
         'admin': admin,
+        'today': today,
+        'greeting': _greeting_now(),
+        'patrons_inside': patrons_inside,
         'books_available': books_available,
         'books_borrowed': books_borrowed,
         'books_overdue': books_overdue,
@@ -1866,7 +1881,9 @@ def admin_add_patron(request):
         ),
         overdue_count=Count(
             'transaction',
-            filter=Q(transaction__overdue_flag=True)
+            filter=Q(transaction__transaction_type='Borrow',
+                     transaction__return_date__isnull=True,
+                     transaction__due_date__lt=timezone.localdate())
         ),
         borrow_count=Count(
             'transaction',
@@ -1926,6 +1943,64 @@ def approve_patron(request, patron_id):
                      f'Approved registration of "{patron.fullname}" — {how}')
     registration_approved_email(patron)
     messages.success(request, f'{patron.fullname} approved. Their QR code is now active.')
+    return _patron_page_redirect(request)
+
+
+@admin_or_module_required('patrons')
+def set_patron_identity(request, patron_id):
+    """Record that a patron presented their ID at the desk, or undo that."""
+    if request.method != 'POST':
+        return _patron_page_redirect(request)
+
+    patron = Patron.objects.filter(patron_id=patron_id).first()
+    if patron is None:
+        messages.error(request, 'That patron is no longer on file.')
+        return _patron_page_redirect(request)
+    if patron.account_status == 'Visitor':
+        messages.error(request, f'{patron.fullname} is a walk-in visitor. Register them as a '
+                                f'member first, then record the ID check.')
+        return _patron_page_redirect(request)
+
+    if (request.POST.get('verified') or '1').strip() == '0':
+        patron.identity_verified_by = None
+        patron.identity_verified_at = None
+        patron.save(update_fields=['identity_verified_by', 'identity_verified_at'])
+        log_admin_action(request, 'Update', 'Patron', patron.patron_id,
+                         f'Cleared the ID check on "{patron.fullname}"', patron=patron)
+        messages.success(request, f'{patron.fullname} is marked as not verified again.')
+        return _patron_page_redirect(request)
+
+    checker = User.objects.filter(admin_id=request.session.get('admin_id')).first()
+    patron.identity_verified_by = checker
+    patron.identity_verified_at = timezone.now()
+    patron.save(update_fields=['identity_verified_by', 'identity_verified_at'])
+    log_admin_action(request, 'Update', 'Patron', patron.patron_id,
+                     f'Physical ID presented and checked for "{patron.fullname}"', patron=patron)
+    messages.success(request, f'{patron.fullname} is now recorded as ID checked.')
+    return _patron_page_redirect(request)
+
+
+@admin_or_module_required('patrons')
+def verify_unverified_patrons(request):
+    """Record the ID check on every member still without one, after a bulk import."""
+    if request.method != 'POST':
+        return _patron_page_redirect(request)
+
+    waiting = (Patron.objects
+               .filter(identity_verified_at__isnull=True)
+               .exclude(account_status='Visitor'))
+    names = list(waiting.values_list('fullname', flat=True)[:5])
+    checker = User.objects.filter(admin_id=request.session.get('admin_id')).first()
+    marked = waiting.update(identity_verified_by=checker, identity_verified_at=timezone.now())
+
+    if not marked:
+        messages.info(request, 'Every member already has their ID check on record.')
+        return _patron_page_redirect(request)
+
+    log_admin_action(request, 'Update', 'Patron', None,
+                     'Recorded the ID check on %d patron record(s)%s' % (
+                         marked, ' incl. ' + ', '.join(names) if names else ''))
+    messages.success(request, '%d patron record(s) recorded as ID checked.' % marked)
     return _patron_page_redirect(request)
 
 
@@ -2114,7 +2189,9 @@ def _patrons_page(request, template):
         ),
         overdue_count=Count(
             'transaction',
-            filter=Q(transaction__overdue_flag=True)
+            filter=Q(transaction__transaction_type='Borrow',
+                     transaction__return_date__isnull=True,
+                     transaction__due_date__lt=timezone.localdate())
         ),
         borrow_count=Count(
             'transaction',
@@ -2128,6 +2205,10 @@ def _patrons_page(request, template):
     patrons_with_borrows = patrons_queryset.filter(active_borrows__gt=0).count()
     patrons_overdue = patrons_queryset.filter(overdue_count__gt=0).count()
     visitor_count = Patron.objects.filter(account_status='Visitor').count()
+    unverified_count = (Patron.objects
+                        .filter(identity_verified_at__isnull=True)
+                        .exclude(account_status='Visitor')
+                        .count())
 
     # Registrations awaiting review, online and from the desk.
     pending_patrons = Patron.objects.filter(account_status='Pending').order_by('-registration_date')
@@ -2155,6 +2236,7 @@ def _patrons_page(request, template):
         'pending_patrons': pending_patrons,
         'pending_reactivations': pending_reactivations,
         'visitor_count': visitor_count,
+        'unverified_count': unverified_count,
         # Schools already on file, offered as a picker beside the free-text box.
         'known_schools': known_schools(),
         'show_visitors': show_visitors,
@@ -2238,7 +2320,9 @@ def admin_edit_patron(request, patron_id):
         ),
         overdue_count=Count(
             'transaction',
-            filter=Q(transaction__overdue_flag=True)
+            filter=Q(transaction__transaction_type='Borrow',
+                     transaction__return_date__isnull=True,
+                     transaction__due_date__lt=timezone.localdate())
         ),
         borrow_count=Count(
             'transaction',
@@ -2610,8 +2694,18 @@ def _book_detail_page(request, template):
     borrowed_count = books.filter(status='Borrowed').count()
     overdue_count = books.filter(status='Overdue').count()
 
+    # Who holds each copy, so the Borrower and Due Date columns are real.
+    open_loans = {}
+    for loan in (Transaction.objects.select_related('patron')
+                 .filter(transaction_type='Borrow', return_date__isnull=True)
+                 .order_by('-transaction_date')):
+        open_loans.setdefault(loan.book_id, loan)
+    listed = list(books)
+    for book in listed:
+        book.open_loan = open_loans.get(book.book_id)
+
     context = {
-        'books': books,
+        'books': listed,
         'total_books': total_books,
         'available_count': available_count,
         'borrowed_count': borrowed_count,
@@ -2628,6 +2722,16 @@ def admin_book_detail(request):
 @module_required('books')
 def staff_book_detail(request):
     return _book_detail_page(request, 'library_staff/bookdetail.html')
+
+
+def _transaction_status(tx, today):
+    """What a loan is right now, rather than what the nightly sweep last wrote."""
+    if tx.return_date:
+        return ('Returned late'
+                if (tx.due_date and tx.return_date > tx.due_date) else 'Returned')
+    if tx.transaction_type == 'Borrow':
+        return 'Overdue' if (tx.due_date and tx.due_date < today) else 'Borrowed'
+    return tx.transaction_type
 
 
 def _transaction_page(request, template):
@@ -2649,7 +2753,10 @@ def _transaction_page(request, template):
     elif status == 'returned':
         transactions_queryset = transactions_queryset.filter(return_date__isnull=False)
     elif status == 'overdue':
-        transactions_queryset = transactions_queryset.filter(overdue_flag=True)
+        # Past its due date and still out, whether or not the sweep has run.
+        transactions_queryset = transactions_queryset.filter(
+            transaction_type='Borrow', return_date__isnull=True,
+            due_date__lt=timezone.localdate())
 
     def _parse_date(s):
         try:
@@ -2668,11 +2775,15 @@ def _transaction_page(request, template):
     # Returns are counted from return_date on borrow rows.
     total_returned = Transaction.objects.filter(return_date__isnull=False).count()
     currently_out = Transaction.objects.filter(transaction_type='Borrow', return_date__isnull=True).count()
-    overdue_count = Transaction.objects.filter(overdue_flag=True).count()
+    today = timezone.localdate()
+    overdue_count = Transaction.objects.filter(
+        transaction_type='Borrow', return_date__isnull=True, due_date__lt=today).count()
     transaction_count = transactions_queryset.count()
 
     paginator = Paginator(transactions_queryset, 20)
     transactions = paginator.get_page(request.GET.get('page', 1))
+    for tx in transactions:
+        tx.status_label = _transaction_status(tx, today)
 
     # Always show pending requests.
     pending_extensions = (DueDateExtension.objects

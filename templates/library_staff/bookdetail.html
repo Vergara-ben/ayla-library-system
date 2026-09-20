@@ -213,6 +213,9 @@
                                 <thead>
                                     <tr class="border-b border-slate-800 text-[10px] font-bold tracking-wider text-slate-500 uppercase">
                                         <th class="py-3 px-5">Copy #</th>
+                                        <th class="py-3 px-5">Title</th>
+                                        <th class="py-3 px-5">Author</th>
+                                        <th class="py-3 px-5">ISBN</th>
                                         <th class="py-3 px-5">Location</th>
                                         <th class="py-3 px-5">Status</th>
                                         <th class="py-3 px-5">Borrower</th>
@@ -225,7 +228,9 @@
                                 <tr class="hover:bg-slate-800/20 transition-colors">
                                     <td class="py-3.5 px-5 font-mono text-slate-400">BOOK-{{ book.book_id }}</td>
                                     <td class="py-3.5 px-5">{{ book.title }}</td>
-                                    <td class="py-3.5 px-5">{% if book.shelf_level.shelf %}{{ book.shelf_level.shelf.name }} · {% endif %}{{ book.shelf_level.category|default:'N/A' }}</td>
+                                    <td class="py-3.5 px-5 text-slate-400">{{ book.author|default:"&mdash;" }}</td>
+                                    <td class="py-3.5 px-5 text-slate-400">{{ book.ISBN|default:"&mdash;" }}</td>
+                                    <td class="py-3.5 px-5">{{ book.location|default:"Not shelved" }}</td>
                                     <td class="py-3.5 px-5">
                                         {% if book.status == 'Available' %}
                                             <span class="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded text-[11px] font-medium">Available</span>
@@ -237,8 +242,8 @@
                                             <span class="bg-slate-800/50 text-slate-400 border border-slate-700/40 px-2 py-0.5 rounded text-[11px] font-medium">{{ book.status }}</span>
                                         {% endif %}
                                     </td>
-                                    <td class="py-3.5 px-5 text-slate-400">{{ book.author }}</td>
-                                    <td class="py-3.5 px-5 text-slate-400">{{ book.ISBN|default:'N/A' }}</td>
+                                    <td class="py-3.5 px-5 text-slate-400">{% if book.open_loan %}{{ book.open_loan.patron.fullname|default:"&mdash;" }}{% else %}&mdash;{% endif %}</td>
+                                    <td class="py-3.5 px-5 text-slate-400">{% if book.open_loan.due_date %}{{ book.open_loan.due_date|date:"M j, Y" }}{% else %}&mdash;{% endif %}</td>
                                     <td class="py-3.5 px-5 text-center">
                                         <a href="{% url 'admin_edit_book' book.book_id %}" class="inline-flex items-center justify-center rounded-lg border border-slate-700 px-3 py-1 text-[10px] text-slate-200 hover:bg-slate-800/40 hover:text-white">
                                             <i class="fa-solid fa-pen-to-square mr-1"></i>Edit
@@ -247,7 +252,7 @@
                                 </tr>
                             {% empty %}
                                 <tr>
-                                    <td colspan="6" class="py-6 px-5 text-center text-slate-500">No books found.</td>
+                                    <td colspan="9" class="py-6 px-5 text-center text-slate-500">No books found.</td>
                                 </tr>
                             {% endfor %}
                         </tbody>

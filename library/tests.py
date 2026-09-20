@@ -6,6 +6,7 @@ import json
 import math
 import os
 from io import StringIO
+from html.parser import HTMLParser
 from unittest import mock
 from uuid import uuid4
 
@@ -6328,8 +6329,12 @@ class AnalyticsTests(TestCase):
 
         from library.reports import _analytics
         report = dict(_analytics(self.start, self.end)['summary'])
-        self.assertEqual(report['Peak Hour'], '10 AM – 11 AM')
-        self.assertEqual(report['Visits In Peak Hour'], 1)
+        # The report plans staffing by opening hours, and still owns up to the rest.
+        self.assertEqual(report['Busiest Opening Hour'], '10 AM – 11 AM')
+        self.assertEqual(report['Visits In Busiest Opening Hour'], 1)
+        self.assertEqual(report['Busiest Hour'], '7 AM – 8 AM')
+        self.assertEqual(report['Visits Outside Opening Hours'], 10)
+        self.assertEqual(report['Total Visits'], 11)
 
     def test_a_visit_spanning_hours_counts_in_each_one(self):
         self._visit(1, 9, 12)
@@ -8166,3 +8171,468 @@ class OneCopyPerBookTests(TestCase):
         migration.give_every_book_one_copy(apps, None)
         self.assertEqual(InventoryRecord.objects.count(), 4)
         self.assertEqual(Book.objects.count(), 4)
+
+
+class ReportAccuracyTests(TestCase):
+    """Every report names its columns honestly and counts what it says it counts."""
+
+    def setUp(self):
+        from library.reports import REPORT_TYPES
+        self.types = [key for key, _label in REPORT_TYPES]
+        self.user = _admin(modules='books,patrons,inventory,transactions,logs')
+        self.client = _signed_in(self.user)
+        self.today = timezone.localdate()
+        self.start = self.today - timedelta(days=30)
+
+        plan = FloorPlan.objects.create(name='Ground', floor_number=1, is_active=True)
+        room = Room.objects.create(floor_plan=plan, name='Main', map_x=0, map_y=0)
+        self.table = Shelf.objects.create(room=room, name='Table 1', map_x=0, map_y=0)
+        self.top = ShelfLevel.objects.create(shelf=self.table, level_number=1, is_top=True)
+        shelf = Shelf.objects.create(room=room, name='Shelf A', map_x=0, map_y=0)
+        self.board = ShelfLevel.objects.create(shelf=shelf, level_number=2, column_number=1)
+
+        self.book = Book.objects.create(title='Noli Me Tangere', author='Rizal, Jose',
+                                        genre='Classic', shelf_level=self.board, shelf_slot=3)
+        self.on_table = Book.objects.create(title='Atlas', author='Grolier',
+                                            shelf_level=self.top)
+        self.copy = InventoryRecord.objects.create(book=self.book, source='Purchase',
+                                                   condition='Good', status='In Stock',
+                                                   qr_label=str(uuid4()))
+        self.patron = Patron.objects.create(first_name='Ana', last_name='Reyes',
+                                            email='ana.report@example.invalid',
+                                            patron_type='Student', school='Rizal High')
+        self.visitor = Patron.objects.create(first_name='Walk', last_name='In',
+                                             patron_type='General Visitor',
+                                             account_status='Visitor')
+
+    def _report(self, key):
+        from library.reports import build_report
+        return build_report(key, self.start, self.today)
+
+    def _day(self, days_ago):
+        return self.today - timedelta(days=days_ago)
+
+    def _loan(self, **extra):
+        values = dict(book=self.book, patron=self.patron, transaction_type='Borrow',
+                      due_date=self._day(5))
+        values.update(extra)
+        tx = Transaction.objects.create(**values)
+        return tx
+
+    # Structure
+
+    def test_every_row_matches_the_column_labels(self):
+        self._loan()
+        PatronLog.objects.create(patron=self.patron, entry_time=timezone.now())
+        for key in self.types:
+            report = self._report(key)
+            width = len(report['columns'])
+            self.assertTrue(width, key)
+            for row in report['rows']:
+                self.assertEqual(len(row), width,
+                                 '%s: %d cells under %d columns' % (key, len(row), width))
+
+    def test_no_report_prints_a_none(self):
+        """A missing value reads as a dash, never as the word None."""
+        self._loan()
+        PatronLog.objects.create(patron=self.visitor, entry_time=timezone.now())
+        for key in self.types:
+            report = self._report(key)
+            for row in report['rows']:
+                for cell in row:
+                    self.assertIsNotNone(cell, key)
+                    self.assertNotEqual(str(cell), 'None', '%s: %r' % (key, row))
+            for label, value in report['summary']:
+                self.assertNotEqual(str(value), 'None', '%s: %s' % (key, label))
+
+    def test_every_report_exports_as_excel_and_pdf(self):
+        self._loan()
+        for key in self.types:
+            for path in ('/admin-portal/reports/excel/', '/admin-portal/reports/pdf/'):
+                r = self.client.get(path, {'type': key, 'start': self.start.isoformat(),
+                                           'end': self.today.isoformat()})
+                self.assertEqual(r.status_code, 200, '%s %s' % (key, path))
+                self.assertTrue(r.content[:4] in (b'PK\x03\x04', b'%PDF'), '%s %s' % (key, path))
+
+    # Books
+
+    def test_books_report_carries_ids_and_the_real_shelf_location(self):
+        report = self._report('books')
+        columns = report['columns']
+        row = next(r for r in report['rows'] if r[columns.index('Title')] == 'Noli Me Tangere')
+        self.assertEqual(row[columns.index('Book ID')], self.book.book_id)
+        self.assertEqual(row[columns.index('Copy ID')], self.copy.inventory_id)
+        self.assertEqual(row[columns.index('Shelf Location')], 'Shelf A Column 1 Level 2')
+        self.assertEqual(row[columns.index('Shelf Slot')], 3)
+        table_row = next(r for r in report['rows'] if r[columns.index('Title')] == 'Atlas')
+        self.assertEqual(table_row[columns.index('Shelf Location')], 'Table 1 Top')
+
+    # Patrons
+
+    def test_patrons_report_counts_each_status_as_itself(self):
+        report = self._report('patrons')
+        summary = dict(report['summary'])
+        self.assertEqual(summary['Total Patrons'], 2)
+        self.assertEqual(summary['Active'], 1)
+        self.assertEqual(summary['Walk-in Visitors'], 1)
+        self.assertEqual(summary['Inactive'], 0)
+        counted = sum(summary[k] for k in ('Active', 'Pending', 'Suspended', 'Inactive',
+                                           'Walk-in Visitors'))
+        self.assertEqual(counted, summary['Total Patrons'])
+
+    def test_patrons_report_shows_the_card_number_and_books_out(self):
+        self._loan()
+        report = self._report('patrons')
+        columns = report['columns']
+        row = next(r for r in report['rows'] if r[columns.index('Patron ID')] == self.patron.patron_id)
+        self.assertEqual(row[columns.index('Card Number')], self.patron.card_display)
+        self.assertEqual(row[columns.index('Books Out')], 1)
+
+    # Transactions
+
+    def test_a_loan_returned_in_the_period_counts_as_a_return(self):
+        """Borrowed before the window, returned inside it: the return belongs here."""
+        old = self._loan()
+        Transaction.objects.filter(pk=old.pk).update(
+            transaction_date=self.start - timedelta(days=10), return_date=self._day(2))
+        report = self._report('transactions')
+        summary = dict(report['summary'])
+        self.assertEqual(summary['Returns Completed'], 1)
+        self.assertEqual(summary['Borrows Started'], 0)
+        columns = report['columns']
+        row = report['rows'][0]
+        self.assertEqual(row[columns.index('Transaction ID')], old.transaction_id)
+        self.assertEqual(row[columns.index('Book ID')], self.book.book_id)
+        self.assertEqual(row[columns.index('Patron ID')], self.patron.patron_id)
+
+    # Visit logs
+
+    def test_an_assumed_exit_is_not_passed_off_as_a_sign_out(self):
+        entry = timezone.now() - timedelta(hours=3)
+        PatronLog.objects.create(patron=self.patron, entry_time=entry,
+                                 exit_time=entry + timedelta(hours=1), auto_closed=True)
+        PatronLog.objects.create(patron=self.patron, entry_time=entry,
+                                 exit_time=entry + timedelta(hours=2))
+        PatronLog.objects.create(patron=self.patron, entry_time=entry)
+        report = self._report('patron_logs')
+        summary = dict(report['summary'])
+        self.assertEqual(summary['Total Visits'], 3)
+        self.assertEqual(summary['Assumed Exits'], 1)
+        self.assertEqual(summary['Signed Out'], 1)
+        self.assertEqual(summary['Still Inside'], 1)
+        records = [row[report['columns'].index('Exit Record')] for row in report['rows']]
+        self.assertEqual(sorted(records), ['Assumed at closing', 'Signed out', 'Still inside'])
+
+    # Stock
+
+    def test_stock_levels_lists_the_ids_behind_each_count(self):
+        report = self._report('stock_levels')
+        columns = report['columns']
+        row = next(r for r in report['rows'] if r[columns.index('Title')] == 'Noli Me Tangere')
+        self.assertEqual(row[columns.index('Book IDs')], str(self.book.book_id))
+        self.assertEqual(row[columns.index('Copy IDs')], str(self.copy.inventory_id))
+        self.assertEqual(row[columns.index('Copies')], 1)
+        self.assertEqual(row[columns.index('Shelf Location')], 'Shelf A Column 1 Level 2')
+        summary = dict(report['summary'])
+        self.assertEqual(summary['Copies On Hand'], summary['Copies Recorded'])
+
+    def test_two_books_sharing_a_title_stay_apart_when_the_author_differs(self):
+        twin = Book.objects.create(title='Noli Me Tangere', author='Someone Else')
+        InventoryRecord.objects.create(book=twin, source='Purchase', condition='Good',
+                                       status='In Stock', qr_label=str(uuid4()))
+        titles = [r[0] for r in self._report('stock_levels')['rows']]
+        self.assertEqual(titles.count('Noli Me Tangere'), 2)
+
+    def test_a_book_with_no_copy_record_is_owned_up_to(self):
+        Book.objects.create(title='Never Received', author='Nobody')
+        summary = dict(self._report('stock_levels')['summary'])
+        self.assertEqual(summary['Books Without A Copy Record'], 2)
+
+    # Unreturned and penalties
+
+    def test_unreturned_shows_who_has_it_and_what_it_would_cost(self):
+        rule = BorrowingRule.current()
+        rule.fine_per_day = 5
+        rule.grace_period_days = 0
+        rule.save()
+        self._loan(due_date=self._day(4))
+        report = self._report('unreturned')
+        columns = report['columns']
+        row = report['rows'][0]
+        self.assertEqual(row[columns.index('Transaction ID')], Transaction.objects.get().transaction_id)
+        self.assertEqual(row[columns.index('Book ID')], self.book.book_id)
+        self.assertEqual(row[columns.index('Patron ID')], self.patron.patron_id)
+        self.assertEqual(row[columns.index('Days Overdue')], '4')
+        self.assertEqual(row[columns.index('Fine If Returned Today (PHP)')], '20.00')
+
+    def test_penalties_say_whether_the_book_is_back(self):
+        returned = self._loan(due_date=self._day(6), return_date=self._day(2), fine_amount=15)
+        Transaction.objects.filter(pk=returned.pk).update(transaction_date=self._day(9))
+        self._loan(due_date=self._day(3), fine_amount=10)
+        report = self._report('penalties')
+        reasons = [row[report['columns'].index('Reason')] for row in report['rows']]
+        self.assertIn('Returned late', reasons)
+        self.assertIn('Still out, fine still growing', reasons)
+        summary = dict(report['summary'])
+        self.assertEqual(summary['Total Charged'], '25.00')
+        self.assertEqual(summary['On Returned Loans'], '15.00')
+        self.assertEqual(summary['Still Accruing'], '10.00')
+
+    # Analytics
+
+    def test_analytics_lists_the_book_ids_behind_a_title(self):
+        self._loan()
+        report = self._report('analytics')
+        columns = report['columns']
+        row = report['rows'][0]
+        self.assertEqual(row[columns.index('Book IDs')], str(self.book.book_id))
+        self.assertEqual(row[columns.index('Times Borrowed')], 1)
+        self.assertEqual(row[columns.index('Rank')], 1)
+
+
+class _TableReader(HTMLParser):
+    """Reads every table on a page as header widths and row widths."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.tables = []
+        self._stack = []
+        self._row = None
+        self._cell = None
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if tag == 'table':
+            self._stack.append({'head': 0, 'rows': [], 'texts': []})
+        elif tag == 'tr' and self._stack:
+            self._row = {'width': 0, 'texts': []}
+        elif tag in ('th', 'td') and self._stack:
+            span = attrs.get('colspan')
+            self._cell = int(span) if span and span.isdigit() else 1
+            self._text = ''
+
+    def handle_data(self, data):
+        if self._cell is not None:
+            self._text = getattr(self, '_text', '') + data
+
+    def handle_endtag(self, tag):
+        if tag in ('th', 'td') and self._stack and self._cell is not None:
+            table = self._stack[-1]
+            text = ' '.join(getattr(self, '_text', '').split())
+            if tag == 'th':
+                table['head'] += self._cell
+                table['texts'].append(text)
+            elif self._row is not None:
+                self._row['width'] += self._cell
+                self._row['texts'].append(text)
+            self._cell = None
+        elif tag == 'tr' and self._stack and self._row is not None:
+            if self._row['width']:
+                self._stack[-1]['rows'].append(self._row)
+            self._row = None
+        elif tag == 'table' and self._stack:
+            self.tables.append(self._stack.pop())
+
+
+def _tables_on(html):
+    reader = _TableReader()
+    reader.feed(html)
+    return reader.tables
+
+
+class PageTableTests(TestCase):
+    """Every table on every portal page lines its cells up under its own headings."""
+
+    PAGES = [
+        '/admin-portal/dashboard/', '/admin-portal/management/', '/admin-portal/book-detail/',
+        '/admin-portal/manage-patron/', '/admin-portal/transaction/',
+        '/admin-portal/log-management/', '/admin-portal/donation-management/',
+        '/admin-portal/inventory/', '/admin-portal/users/', '/admin-portal/reshelving/',
+        '/admin-portal/activity-logs/', '/admin-portal/announcement-management/',
+        '/admin-portal/analytics/', '/admin-portal/reports/?type=books&generate=1',
+        '/library-staff/dashboard/', '/library-staff/books/', '/library-staff/book-detail/',
+        '/library-staff/patrons/', '/library-staff/transactions/', '/library-staff/logs/',
+        '/library-staff/donations/',
+    ]
+
+    def setUp(self):
+        modules = 'books,patrons,transactions,logs,inventory,donations,shelf'
+        self.admin = _admin(modules=modules)
+        self.client = _signed_in(self.admin)
+        self.staff = User.objects.create(
+            fullname='Staff Member', email='staff.tables@example.invalid',
+            password_hash=hash_password('SmokeTest123'), role='Staff',
+            account_status='Active', modules=modules)
+        self.staff_client = _signed_in(self.staff)
+        self.today = timezone.localdate()
+
+        plan = FloorPlan.objects.create(name='Ground', floor_number=1, is_active=True)
+        room = Room.objects.create(floor_plan=plan, name='Main', map_x=0, map_y=0)
+        shelf = Shelf.objects.create(room=room, name='Shelf A', map_x=0, map_y=0)
+        self.board = ShelfLevel.objects.create(shelf=shelf, level_number=2, column_number=1)
+        self.book = Book.objects.create(title='Noli Me Tangere', author='Rizal, Jose',
+                                        genre='Classic', shelf_level=self.board, shelf_slot=1,
+                                        status='Borrowed')
+        self.patron = Patron.objects.create(first_name='Ana', last_name='Reyes',
+                                            email='ana.tables@example.invalid',
+                                            patron_type='Student', school='Rizal High School',
+                                            address='12 Mabini St')
+        # Out, overdue, and never touched by the nightly sweep.
+        self.loan = Transaction.objects.create(
+            book=self.book, patron=self.patron, transaction_type='Borrow',
+            due_date=self.today - timedelta(days=4), overdue_flag=False)
+
+    def _page(self, client, url):
+        response = client.get(url)
+        self.assertEqual(response.status_code, 200, url)
+        return response.content.decode('utf-8', 'replace')
+
+    def test_every_table_row_fits_its_headings(self):
+        for url in self.PAGES:
+            client = self.staff_client if url.startswith('/library-staff/') else self.client
+            for number, table in enumerate(_tables_on(self._page(client, url)), start=1):
+                if not table['head']:
+                    continue          # a layout table, with no headings to disagree with
+                for row in table['rows']:
+                    self.assertEqual(
+                        row['width'], table['head'],
+                        '%s table %d: a row of %d cells under %d headings (%r)'
+                        % (url, number, row['width'], table['head'], row['texts'][:4]))
+
+    def test_the_copy_list_names_the_borrower_under_borrower(self):
+        for url, client in (('/admin-portal/book-detail/', self.client),
+                            ('/library-staff/book-detail/', self.staff_client)):
+            table = [t for t in _tables_on(self._page(client, url)) if 'Borrower' in t['texts']][0]
+            row = table['rows'][0]
+            cells = dict(zip(table['texts'], row['texts']))
+            self.assertEqual(cells['Copy #'], 'BOOK-%d' % self.book.book_id)
+            self.assertEqual(cells['Title'], 'Noli Me Tangere')
+            self.assertEqual(cells['Author'], 'Rizal, Jose')
+            self.assertEqual(cells['Location'], 'Shelf A Column 1 Level 2')
+            self.assertEqual(cells['Status'], 'Borrowed')
+            self.assertEqual(cells['Borrower'], 'Ana Reyes')
+            self.assertIn(self.loan.due_date.strftime('%b'), cells['Due Date'])
+
+    def test_an_overdue_loan_says_overdue_before_the_sweep_runs(self):
+        html = self._page(self.client, '/admin-portal/transaction/')
+        table = [t for t in _tables_on(html) if 'TX ID' in t['texts']][0]
+        cells = dict(zip(table['texts'], table['rows'][0]['texts']))
+        self.assertEqual(cells['Status'], 'Overdue')
+        self.loan.refresh_from_db()
+        self.assertFalse(self.loan.overdue_flag, 'the flag was written, so this proves nothing')
+
+    def test_a_late_return_says_returned_not_overdue(self):
+        self.loan.return_date = self.today
+        self.loan.overdue_flag = True
+        self.loan.save()
+        html = self._page(self.client, '/admin-portal/transaction/')
+        table = [t for t in _tables_on(html) if 'TX ID' in t['texts']][0]
+        cells = dict(zip(table['texts'], table['rows'][0]['texts']))
+        self.assertEqual(cells['Status'], 'Returned late')
+
+    def test_the_patron_list_shows_the_school_under_school(self):
+        for url, client in (('/admin-portal/manage-patron/', self.client),
+                            ('/library-staff/patrons/', self.staff_client)):
+            table = [t for t in _tables_on(self._page(client, url)) if 'School' in t['texts']][0]
+            cells = dict(zip(table['texts'], table['rows'][0]['texts']))
+            self.assertEqual(cells['School'], 'Rizal High School')
+            self.assertNotIn('12 Mabini St', table['rows'][0]['texts'])
+            self.assertIn(self.patron.card_display, cells['ID Number'])
+
+    def test_the_patron_list_counts_only_loans_that_are_still_out(self):
+        """A returned late loan keeps its flag, and must not read as overdue now."""
+        self.loan.return_date = self.today
+        self.loan.overdue_flag = True
+        self.loan.save()
+        html = self._page(self.client, '/admin-portal/manage-patron/')
+        table = [t for t in _tables_on(html) if 'Borrows' in t['texts']][0]
+        cells = dict(zip(table['texts'], table['rows'][0]['texts']))
+        self.assertEqual(cells['Borrows'].replace(' ', ''), '0/0')
+
+
+class PatronIdCheckTests(TestCase):
+    """Recording that a patron presented their ID, one at a time or after an import."""
+
+    SINGLE = '/admin-portal/patron-id-check/%d/'
+    ALL = '/admin-portal/patron-id-check/all/'
+
+    def setUp(self):
+        self.user = _admin(modules='patrons')
+        self.client = _signed_in(self.user)
+        self.patron = Patron.objects.create(first_name='Ana', last_name='Reyes',
+                                            email='ana.id@example.invalid',
+                                            patron_type='Student')
+        self.imported = Patron.objects.create(first_name='Jose', last_name='Rizal',
+                                              email='jose.id@example.invalid',
+                                              patron_type='Teacher')
+        self.visitor = Patron.objects.create(first_name='Walk', last_name='In',
+                                             patron_type='General Visitor',
+                                             account_status='Visitor')
+
+    def test_an_imported_patron_starts_without_an_id_check(self):
+        self.assertIsNone(self.patron.identity_verified_at)
+        page = self.client.get('/admin-portal/manage-patron/').content.decode()
+        self.assertIn('Record ID check', page)
+        self.assertIn('Record ID check for all (2)', page)
+
+    def test_recording_one_id_check_says_who_checked_it(self):
+        r = self.client.post(self.SINGLE % self.patron.patron_id)
+        self.assertEqual(r.status_code, 302)
+        self.patron.refresh_from_db()
+        self.assertIsNotNone(self.patron.identity_verified_at)
+        self.assertEqual(self.patron.identity_verified_by, self.user)
+        self.assertTrue(SystemLog.objects.filter(
+            entity_type='Patron', entity_id=str(self.patron.patron_id),
+            detail__icontains='ID presented').exists())
+
+    def test_the_check_can_be_undone(self):
+        self.client.post(self.SINGLE % self.patron.patron_id)
+        self.client.post(self.SINGLE % self.patron.patron_id, {'verified': '0'})
+        self.patron.refresh_from_db()
+        self.assertIsNone(self.patron.identity_verified_at)
+        self.assertIsNone(self.patron.identity_verified_by)
+
+    def test_a_walk_in_visitor_is_sent_to_register_first(self):
+        self.client.post(self.SINGLE % self.visitor.patron_id)
+        self.visitor.refresh_from_db()
+        self.assertIsNone(self.visitor.identity_verified_at)
+
+    def test_one_button_clears_the_backlog_left_by_an_import(self):
+        self.client.post(self.SINGLE % self.patron.patron_id)
+        checked_at = Patron.objects.get(pk=self.patron.pk).identity_verified_at
+
+        r = self.client.post(self.ALL)
+        self.assertEqual(r.status_code, 302)
+        self.imported.refresh_from_db()
+        self.assertIsNotNone(self.imported.identity_verified_at)
+        self.assertEqual(self.imported.identity_verified_by, self.user)
+        # The one already checked keeps its original date, and visitors are left alone.
+        self.assertEqual(Patron.objects.get(pk=self.patron.pk).identity_verified_at, checked_at)
+        self.visitor.refresh_from_db()
+        self.assertIsNone(self.visitor.identity_verified_at)
+        self.assertTrue(SystemLog.objects.filter(
+            entity_type='Patron', detail__icontains='1 patron record').exists())
+
+    def test_with_nothing_left_to_check_it_says_so_and_changes_nothing(self):
+        self.client.post(self.ALL)
+        before = list(Patron.objects.values_list('patron_id', 'identity_verified_at'))
+        self.client.post(self.ALL)
+        self.assertEqual(list(Patron.objects.values_list('patron_id', 'identity_verified_at')),
+                         before)
+
+    def test_a_get_changes_nothing(self):
+        self.client.get(self.SINGLE % self.patron.patron_id)
+        self.client.get(self.ALL)
+        self.patron.refresh_from_db()
+        self.assertIsNone(self.patron.identity_verified_at)
+
+    def test_an_account_without_the_patrons_module_cannot_record_checks(self):
+        stranger = User.objects.create(
+            fullname='Shelver', email='shelver.id@example.invalid',
+            password_hash=hash_password('SmokeTest123'), role='Staff',
+            account_status='Active', modules='books')
+        client = _signed_in(stranger)
+        client.post(self.SINGLE % self.patron.patron_id)
+        client.post(self.ALL)
+        self.patron.refresh_from_db()
+        self.assertIsNone(self.patron.identity_verified_at)
