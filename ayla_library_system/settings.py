@@ -269,6 +269,12 @@ elif EMAIL_HOST_USER and EMAIL_HOST_PASSWORD:
 else:
     # Nothing configured.
     EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+    # Say so: otherwise pages report "code sent" while nothing reaches an inbox.
+    import logging as _logging
+    _logging.getLogger('ayla.email').warning(
+        'EMAIL_PROVIDER is smtp but EMAIL_HOST_USER or EMAIL_HOST_PASSWORD is empty, '
+        'so emails (including verification codes) are only printed to this console. '
+        'Set both in .env to send real email.')
 
 # Logging to the console and a rotating file.
 LOG_DIR = BASE_DIR / 'logs'
