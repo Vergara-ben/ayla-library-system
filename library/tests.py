@@ -8769,3 +8769,89 @@ class PatronIdCheckTests(TestCase):
         client.post(self.ALL)
         self.patron.refresh_from_db()
         self.assertIsNone(self.patron.identity_verified_at)
+
+
+class CardPhotoTests(TestCase):
+    """A patron's own card photo is printed only after staff approve it."""
+
+    PNG = bytes([137, 80, 78, 71, 13, 10, 26, 10]) + b'0' * 80
+
+    def setUp(self):
+        self.patron = Patron.objects.create(
+            first_name='Ana', last_name='Cruz', email='photo@example.invalid',
+            patron_type='Student', qr_code='photo-qr')
+        self.patron_client = Client()
+        s = self.patron_client.session
+        s['patron_id'] = self.patron.patron_id
+        s.save()
+        self.staff = _signed_in(_admin(modules='patrons'))
+
+    def _upload(self, client, url, name='me.png', data=None):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        return client.post(url, {'photo': SimpleUploadedFile(name, data or self.PNG, 'image/png')})
+
+    def test_a_patron_upload_waits_for_approval(self):
+        from .models import PatronPhoto
+        self._upload(self.patron_client, '/patron/library-card/photo/')
+        photo = PatronPhoto.objects.get(patron=self.patron)
+        self.assertEqual(photo.status, 'Pending')
+        page = self.patron_client.get('/patron/library-card/').content.decode()
+        self.assertIn('waiting for approval', page)
+        # Not on the card itself until approved.
+        self.assertNotIn('alt="Photo of %s"' % self.patron.fullname, page)
+
+    def test_approving_puts_the_photo_on_the_card(self):
+        from .models import PatronPhoto
+        self._upload(self.patron_client, '/patron/library-card/photo/')
+        photo = PatronPhoto.objects.get(patron=self.patron)
+        self.staff.post('/admin-portal/card-photo/%d/respond/' % photo.photo_id, {'action': 'approve'})
+        photo.refresh_from_db()
+        self.assertEqual(photo.status, 'Approved')
+        page = self.patron_client.get('/patron/library-card/').content.decode()
+        self.assertIn('/card-photo/%d/' % photo.photo_id, page)
+
+    def test_a_rejection_is_explained_to_the_patron(self):
+        from .models import PatronPhoto
+        self._upload(self.patron_client, '/patron/library-card/photo/')
+        photo = PatronPhoto.objects.get(patron=self.patron)
+        self.staff.post('/admin-portal/card-photo/%d/respond/' % photo.photo_id,
+                        {'action': 'reject', 'staff_note': 'Face not visible'})
+        page = self.patron_client.get('/patron/library-card/').content.decode()
+        self.assertIn('Face not visible', page)
+        self.assertNotIn('/card-photo/%d/' % photo.photo_id, page)
+
+    def test_a_new_upload_keeps_the_approved_photo_until_it_is_approved(self):
+        from .models import PatronPhoto
+        self._upload(self.staff, '/admin-portal/patron/%d/library-card/photo/' % self.patron.patron_id)
+        approved = PatronPhoto.objects.get(patron=self.patron)
+        self.assertEqual(approved.status, 'Approved')
+        self._upload(self.patron_client, '/patron/library-card/photo/')
+        self._upload(self.patron_client, '/patron/library-card/photo/')
+        self.assertEqual(PatronPhoto.objects.filter(patron=self.patron, status='Pending').count(), 1)
+        self.assertTrue(PatronPhoto.objects.filter(pk=approved.pk, status='Approved').exists())
+
+    def test_staff_see_pending_photos_on_the_patrons_page(self):
+        self._upload(self.patron_client, '/patron/library-card/photo/')
+        page = self.staff.get('/admin-portal/manage-patron/').content.decode()
+        self.assertIn('Card Photo Requests', page)
+
+    def test_a_non_image_is_refused(self):
+        from .models import PatronPhoto
+        self._upload(self.patron_client, '/patron/library-card/photo/', name='me.png', data=b'not an image at all')
+        self.assertFalse(PatronPhoto.objects.exists())
+
+    def test_the_photo_is_private(self):
+        from .models import PatronPhoto
+        self._upload(self.patron_client, '/patron/library-card/photo/')
+        photo = PatronPhoto.objects.get(patron=self.patron)
+        url = '/card-photo/%d/' % photo.photo_id
+        self.assertEqual(self.patron_client.get(url).status_code, 200)
+        self.assertEqual(self.staff.get(url).status_code, 200)
+        self.assertEqual(Client().get(url).status_code, 404)
+        other = Patron.objects.create(first_name='Ben', last_name='Uy',
+                                      email='other@example.invalid', patron_type='Student')
+        c = Client()
+        s = c.session
+        s['patron_id'] = other.patron_id
+        s.save()
+        self.assertEqual(c.get(url).status_code, 404)

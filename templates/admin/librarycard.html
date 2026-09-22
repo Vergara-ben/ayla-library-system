@@ -91,6 +91,91 @@
   }
   .brand-sub { font-size: 2.6mm; color: var(--lc-muted); margin-top: .6mm; }
 
+  /* Photo beside the holder's name. */
+  .identity { display: flex; align-items: center; gap: 4mm; margin-bottom: 3.5mm; }
+  .identity-text { min-width: 0; display: flex; flex-direction: column; }
+
+  .photo-box {
+    position: relative; flex: none;
+    width: 25.4mm; height: 25.4mm;      /* a 1 x 1 inch ID photo */
+    border-radius: 1.5mm; overflow: hidden;
+    border: .35mm dashed #9fb4c2; background: #f4f8fa;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 1.2mm; color: var(--lc-muted); text-align: center;
+    font: inherit; cursor: pointer; padding: 0;
+    transition: border-color .15s, background .15s;
+  }
+  .photo-box:hover, .photo-box:focus-visible { border-color: var(--lc-accent); background: #eef4ff; outline: none; }
+  .photo-box > i { font-size: 5.5mm; color: #b3c4cf; }
+  .photo-box .photo-hint { font-size: 2.2mm; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; line-height: 1.3; }
+  .photo-box img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: none; }
+  .photo-box.has-photo { border-style: solid; border-color: var(--lc-line); background: #fff; }
+  .photo-box.has-photo img { display: block; }
+  .photo-box.has-photo > i, .photo-box.has-photo .photo-hint { display: none; }
+  /* A camera badge shows the square can be changed. */
+  .photo-edit {
+    position: absolute; right: 1.2mm; bottom: 1.2mm; z-index: 1;
+    width: 5.5mm; height: 5.5mm; border-radius: 99px;
+    background: var(--lc-accent); color: #fff; font-size: 2.5mm;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 1px 4px rgba(11, 31, 42, .3);
+    opacity: 0; transform: scale(.85); transition: opacity .15s, transform .15s;
+  }
+  .photo-box:hover .photo-edit, .photo-box:focus-visible .photo-edit { opacity: 1; transform: none; }
+  .photo-box.is-busy { opacity: .55; cursor: progress; }
+  .photo-clear {
+    position: absolute; top: 1.2mm; right: 1.2mm; z-index: 2;
+    width: 5.5mm; height: 5.5mm; border-radius: 99px; border: 0;
+    background: rgba(11, 31, 42, .72); color: #fff; font-size: 2.6mm;
+    display: flex; align-items: center; justify-content: center; cursor: pointer;
+    opacity: 0; transition: opacity .15s;
+  }
+  .photo-wrap { position: relative; flex: none; }
+  .photo-wrap:hover .photo-clear, .photo-clear:focus-visible { opacity: 1; }
+
+  /* Messages and photo status above the card. */
+  .notice {
+    width: var(--card-w); max-width: 100%;
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 14px; border-radius: 14px;
+    background: #fff; border: 1px solid var(--lc-line); color: var(--lc-ink);
+    font-size: 13px; line-height: 1.5;
+    box-shadow: 0 6px 18px rgba(11, 31, 42, .08);
+    position: relative; z-index: 1;   /* above the patron page's decorations */
+  }
+  .notice > i { font-size: 16px; flex: none; }
+  .notice.is-ok { border-color: #a7f3d0; background: #ecfdf5; }
+  .notice.is-ok > i { color: #059669; }
+  .notice.is-error { border-color: #fecaca; background: #fef2f2; }
+  .notice.is-error > i { color: #dc2626; }
+  .notice.is-wait { border-color: #fde68a; background: #fffbeb; }
+  .notice-thumb {
+    width: 44px; height: 44px; flex: none; object-fit: cover;
+    border-radius: 8px; border: 1px solid #fcd34d;
+  }
+  .notice-body { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+  .notice-body strong { font-weight: 700; }
+  .notice-body span { color: var(--lc-muted); }
+  .notice-actions { display: flex; gap: 6px; flex: none; }
+  .mini-btn {
+    font-family: inherit; font-size: 12px; font-weight: 700;
+    padding: 7px 12px; border-radius: 99px; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 5px; border: 1px solid transparent;
+  }
+  .mini-btn.approve { background: #059669; color: #fff; }
+  .mini-btn.approve:hover { background: #047857; }
+  .mini-btn.reject { background: #fff; color: #b91c1c; border-color: #fecaca; }
+  .mini-btn.reject:hover { background: #fef2f2; }
+  .photo-tip {
+    font-size: 13px; color: var(--muted, var(--lc-muted)); text-align: center; max-width: 560px;
+    position: relative; z-index: 1;
+  }
+  .photo-tip i { color: var(--lc-accent); margin-right: 4px; }
+  @media (max-width: 560px) {
+    .notice { flex-wrap: wrap; }
+    .notice-actions { width: 100%; justify-content: flex-end; }
+  }
+
   .card-label {
     font-size: 2.4mm; font-weight: 800; letter-spacing: .22em;
     text-transform: uppercase; color: var(--lc-accent); margin-bottom: 2mm;
@@ -107,7 +192,6 @@
     display: inline-block; align-self: flex-start;
     font-size: 2.7mm; font-weight: 700; padding: 1mm 2.6mm;
     border-radius: 99px; background: #dbeafe; color: #0038A8;
-    margin-bottom: 3.5mm;
   }
 
   .fields {
@@ -222,7 +306,9 @@
 
   @media print {
     body { background: #fff; padding: 0; display: block; }
-    .toolbar, .hint { display: none !important; }
+    .toolbar, .hint, .notice, .photo-tip, .photo-clear, .photo-edit { display: none !important; }
+    .photo-box { background: #fff; }
+    .photo-box > i { display: none; }
     .idcard {
       box-shadow: none;
       border: 1px solid #94a3b8;   /* a cut line that survives printing */
@@ -265,6 +351,57 @@
     {% endif %}
   </div>
 
+  {% if messages %}
+    {% for message in messages %}
+      <div class="notice {% if message.tags == 'error' %}is-error{% else %}is-ok{% endif %}" role="status">
+        <i class="fa-solid {% if message.tags == 'error' %}fa-circle-exclamation{% else %}fa-circle-check{% endif %}" aria-hidden="true"></i>
+        <span>{{ message }}</span>
+      </div>
+    {% endfor %}
+  {% endif %}
+
+  {% if pending_photo %}
+    <div class="notice is-wait">
+      <img class="notice-thumb" src="{% url 'card_photo' pending_photo.photo_id %}" alt="Photo awaiting approval">
+      <div class="notice-body">
+        {% if printed_by_staff %}
+          <strong>{{ patron.fullname }} sent a new card photo.</strong>
+          <span>Uploaded {{ pending_photo.uploaded_at|date:"M j, Y · g:i A" }}. Approve it to print it on the card.</span>
+        {% else %}
+          <strong>Your photo is waiting for approval.</strong>
+          <span>The library checks every photo before it goes on your card. {% if photo %}Your current photo stays until then.{% endif %}</span>
+        {% endif %}
+      </div>
+      {% if printed_by_staff %}
+        <div class="notice-actions">
+          <form method="post" action="{% url 'respond_to_card_photo' pending_photo.photo_id %}">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="approve">
+            <input type="hidden" name="return_to" value="card">
+            <button type="submit" class="mini-btn approve"><i class="fa-solid fa-check" aria-hidden="true"></i> Approve</button>
+          </form>
+          <form method="post" action="{% url 'respond_to_card_photo' pending_photo.photo_id %}" onsubmit="return askRejectNote(this)">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="reject">
+            <input type="hidden" name="return_to" value="card">
+            <input type="hidden" name="staff_note" value="">
+            <button type="submit" class="mini-btn reject"><i class="fa-solid fa-xmark" aria-hidden="true"></i> Reject</button>
+          </form>
+        </div>
+      {% endif %}
+    </div>
+  {% elif not printed_by_staff and last_review.status == 'Rejected' %}
+    <div class="notice is-error">
+      <i class="fa-solid fa-circle-exclamation" aria-hidden="true"></i>
+      <div class="notice-body">
+        <strong>Your last photo was not approved.</strong>
+        <span>{% if last_review.staff_note %}{{ last_review.staff_note }} — {% endif %}Click the photo square on your card to send another.</span>
+      </div>
+    </div>
+  {% elif not printed_by_staff and not photo %}
+    <p class="photo-tip"><i class="fa-solid fa-camera" aria-hidden="true"></i> Click the <strong>1 × 1 photo</strong> square to add your picture. The library approves it before it appears on your card.</p>
+  {% endif %}
+
   <div class="idcard front">
     <div class="details">
       <div class="brand">
@@ -275,9 +412,39 @@
         </div>
       </div>
 
-      <div class="card-label">Library Card</div>
-      <div class="holder-name">{{ patron.fullname }}</div>
-      <div class="holder-type">{{ patron.patron_type }}</div>
+      <div class="identity">
+        {# Only an approved photo is shown; a patron's upload waits for staff approval. #}
+        <div class="photo-wrap">
+          <form method="post" enctype="multipart/form-data" id="photoForm"
+                action="{% if printed_by_staff %}{% url 'staff_card_photo' patron.patron_id %}{% else %}{% url 'patron_upload_card_photo' %}{% endif %}">
+            {% csrf_token %}
+            <button type="button" class="photo-box{% if photo %} has-photo{% endif %}" id="photoBox"
+                    onclick="document.getElementById('photoInput').click()"
+                    title="{% if printed_by_staff %}{% if photo %}Replace the photo{% else %}Add a 1x1 photo{% endif %}{% else %}{% if photo %}Send a new photo for approval{% else %}Send a 1x1 photo for approval{% endif %}{% endif %}"
+                    aria-label="{% if photo %}Change photo{% else %}Add a 1x1 photo{% endif %}">
+              {% if photo %}<img src="{% url 'card_photo' photo.photo_id %}" alt="Photo of {{ patron.fullname }}">{% endif %}
+              <i class="fa-solid fa-user" aria-hidden="true"></i>
+              <span class="photo-hint">1 × 1<br>Photo</span>
+              <span class="photo-edit" aria-hidden="true"><i class="fa-solid fa-camera"></i></span>
+            </button>
+            <input type="file" name="photo" id="photoInput" accept="image/jpeg,image/png" hidden
+                   onchange="if (this.files.length) { document.getElementById('photoBox').classList.add('is-busy'); this.form.submit(); }">
+          </form>
+          {% if printed_by_staff and photo %}
+            <form method="post" action="{% url 'staff_card_photo' patron.patron_id %}"
+                  onsubmit="return confirm('Remove this photo from {{ patron.fullname|escapejs }}\'s card?')">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="remove">
+              <button type="submit" class="photo-clear" aria-label="Remove photo" title="Remove photo"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
+            </form>
+          {% endif %}
+        </div>
+        <div class="identity-text">
+          <div class="card-label">Library Card</div>
+          <div class="holder-name">{{ patron.fullname }}</div>
+          <div class="holder-type">{{ patron.patron_type }}</div>
+        </div>
+      </div>
 
       <dl class="fields">
         {# The issued card number, not the database key. #}
@@ -378,6 +545,14 @@
       fit();
       window.addEventListener('resize', fit);
     })();
+
+    // Rejecting from the card asks for an optional reason, shown to the patron.
+    function askRejectNote(form) {
+      const note = prompt('Reason for rejecting this photo (optional, shown to the patron):', '');
+      if (note === null) return false;
+      form.querySelector('[name=staff_note]').value = note;
+      return true;
+    }
 
     // Download link uses the same QR image.
     (function () {
