@@ -2484,6 +2484,54 @@ def admin_delete_book(request, book_id):
     return portal_redirect(request, 'admin_management')
 
 
+def record_return(request, tx, book=None):
+    """Close one open loan or reading session.
+
+    Every entry point goes through here -- the desk scanner and the row action --
+    so a book always comes back the same way: the loan is closed, any penalty is
+    charged and settled at the desk, and the copy joins the reshelving queue
+    rather than going straight back on the shelf.
+
+    Returns the fine charged, or None when the transaction was already closed.
+    """
+    if tx is None or tx.return_date is not None:
+        return None
+
+    today = timezone.localdate()
+    reading = tx.transaction_type == 'In-Library Reading'
+
+    tx.return_date = today
+    # A reading session has no due date, so it can never run late.
+    tx.overdue_flag = bool(not reading and tx.due_date and today > tx.due_date)
+    tx.fine_amount = 0 if reading else BorrowingRule.current().compute_fine(tx.due_date, today)
+    tx.save(update_fields=['return_date', 'overdue_flag', 'fine_amount'])
+
+    # The caller may already hold a locked copy of the row.
+    copy = book if book is not None else tx.book
+    if copy:
+        # Back at the desk, not back on the shelf.
+        copy.status = 'For Reshelving'
+        copy.save(update_fields=['status'])
+
+    title = copy.title if copy else ''
+    log_admin_action(
+        request, 'Process', 'Transaction', tx.transaction_id,
+        (f'Finished in-library reading of "{title}"' if reading
+         else f'Returned "{title}"'),
+        patron=tx.patron)
+
+    # Staff collect the penalty before accepting the book back, so the return
+    # and the payment are two separate lines in the activity log.
+    if tx.fine_amount:
+        log_admin_action(
+            request, 'Payment', 'Transaction', tx.transaction_id,
+            f'Collected ₱{tx.fine_amount:.2f} overdue penalty from '
+            f'{tx.patron.fullname if tx.patron else "the patron"} for "{title}"',
+            patron=tx.patron)
+
+    return tx.fine_amount
+
+
 @granted_module_required('transactions')
 def transaction_action_preview(request, transaction_id):
     """What Mark Returned / Mark Lost would do, for the confirmation modal."""
@@ -2506,6 +2554,8 @@ def transaction_action_preview(request, transaction_id):
         'is_overdue': is_overdue,
         'overdue_fine': f'{overdue_fine:.2f}',
         'already_closed': tx.return_date is not None,
+        # A reading session is closed by the same action, worded differently.
+        'is_reading': tx.transaction_type == 'In-Library Reading',
     }
     if action == 'lost':
         data.update({
@@ -2524,19 +2574,9 @@ def admin_transaction_action(request, transaction_id):
         action = request.POST.get('action')
         tx = Transaction.objects.select_related('book', 'patron').filter(transaction_id=transaction_id).first()
         if tx and action == 'return' and tx.return_date is None:
-            tx.return_date = timezone.localdate()
-            tx.overdue_flag = bool(tx.due_date and tx.return_date > tx.due_date)
-            tx.fine_amount = BorrowingRule.current().compute_fine(tx.due_date, tx.return_date)
-            tx.save()
-            if tx.book and tx.transaction_type == 'Borrow':
-                # Back at the desk, not back on the shelf.
-                tx.book.status = 'For Reshelving'
-                tx.book.save()
-            log_admin_action(request, 'Process', 'Transaction', tx.transaction_id,
-                             f'Returned "{tx.book.title if tx.book else ""}"',
-                             patron=tx.patron)
-            # Email the patron a return receipt.
-            if tx.patron and tx.book:
+            record_return(request, tx)
+            # A reading session ends at the desk; there is nothing to receipt.
+            if tx.patron and tx.book and tx.transaction_type == 'Borrow':
                 return_receipt_email(tx.patron, [tx.book], had_overdue=tx.overdue_flag)
         elif tx and action == 'lost' and tx.return_date is None and tx.transaction_type == 'Borrow':
             rule = BorrowingRule.current()
@@ -5281,8 +5321,10 @@ def _apply_basket(request, transaction_type, book_ids, patron, admin, rule):
                     errors.append(f'Book "{book.title}" is not Available (current status: {book.status})')
                     continue
             elif transaction_type == 'Return':
-                if book.status not in ['Borrowed', 'Overdue']:
-                    errors.append(f'Book "{book.title}" is not Borrowed or Overdue (current status: {book.status})')
+                # A reading session is handed back over the same counter.
+                if book.status not in ['Borrowed', 'Overdue', 'Being Read']:
+                    errors.append(f'Book "{book.title}" is not out on loan or being read '
+                                  f'(current status: {book.status})')
                     continue
             elif transaction_type == 'In-Library Reading':
                 if book.status != 'Available':
@@ -5303,26 +5345,25 @@ def _apply_basket(request, transaction_type, book_ids, patron, admin, rule):
                 borrowed_books.append(book)
                 borrow_due_date = due_date
             elif transaction_type == 'Return':
-                book.status = 'Available'
-                book.save()
                 tx = Transaction.objects.select_for_update().filter(
                     book=book,
-                    transaction_type='Borrow',
+                    transaction_type__in=['Borrow', 'In-Library Reading'],
                     return_date__isnull=True,
-                ).first()
+                ).order_by('-transaction_id').first()
                 if tx:
-                    tx.return_date = today
-                    tx.overdue_flag = bool(tx.due_date and today > tx.due_date)
-                    tx.fine_amount = rule.compute_fine(tx.due_date, today)
-                    tx.save()
+                    record_return(request, tx, book=book)
                     if tx.overdue_flag:
                         returned_overdue = True
+                else:
+                    # Nothing open against it, but it is still in the staff's hands.
+                    book.status = 'For Reshelving'
+                    book.save()
                 returned_books.append(book)
             elif transaction_type == 'In-Library Reading':
                 book.status = 'Being Read'
                 book.save()
                 Transaction.objects.create(
-                    patron=None,
+                    patron=patron,
                     book=book,
                     processed_by=admin,
                     transaction_type='In-Library Reading',
@@ -5358,10 +5399,10 @@ def process_transaction(request):
     if not book_ids:
         return JsonResponse({'success': False, 'error': 'book_ids is required'})
     
-    # Validate patron for Borrow and Return transactions
+    # Every transaction type is recorded against the patron who came to the desk.
     patron = None
     verification = ''
-    if transaction_type in ['Borrow', 'Return']:
+    if transaction_type in ['Borrow', 'Return', 'In-Library Reading']:
         if patron_qr:
             # Look the patron up again from the scanned QR.
             patron = Patron.objects.filter(qr_code=patron_qr).first()
@@ -5402,11 +5443,13 @@ def process_transaction(request):
         })
 
     patron_label = f' for {patron.fullname}' if patron else ''
-    log_admin_action(
-        request, 'Process', 'Transaction', None,
-        f'{transaction_type}: {len(processed_books)} book(s){patron_label}{verification}',
-        patron=patron,
-    )
+    # A return already wrote one line per book, and a payment line with it.
+    if transaction_type != 'Return':
+        log_admin_action(
+            request, 'Process', 'Transaction', None,
+            f'{transaction_type}: {len(processed_books)} book(s){patron_label}{verification}',
+            patron=patron,
+        )
 
     # Email the patron a borrowing confirmation with the due date.
     if transaction_type == 'Borrow' and patron and borrowed_books:

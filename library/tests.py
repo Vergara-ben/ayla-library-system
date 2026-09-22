@@ -663,7 +663,15 @@ class BorrowingTests(TestCase):
             book.refresh_from_db()
             self.assertEqual(book.status, 'Borrowed')
 
+        # A returned copy waits in the reshelving queue before it is borrowable again.
         self.assertTrue(self._post('Return', self.free)['success'])
+        for book in self.free:
+            book.refresh_from_db()
+            self.assertEqual(book.status, 'For Reshelving')
+
+        self.assertTrue(self.client.post('/admin-portal/reshelving/', {
+            'book_ids': [b.book_id for b in self.free],
+        }, HTTP_X_REQUESTED_WITH='XMLHttpRequest').json()['success'])
         for book in self.free:
             book.refresh_from_db()
             self.assertEqual(book.status, 'Available')
@@ -685,6 +693,131 @@ class BorrowingTests(TestCase):
         self.assertEqual(
             Transaction.objects.filter(book=self.taken,
                                        return_date__isnull=True).count(), 0)
+
+
+class ReturnPathTests(TestCase):
+    """Both entry points close a loan the same way, and reading closes like a loan."""
+
+    def setUp(self):
+        self.admin = _admin(modules='transactions,books')
+        self.client = _signed_in(self.admin)
+        self.patron = Patron.objects.create(
+            fullname='Return Patron', email='return-patron@example.invalid',
+            password_hash=hash_password('SmokeTest123'),
+            patron_type='Student', account_status='Active',
+        )
+        self.rule = BorrowingRule.current()
+        self.rule.loan_period_days = 2
+        self.rule.grace_period_days = 1
+        self.rule.fine_per_day = 5
+        self.rule.save()
+        self.book = Book.objects.create(title='Return Book', author='Tester',
+                                        status='Available')
+
+    def _overdue_loan(self, days_late=4):
+        """A loan whose due date has already passed by days_late days."""
+        today = timezone.localdate()
+        loan = Transaction.objects.create(
+            patron=self.patron, book=self.book, processed_by=self.admin,
+            transaction_type='Borrow',
+            due_date=today - timedelta(days=days_late),
+        )
+        self.book.status = 'Overdue'
+        self.book.save(update_fields=['status'])
+        return loan
+
+    def test_row_action_sends_the_copy_to_reshelving_and_logs_the_payment(self):
+        loan = self._overdue_loan()
+        self.client.post(f'/admin-portal/transaction/{loan.transaction_id}/action/',
+                         {'action': 'return'})
+
+        loan.refresh_from_db()
+        self.book.refresh_from_db()
+        self.assertEqual(self.book.status, 'For Reshelving')
+        self.assertTrue(loan.overdue_flag)
+        # 4 days past due, 1 day of grace, PHP 5 a day.
+        self.assertEqual(loan.fine_amount, 15)
+
+        logs = SystemLog.objects.filter(entity_id=str(loan.transaction_id))
+        self.assertTrue(logs.filter(action='Process').exists())
+        payment = logs.filter(action='Payment').first()
+        self.assertIsNotNone(payment, 'the penalty was collected without a log line')
+        self.assertIn('15.00', payment.detail)
+
+    def test_an_on_time_return_writes_no_payment_line(self):
+        loan = Transaction.objects.create(
+            patron=self.patron, book=self.book, processed_by=self.admin,
+            transaction_type='Borrow',
+            due_date=timezone.localdate() + timedelta(days=1),
+        )
+        self.book.status = 'Borrowed'
+        self.book.save(update_fields=['status'])
+
+        self.client.post(f'/admin-portal/transaction/{loan.transaction_id}/action/',
+                         {'action': 'return'})
+
+        loan.refresh_from_db()
+        self.assertEqual(loan.fine_amount, 0)
+        self.assertFalse(SystemLog.objects.filter(
+            entity_id=str(loan.transaction_id), action='Payment').exists())
+
+    def test_in_library_reading_is_recorded_against_the_patron(self):
+        result = self.client.post('/admin-portal/process-transaction/', {
+            'transaction_type': 'In-Library Reading',
+            'patron_id': self.patron.patron_id,
+            'book_ids': [self.book.book_id],
+        }).json()
+        self.assertTrue(result['success'])
+
+        reading = Transaction.objects.get(transaction_type='In-Library Reading')
+        self.assertEqual(reading.patron_id, self.patron.patron_id)
+        self.book.refresh_from_db()
+        self.assertEqual(self.book.status, 'Being Read')
+
+    def test_in_library_reading_needs_a_patron(self):
+        result = self.client.post('/admin-portal/process-transaction/', {
+            'transaction_type': 'In-Library Reading',
+            'book_ids': [self.book.book_id],
+        }).json()
+        self.assertFalse(result['success'])
+        self.assertFalse(Transaction.objects.exists())
+
+    def test_finishing_a_reading_session_sends_the_copy_to_reshelving(self):
+        reading = Transaction.objects.create(
+            patron=self.patron, book=self.book, processed_by=self.admin,
+            transaction_type='In-Library Reading',
+        )
+        self.book.status = 'Being Read'
+        self.book.save(update_fields=['status'])
+
+        self.client.post(f'/admin-portal/transaction/{reading.transaction_id}/action/',
+                         {'action': 'return'})
+
+        reading.refresh_from_db()
+        self.book.refresh_from_db()
+        self.assertEqual(self.book.status, 'For Reshelving')
+        self.assertIsNotNone(reading.return_date)
+        # A reading session has no due date, so it can never run late.
+        self.assertFalse(reading.overdue_flag)
+        self.assertEqual(reading.fine_amount, 0)
+
+    def test_the_desk_scanner_also_closes_a_reading_session(self):
+        Transaction.objects.create(
+            patron=self.patron, book=self.book, processed_by=self.admin,
+            transaction_type='In-Library Reading',
+        )
+        self.book.status = 'Being Read'
+        self.book.save(update_fields=['status'])
+
+        result = self.client.post('/admin-portal/process-transaction/', {
+            'transaction_type': 'Return',
+            'patron_id': self.patron.patron_id,
+            'book_ids': [self.book.book_id],
+        }).json()
+
+        self.assertTrue(result['success'])
+        self.book.refresh_from_db()
+        self.assertEqual(self.book.status, 'For Reshelving')
 
 
 class DeskModeTests(TestCase):
