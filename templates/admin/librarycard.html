@@ -1,21 +1,25 @@
 {% load static %}
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en"{% if not printed_by_staff %} data-module="patron" data-theme-floating{% endif %}>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Library Card — {{ patron.fullname }}</title>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Poppins:wght@600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="{% static 'js/printname.js' %}"></script>
+{% if not printed_by_staff %}
+<script src="{% static 'js/theme.js' %}"></script>
+<link rel="stylesheet" href="{% static 'css/theme.css' %}">
+{% endif %}
 <style>
   /* Card sized in millimetres, fixed colours. */
   :root {
     --card-w: 153mm;          /* 85.6 x 54 mm CR80 proportions, scaled 1.8x  */
     --card-h: 96.5mm;         /* so the QR is large enough to scan reliably  */
-    --ink: #0b1f2a;
-    --muted: #5b7180;
-    --accent: #0e7490;
-    --line: #d6e2e8;
+    --lc-ink: #0b1f2a;
+    --lc-muted: #5b7180;
+    --lc-accent: #0038A8;
+    --lc-line: #d6e2e8;
   }
 
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -23,7 +27,7 @@
   body {
     font-family: 'Plus Jakarta Sans', Arial, sans-serif;
     background: #eef2f5;
-    color: var(--ink);
+    color: var(--lc-ink);
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -39,25 +43,25 @@
   .btn {
     font-family: inherit; font-size: 13px; font-weight: 700;
     padding: 10px 18px; border-radius: 10px; cursor: pointer;
-    border: 1px solid var(--accent); background: var(--accent); color: #fff;
+    border: 1px solid var(--lc-accent); background: var(--lc-accent); color: #fff;
     text-decoration: none; display: inline-flex; align-items: center; gap: 7px;
   }
-  .btn.secondary { background: #fff; color: var(--ink); border-color: var(--line); }
-  .filename { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 600; color: var(--muted); }
+  .btn.secondary { background: #fff; color: var(--lc-ink); border-color: var(--lc-line); }
+  .filename { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 600; color: var(--lc-muted); }
   .filename input {
-    font-family: inherit; font-size: 13px; color: var(--ink);
-    padding: 9px 12px; border: 1px solid var(--line); border-radius: 10px; background: #fff;
+    font-family: inherit; font-size: 13px; color: var(--lc-ink);
+    padding: 9px 12px; border: 1px solid var(--lc-line); border-radius: 10px; background: #fff;
     width: 220px; max-width: 100%;
   }
-  .hint { font-size: 12px; color: var(--muted); text-align: center; max-width: 560px; line-height: 1.6; }
+  .hint { font-size: 12px; color: var(--lc-muted); text-align: center; max-width: 560px; line-height: 1.6; }
 
   /* The card */
-  .card {
+  .idcard {
     width: var(--card-w);
     height: var(--card-h);
     background: #fff;
     border-radius: 5mm;
-    border: 1px solid var(--line);
+    border: 1px solid var(--lc-line);
     box-shadow: 0 10px 34px rgba(11, 31, 42, .16);
     display: grid;
     grid-template-columns: 1fr auto;   /* details | QR */
@@ -66,10 +70,10 @@
   }
 
   /* A band down the left edge so the card reads as AYLA's at a glance. */
-  .card::before {
+  .idcard::before {
     content: '';
     position: absolute; left: 0; top: 0; bottom: 0; width: 4mm;
-    background: linear-gradient(180deg, var(--accent), #155e75);
+    background: linear-gradient(180deg, #3b82f6, var(--lc-accent));
   }
 
   .details {
@@ -81,19 +85,19 @@
   .brand img { height: 11mm; width: auto; }
   .brand-text { line-height: 1.15; }
   .brand-name {
-    font-family: 'Syne', sans-serif; font-weight: 800;
+    font-family: 'Poppins', sans-serif; font-weight: 800;
     font-size: 3.9mm; letter-spacing: .01em;
     white-space: nowrap;              /* the library's name never breaks mid-phrase */
   }
-  .brand-sub { font-size: 2.6mm; color: var(--muted); margin-top: .6mm; }
+  .brand-sub { font-size: 2.6mm; color: var(--lc-muted); margin-top: .6mm; }
 
   .card-label {
     font-size: 2.4mm; font-weight: 800; letter-spacing: .22em;
-    text-transform: uppercase; color: var(--accent); margin-bottom: 2mm;
+    text-transform: uppercase; color: var(--lc-accent); margin-bottom: 2mm;
   }
 
   .holder-name {
-    font-family: 'Syne', sans-serif; font-weight: 800;
+    font-family: 'Poppins', sans-serif; font-weight: 800;
     font-size: 5mm; line-height: 1.15; letter-spacing: -.01em;
     margin-bottom: 1.8mm;
     word-break: break-word;
@@ -102,7 +106,7 @@
   .holder-type {
     display: inline-block; align-self: flex-start;
     font-size: 2.7mm; font-weight: 700; padding: 1mm 2.6mm;
-    border-radius: 99px; background: #e0f2fe; color: #075985;
+    border-radius: 99px; background: #dbeafe; color: #0038A8;
     margin-bottom: 3.5mm;
   }
 
@@ -110,31 +114,31 @@
     display: grid; grid-template-columns: auto 1fr; gap: 1.4mm 4mm;
     font-size: 3mm; margin-top: auto;
   }
-  .fields dt { color: var(--muted); font-weight: 600; white-space: nowrap; }
+  .fields dt { color: var(--lc-muted); font-weight: 600; white-space: nowrap; }
   .fields dd { font-weight: 600; word-break: break-word; }
 
   /* QR panel */
   .qr-panel {
     width: 56mm;
     background: #f7fbfc;
-    border-left: 1px solid var(--line);
+    border-left: 1px solid var(--lc-line);
     padding: 5mm 5mm 4mm;
     display: flex; flex-direction: column; align-items: center; justify-content: center;
     text-align: center;
   }
   .qr-box {
     background: #fff; padding: 2mm; border-radius: 2mm;
-    border: 1px solid var(--line);
+    border: 1px solid var(--lc-line);
   }
   .qr-box img { display: block; width: 42mm; height: 42mm; image-rendering: pixelated; }
-  .qr-caption { font-size: 2.5mm; color: var(--muted); margin-top: 2.5mm; line-height: 1.5; }
+  .qr-caption { font-size: 2.5mm; color: var(--lc-muted); margin-top: 2.5mm; line-height: 1.5; }
   .qr-number {
     font-family: monospace; font-size: 4.2mm; font-weight: 700;
     letter-spacing: .4mm; color: #0f172a; margin-top: 1.8mm;
   }
   .qr-id {
     font-family: monospace; font-size: 2.1mm; line-height: 1.35;
-    color: var(--muted); margin-top: 1.2mm;
+    color: var(--lc-muted); margin-top: 1.2mm;
     word-break: break-all; max-width: 44mm;
   }
   .qr-missing {
@@ -144,20 +148,20 @@
   }
 
   /* Back of the card. */
-  .card.back {
+  .idcard.back {
     grid-template-columns: 1fr;
     padding: 7mm 9mm 6mm;
     gap: 0;
   }
-  .card.back::before { left: auto; right: 0; }
+  .idcard.back::before { left: auto; right: 0; }
 
   .back-head {
     display: flex; align-items: baseline; justify-content: space-between;
-    gap: 4mm; border-bottom: 1px solid var(--line); padding-bottom: 2.5mm;
+    gap: 4mm; border-bottom: 1px solid var(--lc-line); padding-bottom: 2.5mm;
   }
   .back-title {
-    font-family: 'Syne', sans-serif; font-weight: 800; font-size: 3.4mm;
-    letter-spacing: .16em; text-transform: uppercase; color: var(--accent);
+    font-family: 'Poppins', sans-serif; font-weight: 800; font-size: 3.4mm;
+    letter-spacing: .16em; text-transform: uppercase; color: var(--lc-accent);
   }
   .back-card-no { font-size: 3mm; font-weight: 700; font-family: monospace; }
 
@@ -166,7 +170,7 @@
   .rules { font-size: 2.75mm; line-height: 1.65; }
   .rules-head {
     font-size: 2.4mm; font-weight: 800; letter-spacing: .16em;
-    text-transform: uppercase; color: var(--muted); margin-bottom: 1.6mm;
+    text-transform: uppercase; color: var(--lc-muted); margin-bottom: 1.6mm;
   }
   .rules ol { padding-left: 4mm; }
   .rules li { margin-bottom: 1.2mm; }
@@ -175,42 +179,42 @@
 
   /* Signature strip. */
   .sign-box { margin-top: auto; }
-  .sign-line { border-bottom: .4mm solid var(--ink); height: 7mm; }
+  .sign-line { border-bottom: .4mm solid var(--lc-ink); height: 7mm; }
   .sign-label {
-    font-size: 2.3mm; color: var(--muted); margin-top: 1.2mm;
+    font-size: 2.3mm; color: var(--lc-muted); margin-top: 1.2mm;
     letter-spacing: .06em; text-transform: uppercase; font-weight: 700;
   }
 
   .found-box {
-    border: .4mm dashed var(--line); border-radius: 2mm; padding: 3mm;
+    border: .4mm dashed var(--lc-line); border-radius: 2mm; padding: 3mm;
     font-size: 2.6mm; line-height: 1.55;
   }
   .found-head {
     font-size: 2.3mm; font-weight: 800; letter-spacing: .14em;
-    text-transform: uppercase; color: var(--accent); margin-bottom: 1.2mm;
+    text-transform: uppercase; color: var(--lc-accent); margin-bottom: 1.2mm;
   }
 
   .back-foot {
-    margin-top: 3mm; padding-top: 2.5mm; border-top: 1px solid var(--line);
+    margin-top: 3mm; padding-top: 2.5mm; border-top: 1px solid var(--lc-line);
     display: flex; justify-content: space-between; gap: 4mm;
-    font-size: 2.4mm; color: var(--muted);
+    font-size: 2.4mm; color: var(--lc-muted);
   }
 
   /* Which face to print. */
-  body.only-front .card.back,
-  body.only-back .card.front { display: none; }
+  body.only-front .idcard.back,
+  body.only-back .idcard.front { display: none; }
 
   .footer-strip {
     grid-column: 1 / -1;
-    border-top: 1px solid var(--line);
+    border-top: 1px solid var(--lc-line);
     padding: 2mm 5mm 2mm 9mm;
-    font-size: 2.4mm; color: var(--muted);
+    font-size: 2.4mm; color: var(--lc-muted);
     display: flex; justify-content: space-between; gap: 4mm;
   }
 
   /* Shrink the card to fit a phone screen; the printed size does not change. */
   @media screen {
-    .card { zoom: var(--card-zoom, 1); }
+    .idcard { zoom: var(--card-zoom, 1); }
   }
 
   /* Print. */
@@ -219,22 +223,26 @@
   @media print {
     body { background: #fff; padding: 0; display: block; }
     .toolbar, .hint { display: none !important; }
-    .card {
+    .idcard {
       box-shadow: none;
       border: 1px solid #94a3b8;   /* a cut line that survives printing */
       page-break-inside: avoid;
     }
     /* One card face per page. */
-    .card.front { page-break-after: always; }
-    body.only-front .card.front,
-    body.only-back .card.back { page-break-after: auto; }
+    .idcard.front { page-break-after: always; }
+    body.only-front .idcard.front,
+    body.only-back .idcard.back { page-break-after: auto; }
     /* Chrome drops backgrounds by default; these carry meaning here. */
     * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   }
 </style>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha384-iw3OoTErCYJJB9mCa8LNS2hbsQ7M3C0EpIsO/H5+EGAkPGc6rk+V8i04oW/K5xq0" crossorigin="anonymous" referrerpolicy="no-referrer">
+{% if not printed_by_staff %}
+    <link rel="stylesheet" href="{% static 'css/patron-neu.css' %}?v=20260922h">
+    <script src="{% static 'js/patron-neu.js' %}?v=20260922" defer></script>
+{% endif %}
 </head>
-<body>
+<body{% if not printed_by_staff %} class="neu-app lib-card-page"{% endif %}>
 
   <div class="toolbar">
     <label class="filename">File name
@@ -257,7 +265,7 @@
     {% endif %}
   </div>
 
-  <div class="card front">
+  <div class="idcard front">
     <div class="details">
       <div class="brand">
         <img src="{% static 'images/ayla-logo.png' %}" alt="AYLA">
@@ -303,7 +311,7 @@
   </div>
 
   {# The reverse. #}
-  <div class="card back">
+  <div class="idcard back">
     <div class="back-head">
       <span class="back-title">Conditions of use</span>
       {% if patron.card_number %}<span class="back-card-no">AYLA-{{ patron.card_display }}</span>{% endif %}
@@ -358,7 +366,7 @@
 
     // Fit the card on narrow screens.
     (function () {
-      const card = document.querySelector('.card');
+      const card = document.querySelector('.idcard');
       if (!card) return;
       const root = document.documentElement;
       function fit() {

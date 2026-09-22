@@ -1,0 +1,127 @@
+{% load static %}
+{# Patron guide: a button for the top bar and the pop-up it opens (video + step by step). #}
+<button type="button" class="guide-btn" onclick="openPatronGuide()" aria-haspopup="dialog">
+  <i class="fa-solid fa-circle-play" aria-hidden="true"></i><span>Guide</span>
+</button>
+
+<dialog id="patronGuide" class="guide-dialog" aria-labelledby="guideTitle">
+  <div class="guide-head">
+    <div>
+      <p class="guide-eyebrow">How to use AYLA</p>
+      <h2 id="guideTitle">Patron guide</h2>
+    </div>
+    <button type="button" class="guide-close" onclick="closePatronGuide()" aria-label="Close guide"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
+  </div>
+
+  <div class="guide-tabs" role="tablist">
+    <button type="button" role="tab" id="guideTabVideo" aria-selected="true" aria-controls="guidePanelVideo" onclick="guideTab('Video')"><i class="fa-solid fa-film" aria-hidden="true"></i> Video</button>
+    <button type="button" role="tab" id="guideTabSteps" aria-selected="false" aria-controls="guidePanelSteps" onclick="guideTab('Steps')"><i class="fa-solid fa-list-ol" aria-hidden="true"></i> Step by step</button>
+  </div>
+
+  <div class="guide-body">
+    <section id="guidePanelVideo" role="tabpanel" aria-labelledby="guideTabVideo">
+      <div class="guide-video">
+        <video id="guideVideo" controls preload="none" playsinline>
+          <source src="{% static 'videos/patron-guide.mp4' %}" type="video/mp4">
+        </video>
+        <div class="guide-video-missing" id="guideVideoMissing" hidden>
+          <i class="fa-solid fa-clapperboard" aria-hidden="true"></i>
+          <p><strong>The video tutorial is coming soon.</strong></p>
+          <p>In the meantime, the <button type="button" class="guide-link" onclick="guideTab('Steps')">step-by-step guide</button> covers everything.</p>
+        </div>
+      </div>
+      <p class="guide-note">A short walkthrough: finding a book, following the map to its shelf, and borrowing it at the desk.</p>
+    </section>
+
+    <section id="guidePanelSteps" role="tabpanel" aria-labelledby="guideTabSteps" hidden>
+      <ol class="guide-steps">
+        <li>
+          <span class="gs-icon g-blue"><i class="fa-solid fa-house" aria-hidden="true"></i></span>
+          <div>
+            <h3>Start at Home</h3>
+            <p>Your dashboard shows the books you have out, anything overdue, and whether the library is open right now. The bell at the top shows announcements and reminders.</p>
+          </div>
+        </li>
+        <li>
+          <span class="gs-icon g-cyan"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i></span>
+          <div>
+            <h3>Find a book</h3>
+            <p>Tap <strong>Search</strong> at the bottom. Type a title, author, ISBN or subject, and narrow the list by subject, availability or location. <em>Available</em> means it is on the shelf.</p>
+          </div>
+        </li>
+        <li>
+          <span class="gs-icon g-pink"><i class="fa-solid fa-book-open" aria-hidden="true"></i></span>
+          <div>
+            <h3>Open the book</h3>
+            <p>Tap a book to see its details and exactly where it is kept: room, shelf and level.</p>
+          </div>
+        </li>
+        <li>
+          <span class="gs-icon g-amber"><i class="fa-solid fa-map-location-dot" aria-hidden="true"></i></span>
+          <div>
+            <h3>Walk to the shelf</h3>
+            <p>Tap <strong>Navigate on Map</strong>. The floor plan highlights the shelf. Inside the library, <strong>Enable Navigation</strong> shows where you are as you walk (Chrome on Android; the <a href="{% url 'live_position_guide' %}">live position setup</a> explains how to turn it on).</p>
+          </div>
+        </li>
+        <li>
+          <span class="gs-icon g-green"><i class="fa-solid fa-qrcode" aria-hidden="true"></i></span>
+          <div>
+            <h3>Sign in and borrow at the desk</h3>
+            <p>When you arrive, scan your card at the front-desk screen to sign in, and again when you leave. To borrow, bring the book to the desk and show your QR code (<strong>Account &rarr; My Library Card</strong>). Staff scan it and the book appears under <em>Active Borrows</em>.</p>
+          </div>
+        </li>
+        <li>
+          <span class="gs-icon g-blue"><i class="fa-solid fa-calendar-check" aria-hidden="true"></i></span>
+          <div>
+            <h3>Return on time</h3>
+            <p>Your due dates are on Home and in Account. Need more time? Use <strong>Request extension</strong> in Account. Late books are charged a daily fine; the rules are on the back of your library card.</p>
+          </div>
+        </li>
+        <li>
+          <span class="gs-icon g-cyan"><i class="fa-solid fa-comments" aria-hidden="true"></i></span>
+          <div>
+            <h3>Ask a librarian</h3>
+            <p>Have a question? Go to <strong>Account &rarr; Ask a Librarian</strong> and send a message. You will get an email when someone replies.</p>
+          </div>
+        </li>
+        <li>
+          <span class="gs-icon g-pink"><i class="fa-solid fa-user-gear" aria-hidden="true"></i></span>
+          <div>
+            <h3>Manage your account</h3>
+            <p>In <strong>Account</strong> you can update your details, change your password, print your library card, and see your borrowing history.</p>
+          </div>
+        </li>
+      </ol>
+    </section>
+  </div>
+</dialog>
+
+<script>
+  (function () {
+    var dlg = document.getElementById('patronGuide');
+    var video = document.getElementById('guideVideo');
+    // No video file yet: show the placeholder instead of a broken player.
+    video.addEventListener('error', showMissing, true);
+    video.querySelector('source').addEventListener('error', showMissing);
+    function showMissing() {
+      video.hidden = true;
+      document.getElementById('guideVideoMissing').hidden = false;
+    }
+    window.openPatronGuide = function () {
+      if (video.preload === 'none') { video.preload = 'metadata'; video.load(); }
+      dlg.showModal();
+    };
+    window.closePatronGuide = function () { video.pause(); dlg.close(); };
+    window.guideTab = function (name) {
+      ['Video', 'Steps'].forEach(function (n) {
+        var on = n === name;
+        document.getElementById('guideTab' + n).setAttribute('aria-selected', on ? 'true' : 'false');
+        document.getElementById('guidePanel' + n).hidden = !on;
+      });
+      if (name !== 'Video') video.pause();
+    };
+    // Clicking the dim backdrop closes it too.
+    dlg.addEventListener('click', function (e) { if (e.target === dlg) closePatronGuide(); });
+    dlg.addEventListener('close', function () { video.pause(); });
+  })();
+</script>

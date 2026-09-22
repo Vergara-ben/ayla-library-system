@@ -8,7 +8,7 @@
 <title>AYLA Library — Floor Map</title>
 <script src="{% static 'js/theme.js' %}"></script>
 <script src="{% static 'js/session.js' %}"></script>
-<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" integrity="sha384-c6Rcwz4e4CITMbu/NBmnNS8yN2sC3cUElMEMfP3vqqKFp7GOYaaBBCqmaWBjmkjb" crossorigin="anonymous" referrerpolicy="no-referrer"/>
 <link rel="stylesheet" href="{% static 'css/theme.css' %}">
 <style>
@@ -234,8 +234,10 @@
     <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
     <script src="{% static 'js/ayla-dialog.js' %}"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha384-iw3OoTErCYJJB9mCa8LNS2hbsQ7M3C0EpIsO/H5+EGAkPGc6rk+V8i04oW/K5xq0" crossorigin="anonymous" referrerpolicy="no-referrer">
+    <link rel="stylesheet" href="{% static 'css/patron-neu.css' %}?v=20260922h">
+    <script src="{% static 'js/patron-neu.js' %}?v=20260922" defer></script>
 </head>
-<body>
+<body class="neu-app">
 <nav class="navbar">
   <a href="{% if target.book_id %}{% url 'patron_book_details' target.book_id %}{% else %}{% url 'patron_catalog' %}{% endif %}" class="back-btn" aria-label="Back"><i class="fa-solid fa-arrow-left" aria-hidden="true"></i></a>
   <div class="nav-title" id="navTitle">Floor Map</div>
@@ -808,7 +810,7 @@ function drawFloor(data) {
   // Layer 1: floor plan base, the rooms drawn by the librarian.
   L.rectangle(bounds, {
     color: 'transparent', fillColor: AylaTheme.color('--surface'),
-    fillOpacity: 1, interactive: false,
+    fillOpacity: 1, interactive: false, className: 'map-floor',
   }).addTo(baseLayer);
   // Draw staff-only rooms greyed and dashed.
   let anyRestricted = false;
@@ -822,8 +824,21 @@ function drawFloor(data) {
       dashArray: open ? null : '6,4',
       fillColor: AylaTheme.color(open ? '--surface2' : '--muted'),
       fillOpacity: open ? 1 : 0.1,
+      className: open ? 'map-room' : 'map-room is-staff',
     }).bindTooltip((room.name || 'Room') + (open ? '' : ' · staff only'),
                    { direction: 'top', sticky: true }).addTo(baseLayer);
+    // Open rooms are named on the map too, so patrons can find their way.
+    if (open && room.name && room.map_x != null && room.map_y != null) {
+      L.marker(toLatLng(room.map_x, room.map_y), {
+        interactive: false,
+        icon: L.divIcon({
+          className: 'map-label room',
+          html: '<span>' + String(room.name).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }) + '</span>',
+          iconSize: [Math.max(80, room.name.length * 7), 18],
+          iconAnchor: [0, 9],
+        }),
+      }).addTo(baseLayer);
+    }
     // Named on the map rather than only in a tooltip.
     if (!open) {
       const text = (room.name || 'Room') + ' · staff only';
@@ -897,6 +912,7 @@ function drawFloor(data) {
       color: accent, weight: 2, fillColor: accent,
       fillOpacity: s.elevated ? 0.12 : (isTarget ? 0.8 : 0.4),
       dashArray: s.elevated ? '6,4' : null,
+      className: isTarget ? 'map-shelf is-target' : 'map-shelf',
     }).bindTooltip((isTarget ? '<i class="fa-solid fa-bullseye"></i> ' : '') + (s.label || s.name)
                    + (s.elevated ? ' — above head height' : ''),
                    { direction: 'top', sticky: true }).addTo(shelfLayer);
@@ -909,6 +925,7 @@ function drawFloor(data) {
         L.circleMarker(toLatLng(spot.x, spot.y), {
           radius: 7, color: hot, weight: 3,
           fillColor: AylaTheme.color('--bg-card'), fillOpacity: 1,
+          className: 'map-target-spot',
         }).bindTooltip(targetData.location || 'Your book is here',
                        { direction: 'top' }).addTo(shelfLayer);
         // Tick mark for the book position.
@@ -1124,7 +1141,7 @@ function stepPositionAnimation(now) {
 function renderDisplayedPosition() {
   const ll = toLatLng(displayedPos.x, displayedPos.y);
   if (!patronMarker) {
-    patronMarker = L.circleMarker(ll, { radius: 8, color: AylaTheme.color('--surface'), weight: 3, fillColor: AylaTheme.color('--blue'), fillOpacity: 1 })
+    patronMarker = L.circleMarker(ll, { radius: 8, color: AylaTheme.color('--surface'), weight: 3, fillColor: AylaTheme.color('--blue'), fillOpacity: 1, className: 'map-me' })
       .bindTooltip('You are here', { direction: 'top' }).addTo(positionLayer);
   } else {
     patronMarker.setLatLng(ll);

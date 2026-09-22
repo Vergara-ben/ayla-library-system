@@ -25,7 +25,7 @@
 body{
   font-family:'Plus Jakarta Sans',sans-serif;
   min-height:100vh;
-  overflow:hidden;
+  overflow-x:hidden;
   position:relative;
   color:var(--text);
 
@@ -439,16 +439,21 @@ label{
 
 </style>
     <link rel="stylesheet" href="{% static 'css/patron.css' %}">
+    <link rel="stylesheet" href="{% static 'css/auth-neu.css' %}?v=20260922">
+    <script src="{% static 'js/auth-flip.js' %}?v=20260922" defer></script>
+    <script src="{% static 'js/auth-decor.js' %}?v=20260922" defer></script>
     <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
     <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha384-iw3OoTErCYJJB9mCa8LNS2hbsQ7M3C0EpIsO/H5+EGAkPGc6rk+V8i04oW/K5xq0" crossorigin="anonymous" referrerpolicy="no-referrer">
 </head>
 
-<body>
+<body class="auth-centered">
 
 <div class="main">
 
   <div class="left">
+
+    <img src="{% static 'images/ayla-logo.png' %}" data-logo-light="{% static 'images/ayla-logo.png' %}" data-logo-dark="{% static 'images/ayla-logo-dark.png' %}" alt="AYLA" class="hero-logo ayla-logo">
 
     <div class="badge">
       <div class="dot"></div>
@@ -460,38 +465,17 @@ label{
       Access System
     </div>
 
-    <div class="desc">
-      Experience a premium and secure digital library platform with modern authentication and seamless account management for AYLA patrons.
-    </div>
-
-    <div class="features">
-
-      <div class="feature">
-        <h4>Secure Login</h4>
-        <p>Protected authentication system</p>
-      </div>
-
-      <div class="feature">
-        <h4>Digital Library</h4>
-        <p>Premium user experience</p>
-      </div>
-
-    </div>
-
   </div>
 
   <div class="right">
 
-    <div class="card">
+    <div class="neu-stage">
+    <div class="card neu-card">
 
-      <div class="logo">
-        <img src="{% static 'images/ayla-logo.png' %}" data-logo-light="{% static 'images/ayla-logo.png' %}" data-logo-dark="{% static 'images/ayla-logo-dark.png' %}" alt="AYLA" class="logo-lockup ayla-logo">
-        <p>LIBRARY SYSTEM</p>
-      </div>
+      <div class="neu-avatar"><i class="fa-solid fa-book-open-reader" aria-hidden="true"></i></div>
 
-      <div class="tabs">
-        <span class="tab active">Sign In</span>
-      </div>
+      <h2 class="signin-title">Welcome</h2>
+      <p class="signin-subtitle">Sign in to your AYLA library account</p>
 
       <!-- LOGIN AREA -->
       <div class="form-area">
@@ -539,9 +523,13 @@ label{
 
       <div class="create">
         New patron?
-        <a href="{% url 'patron_register' %}">Create account</a>
+        <a href="{% url 'patron_register' %}" class="neu-create">
+          <span class="neu-circle"><i class="fa-solid fa-plus" aria-hidden="true"></i></span>
+          Create account
+        </a>
       </div>
 
+    </div>
     </div>
 
   </div>

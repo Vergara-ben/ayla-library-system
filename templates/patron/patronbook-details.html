@@ -8,7 +8,7 @@
 <title>AYLA Library — Book Details</title>
 <script src="{% static 'js/theme.js' %}"></script>
 <script src="{% static 'js/session.js' %}"></script>
-<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="{% static 'css/theme.css' %}">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
@@ -113,8 +113,10 @@
     <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
     <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha384-iw3OoTErCYJJB9mCa8LNS2hbsQ7M3C0EpIsO/H5+EGAkPGc6rk+V8i04oW/K5xq0" crossorigin="anonymous" referrerpolicy="no-referrer">
+    <link rel="stylesheet" href="{% static 'css/patron-neu.css' %}?v=20260922h">
+    <script src="{% static 'js/patron-neu.js' %}?v=20260922" defer></script>
 </head>
-<body>
+<body class="neu-app">
 <nav class="navbar">
   <a href="{% url 'patron_catalog' %}" class="back-btn" aria-label="Back"><i class="fa-solid fa-arrow-left" aria-hidden="true"></i></a>
   <div class="nav-title">Book Details</div>
@@ -124,8 +126,26 @@
   </div>
 </nav>
 
-<!-- HERO -->
-<div class="hero">
+<!-- OPEN BOOK -->
+<div class="book-stage">
+<div class="book-spread">
+  {# The book arrives closed; the cover swings open, then two leaves turn. #}
+  <div class="bs-cover" aria-hidden="true">
+    <div class="bs-cover-front">
+      <div class="bs-cover-face">
+        <span class="bs-cover-rule"></span>
+        <span class="bs-cover-title">{{ book.title }}</span>
+        <span class="bs-cover-author">{{ book.author }}</span>
+        <span class="bs-cover-rule"></span>
+      </div>
+    </div>
+    <div class="bs-cover-back"></div>
+  </div>
+  <div class="bs-leaf bs-leaf-1" aria-hidden="true"></div>
+  <div class="bs-leaf bs-leaf-2" aria-hidden="true"></div>
+
+  <!-- Left page: the book itself -->
+  <div class="bs-page bs-left">
   <div class="book-cover-large">{{ book.title }}</div>
   <div class="book-main-title">{{ book.title }}</div>
   <div class="book-main-author">{{ book.author }}</div>
@@ -136,9 +156,11 @@
   {% else %}
   <div class="status-badge status-available">{{ book.status }}</div>
   {% endif %}
-</div>
+    <p class="bs-folio">AYLA Public Library</p>
+  </div>
 
-<div class="page">
+  <!-- Right page: its details -->
+  <div class="bs-page bs-right">
   <!-- Bibliographic Info -->
   <div class="detail-card">
     <div class="detail-section-title"><i class="fa-solid fa-circle-info" aria-hidden="true"></i> Book Information</div>
@@ -184,6 +206,9 @@
       {% if book.genre %}{{ book.title }} by {{ book.author }} is categorized under {{ book.genre }}.{% else %}{{ book.title }} by {{ book.author }}.{% endif %}
     </div>
   </div>
+  <p class="bs-folio">{% if room %}{{ room.name }}{% else %}Library catalogue{% endif %}</p>
+  </div>
+</div>
 </div>
 
 <!-- BOTTOM -->

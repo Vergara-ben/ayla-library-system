@@ -525,6 +525,9 @@
     </style>
     <link rel="stylesheet" href="{% static 'css/admin-enhance.css' %}">
     <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'css/admin-neu.css' %}?v=20260922b">
+    <script src="{% static 'js/admin-neu.js' %}?v=20260922" defer></script>
     <link rel="stylesheet" href="{% static 'css/readability.css' %}">
     <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
     <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
@@ -862,7 +865,7 @@
             const bounds = [[0, 0], [height, width]];
             L.rectangle(bounds, {
                 color: AylaTheme.color('--border-color'), weight: 1,
-                fillColor: AylaTheme.color('--bg-card'), fillOpacity: 1, interactive: false,
+                fillColor: AylaTheme.color('--bg-card'), fillOpacity: 1, interactive: false, className: 'map-floor',
             }).addTo(map);
             map.fitBounds(bounds);
 
@@ -938,6 +941,7 @@
                 const poly = L.polygon(latlngs, {
                     color: AylaTheme.color('--accent-strong'), weight: 2,
                     fillColor: AylaTheme.color('--accent'), fillOpacity: 0.15,
+                    className: 'map-room',
                 }).bindTooltip(room.name || 'Room', { direction: 'top', sticky: true });
                 poly.addTo(map);
                 // Same layer as the room label, so the Rooms filter hides both.
@@ -984,6 +988,7 @@
                         weight: isTarget ? 3 : 2,
                         fillColor: isTarget ? AylaTheme.color('--warning') : AylaTheme.color('--cover-3'),
                         fillOpacity: isTarget ? 0.4 : 0.55,
+                        className: isTarget ? 'map-shelf is-target' : 'map-shelf',
                     }).bindTooltip(shelf.label || shelf.name || 'Shelf', { direction: 'top', permanent: isTarget, sticky: true });
                     poly.addTo(map);
                     shelfMarkers.push(poly);
@@ -1021,16 +1026,18 @@
         }
 
         function createEmojiMarker(x, y, emoji, title, description, color) {
+            // Waypoints are small dots, beacons small tiles, rooms a tile with their name.
+            const kind = emoji.indexOf('fa-location-dot') !== -1 ? 'wp'
+                       : emoji.indexOf('fa-tower-broadcast') !== -1 ? 'beacon' : 'room';
+            const size = kind === 'wp' ? 14 : (kind === 'beacon' ? 26 : 32);
+            const name = kind === 'room' && title
+                ? '<span class="mm-name">' + String(title).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }) + '</span>'
+                : '';
             const icon = L.divIcon({
                 className: 'emoji-marker',
-                html: `<div style="
-                    font-size: 22px;
-                    color: ${color || 'var(--accent)'};
-                    text-shadow: 0 2px 4px var(--scrim);
-                    cursor: pointer;
-                ">${emoji}</div>`,
-                iconSize: [30, 30],
-                iconAnchor: [15, 15]
+                html: `<div class="mm mm-${kind}" style="--mc: ${color || 'var(--accent)'}">${emoji}${name}</div>`,
+                iconSize: [size, size],
+                iconAnchor: [size / 2, size / 2]
             });
 
             const marker = L.marker(toLatLng(x, y), { icon: icon });

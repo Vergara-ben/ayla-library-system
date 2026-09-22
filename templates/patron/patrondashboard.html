@@ -8,7 +8,7 @@
 <title>AYLA Library — Dashboard</title>
 <script src="{% static 'js/theme.js' %}"></script>
 <script src="{% static 'js/session.js' %}"></script>
-<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700&family=Inter:wght@400;500;600;700&family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="{% static 'css/theme.css' %}">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
@@ -187,11 +187,15 @@
   }
 </style>
     <link rel="stylesheet" href="{% static 'css/patron.css' %}">
+    <link rel="stylesheet" href="{% static 'css/terms.css' %}">
+    <link rel="stylesheet" href="{% static 'css/patron-neu.css' %}?v=20260922h">
+    <script src="{% static 'js/patron-neu.js' %}?v=20260922" defer></script>
+    <script src="{% static 'js/auth-decor.js' %}?v=20260922" defer></script>
     <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
     <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha384-iw3OoTErCYJJB9mCa8LNS2hbsQ7M3C0EpIsO/H5+EGAkPGc6rk+V8i04oW/K5xq0" crossorigin="anonymous" referrerpolicy="no-referrer">
 </head>
-<body>
+<body class="neu-app">
 
 <!-- NAVBAR -->
 <nav class="navbar">
@@ -199,6 +203,7 @@
     <img src="{% static 'images/ayla-logo.png' %}" data-logo-light="{% static 'images/ayla-logo.png' %}" data-logo-dark="{% static 'images/ayla-logo-dark.png' %}" alt="AYLA" class="logo-icon ayla-logo">
   </div>
   <div class="nav-right">
+    {% include 'patron/_guide.html' %}
     <button type="button" class="theme-toggle" data-theme-toggle></button>
     <a href="{% url 'patron_announcements' %}" class="nav-btn"><i class="fa-solid fa-bell" aria-hidden="true"></i>{% if recent_announcements %}<span class="badge">{{ recent_announcements|length }}</span>{% endif %}</a>
     <a href="{% url 'patron_account' %}" class="avatar">{{ patron.fullname|first|upper }}</a>
@@ -230,25 +235,27 @@
     <p>You have no active borrows right now.</p>
     {% endif %}
     <div class="lib-badge{% if library_status.is_open %} is-open{% endif %}">{% if library_status.is_open %}Library open now · closes at {{ library_status.closing_label }}{% else %}Library closed right now{% endif %}</div>
+    <button type="button" class="hero-rules-btn" onclick="document.getElementById('rulesDialog').showModal()"><i class="fa-solid fa-scale-balanced" aria-hidden="true"></i> Library Rules</button>
+    <div class="hero-walkers" data-decor-walkers aria-hidden="true"></div>
   </div>
 
   <!-- STATS -->
   <div class="stats">
     <div class="stat-card green" onclick="window.location.href='{% url 'patron_account' %}'">
       <div class="stat-icon"><i class="fa-solid fa-book" aria-hidden="true"></i></div>
-      <div class="stat-num">{{ borrowed_count }}</div>
+      <div class="stat-num" data-count-up>{{ borrowed_count }}</div>
       <div class="stat-label">Books Borrowed</div>
       <div class="stat-sub">↑ Active borrows</div>
     </div>
     <div class="stat-card amber">
       <div class="stat-icon"><i class="fa-solid fa-clock" aria-hidden="true"></i></div>
-      <div class="stat-num">{{ overdue_count }}</div>
+      <div class="stat-num" data-count-up>{{ overdue_count }}</div>
       <div class="stat-label">Overdue Books</div>
       <div class="stat-sub"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> Return soon</div>
     </div>
     <div class="stat-card blue">
       <div class="stat-icon"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i></div>
-      <div class="stat-num">{{ history_count }}</div>
+      <div class="stat-num" data-count-up>{{ history_count }}</div>
       <div class="stat-label">Books in History</div>
       <div class="stat-sub">↑ Returned</div>
     </div>
@@ -342,7 +349,10 @@
       </div>
     </div>
   </div>
+
 </div>
+
+{% include 'patron/_rules_dialog.html' %}
 
 <!-- BOTTOM NAV -->
 <nav class="bottom-nav">
@@ -355,6 +365,7 @@
   <a href="{% url 'patron_map' %}" class="nav-item">
     <div class="nav-icon"><i class="fa-solid fa-map" aria-hidden="true"></i></div><div class="nav-label">Map</div>
   </a>
+  <a href="{% url 'patron_messages' %}" class="nav-item"><div class="nav-icon"><i class="fa-solid fa-comments" aria-hidden="true"></i></div><div class="nav-label">Messages</div></a>
   <a href="{% url 'patron_account' %}" class="nav-item">
     <div class="nav-icon"><i class="fa-solid fa-user" aria-hidden="true"></i></div><div class="nav-label">Account</div>
   </a>

@@ -1,0 +1,739 @@
+/* auth-neu.css: soft raised sign-in card for the admin and staff login pages. */
+:root {
+    --neu-bg:      #e8edf4;
+    --neu-light:   rgba(255, 255, 255, 0.95);
+    --neu-dark:    rgba(146, 162, 188, 0.55);
+    --neu-field:   #e3e9f1;
+    --neu-edge:    rgba(15, 23, 42, 0.28);
+}
+[data-theme="dark"] {
+    --neu-bg:      #141d2e;
+    --neu-light:   rgba(255, 255, 255, 0.05);
+    --neu-dark:    rgba(0, 0, 0, 0.55);
+    --neu-field:   #111929;
+    --neu-edge:    rgba(255, 255, 255, 0.30);
+}
+
+/* Panel */
+.sidebar.neu-panel {
+    background-color: var(--neu-bg);
+    border-left: none;
+    padding: 48px 40px;
+    justify-content: center;
+    gap: 28px;
+    box-shadow: -18px 0 40px rgba(15, 23, 42, 0.10);
+}
+
+/* Flip stage */
+.neu-stage {
+    perspective: 1400px;
+    width: 100%;
+}
+
+.neu-card {
+    width: 100%;
+    background: var(--neu-bg);
+    border-radius: 28px;
+    padding: 40px 32px 32px;
+    box-shadow:
+        -10px -10px 24px var(--neu-light),
+         12px  12px 28px var(--neu-dark);
+    transform-origin: center;
+    backface-visibility: hidden;
+    will-change: transform;
+}
+
+.neu-card.is-flipping-out {
+    animation: neu-flip-out 0.42s cubic-bezier(0.55, 0, 0.75, 0.3) forwards;
+}
+.neu-card.is-flipping-in {
+    animation: neu-flip-in 0.5s cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+
+@keyframes neu-flip-out {
+    from { transform: rotateY(0deg); opacity: 1; }
+    to   { transform: rotateY(90deg) scale(0.96); opacity: 0.4; }
+}
+@keyframes neu-flip-in {
+    from { transform: rotateY(-90deg) scale(0.96); opacity: 0.4; }
+    to   { transform: rotateY(0deg); opacity: 1; }
+}
+
+/* Header */
+.neu-avatar {
+    width: 84px;
+    height: 84px;
+    margin: 0 auto 20px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--neu-bg);
+    color: var(--accent);
+    font-size: 30px;
+    box-shadow:
+        -7px -7px 16px var(--neu-light),
+         8px  8px 18px var(--neu-dark);
+}
+
+.neu-avatar i {
+    filter: drop-shadow(0 2px 3px rgba(0, 56, 168, 0.25));
+}
+
+.neu-card .signin-title {
+    text-align: center;
+    font-size: 28px;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    margin-bottom: 6px;
+}
+
+.neu-card .signin-subtitle {
+    text-align: center;
+    font-size: 14px;
+    margin-bottom: 30px;
+}
+
+/* Fields */
+.neu-card .form-group {
+    margin-bottom: 20px;
+}
+
+.neu-card .form-label {
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--accent);
+    margin: 0 0 8px 4px;
+}
+
+.neu-card .form-input {
+    background: var(--neu-field);
+    border: 1px solid var(--neu-edge);
+    border-radius: 14px;
+    padding: 15px 16px 15px 46px;
+    box-shadow:
+        inset 4px 4px 9px var(--neu-dark),
+        inset -4px -4px 9px var(--neu-light);
+    transition: box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.neu-card .form-input:focus {
+    border-color: var(--accent) !important;
+    box-shadow:
+        inset 3px 3px 7px var(--neu-dark),
+        inset -3px -3px 7px var(--neu-light),
+        0 0 0 3px var(--accent-ring) !important;
+}
+
+.neu-card .input-icon {
+    left: 17px;
+    color: var(--text-muted);
+    z-index: 1;
+}
+
+.neu-card .input-wrapper:focus-within .input-icon {
+    color: var(--accent);
+}
+
+/* Options row */
+.neu-card .form-options {
+    font-size: 14px;
+    margin: 4px 2px 28px;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+/* Sign-in button */
+.neu-card .btn-primary {
+    background: var(--neu-bg);
+    border: 1px solid transparent;
+    border-radius: 999px;
+    color: var(--accent);
+    padding: 16px 20px;
+    margin-bottom: 0;
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    box-shadow:
+        -7px -7px 16px var(--neu-light),
+         8px  8px 18px var(--neu-dark);
+    transition: box-shadow 0.18s ease, transform 0.18s ease, color 0.18s ease;
+}
+
+.neu-card .btn-primary:hover {
+    background: var(--neu-bg);
+    border-color: transparent;
+    color: var(--accent-strong);
+    transform: translateY(-1px);
+}
+
+.neu-card .btn-primary:active {
+    transform: translateY(0);
+    box-shadow:
+        inset 5px 5px 11px var(--neu-dark),
+        inset -5px -5px 11px var(--neu-light);
+}
+
+/* Portal switch */
+
+.neu-switch {
+    display: flex;
+    justify-content: center;
+    gap: 32px;
+    margin-top: 30px;
+}
+
+.neu-switch-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    text-decoration: none;
+    color: var(--text-muted);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.neu-circle {
+    width: 54px;
+    height: 54px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--neu-bg);
+    color: var(--accent);
+    font-size: 18px;
+    box-shadow:
+        -6px -6px 13px var(--neu-light),
+         6px  6px 14px var(--neu-dark);
+    transition: box-shadow 0.18s ease, transform 0.18s ease;
+}
+
+.neu-switch-item:hover .neu-circle {
+    transform: translateY(-2px);
+}
+
+.neu-switch-item:hover {
+    color: var(--accent);
+}
+
+.neu-switch-item:active .neu-circle {
+    transform: translateY(0);
+    box-shadow:
+        inset 4px 4px 9px var(--neu-dark),
+        inset -4px -4px 9px var(--neu-light);
+}
+
+.neu-switch-item:focus-visible {
+    outline: none;
+}
+.neu-switch-item:focus-visible .neu-circle {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+}
+
+/* Notice under the card */
+.neu-panel .notice-box {
+    margin-top: 0;
+    border-radius: 16px;
+    background: var(--neu-bg);
+    border: 1px solid var(--warning);
+    box-shadow:
+        inset 3px 3px 7px var(--neu-dark),
+        inset -3px -3px 7px var(--neu-light);
+}
+
+/* Patron page: same card, its own markup */
+[data-module="patron"] .main {
+    margin: auto;
+}
+[data-module="patron"] .hero-logo {
+    display: block;
+    height: 76px;
+    width: auto;
+    margin-bottom: 24px;
+}
+[data-module="patron"] .neu-card {
+    border: none;
+    overflow: visible;
+    backdrop-filter: none;
+    color: var(--text);
+}
+[data-module="patron"] .neu-card:hover {
+    border: none;
+}
+[data-module="patron"] .neu-card .signin-title {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+}
+[data-module="patron"] .neu-card .signin-subtitle {
+    color: var(--muted);
+}
+[data-module="patron"] .neu-card label {
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--accent);
+    margin: 0 0 8px 4px;
+}
+[data-module="patron"] .neu-card .input {
+    padding: 0;
+}
+[data-module="patron"] .neu-card .input input {
+    background: var(--neu-field);
+    border: 1px solid var(--neu-edge);
+    border-radius: 14px;
+    padding: 15px 16px 15px 46px;
+    font-size: 15px;
+    box-shadow:
+        inset 4px 4px 9px var(--neu-dark),
+        inset -4px -4px 9px var(--neu-light);
+}
+[data-module="patron"] .neu-card .input input:focus {
+    border-color: var(--accent) !important;
+    box-shadow:
+        inset 3px 3px 7px var(--neu-dark),
+        inset -3px -3px 7px var(--neu-light),
+        0 0 0 3px var(--accent-ring) !important;
+}
+[data-module="patron"] .neu-card .icon {
+    left: 17px;
+    z-index: 1;
+    opacity: 1;
+    color: var(--muted);
+}
+[data-module="patron"] .neu-card .input:focus-within .icon {
+    color: var(--accent);
+}
+[data-module="patron"] .neu-card .forgot {
+    margin: 4px 2px 28px;
+    font-size: 14px;
+    color: var(--muted);
+}
+[data-module="patron"] .neu-card .forgot a {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--accent);
+}
+[data-module="patron"] .neu-card .forgot a:hover {
+    text-decoration: underline;
+}
+[data-module="patron"] .neu-card .btn,
+[data-module="patron"] .neu-card .btn:hover {
+    background: var(--neu-bg) !important;
+    border-radius: 999px;
+    color: var(--accent);
+    padding: 16px 20px;
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    box-shadow:
+        -7px -7px 16px var(--neu-light),
+         8px  8px 18px var(--neu-dark);
+    transition: box-shadow 0.18s ease, transform 0.18s ease, color 0.18s ease;
+}
+[data-module="patron"] .neu-card .btn:hover {
+    color: var(--accent-strong);
+    transform: translateY(-1px);
+}
+[data-module="patron"] .neu-card .btn:active {
+    transform: translateY(0);
+    box-shadow:
+        inset 5px 5px 11px var(--neu-dark),
+        inset -5px -5px 11px var(--neu-light);
+}
+[data-module="patron"] .neu-card .create {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    margin-top: 28px;
+}
+.neu-create {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 700;
+    color: var(--accent) !important;
+    text-decoration: none;
+}
+.neu-create .neu-circle {
+    width: 46px;
+    height: 46px;
+    font-size: 16px;
+}
+.neu-create:hover .neu-circle {
+    transform: translateY(-2px);
+}
+.neu-create:active .neu-circle {
+    transform: translateY(0);
+    box-shadow:
+        inset 4px 4px 9px var(--neu-dark),
+        inset -4px -4px 9px var(--neu-light);
+}
+
+@media (max-width: 980px) {
+    [data-module="patron"] .hero-logo {
+        margin: 0 auto 20px;
+    }
+}
+
+@media (max-width: 992px) {
+    .sidebar.neu-panel {
+        padding: 48px 24px;
+        box-shadow: none;
+        border-top: none;
+    }
+    .neu-stage {
+        max-width: 440px;
+        margin: 0 auto;
+    }
+    .neu-panel .notice-box {
+        max-width: 440px;
+        margin: 0 auto;
+    }
+}
+
+@media (max-width: 600px) {
+    .main-container {
+        padding: 48px 20px;
+    }
+    .features-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 420px) {
+    .neu-card {
+        padding: 32px 20px 26px;
+        border-radius: 22px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .neu-card.is-flipping-out,
+    .neu-card.is-flipping-in {
+        animation: none;
+    }
+}
+
+/* Centred layout: logo and title above the card, over the photo */
+body.auth-centered {
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 48px 16px;
+}
+
+/* Header row: logo on the left, the title on one line beside it */
+body.auth-centered .main-container,
+body.auth-centered .left {
+    flex: none;
+    display: grid;
+    grid-template-columns: auto auto;
+    justify-content: center;
+    align-items: center;
+    column-gap: 18px;
+    width: 100%;
+    max-width: 760px;
+    padding: 0;
+    text-align: left;
+}
+body.auth-centered .main-container {
+    margin-bottom: 32px;
+}
+body.auth-centered .brand-logo-hero,
+body.auth-centered .hero-logo {
+    grid-column: 1;
+    grid-row: 1;
+    margin: 0;
+}
+body.auth-centered .brand-lockup,
+body.auth-centered .hero-logo {
+    height: 64px;
+    width: auto;
+    margin: 0;
+}
+/* The badge and the small caption under the logo repeat the title. */
+body.auth-centered .main-container .badge,
+body.auth-centered .left .badge,
+body.auth-centered .brand-logo-hero .brand-text {
+    display: none;
+}
+body.auth-centered .main-title,
+body.auth-centered .title {
+    grid-column: 2;
+    grid-row: 1;
+    margin: 0;
+    padding-left: 18px;
+    border-left: 2px solid var(--accent);
+}
+/* One clean sans-serif for every portal title, second half in the accent. */
+body.auth-centered .main-title,
+body.auth-centered .title,
+body.auth-centered .main-title span {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-style: normal;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--text-main);
+}
+body.auth-centered .main-title,
+body.auth-centered .title {
+    font-size: 30px;
+    line-height: 1.2;
+}
+body.auth-centered .main-title span,
+body.auth-centered .title span {
+    display: inline;
+    color: var(--accent);
+}
+body.auth-centered .title br {
+    display: none;
+}
+@media (min-width: 601px) {
+    body.auth-centered .main-title,
+    body.auth-centered .title {
+        white-space: nowrap;
+    }
+}
+
+body.auth-centered .sidebar.neu-panel {
+    width: 100%;
+    max-width: 460px;
+    background: transparent;
+    box-shadow: none;
+    border: none;
+    padding: 0;
+    overflow: visible;
+    flex: none;
+}
+body.auth-centered .neu-stage,
+body.auth-centered .neu-panel .notice-box {
+    max-width: none;
+}
+/* The card now sits on the photo, so give it a soft drop shadow as well. */
+body.auth-centered .neu-card {
+    box-shadow:
+        -10px -10px 24px var(--neu-light),
+         12px  12px 28px var(--neu-dark),
+         0 24px 60px rgba(15, 23, 42, 0.18);
+}
+body.auth-centered .neu-panel .notice-box {
+    background: var(--neu-bg);
+    box-shadow: 0 12px 30px rgba(15, 23, 42, 0.12);
+}
+
+/* Patron page */
+body.auth-centered .main {
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    gap: 28px;
+    max-width: 760px;
+    padding: 0;
+}
+body.auth-centered .right {
+    width: 100%;
+    max-width: 460px;
+}
+
+@media (max-width: 600px) {
+    /* Extra top room so the floating theme button clears the title. */
+    body.auth-centered { padding: 76px 16px 32px; }
+    body.auth-centered .main-container,
+    body.auth-centered .left {
+        grid-template-columns: auto 1fr;
+        column-gap: 12px;
+    }
+    body.auth-centered .brand-lockup,
+    body.auth-centered .hero-logo { height: 48px; }
+    body.auth-centered .main-title,
+    body.auth-centered .title { padding-left: 12px; }
+    body.auth-centered .main-title,
+    body.auth-centered .title { font-size: 20px; }
+    /* Too narrow for one line, so break between the two halves. */
+    body.auth-centered .main-title span { display: block; }
+    body.auth-centered .title br { display: inline; }
+}
+
+/* Readability: one font across the card, slightly larger small print */
+[data-module="patron"] .neu-card,
+[data-module="patron"] .neu-card .btn {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+}
+.neu-card .signin-subtitle,
+[data-module="patron"] .neu-card .create {
+    font-size: 15px;
+    line-height: 1.5;
+}
+.neu-switch-item {
+    font-size: 13px;
+}
+.neu-card .form-input::placeholder,
+[data-module="patron"] .neu-card .input input::placeholder {
+    opacity: 0.9;
+}
+
+/* Desktop: larger header and card for easier reading */
+@media (min-width: 993px) {
+    body.auth-centered .main-container,
+    body.auth-centered .left,
+    body.auth-centered .main {
+        max-width: 1100px;
+    }
+    body.auth-centered .main-container,
+    body.auth-centered .left {
+        column-gap: 24px;
+    }
+    body.auth-centered .brand-lockup,
+    body.auth-centered .hero-logo {
+        height: 84px;
+    }
+    body.auth-centered .main-title,
+    body.auth-centered .title {
+        font-size: clamp(30px, 3vw, 40px);
+        padding-left: 24px;
+        border-left-width: 3px;
+    }
+    body.auth-centered .main-container {
+        margin-bottom: 36px;
+    }
+
+    body.auth-centered .sidebar.neu-panel,
+    body.auth-centered .right {
+        max-width: 520px;
+    }
+    body.auth-centered .neu-card {
+        padding: 48px 44px 40px;
+        border-radius: 32px;
+    }
+    body.auth-centered .neu-avatar {
+        width: 96px;
+        height: 96px;
+        font-size: 34px;
+    }
+    body.auth-centered .neu-card .signin-title {
+        font-size: 32px;
+    }
+    body.auth-centered .neu-card .signin-subtitle {
+        font-size: 16px;
+        margin-bottom: 34px;
+    }
+    body.auth-centered .neu-card .form-label,
+    body.auth-centered[data-module] .neu-card label,
+    body.auth-centered .neu-card label {
+        font-size: 15px;
+    }
+    body.auth-centered .neu-card .form-input,
+    body.auth-centered .neu-card .input input {
+        font-size: 16px;
+        padding-top: 17px;
+        padding-bottom: 17px;
+    }
+    body.auth-centered .neu-card .input-icon,
+    body.auth-centered .neu-card .icon {
+        font-size: 16px;
+    }
+    body.auth-centered .neu-card .form-options,
+    body.auth-centered .neu-card .forgot,
+    body.auth-centered .neu-card .forgot a {
+        font-size: 15px;
+    }
+    body.auth-centered .neu-card .btn-primary,
+    body.auth-centered .neu-card .btn {
+        font-size: 16px;
+        padding: 18px 20px;
+    }
+    body.auth-centered .neu-card .create {
+        font-size: 16px;
+    }
+    body.auth-centered .neu-circle {
+        width: 60px;
+        height: 60px;
+        font-size: 20px;
+    }
+    body.auth-centered .neu-switch-item {
+        font-size: 14px;
+    }
+    body.auth-centered .neu-panel .notice-text {
+        font-size: 14px;
+    }
+}
+
+/* Decorative layer: pixel readers */
+:root {
+    --walker-book: #CE1126;
+}
+.auth-decor {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    overflow: hidden;
+    pointer-events: none;
+}
+body.auth-centered .main-container,
+body.auth-centered .sidebar,
+body.auth-centered .main {
+    position: relative;
+    z-index: 1;
+}
+
+.decor-walker {
+    position: absolute;
+    bottom: 16px;
+    left: 0;
+    width: 72px;
+    filter: drop-shadow(0 4px 3px rgba(15, 23, 42, 0.25));
+}
+.decor-sprite {
+    display: block;
+    width: 72px;
+    height: 96px;
+    animation: decor-bob 0.5s steps(1) infinite;
+}
+.decor-walker .legs-b { opacity: 0; }
+.decor-walker .legs-a { animation: decor-leg-a 0.5s steps(1) infinite; }
+.decor-walker .legs-b { animation: decor-leg-b 0.5s steps(1) infinite; }
+@keyframes decor-leg-a { 0% { opacity: 1; } 50% { opacity: 0; } }
+@keyframes decor-leg-b { 0% { opacity: 0; } 50% { opacity: 1; } }
+@keyframes decor-bob   { 0% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+
+.decor-walker.walk-right {
+    --walker-shirt: #0038A8;
+    animation: decor-walk-right 30s linear infinite;
+}
+.decor-walker.walk-left {
+    --walker-shirt: #CE1126;
+    --walker-book: #E0A800;
+    animation: decor-walk-left 38s linear infinite;
+    animation-delay: -17s;
+}
+@keyframes decor-walk-right {
+    from { transform: translateX(-100px); }
+    to   { transform: translateX(calc(100vw + 100px)); }
+}
+@keyframes decor-walk-left {
+    from { transform: translateX(calc(100vw + 100px)) scaleX(-1); }
+    to   { transform: translateX(-100px) scaleX(-1); }
+}
+
+
+/* Phones: slightly smaller walkers. */
+@media (max-width: 600px) {
+    .decor-walker, .decor-sprite { width: 60px; }
+    .decor-sprite { height: 80px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .decor-sprite,
+    .decor-walker .legs-a, .decor-walker .legs-b {
+        animation: none;
+    }
+    .decor-walker { display: none; }
+}

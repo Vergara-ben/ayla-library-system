@@ -116,6 +116,9 @@
     <script src="{% static 'js/qrsource.js' %}"></script>
     <link rel="stylesheet" href="{% static 'css/admin-enhance.css' %}">
     <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'css/admin-neu.css' %}?v=20260922b">
+    <script src="{% static 'js/admin-neu.js' %}?v=20260922" defer></script>
     <link rel="stylesheet" href="{% static 'css/readability.css' %}">
     <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
     <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
@@ -269,7 +272,7 @@
                                             {% if tx.patron %}
                                                 {{ tx.patron.fullname }}
                                             {% else %}
-                                                In-Library User
+                                                Walk-in reader
                                             {% endif %}
                                         </div>
                                         <div class="text-[10px] text-slate-500 font-mono mt-0.5">
@@ -331,10 +334,13 @@
                                         {% if not tx.return_date and tx.transaction_type == 'Borrow' %}
                                             {# Both actions charge money, so each is confirmed in a modal that shows the exact figure first. #}
                                             <div class="inline-flex justify-center gap-1.5">
-                                                <button type="button" onclick="openTxAction({{ tx.transaction_id }}, 'return')" class="rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-1 text-[10px] font-semibold hover:bg-emerald-500/20 hover:text-emerald-100">Mark Returned</button>
+                                                <button type="button" onclick="openTxAction({{ tx.transaction_id }}, 'return')" class="rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-1 text-[10px] font-semibold hover:bg-emerald-500/20 hover:text-emerald-100" title="Close this loan from its record - use the desk scanner when the patron is at the counter">Mark Returned</button>
                                                 <button type="button" onclick="openTxAction({{ tx.transaction_id }}, 'lost')" class="rounded-lg bg-rose-500/10 text-rose-400 border border-rose-500/20 px-2 py-1 text-[10px] font-semibold hover:bg-rose-500/20 hover:text-rose-100">Mark Lost</button>
                                                 <button type="button" onclick="openDueDateModal({{ tx.transaction_id }}, '{{ tx.due_date|date:"Y-m-d" }}')" class="rounded-lg bg-slate-700/30 text-slate-300 border border-slate-600/40 px-2 py-1 text-[10px] font-semibold hover:bg-slate-700/50" title="Set a new due date directly — for a patron asking in person">Adjust Due</button>
                                             </div>
+                                        {% elif not tx.return_date and tx.transaction_type == 'In-Library Reading' %}
+                                            {# Reading ends the same way a loan does: the copy joins the reshelving queue. #}
+                                            <button type="button" onclick="openTxAction({{ tx.transaction_id }}, 'return')" class="rounded-lg bg-sky-500/10 text-sky-400 border border-sky-500/20 px-2 py-1 text-[10px] font-semibold hover:bg-sky-500/20 hover:text-sky-100" title="Close this reading session and send the book to reshelving">Done Reading</button>
                                         {% else %}
                                             <span class="text-slate-500">—</span>
                                         {% endif %}
@@ -396,6 +402,11 @@
                                 <span class="text-sm text-slate-300">In-Library Reading</span>
                             </label>
                         </div>
+                        <p class="mt-2 text-[11px] leading-snug text-slate-500">
+                            Scanning at the desk, with the patron present. To close a loan without the
+                            book in hand, use <span class="text-slate-400 font-semibold">Mark Returned</span>
+                            on its row in the table above.
+                        </p>
                     </div>
 
                     <!-- One scanner for the whole transaction. -->
@@ -590,6 +601,12 @@
             if (!data.success) { txActionErr(data.error || 'Could not load the transaction.'); return; }
             const p = data.preview;
 
+            if (p.is_reading) {
+                // Only the preview knows this row is a reading session, not a loan.
+                document.getElementById('txActionTitle').textContent = 'Finish Reading Session';
+                btn.textContent = 'Done Reading';
+            }
+
             document.getElementById('txaBook').textContent = p.book;
             document.getElementById('txaPatron').textContent = p.patron;
             document.getElementById('txaDue').textContent = p.due_date + (p.is_overdue ? ' (overdue)' : '');
@@ -608,8 +625,10 @@
                 fines.className = 'rounded-lg border border-emerald-800/50 bg-emerald-950/30 px-3 py-2.5 text-xs space-y-1';
                 fines.innerHTML =
                     '<div class="flex justify-between"><span class="text-slate-400">Overdue fine</span><span class="font-bold text-emerald-200">PHP ' + p.total_fine + '</span></div>';
-                document.getElementById('txaNote').textContent =
-                    'The loan is closed, the book returns to Available, and the patron is emailed a receipt.';
+                document.getElementById('txaNote').textContent = p.is_reading
+                    ? 'The reading session is closed and the book joins the reshelving queue.'
+                    : 'The loan is closed, any penalty is collected at the desk, the book joins the '
+                      + 'reshelving queue, and the patron is emailed a receipt.';
             }
 
             document.getElementById('txActionLoading').classList.add('hidden');
@@ -863,13 +882,8 @@
                 // Reset the repeat guard when the type changes.
                 lastScanCode = '';
                 
-                if (selectedType === 'In-Library Reading') {
-                    // No patron for in-library reading, so clear any scanned card.
-                    patronSection.classList.add('hidden');
-                    clearPatronSelection();
-                } else {
-                    patronSection.classList.remove('hidden');
-                }
+                // Every type is recorded against a patron, in-library reading included.
+                patronSection.classList.remove('hidden');
             });
         });
 
@@ -1185,12 +1199,6 @@
         }
 
         function routeScannedPatron(code, patron) {
-            // No patron for in-library reading.
-            const type = document.querySelector('input[name="transaction_type"]:checked');
-            if (type && type.value === 'In-Library Reading') {
-                scanStatus.textContent = 'In-library reading records no patron \u2014 scan the books instead.';
-                return;
-            }
             const already = document.getElementById('selected-patron-id').value;
             applyScannedPatron(code, patron);
             scanStatus.textContent = (already && String(already) !== String(patron.patron_id))
@@ -1382,7 +1390,7 @@
                 return;
             }
 
-            if (transactionType !== 'In-Library Reading' && !patronId) {
+            if (!patronId) {
                 showMessage('Please select or scan a patron', 'error');
                 return;
             }

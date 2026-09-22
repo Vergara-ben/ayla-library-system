@@ -1,0 +1,2883 @@
+/* patron-neu.css: the sign-in page's soft card look for patron pages. Turned on by body.neu-app. */
+:root {
+    --neu-bg:    #e9eef5;
+    --neu-light: rgba(255, 255, 255, 0.95);
+    --neu-dark:  rgba(146, 162, 188, 0.55);
+    --neu-field: #e3e9f1;
+    --neu-raise: -8px -8px 18px var(--neu-light), 9px 9px 20px var(--neu-dark);
+    --neu-raise-sm: -5px -5px 11px var(--neu-light), 5px 5px 12px var(--neu-dark);
+    --neu-inset: inset 4px 4px 9px var(--neu-dark), inset -4px -4px 9px var(--neu-light);
+
+    --font-head: 'Poppins', system-ui, sans-serif;
+    --font-body: 'Inter', system-ui, sans-serif;
+
+    /* One gradient per stat colour */
+    --g-blue:  linear-gradient(135deg, #3b82f6, #0038A8);
+    --g-amber: linear-gradient(135deg, #fbbf24, #d97706);
+    --g-cyan:  linear-gradient(135deg, #22d3ee, #0e7490);
+    --g-pink:  linear-gradient(135deg, #f472b6, #be185d);
+    --hero:    linear-gradient(120deg, #0038A8 0%, #1d4ed8 55%, #3b82f6 100%);
+}
+[data-theme="dark"] {
+    --neu-bg:    #131c2c;
+    --neu-light: rgba(255, 255, 255, 0.05);
+    --neu-dark:  rgba(0, 0, 0, 0.55);
+    --neu-field: #101826;
+    --hero:      linear-gradient(120deg, #0b2a7a 0%, #1e40af 55%, #2563eb 100%);
+}
+
+/* Page */
+body.neu-app {
+    font-family: var(--font-body);
+    font-size: 16px;
+    line-height: 1.5;
+    background: var(--neu-bg);
+    -webkit-font-smoothing: antialiased;
+}
+body.neu-app h1,
+body.neu-app .card-title,
+body.neu-app .stat-num,
+body.neu-app .avatar,
+body.neu-app .logo-text {
+    font-family: var(--font-head);
+}
+body.neu-app .book-thumb {
+    font-family: var(--font-body);
+}
+body.neu-app .main {
+    max-width: 1100px;
+    padding: 28px 24px 40px;
+}
+
+/* Top bar */
+body.neu-app .navbar {
+    background: color-mix(in srgb, var(--neu-bg) 90%, transparent) !important;
+    border-bottom: none;
+    box-shadow: 0 6px 20px rgba(15, 23, 42, 0.08);
+    padding: 12px 24px;
+}
+body.neu-app .nav-btn,
+body.neu-app .navbar .avatar,
+body.neu-app .navbar .theme-toggle {
+    width: 42px;
+    height: 42px;
+    border: none;
+    border-radius: 50%;
+    background: var(--neu-bg);
+    color: var(--accent);
+    font-size: 16px;
+    box-shadow: var(--neu-raise-sm);
+    transition: box-shadow 0.18s ease, transform 0.18s ease;
+}
+body.neu-app .navbar .avatar {
+    background: var(--g-blue);
+    color: #fff;
+    font-weight: 600;
+}
+body.neu-app .nav-btn:hover,
+body.neu-app .navbar .avatar:hover,
+body.neu-app .navbar .theme-toggle:hover {
+    transform: translateY(-2px);
+    border: none;
+}
+body.neu-app .nav-btn:active,
+body.neu-app .navbar .theme-toggle:active {
+    transform: none;
+    box-shadow: var(--neu-inset);
+}
+
+/* Announcement */
+body.neu-app .announcement {
+    border: none;
+    border-radius: 20px;
+    background: var(--neu-bg);
+    box-shadow: var(--neu-raise-sm);
+    padding: 16px 22px;
+    margin-bottom: 24px;
+}
+body.neu-app .ann-icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--g-blue);
+    color: #fff;
+    font-size: 18px;
+    box-shadow: 0 8px 18px rgba(29, 78, 216, 0.35);
+}
+body.neu-app .ann-title {
+    font-size: 13px;
+    font-weight: 700;
+}
+body.neu-app .ann-msg {
+    font-size: 15px;
+}
+
+/* Hero greeting */
+body.neu-app .greeting {
+    position: relative;
+    overflow: hidden;
+    border-radius: 28px;
+    padding: 34px 36px 92px;
+    margin-bottom: 30px;
+    color: #fff;
+    background: var(--hero);
+    box-shadow: 0 22px 44px -18px rgba(0, 56, 168, 0.55);
+    isolation: isolate;
+}
+/* Soft colour glows drifting behind the text */
+body.neu-app .greeting::before,
+body.neu-app .greeting::after {
+    content: '';
+    position: absolute;
+    z-index: -1;
+    border-radius: 50%;
+    filter: blur(46px);
+    opacity: 0.45;
+    mix-blend-mode: screen;
+    animation: hero-drift 14s ease-in-out infinite alternate;
+}
+body.neu-app .greeting::before {
+    width: 280px;
+    height: 280px;
+    right: -60px;
+    top: -110px;
+    background: #38bdf8;
+}
+body.neu-app .greeting::after {
+    width: 240px;
+    height: 240px;
+    right: 22%;
+    bottom: -150px;
+    background: #f472b6;
+    animation-duration: 18s;
+}
+@keyframes hero-drift {
+    from { transform: translate(0, 0) scale(1); }
+    to   { transform: translate(-60px, 30px) scale(1.15); }
+}
+body.neu-app .greeting h1 {
+    font-size: 34px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    line-height: 1.2;
+    margin-bottom: 8px;
+}
+body.neu-app .greeting p {
+    font-size: 16px;
+    color: rgba(255, 255, 255, 0.88);
+}
+body.neu-app .greeting p span {
+    color: #fde68a;
+    font-weight: 700;
+}
+body.neu-app .lib-badge {
+    margin-top: 16px;
+    padding: 8px 16px;
+    font-size: 14px;
+    font-weight: 600;
+    color: #fff;
+    background: rgba(255, 255, 255, 0.16);
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    backdrop-filter: blur(6px);
+}
+body.neu-app .lib-badge::before {
+    background: #cbd5e1;
+}
+body.neu-app .lib-badge.is-open {
+    color: #fff;
+    background: rgba(16, 185, 129, 0.25);
+    border-color: rgba(110, 231, 183, 0.7);
+}
+body.neu-app .lib-badge.is-open::before {
+    background: #34d399;
+    box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.7);
+    animation: badge-pulse 1.8s ease-out infinite;
+}
+@keyframes badge-pulse {
+    to { box-shadow: 0 0 0 8px rgba(52, 211, 153, 0); }
+}
+
+/* Pixel readers walking along the bottom of the hero */
+body.neu-app .hero-walkers {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 10px;
+    height: 64px;
+    pointer-events: none;
+}
+.hero-walkers .decor-walker {
+    position: absolute;
+    bottom: 0;
+    left: -60px;
+    filter: drop-shadow(0 4px 3px rgba(0, 0, 0, 0.3));
+}
+.hero-walkers .decor-sprite {
+    display: block;
+    width: 45px;
+    height: 60px;
+    animation: hero-bob 0.5s steps(1) infinite;
+}
+.hero-walkers .legs-a { animation: hero-leg-a 0.5s steps(1) infinite; }
+.hero-walkers .legs-b { opacity: 0; animation: hero-leg-b 0.5s steps(1) infinite; }
+@keyframes hero-leg-a { 0% { opacity: 1; } 50% { opacity: 0; } }
+@keyframes hero-leg-b { 0% { opacity: 0; } 50% { opacity: 1; } }
+@keyframes hero-bob   { 0% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
+.hero-walkers .walk-right {
+    --walker-shirt: #fcd116;
+    --walker-book: #ce1126;
+    animation: hero-walk-right 22s linear infinite;
+}
+.hero-walkers .walk-left {
+    --walker-shirt: #ce1126;
+    --walker-book: #fcd116;
+    transform: scaleX(-1);
+    animation: hero-walk-left 28s linear infinite;
+    animation-delay: -12s;
+}
+@keyframes hero-walk-right {
+    from { left: -60px; }
+    to   { left: calc(100% + 20px); }
+}
+@keyframes hero-walk-left {
+    from { left: calc(100% + 20px); }
+    to   { left: -60px; }
+}
+
+/* Stat cards */
+body.neu-app .stats {
+    gap: 20px;
+    margin-bottom: 30px;
+}
+body.neu-app .stat-card {
+    --glow: rgba(29, 78, 216, 0.35);
+    --grad: var(--g-blue);
+    border: none;
+    border-radius: 24px;
+    background: var(--neu-bg);
+    box-shadow: var(--neu-raise);
+    padding: 24px;
+    overflow: hidden;
+    transition: transform 0.25s ease, box-shadow 0.25s ease;
+}
+body.neu-app .stat-card.amber { --glow: rgba(217, 119, 6, 0.35);  --grad: var(--g-amber); }
+body.neu-app .stat-card.blue  { --glow: rgba(14, 116, 144, 0.35); --grad: var(--g-cyan); }
+body.neu-app .stat-card.pink  { --glow: rgba(190, 24, 93, 0.35);  --grad: var(--g-pink); }
+/* Faint colour wash in the corner of each stat card */
+body.neu-app .stat-card::before {
+    content: '';
+    display: block;
+    position: absolute;
+    top: -50px;
+    right: -50px;
+    left: auto;
+    width: 140px;
+    height: 140px !important;
+    border-radius: 50%;
+    background: var(--grad);
+    opacity: 0.12;
+    transition: transform 0.4s ease, opacity 0.4s ease;
+}
+body.neu-app .stat-card:hover {
+    border: none;
+    transform: translateY(-6px);
+    box-shadow: var(--neu-raise), 0 18px 34px -12px var(--glow);
+}
+body.neu-app .stat-card:hover::before {
+    transform: scale(1.35);
+    opacity: 0.2;
+}
+body.neu-app .stat-icon {
+    position: relative;
+    width: 48px;
+    height: 48px;
+    border-radius: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 16px;
+    background: var(--grad);
+    color: #fff !important;
+    font-size: 19px;
+    box-shadow: 0 10px 20px -6px var(--glow);
+}
+body.neu-app .stat-num {
+    position: relative;
+    font-size: 36px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    background: var(--grad);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent !important;
+}
+body.neu-app .stat-label {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+    margin-top: 8px;
+}
+body.neu-app .stat-sub {
+    font-size: 13px;
+    font-weight: 500;
+}
+body.neu-app .stat-card.blue .stat-sub { color: #0e7490; }
+[data-theme="dark"] body.neu-app .stat-card.blue .stat-sub { color: #22d3ee; }
+
+/* Panels */
+body.neu-app .grid {
+    grid-template-columns: 1fr 320px;
+    gap: 26px;
+}
+body.neu-app .card {
+    border: none;
+    border-radius: 26px;
+    background: var(--neu-bg);
+    box-shadow: var(--neu-raise);
+    padding: 26px;
+}
+body.neu-app .card:hover {
+    border: none;
+}
+body.neu-app .card[style*="margin-bottom"] {
+    margin-bottom: 26px !important;
+}
+body.neu-app .card-header {
+    margin-bottom: 18px;
+}
+body.neu-app .card-title {
+    font-size: 19px;
+    font-weight: 600;
+    gap: 12px;
+}
+body.neu-app .card-title i {
+    width: 36px;
+    height: 36px;
+    border-radius: 12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--g-blue);
+    color: #fff;
+    font-size: 15px;
+    box-shadow: 0 8px 16px -6px rgba(29, 78, 216, 0.5);
+}
+body.neu-app .card-title .fa-triangle-exclamation {
+    background: var(--g-amber);
+    box-shadow: 0 8px 16px -6px rgba(217, 119, 6, 0.5);
+}
+body.neu-app .view-all {
+    font-size: 14px;
+    font-weight: 600;
+    opacity: 1;
+}
+body.neu-app .view-all:hover {
+    text-decoration: underline;
+}
+body.neu-app .card .book-author,
+body.neu-app .card .hist-date,
+body.neu-app .card .overdue-days {
+    font-size: 14px;
+}
+
+/* Book rows */
+body.neu-app .book-item,
+body.neu-app .history-item {
+    padding: 16px 10px;
+    margin: 0 -10px;
+    border-radius: 16px;
+    border-bottom: none;
+    transition: background-color 0.2s ease;
+}
+body.neu-app .book-item:hover,
+body.neu-app .history-item:hover {
+    background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+body.neu-app .book-title,
+body.neu-app .hist-title {
+    font-size: 16px;
+    font-weight: 600;
+}
+body.neu-app .book-thumb {
+    width: 46px;
+    height: 60px;
+    border: none;
+    border-radius: 10px;
+    background: var(--g-blue);
+    color: #fff;
+    font-size: 10px;
+    box-shadow: 0 8px 16px -6px rgba(29, 78, 216, 0.5);
+}
+body.neu-app .progress-bar {
+    height: 8px;
+    background: var(--neu-field);
+    box-shadow: inset 1px 1px 3px var(--neu-dark);
+}
+body.neu-app .fill-green { background: var(--g-blue); }
+body.neu-app .fill-red   { background: linear-gradient(90deg, #f87171, #b91c1c); }
+body.neu-app .hist-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 12px;
+    background: var(--g-cyan);
+    color: #fff;
+    font-size: 15px;
+}
+body.neu-app .book-badge,
+body.neu-app .hist-status {
+    border-radius: 999px !important;
+    font-size: 12px !important;
+    font-weight: 700;
+    padding: 5px 12px !important;
+}
+
+/* Quick actions */
+body.neu-app .quick-grid {
+    gap: 16px;
+}
+body.neu-app .q-btn {
+    border: none;
+    border-radius: 20px;
+    padding: 20px 12px;
+    background: var(--neu-bg);
+    box-shadow: var(--neu-raise-sm);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+body.neu-app .q-btn:hover {
+    border: none;
+    background: var(--neu-bg);
+    transform: translateY(-4px);
+    box-shadow: var(--neu-raise-sm), 0 14px 26px -12px rgba(29, 78, 216, 0.5);
+}
+body.neu-app .q-btn:active {
+    transform: none;
+    box-shadow: var(--neu-inset);
+}
+body.neu-app .q-btn-icon {
+    width: 48px;
+    height: 48px;
+    margin: 0 auto 10px;
+    border-radius: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--g-blue);
+    color: #fff;
+    font-size: 19px;
+    transition: transform 0.3s ease;
+}
+body.neu-app .q-btn:nth-child(2) .q-btn-icon { background: var(--g-cyan); }
+body.neu-app .q-btn:nth-child(3) .q-btn-icon { background: var(--g-pink); }
+body.neu-app .q-btn:hover .q-btn-icon {
+    transform: rotate(-8deg) scale(1.08);
+}
+body.neu-app .q-btn-label {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+/* Overdue */
+body.neu-app .overdue-card {
+    border: none;
+    border-radius: 18px;
+    background: var(--neu-bg);
+    box-shadow: var(--neu-inset);
+    padding: 16px;
+}
+body.neu-app .overdue-title {
+    font-size: 14px;
+}
+body.neu-app .overdue-item {
+    border-bottom-color: color-mix(in srgb, var(--muted) 25%, transparent);
+}
+body.neu-app .overdue-item > div:first-child {
+    font-size: 15px !important;
+}
+body.neu-app .card button {
+    border: none !important;
+    border-radius: 999px !important;
+    background: var(--neu-bg) !important;
+    box-shadow: var(--neu-raise-sm);
+    font-family: var(--font-body) !important;
+    font-weight: 700;
+    font-size: 14px !important;
+    padding: 12px !important;
+}
+body.neu-app .card button:active {
+    box-shadow: var(--neu-inset);
+}
+
+/* Bottom bar */
+body.neu-app .bottom-nav {
+    background: color-mix(in srgb, var(--neu-bg) 92%, transparent) !important;
+    border-top: none;
+    box-shadow: 0 -6px 20px rgba(15, 23, 42, 0.08);
+}
+body.neu-app .nav-item .nav-icon {
+    width: 48px;
+    height: 34px;
+    border-radius: 999px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    transition: transform 0.2s ease;
+}
+body.neu-app .nav-item:hover .nav-icon {
+    transform: translateY(-2px);
+}
+body.neu-app .nav-item.active .nav-icon {
+    background: var(--g-blue);
+    color: #fff;
+    box-shadow: 0 8px 16px -6px rgba(29, 78, 216, 0.55);
+}
+body.neu-app .nav-item.active::before {
+    display: none;
+}
+body.neu-app .nav-item .nav-label {
+    font-size: 13px;
+    font-weight: 600;
+}
+
+/* Cards arrive one after another */
+body.neu-app .stats,
+body.neu-app .grid {
+    animation: none;
+}
+body.neu-app .stat-card,
+body.neu-app .grid > div > .card {
+    animation: neu-rise 0.6s cubic-bezier(0.2, 0.7, 0.3, 1) backwards;
+}
+body.neu-app .stat-card:nth-child(2) { animation-delay: 0.08s; }
+body.neu-app .stat-card:nth-child(3) { animation-delay: 0.16s; }
+body.neu-app .stat-card:nth-child(4) { animation-delay: 0.24s; }
+body.neu-app .grid > div:first-child > .card:nth-child(1) { animation-delay: 0.3s; }
+body.neu-app .grid > div:first-child > .card:nth-child(2) { animation-delay: 0.4s; }
+body.neu-app .grid > div:last-child  > .card:nth-child(1) { animation-delay: 0.35s; }
+body.neu-app .grid > div:last-child  > .card:nth-child(2) { animation-delay: 0.45s; }
+@keyframes neu-rise {
+    from { opacity: 0; transform: translateY(22px) scale(0.98); }
+    to   { opacity: 1; transform: none; }
+}
+
+@media (max-width: 700px) {
+    body.neu-app .grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 640px) {
+    body.neu-app .main { padding: 18px 14px 32px; }
+    body.neu-app .navbar { padding: 10px 14px; }
+    body.neu-app .greeting { padding: 26px 22px 84px; border-radius: 22px; }
+    body.neu-app .greeting h1 { font-size: 26px; }
+    body.neu-app .greeting p { font-size: 15px; }
+    body.neu-app .stats { gap: 14px; }
+    body.neu-app .stat-card { padding: 18px; }
+    body.neu-app .stat-num { font-size: 30px; }
+    body.neu-app .stat-label { font-size: 14px; }
+    body.neu-app .card { padding: 20px; border-radius: 22px; }
+    body.neu-app .card-title { font-size: 17px; }
+    body.neu-app .book-title,
+    body.neu-app .hist-title { font-size: 15px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    body.neu-app .greeting::before,
+    body.neu-app .greeting::after,
+    body.neu-app .lib-badge.is-open::before,
+    body.neu-app .stat-card,
+    body.neu-app .grid > div > .card {
+        animation: none;
+    }
+    .hero-walkers { display: none; }
+}
+
+
+/* ===== Shared pieces for every patron page ===== */
+
+/* Type */
+body.neu-app h1,
+body.neu-app h2,
+body.neu-app h3,
+body.neu-app .nav-title,
+body.neu-app [class*="-title"],
+body.neu-app .profile-name,
+body.neu-app .shelf-name {
+    font-family: var(--font-head);
+}
+body.neu-app button,
+body.neu-app input,
+body.neu-app select,
+body.neu-app textarea {
+    font-family: var(--font-body);
+}
+body.neu-app .nav-title {
+    font-size: 20px;
+    font-weight: 600;
+}
+
+/* Round top-bar buttons */
+body.neu-app .back-btn,
+body.neu-app .save-btn,
+body.neu-app .find-close {
+    width: 42px;
+    height: 42px;
+    border: none;
+    border-radius: 50%;
+    background: var(--neu-bg);
+    color: var(--accent);
+    box-shadow: var(--neu-raise-sm);
+    transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+body.neu-app .back-btn:hover,
+body.neu-app .save-btn:hover,
+body.neu-app .find-close:hover {
+    transform: translateY(-2px);
+    border: none;
+}
+body.neu-app .back-btn:active,
+body.neu-app .save-btn:active,
+body.neu-app .find-close:active {
+    transform: none;
+    box-shadow: var(--neu-inset);
+}
+body.neu-app .save-btn.saved {
+    background: var(--g-amber);
+    color: #fff;
+}
+body.neu-app .mark-all {
+    font-size: 14px;
+    font-weight: 600;
+    opacity: 1;
+}
+
+/* Page width */
+body.neu-app .page,
+body.neu-app .wrap {
+    padding-top: 26px;
+}
+body.neu-app .page { max-width: 680px; }
+body.neu-app .wrap { max-width: 960px; }
+
+/* Raised surfaces */
+body.neu-app .section,
+body.neu-app .detail-card,
+body.neu-app .ann-card,
+body.neu-app .notif-card,
+body.neu-app .book-card,
+body.neu-app .past,
+body.neu-app .find-item,
+body.neu-app .modal,
+body.neu-app .find-sheet {
+    border: none;
+    background: var(--neu-bg);
+    box-shadow: var(--neu-raise);
+}
+body.neu-app .section,
+body.neu-app .detail-card {
+    border-radius: 24px;
+    padding: 26px;
+    margin-bottom: 24px;
+}
+body.neu-app .section:hover,
+body.neu-app .detail-card:hover {
+    border: none;
+}
+body.neu-app .modal {
+    border-radius: 26px;
+}
+body.neu-app .find-sheet {
+    border-radius: 26px 26px 0 0;
+}
+@media (min-width: 700px) {
+    body.neu-app .find-sheet { border-radius: 26px; }
+}
+
+/* Section titles get a gradient icon tile, like the dashboard */
+body.neu-app .section-title {
+    font-size: 19px;
+    font-weight: 600;
+    gap: 12px;
+}
+body.neu-app .section-title i {
+    width: 36px;
+    height: 36px;
+    border-radius: 12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--g-blue);
+    color: #fff;
+    font-size: 15px;
+    box-shadow: 0 8px 16px -6px rgba(29, 78, 216, 0.5);
+}
+body.neu-app .section:nth-of-type(3n+2) .section-title i { background: var(--g-cyan); }
+body.neu-app .section:nth-of-type(3n)   .section-title i { background: var(--g-pink); }
+body.neu-app .see-all {
+    font-size: 14px;
+    font-weight: 600;
+    opacity: 1;
+}
+
+/* Fields */
+body.neu-app input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="hidden"]),
+body.neu-app select,
+body.neu-app textarea {
+    background: var(--neu-field);
+    border: 1px solid transparent;
+    border-radius: 14px;
+    color: var(--text);
+    font-size: 15px;
+    box-shadow: var(--neu-inset);
+    padding-top: 13px;
+    padding-bottom: 13px;
+    transition: box-shadow 0.2s ease, border-color 0.2s ease;
+}
+body.neu-app input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):focus,
+body.neu-app select:focus,
+body.neu-app textarea:focus {
+    border-color: var(--accent) !important;
+    box-shadow: var(--neu-inset), 0 0 0 3px var(--accent-ring) !important;
+}
+body.neu-app label,
+body.neu-app .field label {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--accent);
+}
+
+/* Primary buttons: blue gradient pills */
+body.neu-app .btn-primary,
+body.neu-app .btn.primary,
+body.neu-app .save-changes,
+body.neu-app .send-btn,
+body.neu-app .btn-map:not(.btn-map-alt),
+body.neu-app .btn-nav:not(.disabled),
+body.neu-app .btn-enable {
+    border: none;
+    border-radius: 999px;
+    background: var(--g-blue) !important;
+    color: #fff !important;
+    font-weight: 700;
+    font-size: 15px;
+    box-shadow: 0 12px 24px -10px rgba(29, 78, 216, 0.6);
+    transition: transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease;
+}
+body.neu-app .btn-primary:hover,
+body.neu-app .btn.primary:hover,
+body.neu-app .save-changes:hover,
+body.neu-app .send-btn:hover,
+body.neu-app .btn-map:not(.btn-map-alt):hover,
+body.neu-app .btn-nav:not(.disabled):hover,
+body.neu-app .btn-enable:hover {
+    transform: translateY(-2px);
+    filter: brightness(1.08);
+    box-shadow: 0 16px 28px -10px rgba(29, 78, 216, 0.7);
+}
+body.neu-app .btn-primary:active,
+body.neu-app .save-changes:active,
+body.neu-app .send-btn:active,
+body.neu-app .btn-map:active,
+body.neu-app .btn-nav:active,
+body.neu-app .btn-enable:active {
+    transform: none;
+}
+
+/* Secondary buttons: soft raised pills */
+body.neu-app .btn:not(.btn-primary):not(.primary),
+body.neu-app .btn-map-alt,
+body.neu-app .btn-dl,
+body.neu-app .btn-renew,
+body.neu-app .btn-layers,
+body.neu-app .btn-skip,
+body.neu-app .btn-nav.disabled,
+body.neu-app .find-more,
+body.neu-app .edit-btn,
+body.neu-app .ext-request-btn,
+body.neu-app .logout-btn {
+    border: none;
+    border-radius: 999px;
+    background: var(--neu-bg) !important;
+    color: var(--accent);
+    font-weight: 600;
+    box-shadow: var(--neu-raise-sm);
+    transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+body.neu-app .btn:not(.btn-primary):not(.primary):hover,
+body.neu-app .btn-map-alt:hover,
+body.neu-app .btn-dl:hover,
+body.neu-app .btn-renew:hover,
+body.neu-app .btn-layers:hover,
+body.neu-app .btn-skip:hover,
+body.neu-app .find-more:hover,
+body.neu-app .edit-btn:hover,
+body.neu-app .ext-request-btn:hover,
+body.neu-app .logout-btn:hover {
+    transform: translateY(-2px);
+    border: none;
+}
+body.neu-app .btn:not(.btn-primary):not(.primary):active,
+body.neu-app .btn-map-alt:active,
+body.neu-app .btn-dl:active,
+body.neu-app .btn-renew:active,
+body.neu-app .btn-layers:active,
+body.neu-app .btn-skip:active,
+body.neu-app .find-more:active,
+body.neu-app .edit-btn:active,
+body.neu-app .ext-request-btn:active,
+body.neu-app .logout-btn:active {
+    transform: none;
+    box-shadow: var(--neu-inset);
+}
+body.neu-app .btn-renew.urgent,
+body.neu-app .logout-btn {
+    color: var(--danger);
+}
+body.neu-app .logout-btn {
+    font-size: 15px;
+    padding: 15px;
+}
+body.neu-app .btn-dl,
+body.neu-app .btn-renew,
+body.neu-app .edit-btn {
+    font-size: 13px;
+    padding: 9px 16px;
+}
+
+/* Pills and tags */
+body.neu-app .avail,
+body.neu-app .loan-badge,
+body.neu-app .ann-tag,
+body.neu-app .status-pill,
+body.neu-app .find-avail,
+body.neu-app .meta-tag,
+body.neu-app .shelf-step,
+body.neu-app .active-chip {
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 4px 11px;
+}
+body.neu-app .meta-tag,
+body.neu-app .shelf-step {
+    border: none;
+    background: var(--neu-bg);
+    box-shadow: var(--neu-inset);
+}
+body.neu-app .meta-desk {
+    color: var(--info);
+}
+body.neu-app .active-chip {
+    border: none;
+    background: var(--neu-bg);
+    box-shadow: var(--neu-raise-sm);
+}
+
+/* Empty states */
+body.neu-app .empty {
+    font-size: 15px;
+}
+body.neu-app .empty-icon {
+    width: 84px;
+    height: 84px;
+    margin: 0 auto 16px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 32px !important;
+    color: var(--accent);
+    background: var(--neu-bg);
+    box-shadow: var(--neu-raise);
+    opacity: 1 !important;
+}
+
+/* Everything arrives one after another */
+body.neu-app .section,
+body.neu-app .detail-card,
+body.neu-app .ann-card,
+body.neu-app .notif-card,
+body.neu-app .book-card {
+    animation: neu-rise 0.55s cubic-bezier(0.2, 0.7, 0.3, 1) backwards;
+}
+body.neu-app :is(.section, .detail-card, .ann-card, .notif-card, .book-card):nth-child(2) { animation-delay: 0.06s; }
+body.neu-app :is(.section, .detail-card, .ann-card, .notif-card, .book-card):nth-child(3) { animation-delay: 0.12s; }
+body.neu-app :is(.section, .detail-card, .ann-card, .notif-card, .book-card):nth-child(4) { animation-delay: 0.18s; }
+body.neu-app :is(.section, .detail-card, .ann-card, .notif-card, .book-card):nth-child(5) { animation-delay: 0.24s; }
+body.neu-app :is(.section, .detail-card, .ann-card, .notif-card, .book-card):nth-child(n+6) { animation-delay: 0.3s; }
+
+/* Gradient banner shared by the account, book and messages headers */
+body.neu-app .profile-hero,
+body.neu-app .hero,
+body.neu-app .intro {
+    position: relative;
+    overflow: hidden;
+    isolation: isolate;
+    border: none;
+    color: #fff;
+    background: var(--hero);
+    box-shadow: 0 22px 44px -18px rgba(0, 56, 168, 0.55);
+}
+body.neu-app .profile-hero::before,
+body.neu-app .hero::before,
+body.neu-app .intro::before,
+body.neu-app .profile-hero::after,
+body.neu-app .hero::after,
+body.neu-app .intro::after {
+    content: "";
+    position: absolute;
+    z-index: -1;
+    border-radius: 50%;
+    filter: blur(46px);
+    mix-blend-mode: screen;
+    animation: hero-drift 14s ease-in-out infinite alternate;
+}
+body.neu-app .profile-hero::before,
+body.neu-app .hero::before,
+body.neu-app .intro::before {
+    width: 260px;
+    height: 260px;
+    right: -70px;
+    top: -120px;
+    background: #38bdf8;
+    opacity: 0.45;
+}
+body.neu-app .profile-hero::after,
+body.neu-app .hero::after,
+body.neu-app .intro::after {
+    width: 220px;
+    height: 220px;
+    left: 30%;
+    bottom: -150px;
+    background: #f472b6;
+    opacity: 0.4;
+    animation-duration: 18s;
+    animation-direction: alternate-reverse;
+}
+
+/* Search (catalog) */
+body.neu-app .search-input {
+    padding: 16px 18px 16px 50px !important;
+    font-size: 16px !important;
+    border-radius: 999px !important;
+}
+body.neu-app .search-icon {
+    left: 20px;
+    color: var(--accent);
+}
+body.neu-app .search-row .btn {
+    padding: 0 20px;
+    font-size: 14px;
+}
+body.neu-app .filter-panel {
+    gap: 14px;
+    margin-top: 16px;
+}
+@media (max-width: 720px) {
+    body.neu-app .filter-panel {
+        border: none;
+        border-radius: 22px;
+        background: var(--neu-bg);
+        box-shadow: var(--neu-raise);
+        padding: 18px;
+    }
+}
+body.neu-app .field select {
+    font-size: 14px;
+    padding: 11px 14px;
+}
+body.neu-app .results-count,
+body.neu-app .sort-field,
+body.neu-app .sort-field select,
+body.neu-app .clear-all {
+    font-size: 14px;
+}
+body.neu-app .sort-field select {
+    box-shadow: none;
+    background: transparent;
+    padding-top: 0;
+    padding-bottom: 0;
+}
+body.neu-app .book-card {
+    border-radius: 22px;
+    padding: 18px;
+    gap: 18px;
+    margin-bottom: 16px;
+    transition: transform 0.25s ease, box-shadow 0.25s ease;
+}
+body.neu-app .book-card:hover {
+    border: none;
+    transform: translateY(-4px);
+    box-shadow: var(--neu-raise), 0 18px 32px -14px rgba(29, 78, 216, 0.45);
+}
+body.neu-app .book-cover {
+    width: 62px;
+    height: 84px;
+    border-radius: 10px;
+    font-family: var(--font-body);
+    box-shadow: 0 10px 18px -8px rgba(15, 23, 42, 0.5);
+    transition: transform 0.3s ease;
+}
+body.neu-app .book-card:hover .book-cover {
+    transform: rotate(-4deg) scale(1.05);
+}
+body.neu-app .book-card .book-title {
+    font-size: 17px;
+    font-weight: 600;
+}
+body.neu-app .book-card .book-author {
+    font-size: 14px;
+}
+
+/* Account */
+body.neu-app .profile-hero {
+    border-radius: 28px;
+    padding: 30px 28px;
+    gap: 22px;
+    margin-bottom: 26px;
+}
+body.neu-app .profile-hero .avatar {
+    width: 84px;
+    height: 84px;
+    border-radius: 50%;
+    border: 2px solid rgba(255, 255, 255, 0.5);
+    background: rgba(255, 255, 255, 0.18);
+    color: #fff;
+    font-family: var(--font-head);
+    font-size: 32px;
+    font-weight: 600;
+    box-shadow: 0 10px 24px -8px rgba(0, 0, 0, 0.35);
+}
+body.neu-app .profile-name {
+    font-size: 26px;
+    font-weight: 700;
+}
+body.neu-app .profile-type {
+    font-size: 14px;
+    color: #fde68a;
+}
+body.neu-app .profile-email {
+    font-size: 15px;
+    color: rgba(255, 255, 255, 0.85);
+}
+body.neu-app .patron-id {
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    background: rgba(255, 255, 255, 0.16);
+    color: rgba(255, 255, 255, 0.85);
+    border-radius: 999px;
+    font-size: 13px;
+    padding: 6px 14px;
+}
+body.neu-app .patron-id span {
+    color: #fff;
+}
+body.neu-app .loan-row,
+body.neu-app .hist-row {
+    border-bottom-color: color-mix(in srgb, var(--muted) 22%, transparent);
+    padding: 16px 0;
+}
+body.neu-app .loan-cover {
+    width: 46px;
+    height: 60px;
+    border: none;
+    border-radius: 10px;
+    background: var(--g-blue);
+    color: #fff;
+    font-size: 10px;
+    font-family: var(--font-body);
+    box-shadow: 0 8px 16px -6px rgba(29, 78, 216, 0.5);
+}
+body.neu-app .loan-cover.b { background: var(--g-cyan); }
+body.neu-app .loan-cover.c { background: var(--g-amber); }
+body.neu-app .loan-title,
+body.neu-app .hist-title {
+    font-size: 16px;
+    font-weight: 600;
+}
+body.neu-app .loan-author,
+body.neu-app .hist-dates {
+    font-size: 14px;
+}
+body.neu-app .due-label,
+body.neu-app .due-date {
+    font-size: 13px;
+}
+body.neu-app .qr-section {
+    border: none;
+    border-radius: 20px;
+    background: var(--neu-bg);
+    box-shadow: var(--neu-inset);
+    padding: 16px;
+}
+body.neu-app .qr-mini {
+    border-radius: 14px;
+    box-shadow: var(--neu-raise-sm);
+}
+body.neu-app .qr-title {
+    font-size: 15px;
+}
+body.neu-app .qr-sub {
+    font-size: 13px;
+}
+body.neu-app .form-grid {
+    gap: 16px;
+}
+body.neu-app .form-group {
+    margin-bottom: 18px;
+}
+body.neu-app .save-changes {
+    padding: 15px;
+    margin-top: 8px;
+}
+
+/* Announcements */
+body.neu-app .tabs {
+    max-width: 680px;
+    margin: 20px auto 0;
+    padding: 6px;
+    gap: 6px;
+    border: none;
+    border-radius: 999px;
+    background: var(--neu-bg);
+    box-shadow: var(--neu-inset);
+}
+body.neu-app .tab {
+    border: none;
+    border-radius: 999px;
+    font-family: var(--font-head);
+    font-size: 15px;
+    font-weight: 600;
+    padding: 12px;
+    transition: background-color 0.2s ease, box-shadow 0.2s ease, color 0.2s ease;
+}
+body.neu-app .tab.active {
+    color: #fff;
+    background: var(--g-blue);
+    box-shadow: 0 10px 20px -8px rgba(29, 78, 216, 0.6);
+    border: none;
+}
+body.neu-app .tab-badge {
+    font-size: 11px;
+}
+body.neu-app .ann-card,
+body.neu-app .notif-card {
+    border-radius: 22px;
+    border-left: 5px solid transparent;
+    padding: 20px 22px;
+    margin-bottom: 16px;
+    transition: transform 0.25s ease;
+}
+body.neu-app .ann-card.unread  { border-left-color: var(--accent); }
+body.neu-app .ann-card.urgent  { border-left-color: var(--danger); }
+body.neu-app .notif-card.overdue  { border-left-color: var(--danger); }
+body.neu-app .notif-card.due-soon { border-left-color: var(--accent2); }
+body.neu-app .notif-card.returned { border-left-color: var(--accent); }
+body.neu-app .ann-card:hover,
+body.neu-app .notif-card:hover {
+    transform: translateY(-3px);
+}
+body.neu-app .ann-title,
+body.neu-app .notif-title {
+    font-size: 16px;
+    font-weight: 600;
+}
+body.neu-app .ann-msg,
+body.neu-app .notif-sub {
+    font-size: 15px;
+    line-height: 1.6;
+}
+body.neu-app .ann-date,
+body.neu-app .notif-time,
+body.neu-app .section-date {
+    font-size: 13px;
+}
+body.neu-app .notif-icon,
+body.neu-app .ann-icon-badge {
+    width: 46px;
+    height: 46px;
+    flex-shrink: 0;
+    border-radius: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 19px;
+    color: #fff;
+    background: var(--g-blue);
+    box-shadow: 0 8px 16px -6px rgba(29, 78, 216, 0.5);
+}
+body.neu-app .notif-card.overdue .notif-icon  { background: linear-gradient(135deg, #f87171, #b91c1c); }
+body.neu-app .notif-card.due-soon .notif-icon { background: var(--g-amber); }
+body.neu-app .notif-card.returned .notif-icon { background: var(--g-cyan); }
+body.neu-app .ann-icon-badge i,
+body.neu-app .notif-icon i {
+    color: #fff !important;
+}
+
+/* Book details */
+body.neu-app .hero {
+    border-radius: 0 0 36px 36px;
+    padding: 44px 20px 36px;
+    margin-bottom: 28px;
+}
+body.neu-app .book-cover-large {
+    width: 136px;
+    height: 184px;
+    border-radius: 14px;
+    font-family: var(--font-head);
+    box-shadow: 0 24px 40px -14px rgba(0, 0, 0, 0.55);
+    animation: cover-float 6s ease-in-out infinite;
+}
+@keyframes cover-float {
+    0%, 100% { transform: translateY(0) rotate(-1.5deg); }
+    50%      { transform: translateY(-8px) rotate(1.5deg); }
+}
+body.neu-app .book-main-title {
+    font-size: 28px;
+    font-weight: 700;
+}
+body.neu-app .book-main-author {
+    font-size: 16px;
+    color: rgba(255, 255, 255, 0.85);
+}
+body.neu-app .hero .status-badge {
+    font-size: 14px;
+    color: #fff;
+    border: 1px solid rgba(255, 255, 255, 0.4);
+    background: rgba(255, 255, 255, 0.16);
+    border-radius: 999px;
+}
+body.neu-app .detail-section-title {
+    font-size: 14px;
+    letter-spacing: 0.06em;
+}
+body.neu-app .detail-row {
+    border-bottom-color: color-mix(in srgb, var(--muted) 22%, transparent);
+    padding: 13px 0;
+}
+body.neu-app .detail-key {
+    font-size: 14px;
+}
+body.neu-app .detail-val,
+body.neu-app .description {
+    font-size: 15px;
+}
+body.neu-app .unshelved-note {
+    border-radius: 16px;
+    font-size: 14px;
+}
+body.neu-app .bottom-action {
+    background: color-mix(in srgb, var(--neu-bg) 92%, transparent) !important;
+    border-top: none;
+    box-shadow: 0 -6px 20px rgba(15, 23, 42, 0.08);
+}
+body.neu-app .btn-map {
+    padding: 16px;
+    font-size: 16px;
+}
+
+/* Messages */
+body.neu-app .intro {
+    border-radius: 24px;
+    padding: 24px;
+    margin-bottom: 24px;
+}
+body.neu-app .intro h2 {
+    font-size: 20px;
+    font-weight: 600;
+}
+body.neu-app .intro p {
+    font-size: 15px;
+    color: rgba(255, 255, 255, 0.88);
+}
+body.neu-app .intro .status-pill {
+    background: rgba(255, 255, 255, 0.18);
+    color: #fff;
+}
+body.neu-app .bubble {
+    font-size: 15px;
+    border-radius: 20px;
+    padding: 14px 16px;
+}
+body.neu-app .from-me {
+    background: var(--g-blue);
+    box-shadow: 0 10px 20px -10px rgba(29, 78, 216, 0.6);
+    border-bottom-right-radius: 6px;
+}
+body.neu-app .from-library {
+    border: none;
+    background: var(--neu-bg);
+    box-shadow: var(--neu-raise-sm);
+    border-bottom-left-radius: 6px;
+}
+body.neu-app .meta {
+    font-size: 12px;
+}
+body.neu-app .hint,
+body.neu-app .past {
+    font-size: 14px;
+}
+body.neu-app .past {
+    border-radius: 18px;
+    padding: 14px 16px;
+    margin-bottom: 12px;
+}
+body.neu-app .history h3 {
+    font-size: 18px;
+    font-weight: 600;
+}
+body.neu-app .send-btn {
+    padding: 15px;
+}
+
+/* Live position guide */
+body.neu-app .card:has(> .card-head) {
+    padding: 0;
+    overflow: hidden;
+}
+body.neu-app .card-head {
+    border-bottom-color: color-mix(in srgb, var(--muted) 22%, transparent);
+    padding: 16px 22px;
+}
+body.neu-app .card-body {
+    padding: 8px 22px 18px;
+}
+body.neu-app .lead,
+body.neu-app .check,
+body.neu-app ol.steps li {
+    font-size: 15px;
+}
+body.neu-app ol.steps li::before {
+    border: none;
+    color: #fff;
+    background: var(--g-blue);
+    box-shadow: 0 6px 12px -4px rgba(29, 78, 216, 0.5);
+}
+body.neu-app .flag-url {
+    border: none;
+    border-radius: 12px;
+    background: var(--neu-field);
+    box-shadow: var(--neu-inset);
+    font-size: 13px;
+}
+body.neu-app .note {
+    font-size: 14px;
+}
+
+/* Map */
+body.neu-app .floor-picker {
+    padding: 9px 12px;
+    font-size: 13px;
+    border-radius: 999px;
+    max-width: 210px;
+}
+body.neu-app .info-panel {
+    background: color-mix(in srgb, var(--neu-bg) 94%, transparent) !important;
+    border-top: none;
+    box-shadow: 0 -8px 24px rgba(15, 23, 42, 0.10);
+    padding: 18px 22px;
+}
+body.neu-app .shelf-name {
+    font-size: 18px;
+    font-weight: 600;
+}
+body.neu-app .info-panel .shelf-path,
+body.neu-app .nav-status {
+    font-size: 14px;
+}
+body.neu-app .btn-nav,
+body.neu-app .btn-layers {
+    padding: 14px 18px;
+    font-size: 15px;
+}
+body.neu-app .map-legend {
+    border: none;
+    border-radius: 18px;
+    background: color-mix(in srgb, var(--neu-bg) 92%, transparent);
+    box-shadow: var(--neu-raise-sm);
+    padding: 14px 16px;
+}
+body.neu-app .legend-item {
+    font-size: 13px;
+}
+body.neu-app .modal {
+    padding: 34px 28px;
+}
+body.neu-app .modal-icon {
+    width: 84px;
+    height: 84px;
+    margin: 0 auto 18px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 34px;
+    color: #fff;
+    background: var(--g-blue);
+    box-shadow: 0 14px 28px -10px rgba(29, 78, 216, 0.6);
+}
+body.neu-app .modal-title {
+    font-size: 22px;
+    font-weight: 700;
+}
+body.neu-app .modal-text {
+    font-size: 15px;
+}
+body.neu-app .btn-enable,
+body.neu-app .btn-skip {
+    padding: 15px;
+}
+body.neu-app .find-title {
+    font-size: 20px;
+    font-weight: 600;
+}
+body.neu-app .find-input {
+    font-size: 16px !important;
+    border-radius: 999px !important;
+    padding: 14px 18px !important;
+}
+body.neu-app .find-filters select {
+    font-size: 14px;
+}
+body.neu-app .find-count {
+    font-size: 13px;
+}
+body.neu-app .find-item {
+    border-radius: 18px;
+    padding: 14px 16px;
+    margin-bottom: 12px;
+    box-shadow: var(--neu-raise-sm);
+}
+body.neu-app a.find-item:hover {
+    border: none;
+    transform: translateY(-2px);
+}
+body.neu-app .find-item-title {
+    font-size: 16px;
+    font-weight: 600;
+}
+body.neu-app .find-item-sub,
+body.neu-app .find-item-where {
+    font-size: 13px;
+}
+body.neu-app .map-notice {
+    border: none;
+    border-radius: 999px;
+    background: var(--neu-bg);
+    box-shadow: var(--neu-raise-sm);
+    font-size: 14px;
+}
+
+/* Phones */
+@media (max-width: 480px) {
+    body.neu-app .nav-title { font-size: 18px; }
+    body.neu-app .section,
+    body.neu-app .detail-card { padding: 20px; border-radius: 22px; }
+    body.neu-app .profile-hero { padding: 24px 20px; }
+    body.neu-app .profile-name { font-size: 22px; }
+    body.neu-app .book-main-title { font-size: 23px; }
+    body.neu-app .book-card { padding: 14px; gap: 14px; }
+    body.neu-app .book-cover { width: 54px; height: 72px; }
+    body.neu-app .book-card .book-title { font-size: 16px; }
+    body.neu-app .ann-card,
+    body.neu-app .notif-card { padding: 16px 18px; }
+    body.neu-app .tabs { margin: 16px 14px 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    body.neu-app .section,
+    body.neu-app .detail-card,
+    body.neu-app .ann-card,
+    body.neu-app .notif-card,
+    body.neu-app .book-card,
+    body.neu-app .book-cover-large,
+    body.neu-app .profile-hero::before,
+    body.neu-app .profile-hero::after,
+    body.neu-app .hero::before,
+    body.neu-app .hero::after,
+    body.neu-app .intro::before,
+    body.neu-app .intro::after {
+        animation: none;
+    }
+}
+
+/* Keep the meaning of buttons a page colours inline: red stays red, grey becomes a soft secondary pill */
+body.neu-app .save-changes[style*="--danger"] {
+    background: linear-gradient(135deg, #f87171, #b91c1c) !important;
+    box-shadow: 0 12px 24px -10px rgba(185, 28, 28, 0.6);
+}
+body.neu-app .save-changes[style*="--surface2"] {
+    background: var(--neu-bg) !important;
+    color: var(--text) !important;
+    box-shadow: var(--neu-raise-sm);
+}
+body.neu-app .section-title[style*="--danger"] i {
+    background: linear-gradient(135deg, #f87171, #b91c1c);
+    box-shadow: 0 8px 16px -6px rgba(185, 28, 28, 0.5);
+}
+body.neu-app .check + .check,
+body.neu-app .note {
+    border-top-color: color-mix(in srgb, var(--muted) 22%, transparent);
+}
+
+/* Dashboard side decoration: glows, dot grids and floating tiles in the empty side space */
+.side-decor {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    overflow: hidden;
+    pointer-events: none;
+}
+body.neu-app .main {
+    position: relative;
+    z-index: 1;
+}
+.side-decor .orb {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(80px);
+    opacity: 0.35;
+    animation: orb-drift 22s ease-in-out infinite alternate;
+}
+.side-decor .orb-a {
+    width: 520px;
+    height: 520px;
+    left: -180px;
+    top: 8%;
+    background: radial-gradient(circle, #60a5fa, #1d4ed8 70%);
+}
+.side-decor .orb-b {
+    width: 480px;
+    height: 480px;
+    right: -170px;
+    bottom: 4%;
+    background: radial-gradient(circle, #f472b6, #22d3ee 75%);
+    animation-duration: 28s;
+    animation-direction: alternate-reverse;
+}
+@keyframes orb-drift {
+    from { transform: translate(0, 0) scale(1); }
+    to   { transform: translate(60px, -50px) scale(1.12); }
+}
+[data-theme="dark"] .side-decor .orb { opacity: 0.22; }
+
+.side-decor .dots {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 260px;
+    background-image: radial-gradient(color-mix(in srgb, var(--accent) 35%, transparent) 1.4px, transparent 1.6px);
+    background-size: 22px 22px;
+    opacity: 0.55;
+}
+.side-decor .dots-l {
+    left: 0;
+    -webkit-mask-image: linear-gradient(90deg, #000 20%, transparent);
+    mask-image: linear-gradient(90deg, #000 20%, transparent);
+}
+.side-decor .dots-r {
+    right: 0;
+    -webkit-mask-image: linear-gradient(270deg, #000 20%, transparent);
+    mask-image: linear-gradient(270deg, #000 20%, transparent);
+}
+
+.side-decor .tile {
+    position: absolute;
+    width: 64px;
+    height: 64px;
+    border-radius: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+    background: var(--neu-bg);
+    box-shadow: var(--neu-raise);
+    animation: tile-bob 7s ease-in-out infinite;
+}
+.side-decor .tile i {
+    background: var(--g, var(--g-blue));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+}
+.side-decor .t1 { left: 5%;  top: 22%; --g: var(--g-blue);  transform: rotate(-8deg); }
+.side-decor .t2 { left: 10%; top: 52%; --g: var(--g-pink);  width: 52px; height: 52px; font-size: 20px; animation-delay: -2s; }
+.side-decor .t3 { left: 4%;  top: 76%; --g: var(--g-amber); animation-delay: -4s; }
+.side-decor .t4 { right: 6%; top: 18%; --g: var(--g-cyan);  animation-delay: -1s; }
+.side-decor .t5 { right: 11%; top: 46%; --g: var(--g-amber); width: 50px; height: 50px; font-size: 19px; animation-delay: -3s; }
+.side-decor .t6 { right: 5%; top: 72%; --g: var(--g-blue);  width: 70px; height: 70px; animation-delay: -5s; }
+@keyframes tile-bob {
+    0%, 100% { transform: translateY(0) rotate(-4deg); }
+    50%      { transform: translateY(-16px) rotate(4deg); }
+}
+
+.side-decor .ring {
+    position: absolute;
+    border-radius: 50%;
+    border: 2px dashed color-mix(in srgb, var(--accent) 30%, transparent);
+    animation: ring-spin 40s linear infinite;
+}
+.side-decor .r1 { width: 180px; height: 180px; left: 7%;  top: 30%; }
+.side-decor .r2 { width: 140px; height: 140px; right: 7%; top: 54%; animation-direction: reverse; }
+@keyframes ring-spin {
+    to { transform: rotate(360deg); }
+}
+
+/* Only where there is room beside the content */
+@media (max-width: 1279px) {
+    .side-decor .dots { display: none; }
+}
+@media (max-width: 1499px) {
+    .side-decor .tile,
+    .side-decor .ring { display: none; }
+}
+@media (max-width: 1699px) {
+    .side-decor .t2, .side-decor .t5 { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .side-decor .orb,
+    .side-decor .tile,
+    .side-decor .ring { animation: none; }
+}
+
+/* ===== Cards stand out from the page ===== */
+:root {
+    --page-bg:   #e4eaf2;
+    --card-surf: linear-gradient(160deg, #ffffff 0%, #f3f6fb 100%);
+    --card-edge: rgba(15, 23, 42, 0.06);
+    --card-lift: 0 18px 40px -22px rgba(15, 23, 42, 0.35), 0 2px 6px rgba(15, 23, 42, 0.05);
+}
+[data-theme="dark"] {
+    --page-bg:   #0a101c;
+    --card-surf: linear-gradient(160deg, #1d2942 0%, #151e32 100%);
+    --card-edge: rgba(148, 163, 184, 0.14);
+    --card-lift: 0 22px 44px -20px rgba(0, 0, 0, 0.85), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+body.neu-app {
+    background: var(--page-bg);
+}
+
+/* Panels */
+body.neu-app .card,
+body.neu-app .section,
+body.neu-app .detail-card,
+body.neu-app .ann-card,
+body.neu-app .notif-card,
+body.neu-app .book-card,
+body.neu-app .announcement {
+    background: var(--card-surf);
+    border: 1px solid var(--card-edge);
+    box-shadow: var(--card-lift);
+}
+body.neu-app .ann-card,
+body.neu-app .notif-card {
+    border-left-width: 5px;
+}
+
+/* Stat cards: each tinted and edged in its own colour */
+body.neu-app .stat-card {
+    --c: #3b82f6;
+    background:
+        linear-gradient(150deg, color-mix(in srgb, var(--c) 16%, transparent) 0%, transparent 55%),
+        var(--card-surf);
+    border: 1px solid color-mix(in srgb, var(--c) 30%, transparent);
+    box-shadow: var(--card-lift), 0 14px 36px -22px var(--glow);
+}
+body.neu-app .stat-card.amber { --c: #f59e0b; }
+body.neu-app .stat-card.blue  { --c: #06b6d4; }
+body.neu-app .stat-card.pink  { --c: #ec4899; }
+[data-theme="dark"] body.neu-app .stat-card {
+    background:
+        linear-gradient(150deg, color-mix(in srgb, var(--c) 24%, transparent) 0%, transparent 60%),
+        var(--card-surf);
+    border-color: color-mix(in srgb, var(--c) 40%, transparent);
+    box-shadow: var(--card-lift), 0 18px 44px -20px var(--glow);
+}
+/* A thin line of light along the top edge */
+body.neu-app .stat-card::after {
+    content: "";
+    position: absolute;
+    left: 18px;
+    right: 18px;
+    top: 0;
+    height: 2px;
+    border-radius: 2px;
+    background: linear-gradient(90deg, transparent, var(--c), transparent);
+    opacity: 0.9;
+}
+body.neu-app .stat-card:hover {
+    border-color: color-mix(in srgb, var(--c) 60%, transparent);
+    box-shadow: var(--card-lift), 0 22px 48px -16px var(--glow);
+}
+body.neu-app .stat-card::before {
+    opacity: 0.18;
+}
+
+/* Quick action tiles tinted to match their icon */
+body.neu-app .q-btn {
+    --c: #3b82f6;
+    background:
+        linear-gradient(160deg, color-mix(in srgb, var(--c) 14%, transparent), transparent 70%),
+        var(--card-surf);
+    border: 1px solid color-mix(in srgb, var(--c) 28%, transparent);
+    box-shadow: 0 12px 26px -18px rgba(15, 23, 42, 0.45);
+}
+body.neu-app .q-btn:nth-child(2) { --c: #06b6d4; }
+body.neu-app .q-btn:nth-child(3) { --c: #ec4899; }
+body.neu-app .q-btn:hover {
+    background:
+        linear-gradient(160deg, color-mix(in srgb, var(--c) 22%, transparent), transparent 70%),
+        var(--card-surf);
+    border-color: color-mix(in srgb, var(--c) 55%, transparent);
+    box-shadow: 0 18px 32px -16px color-mix(in srgb, var(--c) 60%, transparent);
+}
+
+/* Bars match the deeper page */
+body.neu-app .navbar,
+body.neu-app .bottom-nav,
+body.neu-app .bottom-action,
+body.neu-app .info-panel {
+    background: color-mix(in srgb, var(--page-bg) 88%, transparent) !important;
+    backdrop-filter: blur(16px);
+}
+
+/* ===== Side decoration on every page: content stays above it ===== */
+body.neu-app .page,
+body.neu-app .wrap,
+body.neu-app .hero,
+body.neu-app .tabs,
+body.neu-app > .card {
+    position: relative;
+    z-index: 1;
+}
+/* Narrow pages have more side room, so the tiles can show sooner */
+@media (min-width: 1200px) {
+    body.neu-app:not(:has(.main, .wrap)) .side-decor .tile,
+    body.neu-app:not(:has(.main, .wrap)) .side-decor .ring { display: flex; }
+    body.neu-app:not(:has(.main, .wrap)) .side-decor .ring { display: block; }
+}
+@media (min-width: 1200px) and (max-width: 1499px) {
+    body.neu-app:not(:has(.main, .wrap)) .side-decor .t2,
+    body.neu-app:not(:has(.main, .wrap)) .side-decor .t5 { display: none; }
+}
+
+/* ===== Sign-up, password reset, reactivation and terms ===== */
+body.neu-app > .card {
+    max-width: 460px;
+    border-radius: 28px;
+    padding: 38px 34px;
+}
+body.neu-app > .card .logo img {
+    height: 48px;
+}
+body.neu-app .eyebrow {
+    font-size: 12px;
+    color: var(--accent);
+}
+body.neu-app > .card h1,
+body.neu-app .page > h1 {
+    font-size: 28px;
+    font-weight: 700;
+}
+body.neu-app .sub,
+body.neu-app .hint {
+    font-size: 15px;
+}
+body.neu-app .code input {
+    font-size: 22px;
+    letter-spacing: 0.5em;
+}
+/* On these cards the plain .btn is the main action */
+body.neu-app > .card .btn:not(.link-btn) {
+    border: none;
+    border-radius: 999px;
+    background: var(--g-blue) !important;
+    color: #fff !important;
+    font-size: 15px;
+    font-weight: 700;
+    padding: 15px;
+    box-shadow: 0 12px 24px -10px rgba(29, 78, 216, 0.6);
+}
+body.neu-app > .card .btn:not(.link-btn):hover {
+    transform: translateY(-2px);
+    filter: brightness(1.08);
+}
+body.neu-app .link-btn {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--accent);
+}
+body.neu-app .alert {
+    border-radius: 16px;
+    font-size: 14px;
+}
+
+/* Registration */
+body.neu-app .header h1 {
+    font-size: 28px;
+    font-weight: 700;
+}
+body.neu-app .header p {
+    font-size: 15px;
+}
+body.neu-app .back-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 16px;
+    border-radius: 999px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--accent);
+    background: var(--card-surf);
+    border: 1px solid var(--card-edge);
+    box-shadow: var(--card-lift);
+}
+body.neu-app .step {
+    height: 6px;
+    background: color-mix(in srgb, var(--muted) 22%, transparent);
+}
+body.neu-app .step.active,
+body.neu-app .step.done {
+    background: var(--g-blue);
+    box-shadow: 0 0 12px rgba(59, 130, 246, 0.6);
+}
+body.neu-app .page > .card,
+body.neu-app .page .card {
+    border-radius: 26px;
+    padding: 32px;
+    backdrop-filter: none;
+}
+body.neu-app .card .section-title {
+    color: var(--text);
+}
+body.neu-app .card .section-title i {
+    flex-shrink: 0;
+}
+body.neu-app .type-card {
+    --c: #3b82f6;
+    border-radius: 18px;
+    padding: 16px;
+    background:
+        linear-gradient(160deg, color-mix(in srgb, var(--c) 12%, transparent), transparent 70%),
+        var(--card-surf);
+    border: 1px solid color-mix(in srgb, var(--c) 25%, transparent);
+    box-shadow: 0 10px 22px -16px rgba(15, 23, 42, 0.45);
+    transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+body.neu-app .type-card:nth-child(2) { --c: #06b6d4; }
+body.neu-app .type-card:nth-child(3) { --c: #ec4899; }
+body.neu-app .type-card:nth-child(4) { --c: #f59e0b; }
+body.neu-app .type-card:hover {
+    transform: translateY(-3px);
+    border-color: color-mix(in srgb, var(--c) 55%, transparent);
+}
+body.neu-app .type-card.selected {
+    border: 2px solid var(--c);
+    background:
+        linear-gradient(160deg, color-mix(in srgb, var(--c) 24%, transparent), transparent 75%),
+        var(--card-surf);
+    box-shadow: 0 14px 28px -14px color-mix(in srgb, var(--c) 70%, transparent);
+}
+body.neu-app .type-card .type-icon {
+    color: var(--c);
+}
+body.neu-app .type-card .type-label {
+    font-size: 14px;
+}
+body.neu-app .type-card.selected .type-label {
+    color: var(--text);
+}
+body.neu-app .divider {
+    background: color-mix(in srgb, var(--muted) 22%, transparent);
+}
+body.neu-app .btn-secondary {
+    border: none;
+    border-radius: 999px;
+    background: var(--neu-bg) !important;
+    color: var(--accent);
+    font-size: 15px;
+    font-weight: 600;
+    box-shadow: var(--neu-raise-sm);
+}
+body.neu-app .btn-row .btn-primary {
+    padding: 15px;
+    font-size: 15px;
+}
+body.neu-app .btn-dl.primary {
+    background: var(--g-blue) !important;
+    color: #fff !important;
+    box-shadow: 0 12px 24px -10px rgba(29, 78, 216, 0.6);
+}
+body.neu-app .success-title {
+    font-size: 26px;
+    font-weight: 700;
+}
+body.neu-app .success-sub {
+    font-size: 15px;
+}
+body.neu-app .qr-display {
+    border-radius: 22px;
+}
+
+/* Terms */
+body.neu-app .sheet,
+body.neu-app .terms-dialog {
+    border-radius: 24px;
+    background: var(--card-surf);
+    border: 1px solid var(--card-edge);
+    box-shadow: var(--card-lift);
+}
+body.neu-app .terms-body {
+    font-size: 15px;
+}
+body.neu-app .terms-body h3 {
+    font-family: var(--font-head);
+    font-size: 17px;
+    font-weight: 600;
+}
+body.neu-app .terms-dialog-head h2 {
+    font-family: var(--font-head);
+    font-weight: 600;
+}
+body.neu-app .logo {
+    height: auto;
+}
+body.neu-app .page > img.logo {
+    height: 48px;
+}
+
+/* Book details: the Navigate bar always sits above the page */
+body.neu-app .bottom-action {
+    z-index: 100;
+    justify-content: center;
+}
+body.neu-app .bottom-action > * {
+    max-width: 680px;
+}
+
+/* ===== Library card page (patron's own copy) ===== */
+body.lib-card-page {
+    padding-top: 36px;
+}
+body.lib-card-page .toolbar,
+body.lib-card-page .idcard,
+body.lib-card-page .hint {
+    position: relative;
+    z-index: 1;
+}
+body.lib-card-page .toolbar {
+    gap: 12px;
+    padding: 12px 14px;
+    border-radius: 999px;
+    background: var(--card-surf);
+    border: 1px solid var(--card-edge);
+    box-shadow: var(--card-lift);
+}
+body.lib-card-page .filename {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--accent);
+    padding-left: 8px;
+}
+body.lib-card-page .filename input {
+    border-radius: 999px;
+    padding: 10px 16px;
+    font-size: 14px;
+}
+body.lib-card-page .toolbar .btn {
+    font-size: 14px;
+    padding: 11px 20px;
+}
+body.lib-card-page .toolbar .btn:not(.secondary) {
+    border: none;
+    border-radius: 999px;
+    background: var(--g-blue) !important;
+    color: #fff !important;
+    box-shadow: 0 12px 24px -10px rgba(29, 78, 216, 0.6);
+}
+body.lib-card-page .toolbar select.btn {
+    padding-top: 11px;
+    padding-bottom: 11px;
+    border-radius: 999px;
+    color: var(--accent);
+    font-weight: 600;
+}
+/* The card itself stays a white printed card, just lifted off the page */
+body.lib-card-page .idcard {
+    border: none;
+    box-shadow: 0 30px 60px -24px rgba(0, 56, 168, 0.45), 0 4px 12px rgba(15, 23, 42, 0.12);
+    animation: neu-rise 0.6s cubic-bezier(0.2, 0.7, 0.3, 1) backwards;
+}
+body.lib-card-page .idcard.back {
+    animation-delay: 0.1s;
+}
+body.lib-card-page .hint {
+    color: var(--muted);
+    font-size: 14px;
+    max-width: 620px;
+}
+@media (max-width: 720px) {
+    body.lib-card-page .toolbar { border-radius: 26px; }
+}
+
+@media print {
+    body.neu-app {
+        background: #fff !important;
+    }
+    .side-decor,
+    .theme-toggle,
+    [data-theme-toggle] {
+        display: none !important;
+    }
+    body.lib-card-page .idcard {
+        animation: none;
+        box-shadow: none;
+        border: 1px solid #94a3b8;
+    }
+}
+
+/* ===== Patron guide button and pop-up ===== */
+body.neu-app .guide-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 42px;
+    padding: 0 18px;
+    border: none;
+    border-radius: 999px;
+    background: var(--g-blue);
+    color: #fff;
+    font-family: var(--font-body);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 10px 22px -10px rgba(29, 78, 216, 0.7);
+    transition: transform 0.18s ease, filter 0.18s ease;
+}
+body.neu-app .guide-btn:hover {
+    transform: translateY(-2px);
+    filter: brightness(1.08);
+}
+body.neu-app .guide-btn i {
+    font-size: 15px;
+}
+
+.guide-dialog {
+    width: min(720px, calc(100vw - 32px));
+    max-height: calc(100vh - 48px);
+    margin: auto;
+    padding: 0;
+    border: 1px solid var(--card-edge);
+    border-radius: 28px;
+    background: var(--card-surf);
+    color: var(--text);
+    font-family: var(--font-body);
+    box-shadow: 0 40px 80px -24px rgba(0, 0, 0, 0.6);
+    overflow: hidden;
+}
+.guide-dialog[open] {
+    display: flex;
+    flex-direction: column;
+    animation: neu-rise 0.35s cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+.guide-dialog::backdrop {
+    background: rgba(10, 15, 25, 0.6);
+    backdrop-filter: blur(4px);
+}
+.guide-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 24px 26px 14px;
+    color: #fff;
+    background: var(--hero);
+}
+.guide-eyebrow {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.8);
+}
+.guide-head h2 {
+    font-family: var(--font-head);
+    font-size: 24px;
+    font-weight: 700;
+    margin-top: 2px;
+}
+.guide-close {
+    width: 38px;
+    height: 38px;
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.14);
+    color: #fff;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+.guide-close:hover {
+    background: rgba(255, 255, 255, 0.26);
+}
+.guide-tabs {
+    display: flex;
+    gap: 6px;
+    margin: 18px 26px 0;
+    padding: 5px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--muted) 12%, transparent);
+}
+.guide-tabs button {
+    flex: 1;
+    padding: 10px 14px;
+    border: none;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--muted);
+    font-family: var(--font-body);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+}
+.guide-tabs button[aria-selected="true"] {
+    color: #fff;
+    background: var(--g-blue);
+    box-shadow: 0 8px 18px -8px rgba(29, 78, 216, 0.7);
+}
+.guide-body {
+    padding: 20px 26px 26px;
+    overflow-y: auto;
+}
+.guide-video {
+    position: relative;
+    aspect-ratio: 16 / 9;
+    border-radius: 20px;
+    overflow: hidden;
+    background: #0b1220;
+}
+.guide-video video {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+.guide-video-missing {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 24px;
+    text-align: center;
+    color: #e2e8f0;
+    background:
+        radial-gradient(circle at 30% 20%, rgba(59, 130, 246, 0.35), transparent 55%),
+        radial-gradient(circle at 80% 80%, rgba(236, 72, 153, 0.25), transparent 55%),
+        #0b1220;
+    font-size: 15px;
+}
+.guide-video-missing i {
+    font-size: 40px;
+    margin-bottom: 6px;
+    color: #93c5fd;
+}
+.guide-link {
+    border: none;
+    background: none;
+    padding: 0;
+    color: #93c5fd;
+    font: inherit;
+    font-weight: 600;
+    text-decoration: underline;
+    cursor: pointer;
+}
+.guide-note {
+    margin-top: 12px;
+    font-size: 14px;
+    color: var(--muted);
+}
+.guide-steps {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    counter-reset: gstep;
+}
+.guide-steps li {
+    counter-increment: gstep;
+    display: flex;
+    gap: 14px;
+    padding: 14px 16px;
+    border-radius: 18px;
+    border: 1px solid var(--card-edge);
+    background: color-mix(in srgb, var(--accent) 4%, transparent);
+    animation: neu-rise 0.45s cubic-bezier(0.2, 0.7, 0.3, 1) backwards;
+}
+.guide-steps li:nth-child(2) { animation-delay: 0.04s; }
+.guide-steps li:nth-child(3) { animation-delay: 0.08s; }
+.guide-steps li:nth-child(4) { animation-delay: 0.12s; }
+.guide-steps li:nth-child(5) { animation-delay: 0.16s; }
+.guide-steps li:nth-child(n+6) { animation-delay: 0.2s; }
+.gs-icon {
+    position: relative;
+    width: 44px;
+    height: 44px;
+    flex-shrink: 0;
+    border-radius: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-size: 17px;
+}
+.gs-icon::after {
+    content: counter(gstep);
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--accent);
+    background: var(--neu-bg);
+    border: 1px solid var(--card-edge);
+}
+.gs-icon.g-blue  { background: var(--g-blue); }
+.gs-icon.g-cyan  { background: var(--g-cyan); }
+.gs-icon.g-pink  { background: var(--g-pink); }
+.gs-icon.g-amber { background: var(--g-amber); }
+.gs-icon.g-green { background: linear-gradient(135deg, #34d399, #047857); }
+.guide-steps h3 {
+    font-family: var(--font-head);
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+.guide-steps p {
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--muted);
+}
+.guide-steps strong {
+    color: var(--text);
+}
+.guide-steps a {
+    color: var(--accent);
+    font-weight: 600;
+}
+@media (max-width: 640px) {
+    body.neu-app .guide-btn span { display: none; }
+    body.neu-app .guide-btn { width: 42px; padding: 0; justify-content: center; }
+    .guide-head, .guide-body { padding-left: 18px; padding-right: 18px; }
+    .guide-tabs { margin-left: 18px; margin-right: 18px; }
+}
+
+/* ===== Library Rules button in the welcome banner ===== */
+body.neu-app .greeting .lib-badge {
+    vertical-align: middle;
+}
+body.neu-app .hero-rules-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin: 16px 0 0 10px;
+    padding: 8px 18px;
+    border: none;
+    border-radius: 999px;
+    background: #fff;
+    color: #0038A8;
+    font-family: var(--font-body);
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    vertical-align: middle;
+    box-shadow: 0 10px 22px -10px rgba(0, 0, 0, 0.45);
+    transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+body.neu-app .hero-rules-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 14px 26px -10px rgba(0, 0, 0, 0.5);
+}
+.rules-dialog .guide-body {
+    padding-top: 22px;
+}
+@media (max-width: 520px) {
+    body.neu-app .hero-rules-btn { margin-left: 0; }
+}
+
+/* ===== Book details as an open book ===== */
+/* Timeline: the closed book rises in, the cover swings open around the spine while the
+   book slides to the centre, then two leaves turn and the spine shadow settles. */
+.book-stage {
+    --t-open: 1.6s;
+    --d-open: 0.55s;
+    --ease-open: cubic-bezier(0.55, 0.02, 0.25, 1);
+    position: relative;
+    z-index: 1;
+    max-width: 1120px;
+    margin: 34px auto 40px;
+    padding: 0 20px;
+    perspective: 2400px;
+    perspective-origin: 50% 40%;
+    animation: book-rise 0.6s cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+.book-spread {
+    --paper: #fbf7ee;
+    --paper-edge: #efe6d2;
+    --ink: #2b2418;
+    --ink-soft: #6b5f4b;
+    --rule: rgba(107, 95, 75, 0.22);
+    --board: linear-gradient(135deg, #1e40af, #0b1a45);
+    position: relative;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    padding: 12px;
+    transform-style: preserve-3d;
+    /* No opacity here: it would flatten the 3D and let the cover sit on top of the pages. */
+    animation: book-center var(--t-open) var(--ease-open) var(--d-open) both;
+}
+@keyframes book-rise {
+    from { opacity: 0; translate: 0 30px; }
+    to   { opacity: 1; translate: 0 0; }
+}
+/* Closed, the book sits in the middle; it slides left as it opens so the spread ends centred. */
+@keyframes book-center {
+    from { transform: translateX(-25%); }
+    to   { transform: translateX(0); }
+}
+/* Back board under the right-hand pages */
+.book-spread::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    right: 0;
+    border-radius: 4px 16px 16px 4px;
+    background: var(--board);
+    box-shadow: 0 40px 70px -30px rgba(0, 0, 0, 0.6), 0 12px 24px -12px rgba(0, 0, 0, 0.4);
+    transform: translateZ(-2px);
+}
+
+/* Pages */
+.bs-page {
+    position: relative;
+    min-height: 560px;
+    padding: 44px 44px 60px;
+    color: var(--ink);
+    background: var(--paper);
+    transform: translateZ(0);
+}
+.bs-left {
+    border-radius: 10px 4px 4px 10px;
+    background: linear-gradient(90deg, var(--paper) 0%, var(--paper) 82%, var(--paper-edge) 100%);
+    box-shadow: -3px 0 0 #f3ecdc, -6px 0 0 #e8dfca, -8px 2px 6px rgba(0, 0, 0, 0.25);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    /* Hidden while the book is closed; appears as the cover passes over it */
+    animation: page-reveal 0.5s ease-out calc(var(--d-open) + var(--t-open) * 0.45) both;
+}
+@keyframes page-reveal {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+.bs-right {
+    border-radius: 4px 10px 10px 4px;
+    background: linear-gradient(270deg, var(--paper) 0%, var(--paper) 82%, var(--paper-edge) 100%);
+    box-shadow: 3px 0 0 #f3ecdc, 6px 0 0 #e8dfca, 8px 2px 6px rgba(0, 0, 0, 0.25);
+}
+/* Shadow down the spine, once the book lies open */
+.book-spread::after {
+    content: "";
+    position: absolute;
+    top: 12px;
+    bottom: 12px;
+    left: 50%;
+    width: 60px;
+    transform: translateX(-50%) translateZ(1px);
+    pointer-events: none;
+    background: linear-gradient(90deg, transparent, rgba(80, 60, 30, 0.18) 42%, rgba(60, 40, 20, 0.35) 50%, rgba(80, 60, 30, 0.18) 58%, transparent);
+    animation: page-reveal 0.6s ease-out calc(var(--d-open) + var(--t-open) * 0.8) both;
+}
+/* A curled corner on the right page */
+.bs-right::after {
+    content: "";
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    width: 46px;
+    height: 46px;
+    border-radius: 0 0 10px 0;
+    background: linear-gradient(315deg, #d9ceb4 0%, #efe6d2 45%, transparent 50%);
+    box-shadow: -2px -2px 4px rgba(0, 0, 0, 0.06);
+}
+.bs-folio {
+    position: absolute;
+    bottom: 22px;
+    left: 0;
+    right: 0;
+    text-align: center;
+    font-family: Georgia, 'Times New Roman', serif;
+    font-style: italic;
+    font-size: 13px;
+    color: var(--ink-soft);
+}
+
+/* The front cover: two faces turning around the spine */
+.bs-cover {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    right: 0;
+    transform-origin: left center;
+    transform-style: preserve-3d;
+    transform: translateZ(4px);
+    animation: cover-open var(--t-open) var(--ease-open) var(--d-open) both;
+    pointer-events: none;
+}
+@keyframes cover-open {
+    0%   { transform: translateZ(4px) rotateY(0deg); }
+    12%  { transform: translateZ(10px) rotateY(-10deg); }
+    100% { transform: translateZ(-4px) rotateY(-180deg); }
+}
+.bs-cover-front,
+.bs-cover-back {
+    position: absolute;
+    inset: 0;
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+}
+.bs-cover-front {
+    border-radius: 4px 16px 16px 4px;
+    background:
+        radial-gradient(circle at 30% 20%, rgba(255, 255, 255, 0.14), transparent 60%),
+        var(--board);
+    box-shadow: inset 8px 0 14px rgba(0, 0, 0, 0.35), 0 16px 34px -12px rgba(0, 0, 0, 0.55);
+}
+/* Light falls away as the cover turns */
+.bs-cover-front::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: #000;
+    opacity: 0;
+    animation: cover-shade var(--t-open) var(--ease-open) var(--d-open) both;
+}
+@keyframes cover-shade {
+    0%   { opacity: 0; }
+    50%  { opacity: 0.45; }
+    100% { opacity: 0.45; }
+}
+/* Inside of the cover: the board with a cream endpaper; it ends up as the left board */
+.bs-cover-back {
+    transform: rotateY(180deg);
+    border-radius: 16px 4px 4px 16px;
+    background: var(--board);
+    box-shadow: 0 40px 70px -30px rgba(0, 0, 0, 0.6), 0 12px 24px -12px rgba(0, 0, 0, 0.4);
+}
+.bs-cover-back::before {
+    content: "";
+    position: absolute;
+    inset: 12px;
+    border-radius: 10px 3px 3px 10px;
+    background:
+        repeating-linear-gradient(45deg, rgba(30, 64, 175, 0.08) 0 6px, transparent 6px 12px),
+        #f1e9d6;
+}
+.bs-cover-face {
+    position: absolute;
+    inset: 22px;
+    border: 2px solid rgba(212, 175, 55, 0.7);
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    padding: 24px;
+    text-align: center;
+    color: #f5e6b8;
+}
+body.neu-app .bs-cover-title {
+    font-family: Georgia, 'Times New Roman', serif;
+    font-size: 30px;
+    font-weight: 700;
+    line-height: 1.25;
+    text-shadow: 0 1px 0 rgba(0, 0, 0, 0.35);
+}
+.bs-cover-author {
+    font-family: Georgia, 'Times New Roman', serif;
+    font-style: italic;
+    font-size: 17px;
+    opacity: 0.85;
+}
+.bs-cover-rule {
+    width: 90px;
+    height: 2px;
+    background: rgba(212, 175, 55, 0.7);
+}
+
+/* Two thin leaves that turn after the cover */
+.bs-leaf {
+    position: absolute;
+    top: 12px;
+    bottom: 12px;
+    left: 50%;
+    right: 12px;
+    border-radius: 3px 10px 10px 3px;
+    transform-origin: left center;
+    background: linear-gradient(270deg, #fbf7ee 0%, #f6efdf 70%, #e9dfc8 100%);
+    box-shadow: 2px 0 6px rgba(0, 0, 0, 0.12);
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+    pointer-events: none;
+    opacity: 0;
+}
+.bs-leaf-1 {
+    animation: leaf-turn 1.1s var(--ease-open) calc(var(--d-open) + var(--t-open) * 0.55) both;
+}
+.bs-leaf-2 {
+    animation: leaf-turn 1.1s var(--ease-open) calc(var(--d-open) + var(--t-open) * 0.72) both;
+}
+@keyframes leaf-turn {
+    0%   { opacity: 1; transform: translateZ(2px) rotateY(0deg); }
+    60%  { opacity: 1; }
+    100% { opacity: 0; transform: translateZ(2px) rotateY(-175deg); }
+}
+
+/* Left page content */
+.bs-left .book-cover-large {
+    margin-top: 8px;
+    margin-bottom: 26px;
+}
+body.neu-app .book-spread .book-main-title {
+    color: var(--ink);
+    font-size: 30px;
+    line-height: 1.25;
+    max-width: 420px;
+}
+body.neu-app .book-spread .book-main-author {
+    color: var(--ink-soft);
+    font-family: Georgia, 'Times New Roman', serif;
+    font-style: italic;
+    font-size: 17px;
+    margin: 8px 0 18px;
+}
+.bs-left .book-main-author::before,
+.bs-left .book-main-author::after {
+    content: "\2014";
+    margin: 0 8px;
+    opacity: 0.5;
+}
+.bs-left .status-badge {
+    border-radius: 999px;
+    font-size: 14px;
+    padding: 7px 16px;
+}
+.book-spread .status-available {
+    color: #047857 !important;
+    background: rgba(16, 185, 129, 0.12) !important;
+    border-color: rgba(4, 120, 87, 0.45) !important;
+}
+.book-spread .status-borrowed {
+    color: #b91c1c !important;
+    background: rgba(239, 68, 68, 0.1) !important;
+    border-color: rgba(185, 28, 28, 0.45) !important;
+}
+
+/* Right page: printed sections instead of floating cards */
+.book-spread .detail-card {
+    background: none !important;
+    border: none !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    padding: 0 0 20px !important;
+    margin: 0 0 20px !important;
+    border-bottom: 1px dashed var(--rule) !important;
+    animation: none;
+}
+.book-spread .detail-card:last-of-type {
+    border-bottom: none !important;
+}
+.book-spread .detail-section-title {
+    color: #0038A8;
+    font-size: 13px;
+    letter-spacing: 0.1em;
+    margin-bottom: 8px;
+}
+.book-spread .detail-row {
+    border-bottom-color: var(--rule) !important;
+    padding: 10px 0;
+}
+.book-spread .detail-key {
+    color: var(--ink-soft);
+}
+.book-spread .detail-val {
+    color: var(--ink);
+    font-weight: 600;
+}
+.book-spread .description {
+    color: var(--ink);
+    font-family: Georgia, 'Times New Roman', serif;
+    font-size: 16px;
+    line-height: 1.75;
+}
+.book-spread .description::first-letter {
+    float: left;
+    font-size: 46px;
+    line-height: 0.9;
+    padding: 4px 8px 0 0;
+    color: #0038A8;
+    font-weight: 700;
+}
+.book-spread .shelf-step {
+    background: #fff !important;
+    border: 1px solid var(--rule) !important;
+    box-shadow: none !important;
+    color: #0038A8 !important;
+}
+.book-spread .unshelved-note {
+    background: rgba(29, 78, 216, 0.08);
+    color: #1e3a8a;
+}
+
+/* Phones and narrow tablets: one page under the other; the cover lifts up like a notebook */
+@media (max-width: 820px) {
+    .book-stage { margin-top: 20px; padding: 0 12px; perspective: 1600px; }
+    .book-spread {
+        grid-template-columns: 1fr;
+        padding: 8px;
+        border-radius: 16px;
+        background: var(--board);
+        animation: none;
+    }
+    .book-spread::before, .book-spread::after, .bs-leaf { display: none; }
+    .bs-page { min-height: 0; padding: 30px 22px 54px; }
+    .bs-left, .bs-right { border-radius: 10px; box-shadow: none; background: var(--paper); }
+    .bs-left { border-bottom: 1px dashed var(--rule); border-radius: 10px 10px 0 0; animation: none; }
+    .bs-right { border-radius: 0 0 10px 10px; }
+    .bs-cover {
+        left: 0;
+        right: 0;
+        transform-origin: center top;
+        animation: cover-lift 1.4s var(--ease-open) var(--d-open) both;
+    }
+    .bs-cover-front { border-radius: 16px; }
+    .bs-cover-back { display: none; }
+    .bs-cover-front::after { animation: cover-shade 1.4s var(--ease-open) var(--d-open) both; }
+    body.neu-app .book-spread .book-main-title { font-size: 24px; }
+}
+@keyframes cover-lift {
+    0%   { transform: translateZ(4px) rotateX(0deg); opacity: 1; }
+    75%  { opacity: 1; }
+    100% { transform: translateZ(4px) rotateX(100deg); opacity: 0; visibility: hidden; }
+}
+
+/* No motion: show the book already open */
+@media (prefers-reduced-motion: reduce) {
+    .book-stage, .book-spread, .bs-left, .book-spread::after, .bs-cover, .bs-cover-front::after, .bs-leaf { animation: none !important; }
+    .bs-cover { transform: translateZ(-4px) rotateY(-180deg); }
+    .bs-leaf { display: none; }
+}
+@media (prefers-reduced-motion: reduce) and (max-width: 820px) {
+    .bs-cover { display: none; }
+}
+
+/* ===== Patron floor map ===== */
+/* Blueprint dot grid behind the plan */
+body.neu-app #map.leaflet-container,
+body.neu-app .leaflet-container {
+    background-color: var(--page-bg) !important;
+    background-image:
+        radial-gradient(color-mix(in srgb, var(--accent) 22%, transparent) 1.2px, transparent 1.5px),
+        radial-gradient(circle at 50% 40%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 65%) !important;
+    background-size: 24px 24px, 100% 100% !important;
+    font-family: var(--font-body);
+}
+/* The floor floats above the grid */
+.map-floor {
+    filter: drop-shadow(0 24px 40px rgba(15, 23, 42, 0.35));
+}
+html[data-theme="dark"] .map-floor {
+    filter: drop-shadow(0 24px 44px rgba(0, 0, 0, 0.65));
+}
+/* Rooms light up under the pointer */
+.map-room {
+    transition: stroke 0.2s ease, stroke-width 0.2s ease, fill-opacity 0.2s ease;
+}
+.map-room:not(.is-staff):hover {
+    stroke: #3b82f6;
+    stroke-width: 3px;
+    filter: drop-shadow(0 0 10px rgba(59, 130, 246, 0.45));
+}
+/* Shelves glow softly; the one holding the book pulses */
+.map-shelf {
+    filter: drop-shadow(0 0 4px rgba(59, 130, 246, 0.45));
+    transition: filter 0.2s ease;
+}
+.map-shelf:hover {
+    filter: drop-shadow(0 0 9px rgba(59, 130, 246, 0.8));
+}
+.map-shelf.is-target {
+    animation: target-glow 1.8s ease-in-out infinite;
+}
+@keyframes target-glow {
+    0%, 100% { filter: drop-shadow(0 0 4px rgba(245, 158, 11, 0.6)); stroke-width: 2px; }
+    50%      { filter: drop-shadow(0 0 16px rgba(245, 158, 11, 0.95)); stroke-width: 4px; }
+}
+.map-target-spot {
+    animation: spot-pulse 1.4s ease-in-out infinite;
+}
+@keyframes spot-pulse {
+    0%, 100% { stroke-width: 3px; filter: drop-shadow(0 0 2px rgba(245, 158, 11, 0.8)); }
+    50%      { stroke-width: 6px; filter: drop-shadow(0 0 12px rgba(245, 158, 11, 1)); }
+}
+/* You are here */
+.map-me {
+    animation: me-pulse 1.6s ease-in-out infinite;
+}
+@keyframes me-pulse {
+    0%, 100% { filter: drop-shadow(0 0 3px rgba(59, 130, 246, 0.9)); }
+    50%      { filter: drop-shadow(0 0 14px rgba(59, 130, 246, 1)) drop-shadow(0 0 26px rgba(59, 130, 246, 0.5)); }
+}
+/* Route chevrons glow in step */
+.route-arrow svg {
+    filter: drop-shadow(0 0 3px rgba(59, 130, 246, 0.8));
+    animation: route-glow 1.2s ease-in-out infinite;
+}
+@keyframes route-glow {
+    0%, 100% { opacity: 0.75; }
+    50%      { opacity: 1; }
+}
+
+/* Labels on the plan */
+body.neu-app .map-label span {
+    border: 1px solid var(--card-edge) !important;
+    border-radius: 999px !important;
+    padding: 2px 9px !important;
+    background: var(--card-surf) !important;
+    box-shadow: 0 4px 10px -4px rgba(15, 23, 42, 0.4);
+    font-family: var(--font-body);
+}
+body.neu-app .map-label.room span {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text);
+    letter-spacing: 0.01em;
+}
+body.neu-app .map-label.target span {
+    background: var(--g-amber) !important;
+    color: #fff !important;
+    border: none !important;
+    box-shadow: 0 8px 18px -6px rgba(217, 119, 6, 0.7);
+}
+body.neu-app .map-label.subtle.target span {
+    background: var(--card-surf) !important;
+    color: #b45309 !important;
+    border: 1px solid rgba(245, 158, 11, 0.5) !important;
+}
+
+/* Map controls */
+body.neu-app .leaflet-bar,
+body.neu-app .leaflet-control-layers {
+    border: 1px solid var(--card-edge) !important;
+    border-radius: 16px !important;
+    overflow: hidden;
+    background: var(--card-surf) !important;
+    box-shadow: var(--card-lift) !important;
+}
+body.neu-app .leaflet-bar a {
+    width: 38px !important;
+    height: 38px !important;
+    line-height: 38px !important;
+    background: transparent !important;
+    color: var(--accent) !important;
+    border-bottom-color: var(--card-edge) !important;
+}
+body.neu-app .leaflet-control-layers-toggle {
+    width: 42px !important;
+    height: 42px !important;
+    background-size: 22px 22px !important;
+}
+body.neu-app .leaflet-control-layers-expanded {
+    padding: 12px 16px !important;
+    color: var(--text);
+    font-size: 14px;
+}
+body.neu-app .leaflet-control-layers label {
+    color: var(--text) !important;
+    font-weight: 500;
+    text-transform: none;
+    letter-spacing: 0;
+    margin: 4px 0;
+}
+body.neu-app .leaflet-tooltip {
+    border: none;
+    border-radius: 10px;
+    padding: 5px 11px;
+    font-family: var(--font-body);
+    font-weight: 600;
+    font-size: 12px;
+    color: #fff;
+    background: rgba(15, 23, 42, 0.9);
+    box-shadow: 0 8px 18px -8px rgba(0, 0, 0, 0.6);
+}
+body.neu-app .leaflet-tooltip-top::before {
+    border-top-color: rgba(15, 23, 42, 0.9);
+}
+body.neu-app .leaflet-control-attribution {
+    border-radius: 8px 0 0 0;
+    background: color-mix(in srgb, var(--card-surf) 80%, transparent) !important;
+}
+
+/* Legend and the bottom panel */
+body.neu-app .map-legend {
+    background: var(--card-surf) !important;
+    border: 1px solid var(--card-edge) !important;
+    box-shadow: var(--card-lift) !important;
+}
+body.neu-app .legend-dot,
+body.neu-app .legend-bar {
+    box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 12%, transparent);
+}
+body.neu-app .info-panel {
+    border-radius: 26px 26px 0 0;
+    background: var(--card-surf) !important;
+    border-top: 1px solid var(--card-edge) !important;
+    box-shadow: 0 -18px 40px -20px rgba(15, 23, 42, 0.45) !important;
+}
+body.neu-app .shelf-dot {
+    width: 14px;
+    height: 14px;
+    animation: spot-dot 1.6s ease-in-out infinite;
+}
+@keyframes spot-dot {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.6); }
+    50%      { box-shadow: 0 0 0 8px rgba(245, 158, 11, 0); }
+}
+body.neu-app .nav-status {
+    padding: 5px 12px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--muted) 12%, transparent);
+    font-weight: 600;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .map-shelf.is-target, .map-target-spot, .map-me, .route-arrow svg, body.neu-app .shelf-dot {
+        animation: none;
+    }
+}

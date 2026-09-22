@@ -8,7 +8,7 @@
 <title>Live Position Setup — AYLA Library</title>
 <script src="{% static 'js/theme.js' %}"></script>
 <script src="{% static 'js/session.js' %}"></script>
-<link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="{% static 'css/theme.css' %}">
 {# Chrome blocks web pages from opening chrome:// addresses, so the flag is copied and pasted. #}
 <style>
@@ -77,8 +77,10 @@
 </style>
 <link rel="stylesheet" href="{% static 'css/patron.css' %}">
 <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
+    <link rel="stylesheet" href="{% static 'css/patron-neu.css' %}?v=20260922h">
+    <script src="{% static 'js/patron-neu.js' %}?v=20260922" defer></script>
 </head>
-<body>
+<body class="neu-app">
 <nav class="navbar">
   <a href="{% url 'patron_map' %}" class="back-btn" aria-label="Back to map">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>

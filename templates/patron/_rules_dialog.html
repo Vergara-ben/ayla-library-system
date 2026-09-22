@@ -1,0 +1,21 @@
+{% load terms %}
+{# The library's full rules in a pop-up, opened by the Library Rules button on the dashboard. #}
+<dialog id="rulesDialog" class="guide-dialog rules-dialog" aria-labelledby="rulesDialogTitle">
+  <div class="guide-head">
+    <div>
+      <p class="guide-eyebrow">Ayla Public Library</p>
+      <h2 id="rulesDialogTitle">Rules and regulations</h2>
+    </div>
+    <button type="button" class="guide-close" onclick="document.getElementById('rulesDialog').close()" aria-label="Close rules"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
+  </div>
+  <div class="guide-body">
+    {% terms_body %}
+  </div>
+</dialog>
+<script>
+  (function () {
+    var d = document.getElementById('rulesDialog');
+    // Clicking the dim backdrop closes it too.
+    d.addEventListener('click', function (e) { if (e.target === d) d.close(); });
+  })();
+</script>
