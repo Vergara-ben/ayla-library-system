@@ -5,7 +5,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from io import BytesIO
 
-from django.db.models import Q
+from django.db.models import Count, Q
 from django.utils import timezone
 
 from .models import (Transaction, Patron, PatronLog, Book, Donation,
@@ -211,39 +211,98 @@ def _day_label(d, span):
 
 
 # Individual report builders
+
+DASH = '—'
+# Ids listed in one cell before the rest are counted instead.
+MAX_IDS_LISTED = 12
+
+
+def _text(value):
+    """A cell that is never the word None."""
+    value = '' if value is None else str(value).strip()
+    return value or DASH
+
+
+def _book_location(book):
+    """Where a copy sits, named the way the shelf itself is: Shelf A Column 1 Level 2."""
+    if book is None:
+        return DASH
+    return book.location_label() or 'Not shelved'
+
+
+def _card(patron):
+    return patron.card_display if (patron and patron.card_number) else DASH
+
+
+def _id_list(ids):
+    """Ids in one cell, with a count instead of a list once there are too many."""
+    ids = sorted(ids)
+    if not ids:
+        return DASH
+    if len(ids) <= MAX_IDS_LISTED:
+        return ', '.join(str(i) for i in ids)
+    listed = ', '.join(str(i) for i in ids[:MAX_IDS_LISTED])
+    return '%s and %d more' % (listed, len(ids) - MAX_IDS_LISTED)
+
+
+def _copy_id(book):
+    """The inventory copy for a book: one each since every copy is its own record."""
+    copies = list(book.inventory_records.all()) if book else []
+    return copies[0].inventory_id if copies else DASH
+
+
+def _minutes_label(minutes):
+    if minutes is None:
+        return DASH
+    if minutes >= 60:
+        return '%dh %dm' % (minutes // 60, minutes % 60)
+    return '%dm' % minutes
+
+
 def _transactions(start, end):
+    # A loan borrowed earlier but returned in this period is part of this period too.
     txns = (Transaction.objects
-            .select_related('patron', 'book')
-            .filter(transaction_date__range=(start, end))
+            .select_related('patron', 'book', 'processed_by')
+            .filter(Q(transaction_date__range=(start, end))
+                    | Q(return_date__range=(start, end)))
             .order_by('-transaction_date', '-transaction_id'))
 
     rows = []
     borrows = returns = in_library = overdue = 0
+    fines = Decimal('0.00')
+    per_day = {}
     for tx in txns:
-        if tx.transaction_type == 'Borrow':
-            borrows += 1
-        elif tx.transaction_type == 'Return':
+        started_here = bool(tx.transaction_date and start <= tx.transaction_date <= end)
+        returned_here = bool(tx.return_date and start <= tx.return_date <= end)
+        if started_here:
+            if tx.transaction_type == 'Borrow':
+                borrows += 1
+            elif tx.transaction_type == 'In-Library Reading':
+                in_library += 1
+            per_day[tx.transaction_date] = per_day.get(tx.transaction_date, 0) + 1
+        if returned_here:
             returns += 1
-        elif tx.transaction_type == 'In-Library Reading':
-            in_library += 1
+            per_day[tx.return_date] = per_day.get(tx.return_date, 0) + 1
         if tx.overdue_flag:
             overdue += 1
+        fines += tx.fine_amount or Decimal('0')
         rows.append([
+            tx.transaction_id,
             _fmt_date(tx.transaction_date),
             tx.transaction_type,
-            tx.book.title if tx.book else '—',
-            tx.patron.fullname if tx.patron else 'In-Library User',
+            tx.book_id or DASH,
+            _text(tx.book.title if tx.book else None),
+            _text(tx.book.author if tx.book else None),
+            tx.patron_id or DASH,
+            _card(tx.patron),
+            _text(tx.patron.fullname if tx.patron else 'In-library reader'),
             _fmt_date(tx.due_date),
             _fmt_date(tx.return_date),
             'Yes' if tx.overdue_flag else 'No',
-            f'{tx.fine_amount:.2f}' if tx.fine_amount else '—',
+            f'{tx.fine_amount:.2f}' if tx.fine_amount else '0.00',
+            _text(tx.processed_by.fullname if tx.processed_by else None),
         ])
 
-    # Activity per day.
-    per_day = {}
-    for tx in txns:
-        if tx.transaction_date:
-            per_day[tx.transaction_date] = per_day.get(tx.transaction_date, 0) + 1
     days = _days_in(start, end)
     busiest_day = max(per_day.items(), key=lambda kv: (kv[1], kv[0]))[0] if per_day else None
 
@@ -251,30 +310,34 @@ def _transactions(start, end):
         'key': 'transactions',
         'title': 'Transactions Report',
         'subtitle': 'Borrowing, returning, and in-library reading transactions',
-        'columns': ['Date', 'Type', 'Book', 'Patron', 'Due Date', 'Returned', 'Overdue', 'Fine'],
+        'columns': ['Transaction ID', 'Transaction Date', 'Type', 'Book ID', 'Book Title',
+                    'Author', 'Patron ID', 'Card Number', 'Patron', 'Due Date', 'Date Returned',
+                    'Overdue', 'Fine (PHP)', 'Processed By'],
         'rows': rows,
         'summary': [
-            ('Total Transactions', len(rows)),
-            ('Borrows', borrows),
-            ('Returns', returns),
+            ('Transactions Listed', len(rows)),
+            ('Borrows Started', borrows),
+            ('Returns Completed', returns),
             ('In-Library Reading', in_library),
-            ('Overdue', overdue),
+            ('Flagged Overdue', overdue),
+            ('Fines On These Loans', f'{fines:.2f}'),
             ('Busiest Day', _fmt_date(busiest_day)),
         ],
         'chart': _chart(
             [(_day_label(d, len(days)), per_day.get(d, 0)) for d in days],
             kind='line',
             title='Transactions per day',
-            note='Every transaction type counted together. Busiest day marked.',
+            note='A borrow counts on the day it started, a return on the day it came back. '
+                 'Busiest day marked.',
             empty_note='No transactions in this period.',
             highlight=_day_label(busiest_day, len(days)) if busiest_day else None,
-            axis_note='Date \u00b7 vertical axis is number of transactions',
+            axis_note='Date · vertical axis is number of transactions',
         ),
         'breakdown': {
             'By type': [
-                ('Borrow', str(borrows)),
-                ('Return', str(returns)),
-                ('In-Library Reading', str(in_library)),
+                ('Borrows started', str(borrows)),
+                ('Returns completed', str(returns)),
+                ('In-library reading', str(in_library)),
             ],
         },
     }
@@ -287,21 +350,36 @@ def _patron_logs(start, end):
             .order_by('-entry_time'))
 
     rows = []
-    completed = ongoing = 0
+    signed_out = assumed = ongoing = 0
+    stay_minutes = []
     for lg in logs:
+        minutes = None
         if lg.exit_time:
-            completed += 1
+            minutes = int((lg.exit_time - lg.entry_time).total_seconds() // 60)
+            if lg.auto_closed:
+                assumed += 1
+                exit_record = 'Assumed at closing'
+            else:
+                signed_out += 1
+                exit_record = 'Signed out'
+                stay_minutes.append(minutes)
         else:
             ongoing += 1
+            exit_record = 'Still inside'
         rows.append([
-            lg.patron.fullname if lg.patron else '—',
-            lg.school or '—',
-            lg.purpose_of_visit or '—',
+            lg.log_id,
+            lg.patron_id or DASH,
+            _card(lg.patron),
+            _text(lg.patron.fullname if lg.patron else None),
+            _text(lg.patron.patron_type if lg.patron else None),
+            _text(lg.school),
+            _text(lg.purpose_of_visit),
             _fmt_dt(lg.entry_time),
             _fmt_dt(lg.exit_time),
+            exit_record,
+            _minutes_label(minutes),
         ])
 
-    # Visits per day.
     per_day, per_purpose = {}, {}
     for lg in logs:
         d = timezone.localtime(lg.entry_time).date()
@@ -310,19 +388,23 @@ def _patron_logs(start, end):
         per_purpose[purpose] = per_purpose.get(purpose, 0) + 1
     days = _days_in(start, end)
     busiest_day = max(per_day.items(), key=lambda kv: (kv[1], kv[0]))[0] if per_day else None
+    average_stay = (sum(stay_minutes) / len(stay_minutes)) if stay_minutes else None
 
     return {
         'key': 'patron_logs',
         'title': 'Patron Logs Report',
         'subtitle': 'Library visit entry and exit records',
-        'columns': ['Patron', 'School', 'Purpose', 'Entry Time', 'Exit Time'],
+        'columns': ['Visit ID', 'Patron ID', 'Card Number', 'Patron', 'Patron Type', 'School',
+                    'Purpose', 'Entry Time', 'Exit Time', 'Exit Record', 'Time Inside'],
         'rows': rows,
         'summary': [
             ('Total Visits', len(rows)),
-            ('Completed', completed),
+            ('Signed Out', signed_out),
+            ('Assumed Exits', assumed),
             ('Still Inside', ongoing),
             ('Busiest Day', _fmt_date(busiest_day)),
-            ('Average Per Day', f'{len(rows) / len(days):.1f}' if days else '0'),
+            ('Visits Per Day', f'{len(rows) / len(days):.1f}' if days else '0.0'),
+            ('Average Stay', _minutes_label(int(average_stay)) if average_stay else DASH),
         ],
         'chart': _chart(
             [(_day_label(d, len(days)), per_day.get(d, 0)) for d in days],
@@ -331,11 +413,16 @@ def _patron_logs(start, end):
             note='Busiest day marked. A day with no entries sits on the baseline.',
             empty_note='No visits were logged in this period.',
             highlight=_day_label(busiest_day, len(days)) if busiest_day else None,
-            axis_note='Date \u00b7 vertical axis is number of library entries',
+            axis_note='Date · vertical axis is number of library entries',
         ),
         'breakdown': {
             'By purpose of visit': [
                 (p, str(n)) for p, n in sorted(per_purpose.items(), key=lambda kv: -kv[1])
+            ],
+            'By exit record': [
+                ('Signed out themselves', str(signed_out)),
+                ('Assumed at closing time', str(assumed)),
+                ('Still inside', str(ongoing)),
             ],
         },
     }
@@ -343,47 +430,56 @@ def _patron_logs(start, end):
 
 def _books(start, end):
     # Real-time catalog snapshot.
-    books = Book.objects.select_related('shelf_level__shelf').order_by('title')
+    books = (Book.objects
+             .select_related('shelf_level__shelf')
+             .prefetch_related('inventory_records')
+             .order_by('title', 'book_id'))
     rows = []
-    available = borrowed = 0
-    for b in books:
-        if b.status == 'Available':
-            available += 1
-        elif b.status == 'Borrowed':
-            borrowed += 1
-        if b.shelf_level:
-            location = b.shelf_level.category or f'Level {b.shelf_level.level_number}'
-        else:
-            location = '—'
-        rows.append([
-            b.title,
-            b.author,
-            b.ISBN or '—',
-            b.genre or '—',
-            b.status,
-            location,
-        ])
-
-    # What the collection is made of.
     per_genre, per_status = {}, {}
     for b in books:
-        g = (b.genre or 'Uncategorised').strip() or 'Uncategorised'
-        per_genre[g] = per_genre.get(g, 0) + 1
         per_status[b.status] = per_status.get(b.status, 0) + 1
+        genre = (b.genre or '').strip() or 'Uncategorised'
+        per_genre[genre] = per_genre.get(genre, 0) + 1
+        rows.append([
+            b.book_id,
+            _copy_id(b),
+            b.title,
+            _text(b.author),
+            _text(b.ISBN),
+            _text(b.call_number),
+            _text(b.genre),
+            b.material_type,
+            b.publication_year or DASH,
+            b.condition,
+            b.status,
+            _book_location(b),
+            b.shelf_slot if b.shelf_slot else DASH,
+        ])
     ranked_genre = sorted(per_genre.items(), key=lambda kv: (-kv[1], kv[0]))[:12]
+
+    def _held(status):
+        return per_status.get(status, 0)
 
     return {
         'key': 'books',
         'title': 'Books Report',
-        'subtitle': 'Complete book catalog listing',
-        'columns': ['Title', 'Author', 'ISBN', 'Genre', 'Status', 'Location'],
+        'subtitle': 'Complete book catalog listing, one row per copy',
+        'columns': ['Book ID', 'Copy ID', 'Title', 'Author', 'ISBN', 'Call Number', 'Genre',
+                    'Material Type', 'Publication Year', 'Condition', 'Status',
+                    'Shelf Location', 'Shelf Slot'],
         'rows': rows,
         'summary': [
-            ('Total Books', len(rows)),
-            ('Available', available),
-            ('Borrowed', borrowed),
+            ('Total Copies', len(rows)),
+            ('Available', _held('Available')),
+            ('Borrowed', _held('Borrowed')),
+            ('Overdue', _held('Overdue')),
+            ('Being Read', _held('Being Read')),
+            ('For Reshelving', _held('For Reshelving')),
+            ('Missing', _held('Missing')),
+            ('Lost', _held('Lost')),
             ('Genres Held', len(per_genre)),
-            ('Largest Genre', ranked_genre[0][0][:24] if ranked_genre else '\u2014'),
+            ('Largest Genre', ranked_genre[0][0] if ranked_genre else DASH),
+            ('Deleted Records Not Shown', Book.all_objects.count() - len(rows)),
         ],
         'chart': _chart(
             ranked_genre,
@@ -393,7 +489,7 @@ def _books(start, end):
             note='Twelve largest genres. Largest marked.',
             empty_note='No books catalogued yet.',
             highlight=ranked_genre[0][0] if ranked_genre else None,
-            axis_note='Genre \u00b7 vertical axis is number of titles held',
+            axis_note='Genre · vertical axis is number of copies held',
         ),
         'breakdown': {
             'By status': [(k, str(v)) for k, v in sorted(per_status.items(), key=lambda kv: -kv[1])],
@@ -404,43 +500,52 @@ def _books(start, end):
 
 def _patrons(start, end):
     # Real-time patron directory snapshot.
-    patrons = Patron.objects.order_by('fullname')
+    patrons = (Patron.objects
+               .annotate(books_out=Count('transaction',
+                                         filter=Q(transaction__transaction_type='Borrow',
+                                                  transaction__return_date__isnull=True)))
+               .order_by('fullname', 'patron_id'))
     rows = []
-    active = suspended = inactive = 0
+    per_status, per_type = {}, {}
     for p in patrons:
-        if p.account_status == 'Active':
-            active += 1
-        elif p.account_status == 'Suspended':
-            suspended += 1
-        else:
-            inactive += 1
+        per_status[p.account_status] = per_status.get(p.account_status, 0) + 1
+        per_type[p.patron_type or 'Not stated'] = per_type.get(p.patron_type or 'Not stated', 0) + 1
         rows.append([
+            p.patron_id,
+            _card(p),
             p.fullname,
-            p.patron_type,
-            p.email,
-            p.contact_number or '—',
+            _text(p.patron_type),
+            _text(p.email),
+            _text(p.contact_number),
+            _text(p.address),
+            _text(p.school),
             p.account_status,
             _fmt_date(p.registration_date),
+            p.registration_channel,
+            p.books_out,
         ])
-
-    per_type = {}
-    for p in patrons:
-        t = p.patron_type or 'Not stated'
-        per_type[t] = per_type.get(t, 0) + 1
     ranked_type = sorted(per_type.items(), key=lambda kv: (-kv[1], kv[0]))
+
+    def _held(status):
+        return per_status.get(status, 0)
 
     return {
         'key': 'patrons',
         'title': 'Patrons Report',
         'subtitle': 'Registered patron directory',
-        'columns': ['Name', 'Type', 'Email', 'Contact', 'Status', 'Registered'],
+        'columns': ['Patron ID', 'Card Number', 'Name', 'Patron Type', 'Email',
+                    'Contact Number', 'Address', 'School', 'Account Status',
+                    'Date Registered', 'Registered Through', 'Books Out'],
         'rows': rows,
         'summary': [
             ('Total Patrons', len(rows)),
-            ('Active', active),
-            ('Suspended', suspended),
-            ('Inactive', inactive),
-            ('Largest Group', ranked_type[0][0] if ranked_type else '\u2014'),
+            ('Active', _held('Active')),
+            ('Pending', _held('Pending')),
+            ('Suspended', _held('Suspended')),
+            ('Inactive', _held('Inactive')),
+            ('Walk-in Visitors', _held('Visitor')),
+            ('Largest Group', ranked_type[0][0] if ranked_type else DASH),
+            ('Deleted Records Not Shown', Patron.all_objects.count() - len(rows)),
         ],
         'chart': _chart(
             ranked_type,
@@ -449,41 +554,44 @@ def _patrons(start, end):
             note='Who the library actually serves. Largest group marked.',
             empty_note='No patrons registered yet.',
             highlight=ranked_type[0][0] if ranked_type else None,
-            axis_note='Patron type \u00b7 vertical axis is number of registered patrons',
+            axis_note='Patron type · vertical axis is number of registered patrons',
         ),
+        'breakdown': {
+            'By account status': [(k, str(v)) for k, v
+                                  in sorted(per_status.items(), key=lambda kv: -kv[1])],
+            'By patron type': [(k, str(v)) for k, v in ranked_type],
+        },
     }
 
 
 def _donations(start, end):
     donations = (Donation.objects
                  .select_related('book')
+                 .prefetch_related('inventory_copies')
                  .filter(date_donated__range=(start, end))
                  .order_by('-date_donated', '-donation_id'))
 
     rows = []
-    received = processing = shelved = 0
+    per_status, per_month, donors = {}, {}, set()
+    copies_total = 0
     for d in donations:
-        if d.status == 'Received':
-            received += 1
-        elif d.status == 'Processing':
-            processing += 1
-        elif d.status == 'Shelved':
-            shelved += 1
-        rows.append([
-            _fmt_date(d.date_donated),
-            d.donor_name,
-            d.book.title if d.book else '—',
-            d.book.author if d.book else '—',
-            d.status,
-        ])
-
-    # Donations per month.
-    per_month, per_status = {}, {}
-    for d in donations:
+        per_status[d.status] = per_status.get(d.status, 0) + 1
+        donors.add((d.donor_name or '').strip().lower())
+        copies = d.inventory_copies.count() or 1
+        copies_total += copies
         if d.date_donated:
             key = (d.date_donated.year, d.date_donated.month)
-            per_month[key] = per_month.get(key, 0) + 1
-        per_status[d.status] = per_status.get(d.status, 0) + 1
+            per_month[key] = per_month.get(key, 0) + copies
+        rows.append([
+            d.donation_id,
+            _fmt_date(d.date_donated),
+            _text(d.donor_name),
+            d.book_id or DASH,
+            _text(d.book.title if d.book else None),
+            _text(d.book.author if d.book else None),
+            copies,
+            d.status,
+        ])
 
     months = []
     if per_month:
@@ -493,26 +601,32 @@ def _donations(start, end):
             months.append((y, m))
             y, m = (y + 1, 1) if m == 12 else (y, m + 1)
 
+    def _held(status):
+        return per_status.get(status, 0)
+
     return {
         'key': 'donations',
         'title': 'Donations Report',
         'subtitle': 'Received donations from receipt through accession',
-        'columns': ['Date Donated', 'Donor', 'Book Title', 'Author', 'Status'],
+        'columns': ['Donation ID', 'Date Donated', 'Donor', 'Book ID', 'Book Title', 'Author',
+                    'Copies', 'Status'],
         'rows': rows,
         'summary': [
-            ('Total Donations', len(rows)),
-            ('Received', received),
-            ('Processing', processing),
-            ('Shelved', shelved),
+            ('Donation Records', len(rows)),
+            ('Copies Received', copies_total),
+            ('Donors', len(donors)),
+            ('Received', _held('Received')),
+            ('Processing', _held('Processing')),
+            ('Shelved', _held('Shelved')),
             ('Months With Donations', len(per_month)),
         ],
         'chart': _chart(
             [(date(y, m, 1).strftime('%b %Y'), per_month.get((y, m), 0)) for y, m in months],
             kind='line',
-            title='Donations received per month',
+            title='Donated copies received per month',
             note='A month with no donations sits on the baseline.',
             empty_note='No donations were received in this period.',
-            axis_note='Month \u00b7 vertical axis is number of donated copies',
+            axis_note='Month · vertical axis is number of donated copies',
         ),
         'breakdown': {
             'By status': [
@@ -528,7 +642,7 @@ def _stock_levels(start, end):
                .select_related('book', 'book__shelf_level', 'book__shelf_level__shelf')
                .order_by('book__title', 'title_hint', 'inventory_id'))
 
-    # Group copies by title.
+    # Group copies by the title and author they belong to.
     groups = {}
     totals = {'Good': 0, 'Damaged': 0, 'Missing': 0, 'Lost': 0, 'Withdrawn': 0}
     removed = 0
@@ -536,26 +650,39 @@ def _stock_levels(start, end):
         if r.status == 'Removed':
             removed += 1
             continue
-        key = r.display_title
+        key = (r.display_title, (r.book.author if r.book else '') or '')
         g = groups.setdefault(key, {
-            'title': key,
-            'location': r.shelf_location or 'Not shelved',
+            'title': r.display_title,
+            'author': (r.book.author if r.book else '') or DASH,
+            'location': _book_location(r.book) if r.book else 'Not shelved',
             'catalogued': r.book is not None,
+            'book_ids': set(),
+            'copy_ids': set(),
             'Good': 0, 'Damaged': 0, 'Missing': 0, 'Lost': 0, 'Withdrawn': 0,
         })
+        if r.book_id:
+            g['book_ids'].add(r.book_id)
+        g['copy_ids'].add(r.inventory_id)
         # A copy not found in a stock count is not on hand, whatever its condition.
         bucket = 'Missing' if r.status == 'Missing' else r.condition
         if bucket in g:
             g[bucket] += 1
             totals[bucket] += 1
 
+    # Every copy is its own book record, so a book with no copy row is a gap worth naming.
+    uncounted_books = Book.objects.filter(inventory_records__isnull=True).count()
+
     rows = []
     for g in groups.values():
         on_hand = g['Good'] + g['Damaged']
         rows.append([
             g['title'],
+            g['author'],
+            _id_list(g['book_ids']),
+            _id_list(g['copy_ids']),
             'Yes' if g['catalogued'] else 'No',
             g['location'],
+            len(g['copy_ids']),
             g['Good'], g['Damaged'], g['Missing'], g['Lost'], g['Withdrawn'], on_hand,
         ])
 
@@ -563,11 +690,12 @@ def _stock_levels(start, end):
         'key': 'stock_levels',
         'title': 'Stock Levels Report',
         'subtitle': 'Physical copies held, by title and condition',
-        'columns': ['Title', 'Catalogued', 'Shelf Location',
-                    'Good', 'Damaged', 'Missing', 'Lost', 'Withdrawn', 'On Hand'],
+        'columns': ['Title', 'Author', 'Book IDs', 'Copy IDs', 'Catalogued', 'Shelf Location',
+                    'Copies', 'Good', 'Damaged', 'Missing', 'Lost', 'Withdrawn', 'On Hand'],
         'rows': rows,
         'summary': [
             ('Titles Held', len(rows)),
+            ('Copies Recorded', sum(totals.values())),
             ('Copies On Hand', totals['Good'] + totals['Damaged']),
             ('Good', totals['Good']),
             ('Damaged', totals['Damaged']),
@@ -575,6 +703,7 @@ def _stock_levels(start, end):
             ('Lost', totals['Lost']),
             ('Withdrawn', totals['Withdrawn']),
             ('Deaccessioned', removed),
+            ('Books Without A Copy Record', uncounted_books),
         ],
         'chart': _chart(
             [(k, totals[k]) for k in ('Good', 'Damaged', 'Missing', 'Lost', 'Withdrawn')],
@@ -603,17 +732,19 @@ def _stock_movement(start, end):
     counts = {}
     for m in movements:
         counts[m.action] = counts.get(m.action, 0) + 1
-        if m.condition_before and m.condition_after and m.condition_before != m.condition_after:
-            change = m.condition_before + ' to ' + m.condition_after
-        else:
-            change = m.condition_after or '—'
+        record = m.inventory_record
         rows.append([
-            _fmt_date(timezone.localtime(m.timestamp).date()),
-            m.inventory_record.display_title if m.inventory_record else '—',
+            m.movement_id,
+            _fmt_dt(m.timestamp),
+            record.inventory_id if record else DASH,
+            (record.book_id if record and record.book_id else DASH),
+            _text(record.display_title if record else None),
             m.get_action_display(),
-            change,
-            m.actor_name or '—',
-            m.reason or '—',
+            _text(m.condition_before),
+            _text(m.condition_after),
+            _text(m.actor_name),
+            _text(m.reason),
+            _text(m.source),
         ])
 
     summary = [('Total Movements', len(rows))]
@@ -629,7 +760,8 @@ def _stock_movement(start, end):
         'key': 'stock_movement',
         'title': 'Stock Movement Report',
         'subtitle': 'Every change to a copy stock status, with actor and reason',
-        'columns': ['Date', 'Copy', 'Action', 'Condition Change', 'Actor', 'Reason'],
+        'columns': ['Movement ID', 'Date & Time', 'Copy ID', 'Book ID', 'Book Title', 'Action',
+                    'Condition Before', 'Condition After', 'Actor', 'Reason', 'Source'],
         'rows': rows,
         'summary': summary,
         'chart': _chart(
@@ -639,7 +771,7 @@ def _stock_movement(start, end):
             note='What is actually happening to stock. Most frequent marked.',
             empty_note='No stock movements in this period.',
             highlight=action_series[0][0] if action_series else None,
-            axis_note='Action \u00b7 vertical axis is number of movements',
+            axis_note='Action · vertical axis is number of movements',
         ),
     }
 
@@ -674,18 +806,28 @@ def _unreturned(start, end):
         days_over = (today - tx.due_date).days if tx.due_date else 0
         days_over_all.append(days_over)
         is_over = days_over > 0
+        fine_today = Decimal('0.00')
         if is_over:
             overdue += 1
             total_days_over += days_over
             # What the fine would be if it came back today.
             billable = max(days_over - (rule.grace_period_days or 0), 0)
-            accruing += Decimal(billable) * (rule.fine_per_day or Decimal('0'))
+            fine_today = Decimal(billable) * (rule.fine_per_day or Decimal('0'))
+            accruing += fine_today
         rows.append([
-            tx.book.title if tx.book else '—',
-            tx.patron.fullname if tx.patron else 'In-Library User',
+            tx.transaction_id,
+            tx.book_id or DASH,
+            _text(tx.book.title if tx.book else None),
+            _text(tx.book.author if tx.book else None),
+            tx.patron_id or DASH,
+            _card(tx.patron),
+            _text(tx.patron.fullname if tx.patron else 'In-library reader'),
+            _text(tx.patron.contact_number if tx.patron else None),
+            _text(tx.patron.email if tx.patron else None),
             _fmt_date(tx.transaction_date),
             _fmt_date(tx.due_date),
-            str(days_over) if is_over else '—',
+            str(days_over) if is_over else DASH,
+            f'{fine_today:.2f}',
             'Overdue' if is_over else 'On loan',
         ])
 
@@ -704,7 +846,9 @@ def _unreturned(start, end):
         'key': 'unreturned',
         'title': 'Unreturned Books Report',
         'subtitle': 'Every borrowed copy still out, oldest due date first',
-        'columns': ['Book', 'Borrowed By', 'Borrowed', 'Due', 'Days Overdue', 'Status'],
+        'columns': ['Transaction ID', 'Book ID', 'Book Title', 'Author', 'Patron ID',
+                    'Card Number', 'Borrowed By', 'Contact Number', 'Email', 'Date Borrowed',
+                    'Due Date', 'Days Overdue', 'Fine If Returned Today (PHP)', 'Status'],
         'rows': rows,
         'summary': [
             ('Still Out', len(rows)),
@@ -712,7 +856,8 @@ def _unreturned(start, end):
             ('On Time', len(rows) - overdue),
             ('Total Days Overdue', total_days_over),
             ('Fines If Returned Today', f'{accruing:.2f}'),
-            ('Longest Overdue', f'{max(days_over_all)} days' if days_over_all and max(days_over_all) > 0 else '\u2014'),
+            ('Longest Overdue', f'{max(days_over_all)} days'
+                                if days_over_all and max(days_over_all) > 0 else DASH),
         ],
         'chart': _chart(
             ageing,
@@ -721,7 +866,7 @@ def _unreturned(start, end):
             note='Largest group marked. Chasing is triaged by age, not by count.',
             empty_note='Nothing is out on loan.',
             highlight=worst[0] if worst else None,
-            axis_note='Days past the due date \u00b7 vertical axis is number of copies',
+            axis_note='Days past the due date · vertical axis is number of copies',
         ),
         'breakdown': {
             'By age': [(label, str(n)) for label, n in ageing],
@@ -738,13 +883,26 @@ def _penalties(start, end):
                     | Q(return_date__isnull=True, transaction_date__range=(start, end)))
             .order_by('-return_date', '-transaction_date'))
 
+    today = timezone.localdate()
     by_day, by_week, by_month = {}, {}, {}
     total = Decimal('0.00')
+    settled = Decimal('0.00')
+    accruing = Decimal('0.00')
     rows = []
     for tx in txns:
         charged_on = tx.return_date or tx.transaction_date
         amount = tx.fine_amount or Decimal('0')
         total += amount
+        if tx.return_date:
+            settled += amount
+            reason = 'Returned late'
+            days_over = (tx.return_date - tx.due_date).days if tx.due_date else 0
+        else:
+            accruing += amount
+            reason = 'Still out, fine still growing'
+            days_over = (today - tx.due_date).days if tx.due_date else 0
+        if tx.book and tx.book.status == 'Lost':
+            reason = 'Reported lost'
         if charged_on:
             iso_year, iso_week, _ = charged_on.isocalendar()
             by_day[charged_on] = by_day.get(charged_on, Decimal('0')) + amount
@@ -752,10 +910,16 @@ def _penalties(start, end):
             by_month[(charged_on.year, charged_on.month)] = (
                 by_month.get((charged_on.year, charged_on.month), Decimal('0')) + amount)
         rows.append([
+            tx.transaction_id,
             _fmt_date(charged_on),
-            tx.patron.fullname if tx.patron else 'In-Library User',
-            tx.book.title if tx.book else '—',
-            'Lost' if (tx.book and tx.book.status == 'Lost') else 'Overdue',
+            tx.patron_id or DASH,
+            _card(tx.patron),
+            _text(tx.patron.fullname if tx.patron else 'In-library reader'),
+            tx.book_id or DASH,
+            _text(tx.book.title if tx.book else None),
+            _fmt_date(tx.due_date),
+            str(days_over) if days_over > 0 else DASH,
+            reason,
             f'{amount:.2f}',
         ])
 
@@ -766,15 +930,19 @@ def _penalties(start, end):
         'key': 'penalties',
         'title': 'Penalties Report',
         'subtitle': 'Fines charged, with daily, weekly and monthly totals',
-        'columns': ['Date Charged', 'Patron', 'Book', 'Reason', 'Amount'],
+        'columns': ['Transaction ID', 'Date Charged', 'Patron ID', 'Card Number', 'Patron',
+                    'Book ID', 'Book Title', 'Due Date', 'Days Overdue', 'Reason',
+                    'Amount (PHP)'],
         'rows': rows,
         'summary': [
             ('Total Charged', f'{total:.2f}'),
             ('Penalties Issued', len(rows)),
+            ('On Returned Loans', f'{settled:.2f}'),
+            ('Still Accruing', f'{accruing:.2f}'),
             ('Days With Fines', len(by_day)),
-            ('Average Per Day', f'{_avg(by_day):.2f}'),
-            ('Average Per Week', f'{_avg(by_week):.2f}'),
-            ('Average Per Month', f'{_avg(by_month):.2f}'),
+            ('Average Per Day With Fines', f'{_avg(by_day):.2f}'),
+            ('Average Per Week With Fines', f'{_avg(by_week):.2f}'),
+            ('Average Per Month With Fines', f'{_avg(by_month):.2f}'),
         ],
         # Rendered as its own table on screen; the exporters ignore it.
         'chart': _chart(
@@ -782,9 +950,10 @@ def _penalties(start, end):
              for d in _days_in(start, end)],
             kind='line',
             title='Fines charged per day',
-            note='A day with no fines sits on the baseline.',
+            note='A day charged is the day a loan came back, or today for a loan still out. '
+                 'A day with no fines sits on the baseline.',
             empty_note='No fines were charged in this period.',
-            axis_note='Date \u00b7 vertical axis is pesos charged',
+            axis_note='Date · vertical axis is pesos charged',
         ),
         'breakdown': {
             'Per day': [(_fmt_date(d), f'{v:.2f}') for d, v in sorted(by_day.items(), reverse=True)],
@@ -806,11 +975,13 @@ def _analytics(start, end):
     for tx in borrows:
         if not tx.book:
             continue
-        key = (tx.book.title, tx.book.author or '—')
-        per_title[key] = per_title.get(key, 0) + 1
-    ranked = sorted(per_title.items(), key=lambda kv: (-kv[1], kv[0][0]))
+        key = (tx.book.title, tx.book.author or DASH)
+        entry = per_title.setdefault(key, {'count': 0, 'book_ids': set()})
+        entry['count'] += 1
+        entry['book_ids'].add(tx.book_id)
+    ranked = sorted(per_title.items(), key=lambda kv: (-kv[1]['count'], kv[0][0]))
 
-    # Busiest hours, counted within opening hours only.
+    # Busiest hours. Every visit is counted, whatever the hour.
     visits = PatronLog.objects.filter(entry_time__date__range=(start, end))
 
     per_hour = {}
@@ -818,16 +989,14 @@ def _analytics(start, end):
     total_visits = 0
     for log in visits:
         local = timezone.localtime(log.entry_time)
-        if local.hour in OPEN_HOURS:
-            per_hour[local.hour] = per_hour.get(local.hour, 0) + 1
+        per_hour[local.hour] = per_hour.get(local.hour, 0) + 1
         per_weekday[local.weekday()] = per_weekday.get(local.weekday(), 0) + 1
         total_visits += 1
-    open_visits = sum(per_hour.values())
 
     def _hour_label(h):
         # Format the hour by hand so it works on Windows.
         if h is None:
-            return '\u2014'
+            return DASH
         suffix = 'AM' if h < 12 else 'PM'
         hour12 = h % 12 or 12
         return f'{hour12} {suffix}'
@@ -835,77 +1004,73 @@ def _analytics(start, end):
     def _hour_span(h):
         """Renders an hour as the range it is: 9 AM - 10 AM."""
         if h is None:
-            return '\u2014'
-        return f'{_hour_label(h)} \u2013 {_hour_label((h + 1) % 24)}'
+            return DASH
+        return f'{_hour_label(h)} – {_hour_label((h + 1) % 24)}'
+
+    # Opening hours, plus any hour that actually had visitors, so none are hidden.
+    charted_hours = sorted(set(OPEN_HOURS) | set(per_hour))
+    outside_hours = sum(n for h, n in per_hour.items() if h not in OPEN_HOURS)
 
     # The earlier hour wins a tie.
-    peak_hour, peak_count = (max(per_hour.items(), key=lambda kv: (kv[1], -kv[0]))
-                             if per_hour else (None, 0))
-    quiet_hour, quiet_count = (min(per_hour.items(), key=lambda kv: (kv[1], kv[0]))
-                               if per_hour else (None, 0))
+    counted = {h: per_hour.get(h, 0) for h in charted_hours}
+    peak_hour, peak_count = (max(counted.items(), key=lambda kv: (kv[1], -kv[0]))
+                             if counted else (None, 0))
+    # Opening hours on their own, which is what staffing is planned around.
+    open_counted = {h: per_hour.get(h, 0) for h in OPEN_HOURS}
+    open_peak_hour, open_peak_count = (max(open_counted.items(), key=lambda kv: (kv[1], -kv[0]))
+                                       if open_counted else (None, 0))
+    quiet_hour, quiet_count = (min(open_counted.items(), key=lambda kv: (kv[1], kv[0]))
+                               if open_counted else (None, 0))
 
     WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
     busy_day, busy_day_count = (max(per_weekday.items(), key=lambda kv: (kv[1], -kv[0]))
                                 if per_weekday else (None, 0))
 
-    # Average over hours that had visits.
-    active_hours = len(per_hour)
-    avg_per_active_hour = (open_visits / active_hours) if active_hours else 0
-    peak_share = (peak_count / open_visits * 100) if open_visits else 0
-
-    # How much busier the peak is than a typical open hour.
-    peak_vs_average = (peak_count / avg_per_active_hour) if avg_per_active_hour else 0
-
-    # Every opening hour, quiet ones included.
-    hours = []
-    if per_hour:
-        for h in OPEN_HOURS:
-            n = per_hour.get(h, 0)
-            hours.append({
-                'hour': h,
-                'label': _hour_label(h),
-                'value': n,
-                'share': round((n / open_visits) * 100, 1) if open_visits else 0,
-                'is_peak': h == peak_hour,
-            })
+    average_per_hour = (total_visits / len(charted_hours)) if charted_hours else 0
+    peak_share = (peak_count / total_visits * 100) if total_visits else 0
+    peak_vs_average = (peak_count / average_per_hour) if average_per_hour else 0
 
     hour_chart = _chart(
-        [(h['label'], h['value']) for h in hours],
+        [(_hour_label(h), counted[h]) for h in charted_hours],
         kind='line',
         title='Visits by hour of day',
-        note='8 AM to 5 PM. Busiest hour marked. Counts are library entries, not borrows.',
+        note='Every hour the library opens, plus any hour that had visitors. '
+             'Busiest hour marked. Counts are library entries, not borrows.',
         empty_note='No visits were logged in this period.',
         highlight=_hour_label(peak_hour) if peak_hour is not None else None,
-        axis_note='Hour of day \u00b7 vertical axis is number of library entries',
+        axis_note='Hour of day · vertical axis is number of library entries',
     )
 
-    rows = [[title, author, str(n)] for (title, author), n in ranked[:50]]
+    rows = [[rank, _id_list(entry['book_ids']), title, author, entry['count']]
+            for rank, ((title, author), entry) in enumerate(ranked[:50], start=1)]
 
     return {
         'key': 'analytics',
         'title': 'Borrowing Analytics Report',
         'subtitle': 'Most borrowed titles, and the hours the library is busiest',
-        'columns': ['Book', 'Author', 'Times Borrowed'],
+        'columns': ['Rank', 'Book IDs', 'Book Title', 'Author', 'Times Borrowed'],
         'rows': rows,
         'summary': [
-            ('Borrows In Period', sum(per_title.values())),
+            ('Borrows In Period', sum(e['count'] for e in per_title.values())),
             ('Distinct Titles', len(per_title)),
-            ('Most Borrowed', ranked[0][0][0][:28] if ranked else '\u2014'),
-            ('Peak Hour', _hour_span(peak_hour)),
-            ('Visits In Peak Hour', peak_count),
-            ('Share Of Visits In Peak', f'{peak_share:.0f}%'),
-            ('Peak vs Average Hour', f'{peak_vs_average:.1f}\u00d7' if peak_vs_average else '\u2014'),
-            ('Busiest Day', WEEKDAYS[busy_day] if busy_day is not None else '\u2014'),
-            ('Quietest Open Hour', _hour_span(quiet_hour)),
-            ('Average Per Open Hour', f'{avg_per_active_hour:.1f}'),
+            ('Most Borrowed', ranked[0][0][0] if ranked else DASH),
+            ('Busiest Hour', _hour_span(peak_hour)),
+            ('Visits In Busiest Hour', peak_count),
+            ('Share Of Visits In Busiest Hour', f'{peak_share:.0f}%'),
+            ('Busiest Hour vs Average', f'{peak_vs_average:.1f}×' if peak_vs_average else DASH),
+            ('Busiest Opening Hour', _hour_span(open_peak_hour)),
+            ('Visits In Busiest Opening Hour', open_peak_count),
+            ('Busiest Day', WEEKDAYS[busy_day] if busy_day is not None else DASH),
+            ('Quietest Opening Hour', _hour_span(quiet_hour)),
+            ('Average Visits Per Hour', f'{average_per_hour:.1f}'),
+            ('Visits Outside Opening Hours', outside_hours),
             ('Total Visits', total_visits),
         ],
         # Screen only.
         'chart': dict(hour_chart, peak_label=_hour_span(peak_hour), peak_count=peak_count),
         'breakdown': {
             'Visits by hour': [
-                (_hour_span(h), str(per_hour.get(h, 0)))
-                for h in OPEN_HOURS
+                (_hour_span(h), str(counted[h])) for h in charted_hours
             ],
             'Visits by day of week': [
                 (WEEKDAYS[d], str(per_weekday[d]))
@@ -1106,6 +1271,23 @@ def _pdf_chart(chart, avail_width):
     return d
 
 
+def _pdf_column_widths(report, usable_width):
+    """Share the page between columns by how much each actually holds."""
+    columns = report['columns']
+    if not columns:
+        return []
+    # An id column needs a fraction of what a title column needs.
+    weights = []
+    for index, header in enumerate(columns):
+        longest = len(str(header))
+        for row in report['rows'][:400]:
+            if index < len(row):
+                longest = max(longest, len(str(row[index])))
+        weights.append(min(max(longest, 5), 34))
+    total = sum(weights)
+    return [usable_width * w / total for w in weights]
+
+
 def render_report_pdf(report):
     """Render a report dict to a PDF and return a BytesIO buffer."""
     from reportlab.lib.pagesizes import A4, landscape
@@ -1126,6 +1308,10 @@ def render_report_pdf(report):
         title=report['title'],
     )
 
+    # Narrower type once a report carries many columns.
+    col_count = len(report['columns'])
+    cell_size = 8 if col_count <= 10 else 7 if col_count <= 13 else 6.5
+
     styles = getSampleStyleSheet()
     org_style = ParagraphStyle('Org', parent=styles['Title'], fontSize=16,
                                spaceAfter=2, alignment=TA_CENTER)
@@ -1142,10 +1328,10 @@ def render_report_pdf(report):
                                   textColor=colors.HexColor('#333333'))
     summary_style = ParagraphStyle('RSummary', parent=styles['Normal'], fontSize=9,
                                    alignment=TA_CENTER, spaceAfter=10)
-    cell_style = ParagraphStyle('Cell', parent=styles['Normal'], fontSize=8,
-                                leading=10)
-    head_style = ParagraphStyle('Head', parent=styles['Normal'], fontSize=8,
-                                leading=10, textColor=colors.white,
+    cell_style = ParagraphStyle('Cell', parent=styles['Normal'], fontSize=cell_size,
+                                leading=cell_size + 2)
+    head_style = ParagraphStyle('Head', parent=styles['Normal'], fontSize=cell_size,
+                                leading=cell_size + 2, textColor=colors.white,
                                 fontName='Helvetica-Bold')
     chart_title_style = ParagraphStyle('ChartTitle', parent=styles['Normal'], fontSize=9.5,
                                        alignment=TA_CENTER, spaceBefore=4, spaceAfter=1,
@@ -1195,8 +1381,7 @@ def render_report_pdf(report):
                     + ['' for _ in report['columns'][1:]])
 
     usable_width = doc.width
-    col_count = len(report['columns'])
-    col_widths = [usable_width / col_count] * col_count
+    col_widths = _pdf_column_widths(report, usable_width)
 
     table = Table(data, colWidths=col_widths, repeatRows=1)
     table.setStyle(TableStyle([

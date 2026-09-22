@@ -47,6 +47,9 @@
     </style>
     <link rel="stylesheet" href="{% static 'css/admin-enhance.css' %}">
     <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'css/admin-neu.css' %}?v=20260922b">
+    <script src="{% static 'js/admin-neu.js' %}?v=20260922" defer></script>
     <link rel="stylesheet" href="{% static 'css/readability.css' %}">
     <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
     <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
@@ -155,7 +158,7 @@
                             <th class="py-3 px-6 w-16">ID</th>
                             <th class="py-3 px-6">Name</th>
                             <th class="py-3 px-6">Email</th>
-                            <th class="py-3 px-6 w-32">Role</th>
+                            <th class="py-3 px-6 role-col">Role</th>
                             <th class="py-3 px-6 w-28">Status</th>
                             <th class="py-3 px-6 text-center w-40">Actions</th>
                         </tr>
@@ -176,9 +179,25 @@
                                     <span class="text-[10px] font-bold px-2.5 py-1 rounded-full bg-blue-950/50 text-blue-300 border border-blue-800/50">Administrator</span>
                                 {% else %}
                                     <span class="text-[10px] font-bold px-2.5 py-1 rounded-full bg-cyan-950/50 text-cyan-300 border border-cyan-800/50">Library Staff</span>
-                                    <div class="mt-1.5 text-[10px] text-slate-500 leading-snug">
-                                        {% if u.module_labels %}{{ u.module_labels|join:" · " }}{% elif u.role == 'Staff' %}<span class="text-amber-500">No modules granted</span>{% else %}<span class="text-slate-500">Administration only</span>{% endif %}
+                                    {% if u.module_keys %}
+                                    {# Short names as pills; the full module name shows on hover. #}
+                                    <div class="module-chips">
+                                        {% for k in u.module_keys %}
+                                        {% if k == 'transactions' %}<span class="module-chip" title="Transaction Module"><i class="fa-solid fa-file-invoice" aria-hidden="true"></i>Transactions</span>
+                                        {% elif k == 'logs' %}<span class="module-chip" title="Log Management Module"><i class="fa-solid fa-clipboard-list" aria-hidden="true"></i>Entry Logs</span>
+                                        {% elif k == 'books' %}<span class="module-chip" title="Book Management Module"><i class="fa-solid fa-book" aria-hidden="true"></i>Books</span>
+                                        {% elif k == 'donations' %}<span class="module-chip" title="Donation Module"><i class="fa-solid fa-hand-holding-heart" aria-hidden="true"></i>Donations</span>
+                                        {% elif k == 'shelf' %}<span class="module-chip" title="Shelf Manager Module"><i class="fa-solid fa-folder-tree" aria-hidden="true"></i>Shelves</span>
+                                        {% elif k == 'indoor_map' %}<span class="module-chip" title="Floor Plan Module"><i class="fa-solid fa-map" aria-hidden="true"></i>Floor Plan</span>
+                                        {% elif k == 'inventory' %}<span class="module-chip" title="Stock Receiving"><i class="fa-solid fa-truck-ramp-box" aria-hidden="true"></i>Stock</span>
+                                        {% elif k == 'patrons' %}<span class="module-chip" title="Patron Registration &amp; Review"><i class="fa-solid fa-user-check" aria-hidden="true"></i>Patrons</span>
+                                        {% elif k == 'chat' %}<span class="module-chip" title="Messages"><i class="fa-solid fa-comments" aria-hidden="true"></i>Messages</span>
+                                        {% endif %}
+                                        {% endfor %}
                                     </div>
+                                    {% else %}
+                                    <div class="mt-1.5 text-[10px] leading-snug"><span class="text-amber-500">No modules granted</span></div>
+                                    {% endif %}
                                 {% endif %}
                             </td>
                             <td class="py-4 px-6">
@@ -214,7 +233,7 @@
                             </td>
                         </tr>
                         {% empty %}
-                        <tr><td colspan="5" class="py-10 text-center text-slate-500 text-xs">No accounts found.</td></tr>
+                        <tr><td colspan="6" class="py-10 text-center text-slate-500 text-xs">No accounts found.</td></tr>
                         {% endfor %}
                     </tbody>
                 </table>

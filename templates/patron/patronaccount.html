@@ -9,7 +9,7 @@
 <script src="{% static 'js/theme.js' %}"></script>
 <script src="{% static 'js/session.js' %}"></script>
 <script src="{% static 'js/password-toggle.js' %}" defer></script>
-<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="{% static 'css/theme.css' %}">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
@@ -117,8 +117,10 @@
     <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
     <script src="{% static 'js/ayla-dialog.js' %}"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha384-iw3OoTErCYJJB9mCa8LNS2hbsQ7M3C0EpIsO/H5+EGAkPGc6rk+V8i04oW/K5xq0" crossorigin="anonymous" referrerpolicy="no-referrer">
+    <link rel="stylesheet" href="{% static 'css/patron-neu.css' %}?v=20260922h">
+    <script src="{% static 'js/patron-neu.js' %}?v=20260922" defer></script>
 </head>
-<body>
+<body class="neu-app">
 <nav class="navbar">
   <a href="{% url 'patron_dashboard' %}" class="back-btn" aria-label="Back"><i class="fa-solid fa-arrow-left" aria-hidden="true"></i></a>
   <div class="nav-title">My Account</div>
@@ -306,6 +308,7 @@
   <a href="{% url 'patron_dashboard' %}" class="nav-item"><div class="nav-icon"><i class="fa-solid fa-house" aria-hidden="true"></i></div><div class="nav-label">Home</div></a>
   <a href="{% url 'patron_catalog' %}" class="nav-item"><div class="nav-icon"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i></div><div class="nav-label">Search</div></a>
   <a href="{% url 'patron_map' %}" class="nav-item"><div class="nav-icon"><i class="fa-solid fa-map" aria-hidden="true"></i></div><div class="nav-label">Map</div></a>
+  <a href="{% url 'patron_messages' %}" class="nav-item"><div class="nav-icon"><i class="fa-solid fa-comments" aria-hidden="true"></i></div><div class="nav-label">Messages</div></a>
   <a href="{% url 'patron_account' %}" class="nav-item active"><div class="nav-icon"><i class="fa-solid fa-user" aria-hidden="true"></i></div><div class="nav-label">Account</div></a>
 </nav>
 

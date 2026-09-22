@@ -19,6 +19,9 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@400;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{% static 'css/theme.css' %}">
     <link rel="stylesheet" href="{% static 'css/readability.css' %}">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'css/admin-neu.css' %}?v=20260922b">
+    <script src="{% static 'js/auth-decor.js' %}?v=20260922" defer></script>
     <style>
         body {
             font-family: 'Inter', sans-serif;
@@ -83,7 +86,9 @@
         @media print { body { display: none; } }
     </style>
 </head>
-<body class="flex flex-col">
+<body class="flex flex-col kiosk-page">
+    {# Pixel readers walking along the bottom of the screen. #}
+    <div class="hero-walkers kiosk-walkers" data-decor-walkers aria-hidden="true"></div>
 
     <header class="flex items-center justify-between px-6 sm:px-10 py-5">
         <div class="flex items-center gap-3">

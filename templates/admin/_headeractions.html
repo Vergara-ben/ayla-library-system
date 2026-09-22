@@ -5,6 +5,9 @@
 
     {% if extra %}{{ extra }}{% endif %}
 
+    {# Light / dark mode switch. #}
+    <button type="button" class="theme-toggle is-wide header-theme-toggle" data-theme-toggle></button>
+
     {% if desk_mode %}
     <span class="bg-amber-500/15 text-amber-400 text-xs px-2.5 py-1 rounded font-bold border border-amber-600/40 tracking-wider">DESK MODE</span>
     {% else %}

@@ -46,6 +46,9 @@
     </style>
     <link rel="stylesheet" href="{% static 'css/admin-enhance.css' %}">
     <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'css/admin-neu.css' %}?v=20260922b">
+    <script src="{% static 'js/admin-neu.js' %}?v=20260922" defer></script>
     <link rel="stylesheet" href="{% static 'css/readability.css' %}">
     <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
     <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
@@ -221,7 +224,7 @@
                             <tr><th>Label</th><th>Type</th><th>Identity</th><th>Tx / n</th><th>Height</th><th>Position</th><th>Heard</th></tr>
                         </thead>
                         <tbody id="configBody">
-                            <tr><td colspan="6" class="text-slate-500 text-xs p-4">Loading&hellip;</td></tr>
+                            <tr><td colspan="7" class="text-slate-500 text-xs p-4">Loading&hellip;</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -496,7 +499,7 @@ async function loadMap() {
 function renderConfig() {
   const body = document.getElementById('configBody');
   if (!mapData.beacons.length) {
-    body.innerHTML = '<tr><td colspan="6" class="text-amber-500 text-xs p-4">'
+    body.innerHTML = '<tr><td colspan="7" class="text-amber-500 text-xs p-4">'
       + 'No beacons are configured on the active floor plan.</td></tr>';
     return;
   }

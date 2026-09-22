@@ -112,6 +112,9 @@ urlpatterns = [
     path('admin-portal/reject-patron/<int:patron_id>/', views.reject_patron, name='reject_patron'),
     path('admin-portal/reactivation/<int:request_id>/respond/', views.respond_to_reactivation, name='respond_to_reactivation'),
     path('admin-portal/promote-visitor/<int:patron_id>/', views.promote_visitor, name='promote_visitor'),
+    # The ID check: one patron, or every member still without one.
+    path('admin-portal/patron-id-check/<int:patron_id>/', views.set_patron_identity, name='set_patron_identity'),
+    path('admin-portal/patron-id-check/all/', views.verify_unverified_patrons, name='verify_unverified_patrons'),
     path('admin-portal/book-detail/', views.admin_book_detail, name='admin_book_detail'),
     path('admin-portal/edit-book/<int:book_id>/', views.admin_edit_book, name='admin_edit_book'),
     path('admin-portal/delete-book/<int:book_id>/', views.admin_delete_book, name='admin_delete_book'),

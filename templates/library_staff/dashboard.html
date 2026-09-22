@@ -594,6 +594,10 @@
     </style>
     <link rel="stylesheet" href="{% static 'css/admin-enhance.css' %}">
     <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'css/admin-neu.css' %}?v=20260922b">
+    <script src="{% static 'js/admin-neu.js' %}?v=20260922" defer></script>
+    <script src="{% static 'js/auth-decor.js' %}?v=20260922" defer></script>
     <link rel="stylesheet" href="{% static 'css/readability.css' %}">
     <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
     <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
@@ -620,7 +624,7 @@
                 <div>
                     <span class="hero-welcome-tag">Staff Dashboard</span>
                     <h1 class="hero-title">Welcome back, {{ admin.fullname|default:"Staff" }}</h1>
-                    <p class="hero-subtitle"><span>{{ visitors_today }} patron{{ visitors_today|pluralize }} logged in today</span></p>
+                    <p class="hero-subtitle">{{ today|date:"l, F j, Y" }} • <span>{{ visitors_today }} visit{{ visitors_today|pluralize }} logged today</span> • <span>{{ patrons_inside }} still inside</span></p>
                     {% include 'admin/_librarystatus.html' %}
                 </div>
                 <div class="hero-actions">

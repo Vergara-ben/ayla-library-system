@@ -41,7 +41,10 @@ def visits_by_hour(start, end):
         'rows': [(label, str(value)) for label, value in series],
         'peak': _hour_label(peak) if peak is not None else '—',
         'peak_count': per_hour.get(peak, 0) if peak is not None else 0,
+        # Visits inside the charted hours, then every visit, then the rest.
         'total': sum(per_hour.values()),
+        'all_visits': logs.count(),
+        'outside_open_hours': logs.count() - sum(per_hour.values()),
     }
 
 
@@ -210,7 +213,10 @@ def books_by_condition():
 
 def shelf_occupancy(limit=15):
     """How loaded each shelf is, fullest first."""
-    shelves = (Shelf.objects.annotate(n=Count('shelflevel__book'))
+    # Deleted books are archived, not removed, so they must not be counted here.
+    shelves = (Shelf.objects
+               .annotate(n=Count('shelflevel__book',
+                                 filter=Q(shelflevel__book__archived_at__isnull=True)))
                .order_by('-n', 'name'))
     top = list(shelves[:limit])
     shelved = Book.objects.filter(shelf_level__isnull=False).count()
@@ -292,7 +298,10 @@ def most_borrowed_genres(start, end, limit=12):
 
 def never_borrowed(limit=10):
     """Stock that has never left the building."""
-    idle = (Book.objects.annotate(loans=Count('transaction'))
+    # Borrows only: reading a book in the library is not borrowing it.
+    idle = (Book.objects
+            .annotate(loans=Count('transaction',
+                                  filter=Q(transaction__transaction_type='Borrow')))
             .filter(loans=0).select_related('shelf_level', 'shelf_level__shelf'))
     total = Book.objects.count()
     count = idle.count()
@@ -370,8 +379,11 @@ def headline(arrivals, occupancy, unshelved, conditions,
     missing_shelf = unshelved.get('count') or 0
 
     return [
-        tile('Visits', arrivals.get('total') or 0,
-             'Busiest at %s' % (arrivals.get('peak') or 'no arrivals yet'),
+        tile('Visits', arrivals.get('all_visits') or 0,
+             'Busiest at %s%s' % (
+                 arrivals.get('peak') or 'no arrivals yet',
+                 (' · %d outside opening hours' % arrivals['outside_open_hours'])
+                 if arrivals.get('outside_open_hours') else ''),
              'period'),
         tile('Fullest hour', occupancy.get('busiest') or '—',
              'Averaged over %d day%s' % (occupancy.get('days_measured') or 0,
