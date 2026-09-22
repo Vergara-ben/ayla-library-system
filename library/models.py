@@ -933,6 +933,46 @@ class PatronCredential(models.Model):
         return self.name
 
 
+class PatronPhoto(models.Model):
+    """The 1x1 photo on a patron's library card.
+
+    A patron's own upload waits for staff approval; one added by staff is
+    approved at once. The card shows the newest approved photo.
+    """
+
+    STATUS_CHOICES = [
+        ('Pending', 'Pending'),
+        ('Approved', 'Approved'),
+        ('Rejected', 'Rejected'),
+    ]
+
+    photo_id = models.AutoField(primary_key=True)
+    patron = models.ForeignKey(Patron, on_delete=models.CASCADE, related_name='photos')
+    content_type = models.CharField(max_length=100)
+    # Kept in the database, like the ID uploads, so it survives a host that wipes its disk.
+    data = models.BinaryField()
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='Pending')
+    uploaded_at = models.DateTimeField(default=timezone.now)
+    # Set when staff added the photo themselves; empty when the patron did.
+    uploaded_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, blank=True, null=True,
+        db_column='uploaded_by', related_name='+',
+    )
+    reviewed_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, blank=True, null=True,
+        db_column='reviewed_by', related_name='+',
+    )
+    reviewed_at = models.DateTimeField(blank=True, null=True)
+    staff_note = models.CharField(max_length=255, blank=True, null=True)
+
+    class Meta:
+        db_table = 'Patron_Photos'
+        ordering = ['-uploaded_at']
+
+    def __str__(self):
+        return f'{self.status} photo for {self.patron_id}'
+
+
 # Transactions
 class Transaction(models.Model):
 

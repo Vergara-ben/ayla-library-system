@@ -35,6 +35,7 @@ urlpatterns = [
     path('patron/deactivate-account/', views.patron_deactivate_account, name='patron_deactivate_account'),
     path('patron/reactivate/', views.patron_reactivate_request, name='patron_reactivate_request'),
     path('patron/library-card/', views.my_library_card, name='my_library_card'),
+    path('patron/library-card/photo/', views.patron_upload_card_photo, name='patron_upload_card_photo'),
     path('admin-portal/login/', views.admin_login, name='admin_login'),
     path('admin-portal/forgot-password/', views.admin_forgot_password, name='admin_forgot_password'),
     # One endpoint for both portals: it acts on whoever is signed in.
@@ -106,6 +107,8 @@ urlpatterns = [
     path('admin-portal/add-patron/', views.admin_add_patron, name='admin_add_patron'),
     path('admin-portal/manage-patron/', views.admin_manage_patron, name='admin_manage_patron'),
     path('admin-portal/patron/<int:patron_id>/library-card/', views.patron_library_card, name='patron_library_card'),
+    path('admin-portal/patron/<int:patron_id>/library-card/photo/', views.staff_card_photo, name='staff_card_photo'),
+    path('admin-portal/card-photo/<int:photo_id>/respond/', views.respond_to_card_photo, name='respond_to_card_photo'),
     path('admin-portal/edit-patron/<int:patron_id>/', views.admin_edit_patron, name='admin_edit_patron'),
     path('admin-portal/delete-patron/<int:patron_id>/', views.admin_delete_patron, name='admin_delete_patron'),
     path('admin-portal/approve-patron/<int:patron_id>/', views.approve_patron, name='approve_patron'),
@@ -155,6 +158,7 @@ urlpatterns = [
     path('admin-portal/announcement-management/', views.announcement_management, name='announcement_management'),
     # Not under /media/: these are identity documents and need a login check.
     re_path(r'^patron-id/(?P<path>.+)$', views.serve_patron_credential, name='patron_credential'),
+    path('card-photo/<int:photo_id>/', views.serve_card_photo, name='card_photo'),
     path('admin-portal/toggle-announcement/', views.toggle_announcement, name='toggle_announcement'),
     path('admin-portal/delete-announcement/', views.delete_announcement, name='delete_announcement'),
     # Floor Plan Management

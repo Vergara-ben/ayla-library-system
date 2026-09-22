@@ -88,7 +88,7 @@ from . import labels
 from . import analytics
 from .reports import (REPORT_TYPES, SNAPSHOT_REPORTS, parse_date_range, build_report,
                       render_report_pdf, render_report_excel)
-from .models import Book, Patron, PatronLog, Transaction, User, ShelfLevel, Donation, Announcement, FloorPlan, Shelf, Room, Door, Waypoint, BLEBeacon, WaypointConnection, SystemLog, BorrowingRule, Obstacle, Stairway, PasswordResetOTP, InventoryRecord, StockMovement, StockAudit, DueDateExtension, ReactivationRequest
+from .models import Book, Patron, PatronLog, Transaction, User, ShelfLevel, Donation, Announcement, FloorPlan, Shelf, Room, Door, Waypoint, BLEBeacon, WaypointConnection, SystemLog, BorrowingRule, Obstacle, Stairway, PasswordResetOTP, InventoryRecord, StockMovement, StockAudit, DueDateExtension, ReactivationRequest, PatronPhoto
 
 # Patron views
 def patron_login(request):
@@ -338,6 +338,20 @@ def _read_credential_document(uploaded):
                          'Please upload a photo or scan of your ID.')
     data = b''.join(uploaded.chunks())
     return f'credential_{uuid4().hex}{ext}', _CREDENTIAL_TYPES[ext], data
+
+
+def _read_card_photo(uploaded):
+    """Check an uploaded 1x1 photo. Returns (content_type, data)."""
+    ext = os.path.splitext(uploaded.name or '')[1].lower()
+    if ext not in ('.jpg', '.jpeg', '.png'):
+        raise ValueError('The photo must be a JPG or PNG image.')
+    if uploaded.size > 3 * 1024 * 1024:
+        raise ValueError('The photo must be 3 MB or smaller.')
+    head = uploaded.read(8)
+    uploaded.seek(0)
+    if not any(head.startswith(sig) for sig in _CREDENTIAL_MAGIC[ext]):
+        raise ValueError('That file does not look like a real JPG or PNG image.')
+    return _CREDENTIAL_TYPES[ext], b''.join(uploaded.chunks())
 
 
 def terms_page(request):
@@ -2217,6 +2231,10 @@ def _patrons_page(request, template):
     pending_reactivations = ReactivationRequest.objects.select_related('patron').filter(
         status='Pending').order_by('-requested_at')
 
+    # Card photos patrons uploaded themselves, awaiting approval.
+    pending_photos = (PatronPhoto.objects.select_related('patron').defer('data')
+                      .filter(status='Pending').order_by('-uploaded_at'))
+
     # Apply the search filter to the table list.
     if search_query:
         patrons_queryset = patrons_queryset.filter(_patron_search_q(search_query))
@@ -2235,6 +2253,7 @@ def _patrons_page(request, template):
         'patrons_overdue': patrons_overdue,
         'pending_patrons': pending_patrons,
         'pending_reactivations': pending_reactivations,
+        'pending_photos': pending_photos,
         'visitor_count': visitor_count,
         'unverified_count': unverified_count,
         # Schools already on file, offered as a picker beside the free-text box.
@@ -11489,6 +11508,7 @@ def _qr_data_uri(payload, box_size=10, border=2):
 def _library_card_context(patron):
     active_borrows = Transaction.objects.filter(
         patron=patron, transaction_type='Borrow', return_date__isnull=True).count()
+    photos = PatronPhoto.objects.filter(patron=patron).defer('data').order_by('-uploaded_at', '-photo_id')
     return {
         'patron': patron,
         'qr_data_uri': _qr_data_uri(patron.qr_code) if patron.qr_code else None,
@@ -11498,6 +11518,11 @@ def _library_card_context(patron):
         'issued_on': timezone.localdate(),
         # Current borrowing rule for the back of the card.
         'rule': BorrowingRule.current(),
+        # Only an approved photo is ever printed.
+        'photo': photos.filter(status='Approved').first(),
+        'pending_photo': photos.filter(status='Pending').first(),
+        # Last decision on the patron's own upload, so a rejection can be explained.
+        'last_review': photos.exclude(status='Pending').filter(uploaded_by__isnull=True).first(),
     }
 
 
@@ -11534,3 +11559,131 @@ def my_library_card(request):
     context = _library_card_context(patron)
     context['printed_by_staff'] = False
     return render(request, 'admin/librarycard.html', context)
+
+
+@patron_login_required
+def patron_upload_card_photo(request):
+    """A patron sends a 1x1 photo for their card; it waits for staff approval."""
+    if request.method != 'POST':
+        return redirect('my_library_card')
+    patron = get_object_or_404(Patron, patron_id=request.session.get('patron_id'))
+    uploaded = request.FILES.get('photo')
+    if uploaded is None:
+        messages.error(request, 'Please choose a photo to upload.')
+        return redirect('my_library_card')
+    try:
+        content_type, data = _read_card_photo(uploaded)
+    except ValueError as exc:
+        messages.error(request, str(exc))
+        return redirect('my_library_card')
+
+    with transaction.atomic():
+        # One request at a time: a new upload replaces the one still waiting.
+        PatronPhoto.objects.filter(patron=patron, status='Pending').delete()
+        photo = PatronPhoto.objects.create(patron=patron, content_type=content_type, data=data)
+    log_patron_action(request, 'Create', 'PatronPhoto', photo.photo_id,
+                      'Submitted a card photo for approval', patron=patron)
+    messages.success(request, 'Photo sent. It will appear on your card once the library approves it.')
+    return redirect('my_library_card')
+
+
+@granted_module_required('patrons')
+def staff_card_photo(request, patron_id):
+    """Staff add or remove a patron's card photo from the card page; no approval needed."""
+    patron = get_object_or_404(Patron, patron_id=patron_id)
+    if request.method != 'POST':
+        return redirect('patron_library_card', patron_id=patron_id)
+    admin = User.objects.filter(admin_id=request.session.get('admin_id')).first()
+
+    if request.POST.get('action') == 'remove':
+        removed, _ = PatronPhoto.objects.filter(patron=patron, status='Approved').delete()
+        if removed:
+            log_admin_action(request, 'Delete', 'PatronPhoto', patron.patron_id,
+                             f'Removed the card photo of "{patron.fullname}"')
+            messages.success(request, 'Photo removed.')
+        return redirect('patron_library_card', patron_id=patron_id)
+
+    uploaded = request.FILES.get('photo')
+    if uploaded is None:
+        messages.error(request, 'Please choose a photo to upload.')
+        return redirect('patron_library_card', patron_id=patron_id)
+    try:
+        content_type, data = _read_card_photo(uploaded)
+    except ValueError as exc:
+        messages.error(request, str(exc))
+        return redirect('patron_library_card', patron_id=patron_id)
+
+    now = timezone.now()
+    with transaction.atomic():
+        PatronPhoto.objects.filter(patron=patron, status='Approved').delete()
+        photo = PatronPhoto.objects.create(
+            patron=patron, content_type=content_type, data=data, status='Approved',
+            uploaded_by=admin, reviewed_by=admin, reviewed_at=now)
+    log_admin_action(request, 'Create', 'PatronPhoto', photo.photo_id,
+                     f'Added a card photo for "{patron.fullname}"')
+    messages.success(request, 'Photo saved to the card.')
+    return redirect('patron_library_card', patron_id=patron_id)
+
+
+@admin_or_module_required('patrons')
+def respond_to_card_photo(request, photo_id):
+    """Staff approve or reject a photo a patron uploaded for their card."""
+    back_to_card = request.POST.get('return_to') == 'card'
+
+    def _back(patron_id=None):
+        if back_to_card and patron_id:
+            return redirect('patron_library_card', patron_id=patron_id)
+        return _patron_page_redirect(request)
+
+    if request.method != 'POST':
+        return _patron_page_redirect(request)
+    action = request.POST.get('action')
+    admin = User.objects.filter(admin_id=request.session.get('admin_id')).first()
+
+    with transaction.atomic():
+        photo = (PatronPhoto.objects.select_for_update().select_related('patron')
+                 .filter(photo_id=photo_id, status='Pending').first())
+        if photo is None:
+            messages.error(request, 'That photo has already been reviewed.')
+            return _back()
+        patron = photo.patron
+        photo.reviewed_by = admin
+        photo.reviewed_at = timezone.now()
+        if action == 'approve':
+            # The approved photo replaces whatever was on the card.
+            PatronPhoto.objects.filter(patron=patron, status='Approved').delete()
+            photo.status = 'Approved'
+            photo.save(update_fields=['status', 'reviewed_by', 'reviewed_at'])
+            log_admin_action(request, 'Approve', 'PatronPhoto', photo.photo_id,
+                             f'Approved the card photo of "{patron.fullname}"')
+            messages.success(request, f'Photo for {patron.fullname} approved.')
+        elif action == 'reject':
+            photo.status = 'Rejected'
+            photo.staff_note = (request.POST.get('staff_note') or '').strip()[:255] or None
+            photo.save(update_fields=['status', 'reviewed_by', 'reviewed_at', 'staff_note'])
+            log_admin_action(request, 'Reject', 'PatronPhoto', photo.photo_id,
+                             f'Rejected the card photo of "{patron.fullname}"'
+                             + (f' — {photo.staff_note}' if photo.staff_note else ''))
+            messages.success(request, f'Photo for {patron.fullname} rejected.')
+        else:
+            messages.error(request, 'Unknown action.')
+    return _back(patron.patron_id)
+
+
+def serve_card_photo(request, photo_id):
+    """A card photo, for its patron and for staff who hold the patrons module."""
+    photo = PatronPhoto.objects.filter(photo_id=photo_id).first()
+    if photo is None:
+        raise Http404('No such photo.')
+
+    allowed = request.session.get('patron_id') == photo.patron_id
+    if not allowed and 'admin_id' in request.session:
+        user = User.objects.filter(admin_id=request.session['admin_id']).first()
+        allowed = user is not None and (
+            request.session.get('admin_role') != 'Staff' or user.has_module('patrons'))
+    if not allowed:
+        raise Http404('No such photo.')
+
+    response = HttpResponse(bytes(photo.data), content_type=photo.content_type)
+    response['Cache-Control'] = 'private, no-store'
+    return response
