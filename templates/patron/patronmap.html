@@ -1056,13 +1056,31 @@ function distanceTo(pos, point) {
   return point ? Math.hypot(pos.x - point.x, pos.y - point.y) : null;
 }
 
+// How far the patron is from the shelf: its nearest edge, or the end of the route beside it.
+function arrivalGap(pos) {
+  if (!targetPoint) return null;
+  let gap = distanceTo(pos, targetPoint);
+  const sh = ((posMap() && posMap().shelves) || []).find(function (x) {
+    return x.shelf_id === targetData.shelf_id;
+  });
+  const outline = sh && ((sh.footprint && sh.footprint.length >= 3) ? sh.footprint : sh.geometry);
+  if (outline && outline.length >= 3) {
+    gap = Math.min(gap, pointInPolygon(pos.x, pos.y, outline)
+      ? 0 : nearestPointOnPolygon(pos.x, pos.y, outline).d);
+  }
+  if (lastRoutePoints && lastRoutePoints.length) {
+    gap = Math.min(gap, distanceTo(pos, lastRoutePoints[lastRoutePoints.length - 1]));
+  }
+  return gap;
+}
+
 // Called on every fix. Decides whether this one is worth acting on at all.
 function onPositionFix(pos) {
   if (!targetData.shelf_id || targetData.floor_closed || targetData.floor_renovation) return;
 
   const arriveAt = metresToUnits(ARRIVAL_M);
   const leaveAt = metresToUnits(DEPARTURE_M);
-  const gap = distanceTo(pos, targetPoint);
+  const gap = arrivalGap(pos);
 
   // Arrival only counts on the floor the shelf is on.
   if (gap !== null && arriveAt !== null && patronFloorId === targetFloorId) {
@@ -1161,6 +1179,7 @@ async function computeRoute() {
   let r;
   try { r = await fetchJSON(url); } catch (e) { return; }
   if (viewing !== shownFloorId) return;      // the floor changed while this was on its way
+  if (hasArrived) return;                    // arrived while this was on its way
   clearArrivalMarker();
   if (!r.success) {
     drawRouteArrows(null);
@@ -1187,6 +1206,10 @@ async function computeRoute() {
   // Chevrons, and no line joining them.
   drawRouteArrows(drawPoints);
   document.getElementById('navBtn').textContent = 'Navigating…';
+  // Walking on again after arriving.
+  if (targetData.shelf_name) {
+    document.getElementById('shelfName').textContent = 'Target: ' + targetData.shelf_name;
+  }
 
   const ppm = mapData && mapData.pixels_per_meter;
   const asDistance = function (v) {
@@ -1219,6 +1242,20 @@ function drawOtherFloorLeg(r) {
   const index = legs.findIndex(function (l) { return l.floor_plan_id === shownFloorId; });
   if (index < 0 || !legs[index].points || legs[index].points.length < 2) {
     drawRouteArrows(null);
+    // No walk drawn here, but still show where the stairs come out.
+    const arr = r.arrival;
+    if (arr && arr.floor_plan_id === shownFloorId && arr.x != null) {
+      arrivalMarker = L.circleMarker(toLatLng(arr.x, arr.y), {
+        radius: 14, color: AylaTheme.color('--blue'), weight: 3,
+        fillColor: AylaTheme.color('--blue'), fillOpacity: 0.15,
+      }).bindTooltip(arr.estimated ? 'You arrive about here' : 'You arrive here', { direction: 'top' })
+        .addTo(routeLayer);
+      path.textContent = shownFloorId === targetFloorId
+        ? 'You arrive at the ' + (arr.estimated ? 'stairs' : arr.label) + '. From there, head to '
+          + (targetData.shelf_name || 'the shelf') + ', highlighted on this map.'
+        : 'You arrive at the ' + (arr.estimated ? 'stairs' : arr.label) + ' on this floor.';
+      return;
+    }
     path.textContent = r.stairs_only
       ? 'The stairs to the ' + (mapData.floor_label || 'this floor') + ' are not linked on the map yet.'
       : 'Your route does not pass through the ' + (mapData.floor_label || 'this floor') + '.';
@@ -1683,6 +1720,40 @@ function solveFrom(used) {
   return (isFinite(x) && isFinite(y)) ? { x: x, y: y } : null;
 }
 
+// Gauss-Newton on the true ranges; near beacons count more, as their ranges are steadier.
+const REFINE_STEPS = 10;
+function rangeCost(x, y, used) {
+  let c = 0;
+  for (const p of used) {
+    const r = Math.hypot(x - p.x, y - p.y) - p.d;
+    c += (r * r) / Math.max(p.d * p.d, 1);
+  }
+  return c;
+}
+
+function refineFix(fix, used) {
+  let x = fix.x, y = fix.y;
+  for (let it = 0; it < REFINE_STEPS; it++) {
+    let a11 = 0, a12 = 0, a22 = 0, b1 = 0, b2 = 0;
+    for (const p of used) {
+      const dx = x - p.x, dy = y - p.y;
+      const r = Math.hypot(dx, dy) || 1e-6;
+      const w = 1 / Math.max(p.d * p.d, 1);
+      const res = r - p.d, jx = dx / r, jy = dy / r;
+      a11 += w * jx * jx; a12 += w * jx * jy; a22 += w * jy * jy;
+      b1 += w * jx * res; b2 += w * jy * res;
+    }
+    const det = a11 * a22 - a12 * a12;
+    if (!(Math.abs(det) > 1e-12)) break;
+    const sx = (a22 * b1 - a12 * b2) / det, sy = (a11 * b2 - a12 * b1) / det;
+    x -= sx; y -= sy;
+    if (Math.hypot(sx, sy) < 0.5) break;
+  }
+  // Keep whichever fits the ranges better.
+  if (!isFinite(x) || !isFinite(y)) return fix;
+  return rangeCost(x, y, used) < rangeCost(fix.x, fix.y, used) ? { x: x, y: y } : fix;
+}
+
 function trilaterate() {
   if (!mapData) return;
   // First which floor, then where on it.
@@ -1725,6 +1796,7 @@ function trilaterate() {
   let fix = null;
   for (let n = MAX_BEACONS_USED; n <= pts.length && !fix; n++) {
     fix = solveFrom(pts.slice(0, n));
+    if (fix) fix = refineFix(fix, pts.slice(0, n));
   }
   if (!fix) {
     setStatus('amber', 'Beacons are too close to a straight line to fix a position');
@@ -1921,36 +1993,61 @@ async function enableBLE() {
 
   // Try continuous scanning.
   if (navigator.bluetooth.requestLEScan) {
+    // Listening first, so no reading is missed however the scan starts.
+    navigator.bluetooth.addEventListener('advertisementreceived', onAdvertisement);
+    const request = navigator.bluetooth.requestLEScan({ acceptAllAdvertisements: true });
     try {
-      const scan = await withTimeout(
-        navigator.bluetooth.requestLEScan({ acceptAllAdvertisements: true }), 8000);
-      if (scan) {
-        navigator.bluetooth.addEventListener('advertisementreceived', onAdvertisement);
-        setStatus('green', 'BLE: Scanning…');
-        startTrilateration();
-        return;
-      }
-      // Resolved as a timeout: Chrome accepted the call and never started.
+      const scan = await withTimeout(request, 8000);
+      if (scan) { bleScanStarted(); return; }
     } catch (err) {
-      const message = String(err);
-      if (/cancel|denied|permission/i.test(message)) {
-        setStatus('amber', 'Bluetooth permission refused');
-        alert('Bluetooth was not allowed, so your position cannot be shown. '
-            + 'Press Enable Navigation and allow the permission to try again.');
-        return;
-      }
-      if (/notfounderror|adapter/i.test(message)) {
-        // Permission error from the scan call.
-        setStatus('amber', 'Bluetooth not available to this browser');
-        alert('Chrome could not reach a Bluetooth adapter to scan with. On Android this is '
-            + 'almost always the "Nearby devices" (or Location, on older Android) permission '
-            + 'not being granted to Chrome -- check Settings → Apps → Chrome → Permissions, '
-            + 'and that Location is on for the phone as a whole.');
-        return;
-      }
+      if (!bleScanFailed(err)) scanNotStarted();
+      return;
     }
+    // Still on the permission prompt: keep waiting rather than giving up.
+    setStatus('amber', 'Waiting for Bluetooth permission…');
+    const gaveUp = setTimeout(function () { if (!bleInterval) scanNotStarted(); }, SCAN_PROMPT_WAIT_MS);
+    request.then(function (scan) {
+      clearTimeout(gaveUp);
+      if (scan) bleScanStarted(); else scanNotStarted();
+    }).catch(function (err) {
+      clearTimeout(gaveUp);
+      if (!bleScanFailed(err)) scanNotStarted();
+    });
+    return;
   }
-  // Nothing further to try.
+  scanNotStarted();
+}
+
+// How long a patron may take over the permission prompt.
+const SCAN_PROMPT_WAIT_MS = 60000;
+
+function bleScanStarted() {
+  setStatus('green', 'BLE: Scanning…');
+  startTrilateration();
+}
+
+// True when the error was explained to the patron.
+function bleScanFailed(err) {
+  const message = String(err);
+  if (/cancel|denied|permission/i.test(message)) {
+    setStatus('amber', 'Bluetooth permission refused');
+    alert('Bluetooth was not allowed, so your position cannot be shown. '
+        + 'Press Enable Navigation and allow the permission to try again.');
+    return true;
+  }
+  if (/notfounderror|adapter/i.test(message)) {
+    // Permission error from the scan call.
+    setStatus('amber', 'Bluetooth not available to this browser');
+    alert('Chrome could not reach a Bluetooth adapter to scan with. On Android this is '
+        + 'almost always the "Nearby devices" (or Location, on older Android) permission '
+        + 'not being granted to Chrome -- check Settings → Apps → Chrome → Permissions, '
+        + 'and that Location is on for the phone as a whole.');
+    return true;
+  }
+  return false;
+}
+
+function scanNotStarted() {
   setStatus('amber', 'Live position not available here');
   alert('Bluetooth scanning did not start, so your position cannot be shown. '
       + 'The floor plan and shelf locations still work.'

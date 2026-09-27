@@ -88,6 +88,14 @@
             </div>
 
             <div class="rounded-xl border border-slate-800/80 p-4 flex items-center gap-3 flex-wrap" style="background-color: var(--bg-card);">
+                {% if floors|length > 1 %}
+                <select id="floorPick" aria-label="Floor to test" onchange="location.search = '?floor=' + this.value"
+                        class="text-xs rounded px-2 py-1.5 text-slate-200 border border-slate-700" style="background-color: var(--bg-input);">
+                    {% for f in floors %}
+                    <option value="{{ f.floor_plan_id }}"{% if f.floor_plan_id == chosen_floor_id %} selected{% endif %}>{{ f.name }} ({{ f.beacon_count }} beacon{{ f.beacon_count|pluralize }})</option>
+                    {% endfor %}
+                </select>
+                {% endif %}
                 <button id="startBtn" class="btn btn-primary" onclick="startTest()">
                     <i class="fa-solid fa-play"></i> Start
                 </button>
@@ -235,6 +243,7 @@
 
 <script>
 const MAP_DATA_URL = "{% url 'get_map_data' %}";
+const TEST_FLOOR_ID = "{{ chosen_floor_id }}";
 
 // CSRF token for saving calibration.
 const CSRF = '{{ csrf_token }}';
@@ -244,6 +253,8 @@ let meMarker = null, meCircle = null;
 const beaconMarkers = {};
 
 const rssiBuffers = {};          // beacon_id -> recent RSSI
+const rssiLastSeen = {};         // beacon_id -> when it was last heard
+const BEACON_STALE_MS = 6000;    // same as the patron map
 const advertisedTxPower = {};    // beacon id -> tx power the packet carried
 const matchedBeacons = new Set();
 const heardDevices = new Map();  // device key -> what it last sent
@@ -252,7 +263,7 @@ let currentScan = null, tickTimer = null, advCount = 0;
 
 // Same calculations as the patron map.
 const DEFAULT_TX_POWER = -59;
-const DEFAULT_PATH_LOSS_N = 2.0;
+const DEFAULT_PATH_LOSS_N = 2.5;
 const APPLE_COMPANY_ID = 0x004C;
 const EDDYSTONE_SERVICE = '0000feaa-0000-1000-8000-00805f9b34fb';
 
@@ -282,6 +293,12 @@ function pushRssi(beaconId, rssi, win) {
   const buf = rssiBuffers[beaconId] || (rssiBuffers[beaconId] = []);
   buf.push(rssi);
   if (buf.length > (win || 5)) buf.shift();
+  rssiLastSeen[beaconId] = Date.now();
+}
+
+function isFresh(beaconId) {
+  const seen = rssiLastSeen[beaconId];
+  return !!seen && (Date.now() - seen) <= BEACON_STALE_MS;
 }
 
 function hex(view, from, to) {
@@ -417,7 +434,7 @@ function trilaterate() {
   const pts = [];
   mapData.beacons.forEach((b) => {
     const buf = rssiBuffers[b.beacon_id];
-    if (buf && buf.length) {
+    if (buf && buf.length && isFresh(b.beacon_id)) {
       const avg = buf.reduce((a, c) => a + c, 0) / buf.length;
       const cal = calibrationFor(b);
       const slant = rssiToDistance(avg, cal.txPower, cal.n);
@@ -447,7 +464,7 @@ function trilaterate() {
 function toLatLng(x, y) { return [imgH - y, x]; }
 
 async function loadMap() {
-  const r = await fetch(MAP_DATA_URL, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+  const r = await fetch(MAP_DATA_URL + (TEST_FLOOR_ID ? '?floor_plan_id=' + TEST_FLOOR_ID : ''), { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
   const d = await r.json();
   if (!d.success || !d.has_active) {
     setStatus('bad', 'No active floor plan');
@@ -638,6 +655,8 @@ const CAL_URL = "{% url 'calibrate_beacon' %}";
 let truthPoint = null;        // {x, y} canvas units: where the operator says they are
 let armingTruth = false;
 let truthMarker = null;
+let truthSetAt = 0;           // readings from before this were taken somewhere else
+const MIN_READINGS_PER_SAMPLE = 3;
 const calSamples = {};        // beacon_id -> [{rssi, dist}, ...]
 const calFits = {};           // beacon_id -> {tx, n, r2, count, spread}
 
@@ -650,6 +669,9 @@ window.armTruth = function () {
 function setTruth(x, y) {
   truthPoint = { x: x, y: y };
   armingTruth = false;
+  // Start every beacon's readings afresh at the new spot.
+  Object.keys(rssiBuffers).forEach(function (k) { rssiBuffers[k] = []; });
+  truthSetAt = Date.now();
   document.getElementById('recordBtn').disabled = false;
   const ll = toLatLng(x, y);
   if (!truthMarker) {
@@ -678,16 +700,25 @@ function medianOf(buf) {
 // One median sample per beacon.
 window.recordSample = function () {
   if (!truthPoint) { alert('Set your position on the map first.'); return; }
-  let taken = 0;
+  let taken = 0, settling = 0;
   const missing = [];
   (mapData.beacons || []).forEach(function (b) {
     const buf = rssiBuffers[b.beacon_id];
-    if (!buf || !buf.length) { missing.push(b.label || ('#' + b.beacon_id)); return; }
+    if (!buf || !buf.length || !isFresh(b.beacon_id)
+        || (rssiLastSeen[b.beacon_id] || 0) < truthSetAt) {
+      missing.push(b.label || ('#' + b.beacon_id)); return;
+    }
+    // Too few readings since standing here to trust the median.
+    if (buf.length < MIN_READINGS_PER_SAMPLE) { settling++; return; }
     const d = trueDistanceM(b);
     if (d == null || d < 0.25) return;   // closer than ~0.25 m the log-distance model says nothing
     (calSamples[b.beacon_id] = calSamples[b.beacon_id] || []).push({ rssi: medianOf(buf), dist: d });
     taken++;
   });
+  if (!taken && settling) {
+    alert('Hold still a few more seconds so each beacon is heard at this spot, then press Record again.');
+    return;
+  }
   if (!taken) {
     alert('No beacon was heard just now, so nothing was recorded.'
         + (missing.length ? '\n\nNot heard: ' + missing.join(', ') : ''));
@@ -697,7 +728,7 @@ window.recordSample = function () {
   renderCalibration();
   document.getElementById('truthNote').textContent = missing.length
     ? ('Recorded ' + taken + '. Not heard here: ' + missing.join(', '))
-    : ('Recorded ' + taken + ' -- move a couple of metres and record again.');
+    : ('Recorded ' + taken + ' -- set your next spot a couple of metres away and record again.');
 };
 
 window.clearSamples = function () {

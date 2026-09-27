@@ -1,6 +1,7 @@
 """Smoke tests."""
 
 from datetime import date, datetime, timedelta
+from decimal import Decimal
 import io
 import json
 import math
@@ -14,10 +15,12 @@ from django.test import TestCase, Client
 from django.utils import timezone
 
 from .auth_utils import hash_password, password_length_error
+from .reports import build_report
 from .models import (
     Announcement, BLEBeacon, Book, BorrowingRule, Donation, Door, FloorPlan, LoginAttempt,
     Obstacle, Patron, Room,
     InventoryRecord, Obstacle, PatronLog, Shelf, ShelfLevel, Stairway, SystemLog,
+    StockMovement,
     Transaction, User,
     Waypoint,
     WaypointConnection,
@@ -232,12 +235,27 @@ class DeletedRecordsStayTests(TestCase):
         self.assertFalse(Patron.objects.filter(pk=pending.pk).exists())
         self.assertIn('Blurry ID', Patron.all_objects.get(pk=pending.pk).archive_reason)
 
-    def test_a_deleted_patrons_email_is_still_taken(self):
+    def test_a_deleted_patrons_email_can_be_registered_again(self):
         self.patron.archive('Smoke Admin')
         self.client.post('/admin-portal/add-patron/', {
             'first_name': 'Other', 'last_name': 'Person', 'email': 'ana@example.invalid',
             'patron_type': 'Student', 'password': 'SmokeTest123', 'id_confirmed': 'on'})
-        self.assertEqual(Patron.all_objects.filter(email='ana@example.invalid').count(), 1)
+        # The removed record stays archived and keeps its history, minus the address.
+        removed = Patron.all_objects.get(pk=self.patron.pk)
+        self.assertIsNotNone(removed.archived_at)
+        self.assertIsNone(removed.email)
+        self.assertIn('ana@example.invalid', removed.archive_reason)
+        # The address now belongs to the new patron.
+        fresh = Patron.objects.get(email='ana@example.invalid')
+        self.assertNotEqual(fresh.pk, self.patron.pk)
+
+    def test_a_live_patrons_email_is_still_refused(self):
+        self.client.post('/admin-portal/add-patron/', {
+            'first_name': 'Other', 'last_name': 'Person', 'email': 'ana@example.invalid',
+            'patron_type': 'Student', 'password': 'SmokeTest123', 'id_confirmed': 'on'})
+        held = Patron.all_objects.filter(email='ana@example.invalid')
+        self.assertEqual(held.count(), 1)
+        self.assertEqual(held.first().pk, self.patron.pk)
 
     def test_there_is_no_archive_page(self):
         for url in ('/admin-portal/archive/', '/admin-portal/archive/restore/',
@@ -837,6 +855,293 @@ class DeskModeTests(TestCase):
         self.assertIn('log-management', response['Location'])
 
 
+class DeskFindBookTests(TestCase):
+    """Anyone at the desk can look a book up, and sees only catalogue facts."""
+
+    def setUp(self):
+        from .desk import DESK_SESSION_KEY
+        self.user = _admin(modules='logs,patrons')
+        self.client = _signed_in(self.user)
+        session = self.client.session
+        session[DESK_SESSION_KEY] = True
+        session.save()
+        self.book = Book.objects.create(title='Noli Me Tangere', author='Rizal',
+                                        genre='FIC', status='Available')
+
+    def test_a_search_returns_the_title_and_whether_it_is_in(self):
+        data = self.client.get('/desk/find-book/', {'search': 'noli'}).json()
+        self.assertTrue(data['success'])
+        titles = [r['title'] for r in data['results']]
+        self.assertIn('Noli Me Tangere', titles)
+        row = next(r for r in data['results'] if r['title'] == 'Noli Me Tangere')
+        self.assertEqual(row['available'], 1)
+
+    def test_a_short_term_searches_nothing(self):
+        data = self.client.get('/desk/find-book/', {'search': 'n'}).json()
+        self.assertEqual(data['results'], [])
+
+    def test_nothing_about_a_patron_is_returned(self):
+        data = self.client.get('/desk/find-book/', {'search': 'noli'}).json()
+        leaked = {'patron', 'patron_id', 'borrower', 'email', 'card_number'}
+        for row in data['results']:
+            self.assertEqual(leaked & set(row), set())
+
+    def test_the_lookup_survives_desk_mode(self):
+        """The middleware confines the browser, but not to the point of uselessness."""
+        self.assertEqual(self.client.get('/desk/find-book/', {'search': 'noli'}).status_code, 200)
+
+
+class StairPairingTests(TestCase):
+    """Stairs join two floors only in pairs, and the plan says so when they do not."""
+
+    def setUp(self):
+        self.admin = _admin(modules='logs,floorplan,shelf')
+        self.client = _signed_in(self.admin)
+        self.ground = FloorPlan.objects.create(name='Ground', floor_number=1, is_active=True,
+                                               canvas_width=1000, canvas_height=800)
+        self.upper = FloorPlan.objects.create(name='Upper', floor_number=2, is_active=True,
+                                              canvas_width=1000, canvas_height=800)
+        self.square = [[100, 100], [160, 100], [160, 160], [100, 160]]
+
+    def _stair(self, plan, connects_to=None, x=130, y=130, direction='both'):
+        return Stairway.objects.create(
+            floor_plan=plan, kind='Stairs', geometry=self.square,
+            map_x=x, map_y=y, direction=direction, connects_to=connects_to, is_active=True)
+
+    def _readiness(self, plan):
+        return self.client.get('/admin-portal/floor-plan-readiness/',
+                               {'floor_plan_id': plan.floor_plan_id}).json()
+
+    def _texts(self, data):
+        return ' | '.join(i['text'] for i in data['issues'])
+
+    def test_a_floor_with_no_stairway_is_a_blocker(self):
+        data = self._readiness(self.ground)
+        self.assertIn('No stairway on this floor', self._texts(data))
+        self.assertTrue(any(i['level'] == 'blocker' and 'stairway' in i['text']
+                            for i in data['issues']))
+
+    def test_an_unlinked_stairway_is_reported(self):
+        self._stair(self.ground)
+        data = self._readiness(self.ground)
+        self.assertIn('not linked to a floor', self._texts(data))
+
+    def test_a_stairway_with_no_partner_is_reported(self):
+        self._stair(self.ground, connects_to=self.upper)
+        data = self._readiness(self.ground)
+        self.assertIn('no matching stairway', self._texts(data))
+
+    def test_a_proper_pair_raises_no_stair_complaint(self):
+        self._stair(self.ground, connects_to=self.upper)
+        self._stair(self.upper, connects_to=self.ground)
+        text = self._texts(self._readiness(self.ground))
+        self.assertNotIn('no matching stairway', text)
+        self.assertNotIn('No stairway on this floor', text)
+        self.assertNotIn('not linked to a floor', text)
+
+    def test_going_up_from_the_top_floor_is_reported(self):
+        self._stair(self.upper, connects_to=self.ground, direction='up')
+        self.assertIn('goes up from the top floor', self._texts(self._readiness(self.upper)))
+
+    def test_drawing_the_far_end_creates_and_links_both_ways(self):
+        st = self._stair(self.ground, connects_to=self.upper)
+        r = self.client.post('/admin-portal/match-stairway/', {
+            'stairway_id': st.stairway_id,
+            'connects_to': self.upper.floor_plan_id}).json()
+        self.assertTrue(r['success'])
+        self.assertTrue(r['created'])
+        partner = Stairway.objects.get(floor_plan=self.upper)
+        self.assertEqual(partner.connects_to_id, self.ground.floor_plan_id)
+        self.assertEqual((partner.map_x, partner.map_y), (st.map_x, st.map_y))
+
+    def test_the_far_end_of_an_upward_stair_goes_down(self):
+        st = self._stair(self.ground, connects_to=self.upper, direction='up')
+        self.client.post('/admin-portal/match-stairway/', {
+            'stairway_id': st.stairway_id, 'connects_to': self.upper.floor_plan_id})
+        self.assertEqual(Stairway.objects.get(floor_plan=self.upper).direction, 'down')
+
+    def test_an_existing_far_end_is_linked_not_duplicated(self):
+        st = self._stair(self.ground, connects_to=self.upper)
+        self._stair(self.upper)
+        r = self.client.post('/admin-portal/match-stairway/', {
+            'stairway_id': st.stairway_id,
+            'connects_to': self.upper.floor_plan_id}).json()
+        self.assertTrue(r['success'])
+        self.assertFalse(r['created'])
+        self.assertEqual(Stairway.objects.filter(floor_plan=self.upper).count(), 1)
+        self.assertEqual(Stairway.objects.get(floor_plan=self.upper).connects_to_id,
+                         self.ground.floor_plan_id)
+
+    def test_linking_one_end_links_the_other_back(self):
+        st = self._stair(self.ground)
+        far = self._stair(self.upper)
+        self.client.post('/admin-portal/edit-stairway/', {
+            'stairway_id': st.stairway_id, 'connects_to': self.upper.floor_plan_id})
+        far.refresh_from_db()
+        self.assertEqual(far.connects_to_id, self.ground.floor_plan_id)
+
+    def test_a_stairway_cannot_reach_its_own_floor(self):
+        st = self._stair(self.ground)
+        r = self.client.post('/admin-portal/match-stairway/', {
+            'stairway_id': st.stairway_id,
+            'connects_to': self.ground.floor_plan_id}).json()
+        self.assertFalse(r['success'])
+
+
+class DeskPositionTests(TestCase):
+    """The desk is marked on the floor plan, and the kiosk routes from it."""
+
+    def setUp(self):
+        from .desk import DESK_SESSION_KEY
+        self.admin = _admin(modules='logs,floorplan')
+        self.client = _signed_in(self.admin)
+        self.plan = FloorPlan.objects.create(name='Ground', floor_number=1, is_active=True,
+                                             canvas_width=1000, canvas_height=800)
+        self.room = Room.objects.create(floor_plan=self.plan, name='Reading Room',
+                                        map_x=500, map_y=400, is_active=True)
+        self.shelf = Shelf.objects.create(room=self.room, name='Shelf A',
+                                          map_x=600, map_y=500, is_active=True)
+        self.kiosk = _signed_in(self.admin)
+        session = self.kiosk.session
+        session[DESK_SESSION_KEY] = True
+        session.save()
+
+    def test_an_admin_marks_the_desk(self):
+        r = self.client.post('/admin-portal/set-floorplan-desk/', {
+            'floorplan_id': self.plan.floor_plan_id, 'desk_x': 120, 'desk_y': 240}).json()
+        self.assertTrue(r['success'])
+        self.plan.refresh_from_db()
+        self.assertEqual((self.plan.desk_x, self.plan.desk_y), (120, 240))
+
+    def test_a_point_off_the_plan_is_refused(self):
+        r = self.client.post('/admin-portal/set-floorplan-desk/', {
+            'floorplan_id': self.plan.floor_plan_id, 'desk_x': 9999, 'desk_y': 10}).json()
+        self.assertFalse(r['success'])
+        self.plan.refresh_from_db()
+        self.assertIsNone(self.plan.desk_x)
+
+    def test_the_desk_can_be_taken_off_again(self):
+        self.plan.desk_x, self.plan.desk_y = 100, 100
+        self.plan.save()
+        r = self.client.post('/admin-portal/set-floorplan-desk/', {
+            'floorplan_id': self.plan.floor_plan_id, 'clear': '1'}).json()
+        self.assertTrue(r['success'])
+        self.plan.refresh_from_db()
+        self.assertIsNone(self.plan.desk_x)
+
+    def test_the_kiosk_says_so_when_no_desk_is_marked(self):
+        r = self.kiosk.get('/desk/way/', {'shelf_id': self.shelf.shelf_id}).json()
+        self.assertFalse(r['success'])
+        self.assertTrue(r['no_desk'])
+
+    def test_the_kiosk_routes_from_the_marked_desk(self):
+        self.plan.desk_x, self.plan.desk_y = 100, 100
+        self.plan.save()
+        r = self.kiosk.get('/desk/way/', {'shelf_id': self.shelf.shelf_id}).json()
+        # Whether a path is found depends on the waypoints drawn, but the desk
+        # it starts from and the plan it draws must always be the marked one.
+        self.assertEqual(r['desk']['floor_plan_id'], self.plan.floor_plan_id)
+        self.assertEqual((r['desk']['x'], r['desk']['y']), (100, 100))
+
+    def test_an_unplaced_shelf_cannot_be_routed_to(self):
+        self.plan.desk_x, self.plan.desk_y = 100, 100
+        self.plan.save()
+        loose = Shelf.objects.create(room=self.room, name='Unplaced', is_active=True)
+        r = self.kiosk.get('/desk/way/', {'shelf_id': loose.shelf_id}).json()
+        self.assertFalse(r['success'])
+
+
+class DeskUnlockWayOutTests(TestCase):
+    """A forgotten password must not strand the machine in desk mode."""
+
+    def setUp(self):
+        from .desk import DESK_SESSION_KEY
+        self.armed = _admin(email='armed@example.invalid', modules='logs')
+        self.client = _signed_in(self.armed)
+        session = self.client.session
+        session[DESK_SESSION_KEY] = True
+        session.save()
+        self.other = User.objects.create(
+            fullname='Other Librarian', email='other@example.invalid',
+            password_hash=hash_password('OtherPass123'),
+            role='Staff', account_status='Active')
+
+    def _still_armed(self):
+        from .desk import DESK_SESSION_KEY
+        return bool(self.client.session.get(DESK_SESSION_KEY))
+
+    def test_the_armed_account_unlocks_with_its_own_password(self):
+        r = self.client.post('/desk/unlock/', {'password': 'SmokeTest123'}).json()
+        self.assertTrue(r['success'])
+        self.assertFalse(self._still_armed())
+
+    def test_another_active_account_can_free_the_machine(self):
+        r = self.client.post('/desk/unlock/', {
+            'email': 'other@example.invalid', 'password': 'OtherPass123'}).json()
+        self.assertTrue(r['success'])
+        self.assertFalse(self._still_armed())
+
+    def test_freeing_it_with_another_account_does_not_hand_over_the_session(self):
+        """Otherwise whoever unlocks inherits the armed account's portal."""
+        self.client.post('/desk/unlock/', {
+            'email': 'other@example.invalid', 'password': 'OtherPass123'})
+        self.assertIsNone(self.client.session.get('admin_id'))
+
+    def test_an_inactive_account_cannot_free_it(self):
+        self.other.account_status = 'Inactive'
+        self.other.save()
+        r = self.client.post('/desk/unlock/', {
+            'email': 'other@example.invalid', 'password': 'OtherPass123'}).json()
+        self.assertFalse(r['success'])
+        self.assertTrue(self._still_armed())
+
+    def test_an_unknown_email_is_refused_without_saying_so(self):
+        r = self.client.post('/desk/unlock/', {
+            'email': 'ghost@example.invalid', 'password': 'SmokeTest123'}).json()
+        self.assertFalse(r['success'])
+        self.assertNotIn('ghost', r['error'])
+        self.assertTrue(self._still_armed())
+
+    def test_an_emailed_code_unlocks_the_armed_account(self):
+        from .desk import UNLOCK_CODE_KEY
+        from django.utils import timezone
+        from datetime import timedelta
+        session = self.client.session
+        session[UNLOCK_CODE_KEY] = {
+            'code': '424242',
+            'expires': (timezone.now() + timedelta(minutes=10)).timestamp(),
+            'attempts': 0}
+        session.save()
+        r = self.client.post('/desk/unlock/', {'code': '424242'}).json()
+        self.assertTrue(r['success'])
+        self.assertFalse(self._still_armed())
+
+    def test_a_stale_code_is_refused(self):
+        from .desk import UNLOCK_CODE_KEY
+        from django.utils import timezone
+        from datetime import timedelta
+        session = self.client.session
+        session[UNLOCK_CODE_KEY] = {
+            'code': '424242',
+            'expires': (timezone.now() - timedelta(minutes=1)).timestamp(),
+            'attempts': 0}
+        session.save()
+        r = self.client.post('/desk/unlock/', {'code': '424242'}).json()
+        self.assertFalse(r['success'])
+        self.assertTrue(self._still_armed())
+
+    def test_requesting_a_code_emails_the_armed_account(self):
+        from django.core import mail
+        with self.settings(EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend'):
+            mail.outbox = []
+            r = self.client.post('/desk/unlock-code/', {}).json()
+            self.assertTrue(r['success'])
+            self.assertEqual(len(mail.outbox), 1)
+            self.assertEqual(mail.outbox[0].to, ['armed@example.invalid'])
+            # The address is shown back only in part.
+            self.assertNotIn('armed@example.invalid', r['sent_to'])
+
+
 class NoIdleSignOutTests(TestCase):
     """A signed-in session is not closed for sitting quiet."""
 
@@ -1172,16 +1477,36 @@ class CrossFloorRoutingTests(TestCase):
         """Half-drawn upstairs: stairs placed, waypoints not."""
         Waypoint.objects.filter(floor_plan=self.f2).delete()
 
+        # Still led to the stairs, told where it comes out, and pointed at the shelf.
         data = self._route(target_shelf_id=self.shelf.shelf_id,
                            from_floor=self.f1.floor_plan_id)
-        self.assertFalse(data['success'])
-        self.assertIn('waypoint', data['error'].lower())
+        self.assertTrue(data['success'])
+        self.assertTrue(data['stairs_only'])
+        self.assertEqual(data['route'][-1]['stairway_id'], data['via_stairway']['stairway_id'])
+        self.assertEqual(data['arrival']['floor_plan_id'], self.f2.floor_plan_id)
+        self.assertIn('up', data['instruction'])
+        self.assertIn(self.shelf.name, data['instruction'])
 
         # And from the other side: standing on the floor that has none.
         blank = self._route(target_shelf_id=self.shelf.shelf_id,
                             from_floor=self.f2.floor_plan_id)
         self.assertFalse(blank['success'])
-        self.assertIn('waypoint', blank['error'].lower())
+        self.assertIn('highlighted on the map', blank['error'])
+
+    def test_unlinked_stairs_still_lead_down_to_a_bare_floor(self):
+        """The library's own setup: stairs on one floor only, linked nowhere."""
+        Waypoint.objects.filter(floor_plan=self.f2).delete()
+        self.landing.delete()
+        self.near.connects_to = None
+        self.near.save(update_fields=['connects_to'])
+
+        data = self._route(target_shelf_id=self.shelf.shelf_id,
+                           from_floor=self.f1.floor_plan_id)
+        self.assertTrue(data['success'])
+        self.assertTrue(data['stairs_only'])
+        self.assertTrue(data['arrival']['estimated'])
+        self.assertEqual((data['arrival']['x'], data['arrival']['y']),
+                         (data['via_stairway']['x'], data['via_stairway']['y']))
 
     def test_a_lift_is_preferred_over_stairs_when_it_is_nearer(self):
         """Stairs and lift are one graph, so the shorter walk simply wins."""
@@ -8769,3 +9094,155 @@ class PatronIdCheckTests(TestCase):
         client.post(self.ALL)
         self.patron.refresh_from_db()
         self.assertIsNone(self.patron.identity_verified_at)
+
+
+class DashboardLinksFollowModulesTests(TestCase):
+    """The staff dashboard links only to modules the account was granted."""
+
+    def _dashboard(self, modules):
+        staff = User.objects.create(
+            fullname='Desk Staff', email='desk.%s@example.invalid' % modules,
+            password_hash=hash_password('SmokeTest123'),
+            role='Staff', account_status='Active', modules=modules)
+        r = _signed_in(staff).get('/library-staff/dashboard/')
+        self.assertEqual(r.status_code, 200)
+        return r.content.decode()
+
+    def test_transactions_only_sees_no_log_management_link(self):
+        page = self._dashboard('transactions')
+        self.assertIn('/library-staff/transactions/', page)
+        self.assertNotIn('/library-staff/logs/', page)
+
+    def test_logs_only_sees_no_transactions_link(self):
+        page = self._dashboard('logs')
+        self.assertIn('/library-staff/logs/', page)
+        self.assertNotIn('/library-staff/transactions/', page)
+
+
+class BeaconIdentityClashTests(TestCase):
+    """Two beacons a phone cannot tell apart are refused and flagged."""
+
+    def setUp(self):
+        self.plan = FloorPlan.objects.create(name='Upper', floor_number=2, is_active=True,
+                                             pixels_per_meter=100)
+        self.first = BLEBeacon.objects.create(
+            floor_plan=self.plan, beacon_uuid='fda50693-a4e2-4fb1-afcf-c6eb07647825',
+            major=10011, minor=2, map_x=10, map_y=10, label='Hallway')
+        self.client = _signed_in(_admin())
+
+    def _add(self, minor):
+        return self.client.post('/admin-portal/add-beacon/', {
+            'floor_plan_id': self.plan.floor_plan_id, 'map_x': 50, 'map_y': 50,
+            'beacon_uuid': 'FDA50693A4E24FB1AFCFC6EB07647825', 'major': 10011, 'minor': minor,
+            'label': 'Research Room'}).json()
+
+    def test_same_identifiers_are_refused(self):
+        r = self._add(2)
+        self.assertFalse(r['success'])
+        self.assertIn('Hallway', r['error'])
+        self.assertTrue(self._add(4)['success'])
+
+    def test_an_existing_clash_can_still_be_edited_away(self):
+        twin = BLEBeacon.objects.create(
+            floor_plan=self.plan, beacon_uuid=self.first.beacon_uuid,
+            major=10011, minor=2, map_x=60, map_y=60, label='Research Room')
+        post = {'beacon_id': twin.beacon_id, 'beacon_uuid': twin.beacon_uuid,
+                'advertisement_type': 'iBeacon', 'major': 10011, 'label': 'Research Room'}
+        # Saving it unchanged is allowed, so other fields can still be corrected.
+        self.assertTrue(self.client.post('/admin-portal/update-beacon/',
+                                         dict(post, minor=2, height='2.4')).json()['success'])
+        self.assertTrue(self.client.post('/admin-portal/update-beacon/',
+                                         dict(post, minor=1)).json()['success'])
+        twin.refresh_from_db()
+        self.assertEqual(twin.minor, 1)
+
+    def test_readiness_names_the_twins(self):
+        BLEBeacon.objects.create(floor_plan=self.plan, beacon_uuid=self.first.beacon_uuid,
+                                 major=10011, minor=2, map_x=60, map_y=60, label='Research Room')
+        BLEBeacon.objects.create(floor_plan=self.plan, beacon_uuid=self.first.beacon_uuid,
+                                 major=10011, minor=3, map_x=90, map_y=20, label='Stacks')
+        ready = self.client.get('/admin-portal/floor-plan-readiness/',
+                                {'floor_plan_id': self.plan.floor_plan_id}).json()
+        texts = [i['text'] + ' ' + i.get('detail', '') for i in ready['issues']]
+        clash = [t for t in texts if 'share identifiers' in t]
+        self.assertEqual(len(clash), 1)
+        self.assertIn('Hallway and Research Room', clash[0])
+
+
+class PositionTestFloorTests(TestCase):
+    """The Position Test opens on a floor that has beacons to test against."""
+
+    def test_defaults_to_the_floor_with_beacons(self):
+        ground = FloorPlan.objects.create(name='Ground Floor', floor_number=1, is_active=True)
+        upper = FloorPlan.objects.create(name='2nd floor', floor_number=2, is_active=True)
+        BLEBeacon.objects.create(floor_plan=upper, beacon_uuid='abc', map_x=1, map_y=1)
+        r = _signed_in(_admin()).get('/admin-portal/position-test/')
+        self.assertEqual(r.context['chosen_floor_id'], upper.floor_plan_id)
+        self.assertNotEqual(r.context['chosen_floor_id'], ground.floor_plan_id)
+
+
+class ReportsSortedByDateTests(TestCase):
+    """Every report with a date column lists its rows oldest first."""
+
+    DATE_COLUMNS = {
+        'transactions': 'Transaction Date',
+        'patron_logs': 'Entry Time',
+        'patrons': 'Date Registered',
+        'donations': 'Date Donated',
+        'stock_movement': 'Date & Time',
+        'unreturned': 'Due Date',
+        'penalties': 'Date Charged',
+    }
+
+    def setUp(self):
+        self.plan = FloorPlan.objects.create(name='Ground', is_active=True)
+        room = Room.objects.create(floor_plan=self.plan, name='Reading', map_x=1, map_y=1)
+        shelf = Shelf.objects.create(room=room, name='Shelf A', map_x=1, map_y=1)
+        self.level = ShelfLevel.objects.create(shelf=shelf, level_number=1)
+        self.staff = _admin(modules='transactions')
+        rule = BorrowingRule.current()
+        rule.fine_per_day = Decimal('5')
+        rule.grace_period_days = 0
+        rule.save()
+
+        # Three patrons registered on different days, each with a visit and a closed loan.
+        for n, day in enumerate([date(2026, 9, 9), date(2026, 9, 7), date(2026, 9, 8)], start=1):
+            patron = Patron.objects.create(
+                fullname='Patron %d' % n, first_name='Patron', last_name=str(n),
+                email='p%d@example.invalid' % n, password_hash=hash_password('SmokeTest123'),
+                account_status='Active')
+            Patron.objects.filter(pk=patron.pk).update(registration_date=day)
+            PatronLog.objects.create(
+                patron=patron, entry_time=timezone.make_aware(datetime(day.year, day.month, day.day, 9, 0)),
+                exit_time=timezone.make_aware(datetime(day.year, day.month, day.day, 10, 0)))
+            book = Book.objects.create(title='Book %d' % n, author='A', shelf_level=self.level)
+            tx = Transaction.objects.create(
+                patron=patron, book=book, processed_by=self.staff, transaction_type='Borrow',
+                due_date=day + timedelta(days=2), return_date=day + timedelta(days=4),
+                overdue_flag=True, fine_amount=Decimal('10'))
+            Transaction.objects.filter(pk=tx.pk).update(transaction_date=day)
+            record = InventoryRecord.objects.create(book=book, source='Purchase', qr_label='L%d' % n)
+            movement = StockMovement.objects.create(record=record, action='Received') \
+                if False else StockMovement.objects.create(inventory_record=record, action='Received')
+            StockMovement.objects.filter(pk=movement.pk).update(
+                timestamp=timezone.make_aware(datetime(day.year, day.month, day.day, 8, 0)))
+            Donation.objects.create(book=book, donor_name='Donor %d' % n, date_donated=day)
+            # one loan still out, so the Unreturned report has rows too
+            out = Book.objects.create(title='Out %d' % n, author='A', shelf_level=self.level,
+                                      status='Borrowed')
+            open_tx = Transaction.objects.create(
+                patron=patron, book=out, processed_by=self.staff, transaction_type='Borrow',
+                due_date=day + timedelta(days=2))
+            Transaction.objects.filter(pk=open_tx.pk).update(transaction_date=day)
+
+    def _column(self, report, name):
+        index = report['columns'].index(name)
+        return [row[index] for row in report['rows']]
+
+    def test_every_dated_report_is_oldest_first(self):
+        start, end = date(2026, 9, 1), date(2026, 9, 30)
+        for key, column in self.DATE_COLUMNS.items():
+            report = build_report(key, start, end)
+            values = [v for v in self._column(report, column) if v and v != '\u2014']
+            self.assertTrue(values, '%s report produced no dated rows' % key)
+            self.assertEqual(values, sorted(values), '%s report is not oldest first' % key)

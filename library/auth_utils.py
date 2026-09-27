@@ -1,5 +1,19 @@
+import secrets
+
 from django.contrib.auth.hashers import check_password as django_check_password, make_password
 from django.shortcuts import redirect
+
+
+def new_otp():
+    """6-digit numeric one-time password."""
+    return f'{secrets.randbelow(1000000):06d}'
+
+
+def otp_matches(supplied, stored):
+    """Constant-time comparison of a supplied code against the stored one."""
+    if not stored or not supplied:
+        return False
+    return secrets.compare_digest(supplied.encode('utf-8'), stored.encode('utf-8'))
 
 
 def hash_password(password):

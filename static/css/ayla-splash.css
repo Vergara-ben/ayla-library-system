@@ -1,0 +1,250 @@
+/* ayla-splash.css: welcome + pixel loading screen shown before the patron auth pages. */
+
+.ayla-splash,
+.ayla-splash *,
+.ayla-splash *::before,
+.ayla-splash *::after { box-sizing: border-box; }
+
+.ayla-splash {
+    position: fixed;
+    inset: 0;
+    z-index: 99999;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 26px;
+    padding: 24px;
+    background: var(--bg, #f4f6f9);
+    font-family: 'Plus Jakarta Sans', 'Inter', system-ui, sans-serif;
+    text-align: center;
+    overflow: hidden;
+    opacity: 1;
+    transition: opacity .35s ease;
+}
+
+/* Soft brand glow behind the scene. */
+.ayla-splash::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: min(720px, 130vw);
+    aspect-ratio: 1;
+    transform: translate(-50%, -50%);
+    background: radial-gradient(circle, var(--tint-accent, rgba(0,56,168,.10)) 0%, transparent 62%);
+    pointer-events: none;
+}
+
+.ayla-splash.is-leaving { opacity: 0; }
+
+.ayla-splash__stage {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 18px;
+}
+
+/* Phases: only one is on screen at a time. */
+.ayla-splash__phase { display: none; flex-direction: column; align-items: center; gap: 18px; }
+.ayla-splash__phase.is-active { display: flex; }
+.ayla-splash__phase.is-out { animation: aylaSplashOut .45s ease forwards; }
+
+/* ---------- Phase 1: welcome ---------- */
+
+.ayla-splash__logo {
+    width: auto;
+    height: 74px;
+    animation: aylaSplashRise .7s cubic-bezier(.2, .7, .3, 1) both;
+}
+
+.ayla-splash__hello {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 2.4px;
+    text-transform: uppercase;
+    color: var(--muted, #55637a);
+    animation: aylaSplashRise .7s .18s cubic-bezier(.2, .7, .3, 1) both;
+}
+
+.ayla-splash__name {
+    font-family: 'Syne', 'Poppins', system-ui, sans-serif;
+    font-size: clamp(30px, 7vw, 52px);
+    font-weight: 800;
+    line-height: 1.1;
+    color: var(--text, #0f172a);
+    animation: aylaSplashRise .7s .3s cubic-bezier(.2, .7, .3, 1) both;
+}
+.ayla-splash__name span { color: var(--accent, #0038A8); }
+
+/* Accent rule that wipes out from the centre. */
+.ayla-splash__rule {
+    width: 190px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--accent, #0038A8);
+    transform-origin: center;
+    animation: aylaSplashWipe .75s .42s cubic-bezier(.2, .7, .3, 1) both;
+}
+
+/* ---------- Phase 2: pixel loading ---------- */
+
+.ayla-splash__scene {
+    position: relative;
+    width: min(340px, 84vw);
+    height: 150px;
+    animation: aylaSplashFade .5s ease both;
+}
+
+/* Books drifting past in the background. */
+.ayla-splash__drift {
+    position: absolute;
+    inset: 0 0 34px 0;
+    overflow: hidden;
+    pointer-events: none;
+}
+.ayla-splash__book {
+    position: absolute;
+    width: 12px;
+    height: 16px;
+    border-radius: 1px;
+    opacity: .5;
+    animation: aylaSplashDrift 3s linear infinite;
+}
+.ayla-splash__book::after {
+    content: '';
+    position: absolute;
+    right: 0; top: 0; bottom: 0;
+    width: 3px;
+    background: var(--surface, #fff);
+}
+
+/* The walking figure. */
+.ayla-splash__walker {
+    position: absolute;
+    left: 50%;
+    bottom: 26px;          /* feet land on the floor strip */
+    width: 108px;
+    margin-left: -54px;
+    animation: aylaSplashBob .44s steps(2, end) infinite;
+}
+.ayla-px { display: block; width: 100%; height: auto; shape-rendering: crispEdges; }
+.ayla-px__frame--a { animation: aylaSplashFrameA .44s steps(1, end) infinite; }
+.ayla-px__frame--b { animation: aylaSplashFrameB .44s steps(1, end) infinite; }
+
+/* Pixel palette, light theme. */
+.ayla-splash {
+    --px-hair:  #2f2418;
+    --px-skin:  #f0c39a;
+    --px-eye:   #1b2330;
+    --px-shirt: #0038A8;
+    --px-pants: #27324b;
+    --px-shoe:  #151a27;
+    --px-book1: #d97706;
+    --px-book2: #be123c;
+    --px-book3: #047857;
+    --px-page:  #efdcb4;
+}
+[data-theme="dark"] .ayla-splash {
+    --px-hair:  #4a3a29;
+    --px-skin:  #f0c39a;
+    --px-eye:   #0b1220;
+    --px-shirt: #60A5FA;
+    --px-pants: #55628a;
+    --px-shoe:  #303a55;
+    --px-book1: #fbbf24;
+    --px-book2: #fb7185;
+    --px-book3: #34d399;
+    --px-page:  #d9c294;
+}
+
+.ayla-px [data-c="H"] { fill: var(--px-hair); }
+.ayla-px [data-c="S"] { fill: var(--px-skin); }
+.ayla-px [data-c="E"] { fill: var(--px-eye); }
+.ayla-px [data-c="B"] { fill: var(--px-shirt); }
+.ayla-px [data-c="P"] { fill: var(--px-pants); }
+.ayla-px [data-c="O"] { fill: var(--px-shoe); }
+.ayla-px [data-c="1"] { fill: var(--px-book1); }
+.ayla-px [data-c="2"] { fill: var(--px-book2); }
+.ayla-px [data-c="3"] { fill: var(--px-book3); }
+.ayla-px [data-c="W"] { fill: var(--px-page); }
+
+/* Scrolling pixel floor, so the figure reads as walking forward. */
+.ayla-splash__floor {
+    position: absolute;
+    left: 0; right: 0; bottom: 22px;
+    height: 4px;
+    background-image: linear-gradient(90deg, var(--border, #7f8b9e) 0 8px, transparent 8px 16px);
+    background-size: 16px 4px;
+    opacity: .55;
+    animation: aylaSplashFloor .44s linear infinite;
+    -webkit-mask-image: linear-gradient(90deg, transparent, #000 18%, #000 82%, transparent);
+            mask-image: linear-gradient(90deg, transparent, #000 18%, #000 82%, transparent);
+}
+
+.ayla-splash__caption {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--muted, #55637a);
+    letter-spacing: .3px;
+}
+
+/* Pixel-styled progress bar. */
+.ayla-splash__bar {
+    width: min(260px, 74vw);
+    height: 18px;          /* border-box: leaves 10px of fill */
+    padding: 2px;
+    border: 2px solid var(--border, #7f8b9e);
+    background: var(--surface2, #eff3f8);
+}
+.ayla-splash__fill {
+    height: 100%;
+    width: 0;
+    background: var(--accent, #0038A8);
+    animation: aylaSplashFill 2.3s linear forwards;
+}
+
+/* ---------- Keyframes ---------- */
+
+@keyframes aylaSplashRise {
+    from { opacity: 0; transform: translateY(16px); }
+    to   { opacity: 1; transform: none; }
+}
+@keyframes aylaSplashFade {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+@keyframes aylaSplashWipe {
+    from { opacity: 0; transform: scaleX(0); }
+    to   { opacity: 1; transform: scaleX(1); }
+}
+@keyframes aylaSplashOut {
+    from { opacity: 1; transform: none; }
+    to   { opacity: 0; transform: translateY(-18px); }
+}
+@keyframes aylaSplashBob {
+    0%, 49%  { transform: translateY(0); }
+    50%, 100% { transform: translateY(-2px); }
+}
+@keyframes aylaSplashFrameA {
+    0%, 49%   { opacity: 1; }
+    50%, 100% { opacity: 0; }
+}
+@keyframes aylaSplashFrameB {
+    0%, 49%   { opacity: 0; }
+    50%, 100% { opacity: 1; }
+}
+@keyframes aylaSplashFloor {
+    from { background-position-x: 0; }
+    to   { background-position-x: -16px; }
+}
+@keyframes aylaSplashDrift {
+    from { transform: translateX(340px); }
+    to   { transform: translateX(-40px); }
+}
+@keyframes aylaSplashFill {
+    from { width: 0; }
+    to   { width: 100%; }
+}

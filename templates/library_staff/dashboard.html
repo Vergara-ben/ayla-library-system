@@ -662,7 +662,7 @@
                 <section class="panel">
                     <div class="panel-header">
                         <h3 class="panel-title"><i class="fa-solid fa-clipboard-list" aria-hidden="true"></i> Recent Transactions</h3>
-                        <a href="{% url 'staff_transaction' %}" class="btn-view-all">View all &rarr;</a>
+                        {% if 'transactions' in allowed_modules %}<a href="{% url 'staff_transaction' %}" class="btn-view-all">View all &rarr;</a>{% endif %}
                     </div>
 
                     <div class="transaction-list">
@@ -737,7 +737,7 @@
                     <section class="panel">
                         <div class="panel-header">
                             <h3 class="panel-title"><i class="fa-solid fa-door-open" aria-hidden="true"></i> Today at a Glance</h3>
-                            <a href="{% url 'staff_logs' %}" class="btn-view-all">View &rarr;</a>
+                            {% if 'logs' in allowed_modules %}<a href="{% url 'staff_logs' %}" class="btn-view-all">View &rarr;</a>{% endif %}
                         </div>
                         <div class="log-stats-list">
                             <div class="log-stat-row">

@@ -32,9 +32,30 @@ services:
         sync: false
       - key: DATABASE_PORT
         value: "5432"
+      # Mail. Render's free plan blocks outbound SMTP, so Gmail cannot be used
+      # here: send over an HTTPS API instead. Set EMAIL_PROVIDER to 'brevo' and
+      # paste the Brevo API key into EMAIL_API_KEY in the Render dashboard.
+      # Until both are set the app still runs, but it reports that codes could
+      # not be emailed rather than pretending they were sent.
       - key: EMAIL_PROVIDER
         sync: false
       - key: EMAIL_API_KEY
         sync: false
+      # e.g. Ayla Public Library <no-reply@yourdomain>  (must be a Brevo-verified sender)
       - key: DEFAULT_FROM_EMAIL
         sync: false
+
+# The overdue sweep and visit close-out. Nothing runs them on their own: either
+# enable the cron service below (paid plans only), or point a free external cron
+# at https://<your-app>.onrender.com/tasks/daily/ with the header
+# X-Task-Token: <DAILY_TASK_TOKEN from the dashboard>, once a day.
+#
+#  - type: cron
+#    name: ayla-daily-maintenance
+#    runtime: python
+#    plan: starter
+#    region: singapore
+#    branch: main
+#    schedule: "0 22 * * *"        # 06:00 Manila (Render runs cron in UTC)
+#    buildCommand: pip install -r requirements.txt
+#    startCommand: python manage.py daily_maintenance

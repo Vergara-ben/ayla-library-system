@@ -265,7 +265,7 @@ def _transactions(start, end):
             .select_related('patron', 'book', 'processed_by')
             .filter(Q(transaction_date__range=(start, end))
                     | Q(return_date__range=(start, end)))
-            .order_by('-transaction_date', '-transaction_id'))
+            .order_by('transaction_date', 'transaction_id'))
 
     rows = []
     borrows = returns = in_library = overdue = 0
@@ -347,7 +347,7 @@ def _patron_logs(start, end):
     logs = (PatronLog.objects
             .select_related('patron')
             .filter(entry_time__date__range=(start, end))
-            .order_by('-entry_time'))
+            .order_by('entry_time', 'log_id'))
 
     rows = []
     signed_out = assumed = ongoing = 0
@@ -504,7 +504,7 @@ def _patrons(start, end):
                .annotate(books_out=Count('transaction',
                                          filter=Q(transaction__transaction_type='Borrow',
                                                   transaction__return_date__isnull=True)))
-               .order_by('fullname', 'patron_id'))
+               .order_by('registration_date', 'fullname', 'patron_id'))
     rows = []
     per_status, per_type = {}, {}
     for p in patrons:
@@ -569,7 +569,7 @@ def _donations(start, end):
                  .select_related('book')
                  .prefetch_related('inventory_copies')
                  .filter(date_donated__range=(start, end))
-                 .order_by('-date_donated', '-donation_id'))
+                 .order_by('date_donated', 'donation_id'))
 
     rows = []
     per_status, per_month, donors = {}, {}, set()
@@ -726,7 +726,7 @@ def _stock_movement(start, end):
     movements = (StockMovement.objects
                  .select_related('inventory_record', 'inventory_record__book')
                  .filter(timestamp__date__range=(start, end))
-                 .order_by('-timestamp', '-movement_id'))
+                 .order_by('timestamp', 'movement_id'))
 
     rows = []
     counts = {}
@@ -881,7 +881,7 @@ def _penalties(start, end):
             .filter(fine_amount__gt=0)
             .filter(Q(return_date__range=(start, end))
                     | Q(return_date__isnull=True, transaction_date__range=(start, end)))
-            .order_by('-return_date', '-transaction_date'))
+            .order_by('return_date', 'transaction_date'))
 
     today = timezone.localdate()
     by_day, by_week, by_month = {}, {}, {}

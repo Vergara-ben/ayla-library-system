@@ -21,10 +21,32 @@ def bulk_connection():
         return None
 
 
+def _no_transport_configured():
+    """True when mail would only be printed because nothing was ever configured.
+
+    An explicit EMAIL_PROVIDER=console is a real choice and is left alone; this
+    catches the fall-through where no provider and no SMTP credentials were set.
+    """
+    if getattr(settings, 'EMAIL_CONFIGURED', True):
+        return False
+    return 'console' in getattr(settings, 'EMAIL_BACKEND', '')
+
+
 def send_email(subject, message, recipient, connection=None):
     """Send a single plain-text email. Returns True on success, False otherwise."""
     if not recipient:
         return False
+    if _no_transport_configured():
+        # In development the printed message is the point, so keep working.
+        # In production, report the failure instead of claiming a delivery.
+        if settings.DEBUG:
+            logger.warning('No email transport configured; printing %r to the console '
+                           'instead of sending it to %s', subject, recipient)
+        else:
+            logger.error('No email transport configured, so %r was NOT sent to %s. '
+                         'Set EMAIL_PROVIDER and EMAIL_API_KEY, or EMAIL_HOST_USER '
+                         'and EMAIL_HOST_PASSWORD.', subject, recipient)
+            return False
     try:
         sent = send_mail(
             subject,

@@ -65,6 +65,9 @@ class FloorPlan(Archivable):
     pixels_per_meter = models.FloatField(blank=True, null=True)
     # How far the plan's "up" sits from magnetic north, in degrees clockwise.
     north_offset_deg = models.FloatField(default=0)
+    # Where the front-desk computer stands, so the kiosk can draw the way from it.
+    desk_x = models.FloatField(blank=True, null=True)
+    desk_y = models.FloatField(blank=True, null=True)
     # Which storey this is.
     floor_number = models.IntegerField(default=1)
     # Whether this floor is in service.

@@ -139,9 +139,75 @@
                     </button>
                 </div>
 
+                <button type="button" onclick="kioskGo('find')"
+                        class="kiosk-choice w-full mt-5 flex flex-row items-center justify-center gap-3 px-6 text-center"
+                        style="min-height:96px">
+                    <i class="fa-solid fa-magnifying-glass text-emerald-400 text-2xl"></i>
+                    <span class="text-left">
+                        <span class="block text-lg font-bold text-slate-100">Find a book</span>
+                        <span class="block text-[12px] text-slate-500">See if it is in, and which shelf it is on &mdash; no sign-in needed</span>
+                    </span>
+                </button>
+
                 <p class="text-center text-[11px] text-slate-600 mt-7 leading-relaxed">
                     Only your own visit is recorded here. Nobody else's details are shown on this screen.
                 </p>
+            </section>
+
+            <!-- Looking a book up -->
+            <section id="screenFind" class="hidden">
+                <div class="text-center mb-7">
+                    <h1 class="text-2xl sm:text-3xl font-bold text-slate-100 tracking-tight">Find a book</h1>
+                    <p class="text-slate-400 mt-2 text-sm">Search by title, author, ISBN or subject.</p>
+                </div>
+
+                <div class="flex gap-2 max-w-xl mx-auto">
+                    <input type="text" id="findValue" class="kiosk-field flex-1" autocomplete="off"
+                           placeholder="e.g. Noli Me Tangere" onkeydown="if(event.key==='Enter')kioskFindBook()">
+                    <button type="button" id="findBtn" onclick="kioskFindBook()"
+                            class="bg-emerald-700 hover:bg-emerald-600 text-white text-sm font-bold px-6 rounded-xl">
+                        Search
+                    </button>
+                </div>
+
+                <p id="findCount" class="hidden text-center text-[12px] text-slate-500 mt-5"></p>
+                <div id="findResults" class="mt-4 space-y-3 max-w-xl mx-auto"></div>
+                <div id="findEmpty" class="hidden text-center text-slate-500 text-sm mt-10">
+                    Nothing matched that. Try fewer words, or ask at the desk.
+                </div>
+
+                <div class="text-center mt-8">
+                    <button type="button" onclick="kioskGo('choose')"
+                            class="text-xs font-semibold px-5 py-2.5 rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800/50">
+                        Back
+                    </button>
+                </div>
+            </section>
+
+            <!-- The way from this desk to the shelf -->
+            <section id="screenRoute" class="hidden">
+                <div class="text-center mb-4">
+                    <h1 id="routeTitle" class="text-xl sm:text-2xl font-bold text-slate-100 tracking-tight">&nbsp;</h1>
+                    <p id="routeWhere" class="text-slate-400 mt-1 text-sm"></p>
+                </div>
+
+                <div id="routeCanvasWrap" class="rounded-2xl border border-slate-700/60 bg-slate-900/40 p-3">
+                    <svg id="routeSvg" class="w-full" style="max-height:46vh" preserveAspectRatio="xMidYMid meet"></svg>
+                </div>
+
+                <p id="routeNote" class="text-center text-[13px] text-cyan-300/90 mt-4 px-4 leading-relaxed"></p>
+                <p id="routeProblem" class="hidden text-center text-[13px] text-amber-300 mt-4 px-4 leading-relaxed"></p>
+
+                <div class="flex items-center justify-center gap-2 mt-6">
+                    <button type="button" onclick="kioskGo('find')"
+                            class="text-xs font-semibold px-5 py-2.5 rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800/50">
+                        Back to results
+                    </button>
+                    <button type="button" onclick="kioskGo('choose')"
+                            class="text-xs font-semibold px-5 py-2.5 rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800/50">
+                        Done
+                    </button>
+                </div>
             </section>
 
             <!-- The card holder -->
@@ -356,6 +422,31 @@
                 <p class="text-[11px] text-slate-400 leading-relaxed">Enter your account password to leave desk mode and return to the library system.</p>
                 <input type="password" id="deskUnlockPw" placeholder="Account password" autocomplete="off"
                        class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-cyan-600">
+
+                <!-- Forgotten the password: another account, or a code by email. -->
+                <div id="deskUnlockAlt" class="hidden space-y-3 pt-1">
+                    <input type="email" id="deskUnlockEmail" placeholder="Another librarian's email" autocomplete="off"
+                           class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-cyan-600">
+                    <p class="text-[10px] text-slate-500 leading-relaxed">
+                        Any active librarian or administrator account can end desk mode. Doing so signs this
+                        machine out completely, so nobody inherits the other account's portal.
+                    </p>
+                    <div class="flex items-center gap-2">
+                        <input type="text" id="deskUnlockCode" inputmode="numeric" maxlength="6" placeholder="6-digit code"
+                               class="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-cyan-600">
+                        <button type="button" id="deskCodeBtn" onclick="deskSendUnlockCode()"
+                                class="text-[11px] font-bold px-3 py-2.5 rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800/50 whitespace-nowrap">
+                            Email me a code
+                        </button>
+                    </div>
+                </div>
+
+                <button type="button" id="deskUnlockAltBtn" onclick="deskToggleUnlockAlt()"
+                        class="text-[11px] font-semibold text-cyan-400 hover:text-cyan-300 underline">
+                    Forgotten your password?
+                </button>
+
+                <p id="deskUnlockNote" class="text-[11px] font-bold text-emerald-400 hidden"></p>
                 <p id="deskUnlockMsg" class="text-[11px] font-bold text-rose-400 hidden"></p>
                 <div class="flex items-center justify-end gap-2">
                     <button type="button" onclick="deskCloseUnlock()" class="text-xs font-semibold px-4 py-2.5 rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800/50">Cancel</button>
@@ -376,6 +467,9 @@
         visit: "{% url 'desk_visit' %}",
         visitor: "{% url 'desk_visitor' %}",
         unlock: "{% url 'desk_unlock' %}",
+        unlockCode: "{% url 'desk_unlock_code' %}",
+        findBook: "{% url 'desk_find_book' %}",
+        wayToBook: "{% url 'desk_way_to_book' %}",
     };
 
     async function deskPost(url, data) {
@@ -407,7 +501,8 @@
 
     // Screen switching
     const SCREENS = { choose: 'screenChoose', member: 'screenMember',
-                      way: 'screenWay', visitor: 'screenVisitor' };
+                      way: 'screenWay', visitor: 'screenVisitor', find: 'screenFind',
+                      route: 'screenRoute' };
     let kioskScreen = 'choose';
     let visitorWay = 'entry';
 
@@ -424,7 +519,211 @@
             box.focus();
         }
         if (name === 'choose') kioskResetVisitorForm();
+        if (name === 'find') {
+            const box = document.getElementById('findValue');
+            box.value = '';
+            box.focus();
+            kioskClearFind();
+        }
         kioskTouch();
+    }
+
+    function kioskClearFind() {
+        document.getElementById('findResults').innerHTML = '';
+        document.getElementById('findCount').classList.add('hidden');
+        document.getElementById('findEmpty').classList.add('hidden');
+    }
+
+    function kioskEscape(value) {
+        const d = document.createElement('div');
+        d.textContent = value == null ? '' : String(value);
+        return d.innerHTML;
+    }
+
+    async function kioskFindBook() {
+        const term = document.getElementById('findValue').value.trim();
+        kioskTouch();
+        if (term.length < 2) { kioskClearFind(); return; }
+
+        const btn = document.getElementById('findBtn');
+        btn.disabled = true;
+        try {
+            const r = await fetch(DESK_URLS.findBook + '?search=' + encodeURIComponent(term),
+                                  { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+            const d = await r.json();
+            kioskRenderFind(d);
+        } catch (e) {
+            kioskClearFind();
+            document.getElementById('findEmpty').classList.remove('hidden');
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
+    function kioskRenderFind(d) {
+        const box = document.getElementById('findResults');
+        const tally = document.getElementById('findCount');
+        const empty = document.getElementById('findEmpty');
+        const rows = (d && d.results) || [];
+
+        box.innerHTML = '';
+        empty.classList.toggle('hidden', rows.length > 0);
+        if (!rows.length) { tally.classList.add('hidden'); return; }
+
+        tally.textContent = d.count > rows.length
+            ? 'Showing the first ' + rows.length + ' of ' + d.count + ' matches'
+            : rows.length + (rows.length === 1 ? ' match' : ' matches');
+        tally.classList.remove('hidden');
+
+        rows.forEach(function (b) {
+            const inStock = b.available > 0;
+            const tag = inStock
+                ? '<span class="text-[11px] font-bold px-2.5 py-1 rounded-full bg-emerald-500/15 text-emerald-300 whitespace-nowrap">Available</span>'
+                : '<span class="text-[11px] font-bold px-2.5 py-1 rounded-full bg-amber-500/15 text-amber-300 whitespace-nowrap">All copies out</span>';
+            // Where it sits, as specifically as the catalogue knows.
+            const place = b.shelved
+                ? [b.where, b.room, b.floor].filter(Boolean).map(kioskEscape).join(' &middot; ')
+                : 'Not yet shelved &mdash; ask at the desk';
+            const copies = b.copies > 1
+                ? '<span class="text-[11px] text-slate-500">' + b.available + ' of ' + b.copies + ' in</span>'
+                : '';
+            const meta = [b.author, b.year].filter(Boolean).map(kioskEscape).join(' &middot; ');
+
+            const canShow = b.shelved && b.shelf_id;
+            const card = document.createElement(canShow ? 'button' : 'div');
+            card.className = 'w-full rounded-xl border border-slate-700/60 bg-slate-900/40 px-4 py-3 text-left'
+                + (canShow ? ' hover:border-cyan-600/70 cursor-pointer' : '');
+            if (canShow) {
+                card.type = 'button';
+                card.onclick = function () { kioskShowRoute(b); };
+            }
+            card.innerHTML =
+                '<div class="flex items-start justify-between gap-3">' +
+                    '<div class="min-w-0">' +
+                        '<p class="text-sm font-bold text-slate-100 leading-snug">' + kioskEscape(b.title) + '</p>' +
+                        (meta ? '<p class="text-[12px] text-slate-400 mt-0.5">' + meta + '</p>' : '') +
+                    '</div>' +
+                    '<div class="flex flex-col items-end gap-1 shrink-0">' + tag + copies + '</div>' +
+                '</div>' +
+                '<p class="text-[12px] text-cyan-300/90 mt-2">' +
+                    '<i class="fa-solid fa-location-dot mr-1.5"></i>' + place +
+                    (canShow ? '<span class="text-slate-500 ml-2">&mdash; tap to see the way</span>' : '') +
+                '</p>';
+            box.appendChild(card);
+        });
+    }
+
+    const SVG_NS = 'http://www.w3.org/2000/svg';
+
+    function svgNode(name, attrs) {
+        const el = document.createElementNS(SVG_NS, name);
+        Object.keys(attrs).forEach(function (k) { el.setAttribute(k, attrs[k]); });
+        return el;
+    }
+
+    function svgPoly(points, attrs) {
+        return svgNode('polygon', Object.assign(
+            { points: points.map(function (p) { return p[0] + ',' + p[1]; }).join(' ') }, attrs));
+    }
+
+    async function kioskShowRoute(book) {
+        kioskTouch();
+        kioskGo('route');
+        document.getElementById('routeTitle').textContent = book.title;
+        document.getElementById('routeWhere').textContent =
+            [book.where, book.room, book.floor].filter(Boolean).join(' \u00b7 ');
+        document.getElementById('routeNote').textContent = 'Finding the way...';
+        document.getElementById('routeProblem').classList.add('hidden');
+        document.getElementById('routeSvg').innerHTML = '';
+
+        let d;
+        try {
+            const r = await fetch(DESK_URLS.wayToBook + '?shelf_id=' + encodeURIComponent(book.shelf_id),
+                                  { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+            d = await r.json();
+        } catch (e) {
+            kioskWayProblem('The map could not be loaded. Please ask at the desk.');
+            return;
+        }
+        kioskDrawWay(d, book);
+    }
+
+    function kioskWayProblem(text) {
+        const note = document.getElementById('routeNote');
+        const bad = document.getElementById('routeProblem');
+        note.textContent = '';
+        bad.textContent = text;
+        bad.classList.remove('hidden');
+    }
+
+    function kioskDrawWay(d, book) {
+        const svg = document.getElementById('routeSvg');
+        const plan = (d && d.plan) || {};
+        const note = document.getElementById('routeNote');
+
+        if (!plan.canvas_width) {
+            kioskWayProblem((d && d.error) || 'There is no floor plan to show yet.');
+            return;
+        }
+
+        const W = plan.canvas_width, H = plan.canvas_height;
+        svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+
+        // Rooms, then the things standing in them, then the way through.
+        (plan.rooms || []).forEach(function (r) {
+            if (!r.geometry || r.geometry.length < 3) return;
+            svg.appendChild(svgPoly(r.geometry, {
+                fill: 'rgba(148,163,184,0.10)', stroke: 'rgba(148,163,184,0.45)', 'stroke-width': 3 }));
+        });
+        (plan.obstacles || []).forEach(function (o) {
+            const g = o.geometry || o.footprint;
+            if (!g || g.length < 3) return;
+            svg.appendChild(svgPoly(g, { fill: 'rgba(100,116,139,0.35)', stroke: 'none' }));
+        });
+        (plan.stairways || []).forEach(function (st) {
+            const g = st.geometry || st.footprint;
+            if (!g || g.length < 3) return;
+            svg.appendChild(svgPoly(g, { fill: 'rgba(251,191,36,0.20)',
+                                         stroke: 'rgba(251,191,36,0.65)', 'stroke-width': 3 }));
+        });
+
+        const targetId = (d.target_shelf && d.target_shelf.shelf_id) || book.shelf_id;
+        (plan.shelves || []).forEach(function (sh) {
+            const g = sh.footprint || sh.geometry;
+            if (!g || g.length < 3) return;
+            const isTarget = String(sh.shelf_id) === String(targetId);
+            svg.appendChild(svgPoly(g, isTarget
+                ? { fill: 'rgba(52,211,153,0.85)', stroke: '#34d399', 'stroke-width': 5 }
+                : { fill: 'rgba(148,163,184,0.30)', stroke: 'rgba(148,163,184,0.5)', 'stroke-width': 2 }));
+        });
+
+        const pts = d.route || [];
+        if (pts.length > 1) {
+            svg.appendChild(svgNode('polyline', {
+                points: pts.map(function (p) { return p.x + ',' + p.y; }).join(' '),
+                fill: 'none', stroke: '#22d3ee', 'stroke-width': 9,
+                'stroke-linecap': 'round', 'stroke-linejoin': 'round', opacity: '0.95' }));
+        }
+
+        if (d.desk) {
+            svg.appendChild(svgNode('circle', {
+                cx: d.desk.x, cy: d.desk.y, r: 15,
+                fill: '#f59e0b', stroke: '#fff', 'stroke-width': 4 }));
+        }
+        if (d.target_shelf && d.target_shelf.x != null) {
+            svg.appendChild(svgNode('circle', {
+                cx: d.target_shelf.x, cy: d.target_shelf.y, r: 15,
+                fill: '#34d399', stroke: '#fff', 'stroke-width': 4 }));
+        }
+
+        // What to actually do, in words.
+        if (!d.success) {
+            kioskWayProblem(d.error || 'The way could not be worked out. Please ask at the desk.');
+            return;
+        }
+        document.getElementById('routeProblem').classList.add('hidden');
+        note.textContent = d.instruction
+            || ('You are at the orange dot. Follow the line to ' + (book.where || 'the shelf') + '.');
     }
 
     function show(id, text) {
@@ -815,10 +1114,50 @@
         o.classList.remove('flex');
         document.getElementById('deskUnlockPw').value = '';
         document.getElementById('deskUnlockMsg').classList.add('hidden');
+        // Nothing a librarian typed is left on a screen the public can see.
+        document.getElementById('deskUnlockEmail').value = '';
+        document.getElementById('deskUnlockCode').value = '';
+        document.getElementById('deskUnlockNote').classList.add('hidden');
+        document.getElementById('deskUnlockAlt').classList.add('hidden');
+        document.getElementById('deskUnlockAltBtn').textContent = 'Forgotten your password?';
     }
+    function deskToggleUnlockAlt() {
+        const alt = document.getElementById('deskUnlockAlt');
+        const opened = alt.classList.toggle('hidden') === false;
+        document.getElementById('deskUnlockAltBtn').textContent =
+            opened ? 'Use my own password instead' : 'Forgotten your password?';
+        if (opened) document.getElementById('deskUnlockEmail').focus();
+    }
+
+    async function deskSendUnlockCode() {
+        const btn = document.getElementById('deskCodeBtn');
+        const note = document.getElementById('deskUnlockNote');
+        const msg = document.getElementById('deskUnlockMsg');
+        note.classList.add('hidden');
+        msg.classList.add('hidden');
+        btn.disabled = true;
+        btn.textContent = 'Sending...';
+        try {
+            const r = await deskPost(DESK_URLS.unlockCode, {});
+            if (r && r.success) {
+                note.textContent = 'Code sent to ' + (r.sent_to || 'your email') + '. It lasts 10 minutes.';
+                note.classList.remove('hidden');
+                document.getElementById('deskUnlockCode').focus();
+            } else {
+                msg.textContent = (r && r.error) || 'Could not send the code.';
+                msg.classList.remove('hidden');
+            }
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'Email me a code';
+        }
+    }
+
     async function deskUnlock() {
         const msg = document.getElementById('deskUnlockMsg');
         const r = await deskPost(DESK_URLS.unlock, {
+            email: document.getElementById('deskUnlockEmail').value,
+            code: document.getElementById('deskUnlockCode').value,
             password: document.getElementById('deskUnlockPw').value,
         });
         if (!r.success) {
