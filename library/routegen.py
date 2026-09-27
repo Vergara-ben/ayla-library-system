@@ -304,6 +304,9 @@ def stair_nodes(shape, stairways):
             if face in done:
                 continue
             room = _valid_point(shape, x, y, KEY_CLEAR_M * m * 0.9, DOOR_WALL_CLEAR_M * m, ignore=st)
+            # Only the side that opens into its own room.
+            if room is not None and st.room_id and room.room_id != st.room_id:
+                continue
             if room is not None and all(math.hypot(x - n.x, y - n.y) > MERGE_M * m for n in nodes):
                 nodes.append(Node(x, y, room, 'stairs', st.label))
                 done.add(face)

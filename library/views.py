@@ -2765,6 +2765,143 @@ def adjust_due_date(request):
     })
 
 
+
+def _tx_json(tx):
+    """One transaction, for the View and Edit modals."""
+    def d(value):
+        return value.strftime('%Y-%m-%d') if value else ''
+    return {
+        'transaction_id': tx.transaction_id,
+        'transaction_type': tx.transaction_type,
+        'status': _transaction_status(tx, timezone.localdate()),
+        'patron': tx.patron.fullname if tx.patron else 'Walk-in reader',
+        'patron_id': tx.patron.patron_id if tx.patron else '',
+        'book': tx.book.title if tx.book else '',
+        'author': tx.book.author if tx.book else '',
+        'book_status': tx.book.status if tx.book else '',
+        'transaction_date': d(tx.transaction_date),
+        'due_date': d(tx.due_date),
+        'return_date': d(tx.return_date),
+        'overdue_flag': tx.overdue_flag,
+        'fine_amount': f'{tx.fine_amount:.2f}',
+        'processed_by': tx.processed_by.fullname if tx.processed_by else '',
+        'extensions': [
+            {
+                'from': d(e.previous_due_date), 'to': d(e.requested_due_date),
+                'status': e.status, 'by_patron': e.requested_by_patron,
+            }
+            for e in tx.extension_requests.order_by('requested_at')
+        ],
+    }
+
+
+@granted_module_required('transactions')
+def transaction_detail(request, transaction_id):
+    tx = (Transaction.objects.select_related('book', 'patron', 'processed_by')
+          .filter(transaction_id=transaction_id).first())
+    if tx is None:
+        return JsonResponse({'success': False, 'error': 'Transaction not found.'})
+    return JsonResponse({'success': True, 'transaction': _tx_json(tx)})
+
+
+@granted_module_required('transactions')
+def edit_transaction(request, transaction_id):
+    """Correct the dates or fine on a transaction record."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
+    tx = (Transaction.objects.select_related('book', 'patron', 'processed_by')
+          .filter(transaction_id=transaction_id).first())
+    if tx is None:
+        return JsonResponse({'success': False, 'error': 'Transaction not found.'})
+
+    def parse(key):
+        raw = (request.POST.get(key) or '').strip()
+        if not raw:
+            return None
+        return datetime.strptime(raw, '%Y-%m-%d').date()
+
+    try:
+        due = parse('due_date')
+        returned = parse('return_date')
+    except ValueError:
+        return JsonResponse({'success': False, 'error': 'Enter valid dates.'})
+    try:
+        fine = Decimal((request.POST.get('fine_amount') or '0').strip() or '0')
+    except (InvalidOperation, ValueError):
+        return JsonResponse({'success': False, 'error': 'Enter a valid fine amount.'})
+    if not fine.is_finite() or fine < 0 or fine >= Decimal('1000000'):
+        return JsonResponse({'success': False, 'error': 'The fine must be between 0 and 999,999.99.'})
+    fine = fine.quantize(Decimal('0.01'))
+
+    if tx.transaction_type == 'Borrow' and due is None:
+        return JsonResponse({'success': False, 'error': 'A loan needs a due date.'})
+    if due and tx.transaction_date and due < tx.transaction_date:
+        return JsonResponse({'success': False, 'error': 'The due date cannot be before the borrow date.'})
+    # Opening or closing a loan moves the book, so that stays with Mark Returned.
+    if (tx.return_date is None) != (returned is None):
+        return JsonResponse({'success': False, 'error': (
+            'Use Mark Returned to close an open loan.' if tx.return_date is None
+            else 'A returned transaction needs a return date.')})
+    if returned and tx.transaction_date and returned < tx.transaction_date:
+        return JsonResponse({'success': False, 'error': 'The return date cannot be before the borrow date.'})
+    if returned and returned > timezone.localdate():
+        return JsonResponse({'success': False, 'error': 'The return date cannot be in the future.'})
+
+    changes = []
+    if due != tx.due_date:
+        changes.append(f'due {tx.due_date or "—"} to {due or "—"}')
+    if returned != tx.return_date:
+        changes.append(f'returned {tx.return_date or "—"} to {returned or "—"}')
+    if fine != tx.fine_amount:
+        changes.append(f'fine {tx.fine_amount:.2f} to {fine:.2f}')
+
+    tx.due_date = due
+    tx.return_date = returned
+    tx.fine_amount = fine
+    tx.overdue_flag = bool(due and (returned or timezone.localdate()) > due)
+    tx.save(update_fields=['due_date', 'return_date', 'fine_amount', 'overdue_flag'])
+
+    if changes:
+        log_admin_action(request, 'Update', 'Transaction', tx.transaction_id,
+                         f'Edited transaction for "{tx.book.title if tx.book else ""}": '
+                         + ', '.join(changes), patron=tx.patron)
+    return JsonResponse({'success': True, 'transaction': _tx_json(tx)})
+
+
+@granted_module_required('transactions')
+def delete_transaction(request, transaction_id):
+    """Remove a transaction record, freeing the book if it was its open loan."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
+    with transaction.atomic():
+        tx = (Transaction.objects.select_for_update()
+              .filter(transaction_id=transaction_id).first())
+        if tx is None:
+            return JsonResponse({'success': False, 'error': 'Transaction not found.'})
+        book = tx.book
+        patron = tx.patron
+        was_open = tx.return_date is None and tx.transaction_type in ('Borrow', 'In-Library Reading')
+        label = f'{tx.transaction_type} of "{book.title if book else ""}"' + (
+            f' by {patron.fullname}' if patron else '')
+        tx.delete()
+
+        # Nothing else holds the copy, so it is back on the shelf.
+        freed = False
+        if was_open and book and book.status in ('Borrowed', 'Overdue', 'Being Read'):
+            still_out = Transaction.objects.filter(
+                book=book, return_date__isnull=True,
+                transaction_type__in=['Borrow', 'In-Library Reading']).exists()
+            if not still_out:
+                book.status = 'Available'
+                book.save(update_fields=['status'])
+                freed = True
+
+    log_admin_action(request, 'Delete', 'Transaction', transaction_id,
+                     f'Deleted #TX-{transaction_id}: {label}'
+                     + (' — book set back to Available' if freed else ''),
+                     patron=patron)
+    return JsonResponse({'success': True, 'book_freed': freed})
+
 def _book_detail_page(request, template):
     books = Book.objects.select_related('shelf_level', 'shelf_level__shelf').order_by('title')
     total_books = books.count()
@@ -7190,55 +7327,92 @@ def add_stairway(request):
     if direction not in dict(Stairway.DIRECTION_CHOICES):
         direction = 'both'
 
-    connects_to = None
-    raw_to = (request.POST.get('connects_to') or '').strip()
-    if raw_to.isdigit():
-        connects_to = FloorPlan.objects.filter(floor_plan_id=int(raw_to)).first()
-        # A stair cannot connect a floor to itself.
-        if connects_to and connects_to.floor_plan_id == floor_plan.floor_plan_id:
-            return JsonResponse({'success': False,
-                                 'error': 'A stairway cannot connect a floor to itself.'})
-
-    # Work out the direction from the shape.
-    raw_bearing = (request.POST.get('bearing') or '').strip()
-    if raw_bearing:
-        try:
-            bearing = float(raw_bearing) % 360
-        except (TypeError, ValueError):
-            bearing = _infer_stair_bearing(geometry)
-    else:
-        bearing = _infer_stair_bearing(geometry)
-
-    shape = (request.POST.get('shape') or 'straight').strip()
-    if shape not in STAIR_SHAPES:
-        shape = 'straight'
-    flights = _stair_flights(geometry, bearing, shape) or None
+    room, room_error = _stair_room(request, floor_plan)
+    if room_error:
+        return JsonResponse({'success': False, 'error': room_error})
+    connects_to, partner, link_error = _stair_link(request, floor_plan)
+    if link_error:
+        return JsonResponse({'success': False, 'error': link_error})
 
     map_x, map_y = _polygon_centroid(geometry)
     stairway = Stairway.objects.create(
         floor_plan=floor_plan, kind=kind, direction=direction,
         name=(request.POST.get('name') or '').strip()[:255] or None,
         geometry=geometry, map_x=map_x, map_y=map_y,
-        bearing=bearing, connects_to=connects_to, flights=flights,
+        # The steps run along the long side of what was drawn.
+        bearing=_infer_stair_bearing(geometry), connects_to=connects_to, room=room,
     )
+    if partner is not None:
+        _set_stair_partner(stairway, partner)
     log_admin_action(request, 'Create', 'Stairway', stairway.stairway_id,
-                     f'Added {stairway.label} on {floor_plan.floor_label}'
+                     f'Added {stairway.label} in {room.name} on {floor_plan.floor_label}'
                      + (f' to {stairway.destination_label}' if connects_to else ''))
     return JsonResponse({'success': True, 'stairway': _stairway_payload(stairway)})
 
 
+def _stair_room(request, floor_plan):
+    """The room a stairway opens into, which must be on the same floor."""
+    raw = (request.POST.get('room_id') or '').strip()
+    room = (Room.objects.filter(room_id=int(raw), floor_plan=floor_plan).first()
+            if raw.isdigit() else None)
+    if room is None:
+        return None, 'Pick the room this stairway opens into.'
+    return room, None
+
+
+def _stair_link(request, floor_plan):
+    """(floor it reaches, stairway it meets there, error) from the posted fields."""
+    partner = None
+    raw_partner = (request.POST.get('partner_id') or '').strip()
+    if raw_partner.isdigit():
+        partner = Stairway.objects.select_related('floor_plan').filter(
+            stairway_id=int(raw_partner)).first()
+        if partner is None or partner.floor_plan_id == floor_plan.floor_plan_id:
+            return None, None, 'That stairway is not on another floor.'
+        return partner.floor_plan, partner, None
+
+    raw_to = (request.POST.get('connects_to') or '').strip()
+    if not raw_to.isdigit():
+        return None, None, None
+    dest = FloorPlan.objects.filter(floor_plan_id=int(raw_to)).first()
+    if dest and dest.floor_plan_id == floor_plan.floor_plan_id:
+        return None, None, 'A stairway cannot connect a floor to itself.'
+    return dest, None, None
+
+
+def _set_stair_partner(st, partner):
+    """Link two stairways to each other, releasing whatever each was linked to before."""
+    old = Stairway.objects.filter(stairway_id=st.partner_id).first() if st.partner_id else None
+    if old is not None and (partner is None or old.stairway_id != partner.stairway_id):
+        if old.partner_id == st.stairway_id:
+            old.partner = None
+            old.save(update_fields=['partner'])
+    if partner is not None:
+        taken = (Stairway.objects.filter(stairway_id=partner.partner_id).first()
+                 if partner.partner_id else None)
+        if taken is not None and taken.stairway_id != st.stairway_id and taken.partner_id == partner.stairway_id:
+            taken.partner = None
+            taken.save(update_fields=['partner'])
+        partner.partner = st
+        partner.connects_to = st.floor_plan
+        partner.save(update_fields=['partner', 'connects_to'])
+        st.connects_to = partner.floor_plan
+    st.partner = partner
+    st.save(update_fields=['partner', 'connects_to'])
+
+
 @admin_or_module_required('shelf')
 def edit_stairway(request):
-    """Rename a stairway, turn it, or change which floor it reaches."""
+    """Change a stairway: its type, room, label, shape, or where it leads."""
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
 
-    st = Stairway.objects.filter(stairway_id=_posted_id(request, 'stairway_id')).first()
+    st = (Stairway.objects.select_related('floor_plan')
+          .filter(stairway_id=_posted_id(request, 'stairway_id')).first())
     if st is None:
         return JsonResponse({'success': False, 'error': 'Stairway not found'})
 
     fields = []
-    link_back = False
     if 'kind' in request.POST and request.POST['kind'] in dict(Stairway.KIND_CHOICES):
         st.kind = request.POST['kind']; fields.append('kind')
     if 'direction' in request.POST and request.POST['direction'] in dict(Stairway.DIRECTION_CHOICES):
@@ -7246,44 +7420,38 @@ def edit_stairway(request):
     if 'name' in request.POST:
         st.name = (request.POST.get('name') or '').strip()[:255] or None
         fields.append('name')
-    if 'bearing' in request.POST:
-        try:
-            st.bearing = float(request.POST['bearing']) % 360
-            fields.append('bearing')
-        except (TypeError, ValueError):
-            pass
-    # Rebuild flights when the stair is turned or reshaped.
-    raw_shape = (request.POST.get('shape') or '').strip()
-    if raw_shape in STAIR_SHAPES or 'bearing' in request.POST:
-        shape = raw_shape if raw_shape in STAIR_SHAPES else _stair_shape_of(st)
-        st.flights = _stair_flights(st.geometry, st.bearing, shape) or None
-        fields.append('flights')
-    if 'connects_to' in request.POST:
-        raw = (request.POST.get('connects_to') or '').strip()
-        if not raw:
-            st.connects_to = None
-        elif raw.isdigit():
-            dest = FloorPlan.objects.filter(floor_plan_id=int(raw)).first()
-            if dest and dest.floor_plan_id == st.floor_plan_id:
-                return JsonResponse({'success': False,
-                                     'error': 'A stairway cannot connect a floor to itself.'})
-            st.connects_to = dest
-        fields.append('connects_to')
-        link_back = True
+    if 'room_id' in request.POST:
+        room, room_error = _stair_room(request, st.floor_plan)
+        if room_error:
+            return JsonResponse({'success': False, 'error': room_error})
+        st.room = room
+        fields.append('room')
+    if 'geometry' in request.POST:
+        geometry, geo_error = _parse_geometry(request.POST.get('geometry'))
+        if geo_error or not geometry:
+            return JsonResponse({'success': False, 'error': geo_error or 'Draw the shape first.'})
+        st.geometry = geometry
+        st.map_x, st.map_y = _polygon_centroid(geometry)
+        st.bearing = _infer_stair_bearing(geometry)
+        st.flights = None
+        fields += ['geometry', 'map_x', 'map_y', 'bearing', 'flights']
     if 'is_active' in request.POST:
         st.is_active = request.POST.get('is_active') in ('1', 'true', 'True', 'on')
         fields.append('is_active')
 
+    relink = 'connects_to' in request.POST or 'partner_id' in request.POST
+    if relink:
+        dest, partner, link_error = _stair_link(request, st.floor_plan)
+        if link_error:
+            return JsonResponse({'success': False, 'error': link_error})
+
     if fields:
         st.save(update_fields=fields)
+    if relink:
+        st.connects_to = dest
+        _set_stair_partner(st, partner)
+    if fields or relink:
         log_admin_action(request, 'Update', 'Stairway', st.stairway_id, f'Edited {st.label}')
-
-    # Pairing prefers a mutual link, so point the far end back at this floor.
-    if link_back and st.connects_to_id:
-        partner = _nearest_stairway_on(st.connects_to, st)
-        if partner is not None and partner.connects_to_id != st.floor_plan_id:
-            partner.connects_to = st.floor_plan
-            partner.save(update_fields=['connects_to'])
 
     return JsonResponse({'success': True, 'stairway': _stairway_payload(st)})
 
@@ -7301,81 +7469,6 @@ def _nearest_stairway_on(floor, like):
                                                     o.map_y - like.map_y))
     gap = math.hypot(nearest.map_x - like.map_x, nearest.map_y - like.map_y)
     return nearest if gap <= ceiling else None
-
-
-@admin_or_module_required('shelf')
-def match_stairway(request):
-    """Draw the far end of a staircase on the floor it reaches, and link both ways."""
-    if request.method != 'POST':
-        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
-
-    st = Stairway.objects.filter(stairway_id=_posted_id(request, 'stairway_id')).first()
-    if st is None:
-        return JsonResponse({'success': False, 'error': 'Stairway not found'})
-
-    raw = (request.POST.get('connects_to') or '').strip()
-    dest = (FloorPlan.objects.filter(floor_plan_id=int(raw), is_active=True).first()
-            if raw.isdigit() else st.connects_to)
-    if dest is None:
-        return JsonResponse({'success': False,
-                             'error': 'Say which floor this staircase reaches first.'})
-    if dest.floor_plan_id == st.floor_plan_id:
-        return JsonResponse({'success': False,
-                             'error': 'A stairway cannot connect a floor to itself.'})
-
-    existing = _nearest_stairway_on(dest, st)
-    if existing is not None:
-        # Already drawn: just make the link mutual.
-        existing.connects_to = st.floor_plan
-        existing.save(update_fields=['connects_to'])
-        made = False
-        partner = existing
-    else:
-        # Floors are stacked, so the same spot on the other floor is the best guess.
-        partner = Stairway.objects.create(
-            floor_plan=dest,
-            kind=st.kind,
-            name=st.name,
-            geometry=st.geometry,
-            map_x=st.map_x,
-            map_y=st.map_y,
-            flights=st.flights,
-            bearing=st.bearing,
-            direction=_opposite_direction(st, dest),
-            connects_to=st.floor_plan,
-            is_active=True,
-        )
-        made = True
-
-    if st.connects_to_id != dest.floor_plan_id:
-        st.connects_to = dest
-        st.save(update_fields=['connects_to'])
-
-    log_admin_action(request, 'Create' if made else 'Update', 'Stairway',
-                     partner.stairway_id,
-                     '%s %s on %s' % ('Added the matching' if made else 'Linked the existing',
-                                      partner.label, dest.floor_label))
-    return JsonResponse({
-        'success': True,
-        'created': made,
-        'floor': dest.floor_label,
-        'floor_plan_id': dest.floor_plan_id,
-        'stairway': _stairway_payload(partner),
-        'message': ('%s added on the %s, at the same spot. Drag it if it sits elsewhere.'
-                    % (partner.label, dest.floor_label)) if made
-                   else ('%s on the %s is now linked back to this floor.'
-                         % (partner.label, dest.floor_label)),
-    })
-
-
-def _opposite_direction(st, dest):
-    """If these stairs go up to that floor, the far end goes down."""
-    if st.direction == 'both':
-        return 'both'
-    here, there = st.floor_plan.floor_number, dest.floor_number
-    if here is None or there is None:
-        return 'both'
-    return 'down' if there > here else 'up'
 
 
 @admin_or_module_required('shelf')
@@ -8817,6 +8910,11 @@ def floor_plan_readiness(request):
                 'route crosses between them. Without one here, nothing on another '
                 'floor can be navigated to from this one.' % len(other_floors))
         else:
+            for st in stairways:
+                if not st.room_id:
+                    add('blocker', '%s has no room' % st.label,
+                        'Say which room it opens into, so routes reach it from that room '
+                        'and not through a wall.')
             unlinked = [st for st in stairways if not st.connects_to_id]
             for st in unlinked:
                 add('warning', '%s is not linked to a floor' % st.label,
@@ -8828,8 +8926,8 @@ def floor_plan_readiness(request):
             for st in lonely:
                 add('warning', '%s has no matching stairway on the %s'
                     % (st.label, st.destination_label or 'other floor'),
-                    'Stairs join up in pairs. Draw the other end on that floor, near '
-                    'the same spot, and link it back to this one.')
+                    'Stairs join up in pairs. Pick the stairway it meets on that floor '
+                    'in its panel.')
 
             if not any(st.stairway_id in paired_ids for st in stairways):
                 add('blocker', 'No stairway here reaches another floor',
@@ -8991,7 +9089,8 @@ def get_map_data(request):
 
     stairways = [
         _stairway_payload(st)
-        for st in Stairway.objects.select_related('connects_to').filter(floor_plan=floor_plan)
+        for st in Stairway.objects.select_related('connects_to', 'room', 'partner')
+                                  .filter(floor_plan=floor_plan)
     ]
 
     shelves = [
@@ -9014,6 +9113,9 @@ def get_map_data(request):
         for s in Shelf.objects.filter(room__floor_plan=floor_plan).order_by('name')
     ]
 
+    from .floorplan_undo import history_state
+    undo_label, undo_count = history_state(floor_plan)
+
     return JsonResponse({
         'success': True,
         'has_active': True,
@@ -9035,11 +9137,19 @@ def get_map_data(request):
         'stairways': stairways,
         # For the "connects to" picker: every other floor in the building.
         'other_floors': [
-            {'floor_plan_id': f.floor_plan_id, 'label': f.floor_label, 'name': f.name}
+            {'floor_plan_id': f.floor_plan_id, 'label': f.floor_label, 'name': f.name,
+             # For the "meets which stairway" picker.
+             'stairways': [{'stairway_id': o.stairway_id, 'label': o.label,
+                            'room': o.room.name if o.room_id else '',
+                            'partner_id': o.partner_id}
+                           for o in f.stairways.select_related('room').all()]}
             for f in FloorPlan.objects.exclude(floor_plan_id=floor_plan.floor_plan_id)
                                       .order_by('floor_number', 'floor_plan_id')
         ],
         'shelves': shelves,
+        # What the editor's Undo button would take back.
+        'undo_label': undo_label,
+        'undo_count': undo_count,
     })
 
 
@@ -9055,12 +9165,17 @@ def _rect(x0, y0, x1, y1):
 
 
 def _infer_stair_bearing(geometry):
-    """Which way the steps run, read off the shape somebody just drew."""
+    """Which way the steps run: along the longest side of the shape, whatever its angle."""
     if not geometry or len(geometry) < 3:
         return 0.0
-    xs = [p[0] for p in geometry]
-    ys = [p[1] for p in geometry]
-    return 0.0 if (max(ys) - min(ys)) >= (max(xs) - min(xs)) else 90.0
+    best, bearing = -1.0, 0.0
+    for i in range(len(geometry)):
+        dx = geometry[i][0] - geometry[i - 1][0]
+        dy = geometry[i][1] - geometry[i - 1][1]
+        length = math.hypot(dx, dy)
+        if length > best:
+            best, bearing = length, math.degrees(math.atan2(dx, -dy)) % 180
+    return round(bearing, 2)
 
 
 def _stair_flights(geometry, bearing, shape):
@@ -9165,21 +9280,20 @@ def _stair_treads(geometry, bearing, count=None):
     if not geometry or len(geometry) < 3:
         return []
 
-    xs = [p[0] for p in geometry]
-    ys = [p[1] for p in geometry]
-    cx, cy = (min(xs) + max(xs)) / 2.0, (min(ys) + max(ys)) / 2.0
-    width, height = max(xs) - min(xs), max(ys) - min(ys)
-
     rad = math.radians(bearing or 0)
     # Unit vector along travel, and the one across it that the treads follow.
     ux, uy = math.sin(rad), -math.cos(rad)
     vx, vy = -uy, ux
 
-    # How far the shape reaches along each axis.
-    along = abs(width * ux) + abs(height * uy)
-    across = abs(width * vx) + abs(height * vy)
+    # How far the shape reaches along each axis, measured in its own frame.
+    ts = [p[0] * ux + p[1] * uy for p in geometry]
+    cs = [p[0] * vx + p[1] * vy for p in geometry]
+    along = max(ts) - min(ts)
+    across = max(cs) - min(cs)
     if along <= 0 or across <= 0:
         return []
+    mid_t, mid_c = (max(ts) + min(ts)) / 2.0, (max(cs) + min(cs)) / 2.0
+    cx, cy = ux * mid_t + vx * mid_c, uy * mid_t + vy * mid_c
 
     if count is None:
         # About one tread every 12 units, within limits.
@@ -9199,6 +9313,8 @@ def _stair_treads(geometry, bearing, count=None):
 
 def _stairway_is_paired(st):
     """True when this stairway meets a matching one on the floor it reaches."""
+    if st.partner_id:
+        return True
     if not st.connects_to_id:
         return False
     partner = _nearest_stairway_on(st.connects_to, st)
@@ -9220,6 +9336,10 @@ def _stairway_payload(st):
         'direction': st.direction,
         'connects_to': st.connects_to_id,
         'destination': st.destination_label,
+        'room_id': st.room_id,
+        'room': st.room.name if st.room_id else '',
+        'partner_id': st.partner_id,
+        'partner': st.partner.label if st.partner_id else '',
         # Whether this end actually meets one on the other floor.
         'paired': _stairway_is_paired(st),
         'is_active': st.is_active,
@@ -9792,10 +9912,18 @@ def _pair_stairways(stairways, scale_by_floor=None):
 
     pairs = []
     seen = set()
+    listed = {st.stairway_id: st for st in stairways}
     for st in stairways:
-        if not st.connects_to_id:
+        other = listed.get(st.partner_id)
+        if other is not None:
+            key = tuple(sorted((st.stairway_id, other.stairway_id)))
+            if key not in seen:
+                seen.add(key)
+                pairs.append((st, other))
+    for st in stairways:
+        if not st.connects_to_id or st.partner_id:
             continue
-        over_there = by_floor.get(st.connects_to_id, [])
+        over_there = [o for o in by_floor.get(st.connects_to_id, []) if not o.partner_id]
         candidates = [o for o in over_there if o.connects_to_id == st.floor_plan_id]
         if not candidates:
             candidates = [o for o in over_there
@@ -9834,7 +9962,7 @@ def _build_route_graph(floor_plans, include_stairs=True):
         adjacency[b].append((a, c.distance))
         edges_by_floor[node_floor[a]].append((a, b))
 
-    stairways = (list(Stairway.objects.filter(
+    stairways = (list(Stairway.objects.select_related('room').filter(
         floor_plan_id__in=floor_ids, is_active=True)) if include_stairs else [])
     stair_nodes = {}
     for st in stairways:
@@ -9844,8 +9972,13 @@ def _build_route_graph(floor_plans, include_stairs=True):
         adjacency.setdefault(node, [])
         stair_nodes[node] = st
 
-        # Hook it into the floor it stands on.
+        # Hook it into the floor it stands on, from inside its own room.
         same_floor = [w for w in waypoints if w.floor_plan_id == st.floor_plan_id]
+        room_poly = st.room.geometry if st.room_id and st.room and st.room.geometry else None
+        if room_poly and len(room_poly) >= 3:
+            inside = [w for w in same_floor if _point_in_polygon(w.map_x, w.map_y, room_poly)]
+            if inside:
+                same_floor = inside
         same_floor.sort(key=lambda w: math.hypot(w.map_x - st.map_x, w.map_y - st.map_y))
         for w in same_floor[:STAIR_LINK_NEIGHBOURS]:
             d = math.hypot(w.map_x - st.map_x, w.map_y - st.map_y)

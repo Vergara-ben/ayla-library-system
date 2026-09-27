@@ -838,6 +838,85 @@ class ReturnPathTests(TestCase):
         self.assertEqual(self.book.status, 'For Reshelving')
 
 
+
+class TransactionRecordTests(TestCase):
+    """View, edit and delete on the transactions table."""
+
+    def setUp(self):
+        self.admin = _admin(modules='transactions,books')
+        self.client = _signed_in(self.admin)
+        self.patron = Patron.objects.create(
+            fullname='Record Patron', email='record-patron@example.invalid',
+            password_hash=hash_password('SmokeTest123'),
+            patron_type='Student', account_status='Active',
+        )
+        self.book = Book.objects.create(title='Record Book', author='Tester', status='Borrowed')
+        self.today = timezone.localdate()
+        self.loan = Transaction.objects.create(
+            patron=self.patron, book=self.book, processed_by=self.admin,
+            transaction_type='Borrow', due_date=self.today + timedelta(days=3),
+        )
+
+    def _url(self, what, tx=None):
+        return f'/admin-portal/transaction/{(tx or self.loan).transaction_id}/{what}/'
+
+    def test_detail_returns_the_record(self):
+        data = self.client.get(self._url('detail')).json()
+        self.assertTrue(data['success'])
+        self.assertEqual(data['transaction']['book'], 'Record Book')
+        self.assertEqual(data['transaction']['status'], 'Borrowed')
+
+    def test_edit_changes_due_date_and_fine(self):
+        Transaction.objects.filter(pk=self.loan.pk).update(
+            transaction_date=self.today - timedelta(days=10))
+        new_due = self.today - timedelta(days=1)
+        data = self.client.post(self._url('edit'), {
+            'due_date': new_due.isoformat(), 'return_date': '', 'fine_amount': '12.5',
+        }).json()
+        self.assertTrue(data['success'], data)
+        self.loan.refresh_from_db()
+        self.assertEqual(self.loan.due_date, new_due)
+        self.assertEqual(self.loan.fine_amount, Decimal('12.50'))
+        self.assertTrue(self.loan.overdue_flag)
+        self.assertTrue(SystemLog.objects.filter(
+            entity_id=str(self.loan.transaction_id), action='Update').exists())
+
+    def test_edit_cannot_close_an_open_loan(self):
+        data = self.client.post(self._url('edit'), {
+            'due_date': self.loan.due_date.isoformat(),
+            'return_date': self.today.isoformat(), 'fine_amount': '0',
+        }).json()
+        self.assertFalse(data['success'])
+        self.loan.refresh_from_db()
+        self.assertIsNone(self.loan.return_date)
+
+    def test_edit_rejects_a_negative_fine(self):
+        data = self.client.post(self._url('edit'), {
+            'due_date': self.loan.due_date.isoformat(), 'fine_amount': '-1',
+        }).json()
+        self.assertFalse(data['success'])
+
+    def test_deleting_an_open_loan_frees_the_book(self):
+        data = self.client.post(self._url('delete')).json()
+        self.assertTrue(data['success'])
+        self.assertTrue(data['book_freed'])
+        self.assertFalse(Transaction.objects.filter(pk=self.loan.pk).exists())
+        self.book.refresh_from_db()
+        self.assertEqual(self.book.status, 'Available')
+
+    def test_deleting_a_closed_loan_leaves_the_book_alone(self):
+        self.loan.return_date = self.today
+        self.loan.save()
+        self.book.status = 'For Reshelving'
+        self.book.save()
+        self.assertTrue(self.client.post(self._url('delete')).json()['success'])
+        self.book.refresh_from_db()
+        self.assertEqual(self.book.status, 'For Reshelving')
+
+    def test_delete_needs_post(self):
+        self.client.get(self._url('delete'))
+        self.assertTrue(Transaction.objects.filter(pk=self.loan.pk).exists())
+
 class DeskModeTests(TestCase):
     """Arming the desk confines the browser to the log page."""
 
@@ -943,50 +1022,86 @@ class StairPairingTests(TestCase):
         self._stair(self.upper, connects_to=self.ground, direction='up')
         self.assertIn('goes up from the top floor', self._texts(self._readiness(self.upper)))
 
-    def test_drawing_the_far_end_creates_and_links_both_ways(self):
-        st = self._stair(self.ground, connects_to=self.upper)
-        r = self.client.post('/admin-portal/match-stairway/', {
-            'stairway_id': st.stairway_id,
-            'connects_to': self.upper.floor_plan_id}).json()
-        self.assertTrue(r['success'])
-        self.assertTrue(r['created'])
-        partner = Stairway.objects.get(floor_plan=self.upper)
-        self.assertEqual(partner.connects_to_id, self.ground.floor_plan_id)
-        self.assertEqual((partner.map_x, partner.map_y), (st.map_x, st.map_y))
+    def _room(self, plan, box=(0, 0, 400, 400)):
+        x0, y0, x1, y1 = box
+        return Room.objects.create(floor_plan=plan, name='Hall', map_x=(x0 + x1) / 2,
+                                   map_y=(y0 + y1) / 2,
+                                   geometry=[[x0, y0], [x1, y0], [x1, y1], [x0, y1]])
 
-    def test_the_far_end_of_an_upward_stair_goes_down(self):
-        st = self._stair(self.ground, connects_to=self.upper, direction='up')
-        self.client.post('/admin-portal/match-stairway/', {
-            'stairway_id': st.stairway_id, 'connects_to': self.upper.floor_plan_id})
-        self.assertEqual(Stairway.objects.get(floor_plan=self.upper).direction, 'down')
+    def test_the_far_end_drawer_is_gone(self):
+        from django.urls import NoReverseMatch, reverse
+        with self.assertRaises(NoReverseMatch):
+            reverse('match_stairway')
 
-    def test_an_existing_far_end_is_linked_not_duplicated(self):
-        st = self._stair(self.ground, connects_to=self.upper)
-        self._stair(self.upper)
-        r = self.client.post('/admin-portal/match-stairway/', {
-            'stairway_id': st.stairway_id,
-            'connects_to': self.upper.floor_plan_id}).json()
-        self.assertTrue(r['success'])
-        self.assertFalse(r['created'])
-        self.assertEqual(Stairway.objects.filter(floor_plan=self.upper).count(), 1)
-        self.assertEqual(Stairway.objects.get(floor_plan=self.upper).connects_to_id,
-                         self.ground.floor_plan_id)
-
-    def test_linking_one_end_links_the_other_back(self):
+    def test_choosing_the_partner_links_both_ends(self):
         st = self._stair(self.ground)
-        far = self._stair(self.upper)
-        self.client.post('/admin-portal/edit-stairway/', {
-            'stairway_id': st.stairway_id, 'connects_to': self.upper.floor_plan_id})
-        far.refresh_from_db()
+        far = self._stair(self.upper, x=900, y=700)
+        r = self.client.post('/admin-portal/edit-stairway/', {
+            'stairway_id': st.stairway_id, 'partner_id': far.stairway_id}).json()
+        self.assertTrue(r['success'], r)
+        st.refresh_from_db(); far.refresh_from_db()
+        self.assertEqual(st.partner_id, far.stairway_id)
+        self.assertEqual(far.partner_id, st.stairway_id)
+        self.assertEqual(st.connects_to_id, self.upper.floor_plan_id)
         self.assertEqual(far.connects_to_id, self.ground.floor_plan_id)
+
+    def test_a_chosen_partner_pairs_however_far_apart_they_stand(self):
+        st = self._stair(self.ground)
+        far = self._stair(self.upper, x=900, y=700)
+        self.client.post('/admin-portal/edit-stairway/', {
+            'stairway_id': st.stairway_id, 'partner_id': far.stairway_id})
+        from .views import _pair_stairways
+        pairs = _pair_stairways(list(Stairway.objects.all()))
+        self.assertEqual({frozenset((a.stairway_id, b.stairway_id)) for a, b in pairs},
+                         {frozenset((st.stairway_id, far.stairway_id))})
+        self.assertNotIn('no matching stairway', self._texts(self._readiness(self.ground)))
+
+    def test_relinking_releases_the_old_partner(self):
+        st = self._stair(self.ground)
+        first = self._stair(self.upper)
+        second = self._stair(self.upper, x=600, y=600)
+        self.client.post('/admin-portal/edit-stairway/', {
+            'stairway_id': st.stairway_id, 'partner_id': first.stairway_id})
+        self.client.post('/admin-portal/edit-stairway/', {
+            'stairway_id': st.stairway_id, 'partner_id': second.stairway_id})
+        first.refresh_from_db(); second.refresh_from_db()
+        self.assertIsNone(first.partner_id)
+        self.assertEqual(second.partner_id, st.stairway_id)
+
+    def test_a_partner_must_be_on_another_floor(self):
+        st = self._stair(self.ground)
+        same = self._stair(self.ground, x=500, y=500)
+        r = self.client.post('/admin-portal/edit-stairway/', {
+            'stairway_id': st.stairway_id, 'partner_id': same.stairway_id}).json()
+        self.assertFalse(r['success'])
 
     def test_a_stairway_cannot_reach_its_own_floor(self):
         st = self._stair(self.ground)
-        r = self.client.post('/admin-portal/match-stairway/', {
+        r = self.client.post('/admin-portal/edit-stairway/', {
             'stairway_id': st.stairway_id,
             'connects_to': self.ground.floor_plan_id}).json()
         self.assertFalse(r['success'])
 
+    def test_a_stairway_without_a_room_is_a_blocker(self):
+        self._stair(self.ground, connects_to=self.upper)
+        data = self._readiness(self.ground)
+        self.assertTrue(any(i['level'] == 'blocker' and 'has no room' in i['text']
+                            for i in data['issues']))
+
+    def test_the_stairs_join_only_waypoints_in_their_own_room(self):
+        from .views import _build_route_graph, _stair_node
+        hall = self._room(self.ground, (0, 0, 400, 400))
+        self._room(self.ground, (400, 0, 800, 400))
+        # Stairs against the shared wall, opening into the hall.
+        st = Stairway.objects.create(
+            floor_plan=self.ground, kind='Stairs', room=hall, is_active=True,
+            geometry=[[380, 180], [420, 180], [420, 220], [380, 220]], map_x=400, map_y=200)
+        mine = Waypoint.objects.create(floor_plan=self.ground, map_x=300, map_y=200)
+        # Nearer, but through the wall in the next room.
+        Waypoint.objects.create(floor_plan=self.ground, map_x=430, map_y=200)
+        _, adjacency, _, _, _ = _build_route_graph([self.ground])
+        linked = {n for n, _ in adjacency[_stair_node(st.stairway_id)]}
+        self.assertEqual(linked, {mine.waypoint_id})
 
 class DeskPositionTests(TestCase):
     """The desk is marked on the floor plan, and the kiosk routes from it."""
@@ -3599,159 +3714,74 @@ class ShelfReadAuditTests(TestCase):
                       'two books here have never been confirmed')
 
 
-class ShapedStairTests(TestCase):
-    """A staircase that turns, drawn once."""
+class StairShapeTests(TestCase):
+    """A stairway is one run whose steps follow its long side, in a room it opens into."""
 
     def setUp(self):
         self.user = _admin(modules='shelf')
         self.client = _signed_in(self.user)
-        self.plan = FloorPlan.objects.create(name='Ground', floor_number=1,
-                                             is_active=True)
-        self.upstairs = FloorPlan.objects.create(name='First', floor_number=2)
-        # A tall well: 200 across, 400 along, travel running north-south.
+        self.plan = FloorPlan.objects.create(name='Ground', floor_number=1, is_active=True)
+        self.room = Room.objects.create(floor_plan=self.plan, name='Lobby', map_x=300, map_y=300,
+                                        geometry=[[0, 0], [600, 0], [600, 600], [0, 600]])
+        # A tall well: 200 across, 400 along.
         self.well = [[100, 100], [300, 100], [300, 500], [100, 500]]
 
     def _add(self, **kw):
-        data = {'floor_plan_id': self.plan.floor_plan_id,
-                'geometry': json.dumps(self.well)}
+        data = {'floor_plan_id': self.plan.floor_plan_id, 'geometry': json.dumps(self.well),
+                'room_id': self.room.room_id}
         data.update(kw)
         return self.client.post('/admin-portal/add-stairway/', data).json()
 
-    @staticmethod
-    def _box(geometry):
-        xs = [p[0] for p in geometry]
-        ys = [p[1] for p in geometry]
-        return min(xs), min(ys), max(xs), max(ys)
+    def test_a_stairway_needs_its_room(self):
+        r = self._add(room_id='')
+        self.assertFalse(r['success'])
+        self.assertIn('room', r['error'])
+        self.assertFalse(Stairway.objects.exists())
 
-    # The shape
+    def test_a_room_on_another_floor_is_refused(self):
+        other = FloorPlan.objects.create(name='Upper', floor_number=2)
+        elsewhere = Room.objects.create(floor_plan=other, name='Attic', map_x=0, map_y=0)
+        self.assertFalse(self._add(room_id=elsewhere.room_id)['success'])
 
-    def test_a_straight_stair_stores_no_flights(self):
-        """The overwhelming majority. Footprint and bearing say it all."""
-        r = self._add(shape='straight')
-        self.assertTrue(r['success'], r)
-        st = Stairway.objects.get(stairway_id=r['stairway']['stairway_id'])
-        self.assertIsNone(st.flights)
-        self.assertEqual(r['stairway']['shape'], 'straight')
+    def test_the_steps_follow_the_long_side(self):
+        tall = self._add()
+        self.assertTrue(tall['success'], tall)
+        self.assertEqual(Stairway.objects.get().bearing % 180, 0)
+        Stairway.objects.all().delete()
+        self.well = [[100, 100], [500, 100], [500, 300], [100, 300]]
+        self._add()
+        self.assertEqual(Stairway.objects.get().bearing % 180, 90)
 
-    def test_a_half_turn_becomes_two_flights_and_a_landing(self):
-        r = self._add(shape='half', bearing=180)
-        st = Stairway.objects.get(stairway_id=r['stairway']['stairway_id'])
-        self.assertEqual([f['kind'] for f in st.flights],
-                         ['flight', 'landing', 'flight'])
-        self.assertEqual(r['stairway']['shape'], 'half')
+    def test_a_turned_stair_still_reads_its_long_side(self):
+        from .views import _infer_stair_bearing
+        # The tall well turned 45 degrees.
+        c, h = 200.0, math.sqrt(0.5)
+        turned = [[c + (x - c) * h - (y - 300) * h, 300 + (x - c) * h + (y - 300) * h]
+                  for x, y in self.well]
+        self.assertAlmostEqual(_infer_stair_bearing(turned), 45, delta=0.5)
 
-    def test_the_two_flights_of_a_half_turn_climb_opposite_ways(self):
-        """That is what turning about means, and it is why one bearing failed."""
-        r = self._add(shape='half', bearing=180)
-        st = Stairway.objects.get(stairway_id=r['stairway']['stairway_id'])
-        first, _, second = st.flights
-        self.assertEqual(first['bearing'], 180)
-        self.assertEqual(second['bearing'], 0)
+    def test_a_bearing_or_turn_sent_by_an_old_page_is_ignored(self):
+        self._add(bearing='90', shape='half')
+        st = Stairway.objects.get()
+        self.assertEqual(st.bearing % 180, 0)
+        self.assertFalse(st.flights)
 
-    def test_the_flights_of_a_half_turn_stand_side_by_side(self):
-        r = self._add(shape='half', bearing=180)
-        st = Stairway.objects.get(stairway_id=r['stairway']['stairway_id'])
-        first, landing, second = st.flights
-        fx0, fy0, fx1, fy1 = self._box(first['geometry'])
-        sx0, sy0, sx1, sy1 = self._box(second['geometry'])
-        self.assertLess(fx1, sx0, 'the flights must not overlap')
-        self.assertEqual((fy0, fy1), (sy0, sy1), 'they run the same length')
+    def test_treads_stay_inside_the_well(self):
+        r = self._add()
+        treads = r['stairway']['treads']
+        self.assertTrue(treads)
+        for (x1, y1), (x2, y2) in treads:
+            for x, y in ((x1, y1), (x2, y2)):
+                self.assertTrue(99.9 <= x <= 300.1 and 99.9 <= y <= 500.1, (x, y))
 
-    def test_the_landing_sits_at_the_end_the_flights_climb_towards(self):
-        """A half-landing is where you turn round, so it is at the far end."""
-        r = self._add(shape='half', bearing=180)          # travelling south
-        st = Stairway.objects.get(stairway_id=r['stairway']['stairway_id'])
-        first, landing, _ = st.flights
-        self.assertGreater(self._box(landing['geometry'])[1],
-                           self._box(first['geometry'])[1],
-                           'travelling south, the landing is at the south end')
-
-        r = self._add(shape='half', bearing=0)            # travelling north
-        st = Stairway.objects.get(stairway_id=r['stairway']['stairway_id'])
-        first, landing, _ = st.flights
-        self.assertLess(self._box(landing['geometry'])[1],
-                        self._box(first['geometry'])[1])
-
-    def test_the_landing_spans_the_whole_well(self):
-        """You walk off one flight and onto the other across it."""
-        r = self._add(shape='half', bearing=180)
-        st = Stairway.objects.get(stairway_id=r['stairway']['stairway_id'])
-        landing = st.flights[1]
-        lx0, _, lx1, _ = self._box(landing['geometry'])
-        wx0, _, wx1, _ = self._box(self.well)
-        self.assertEqual((lx0, lx1), (wx0, wx1))
-
-    def test_a_quarter_turn_leaves_its_landing_sideways(self):
-        r = self._add(shape='quarter', bearing=180)
-        st = Stairway.objects.get(stairway_id=r['stairway']['stairway_id'])
-        first, _, second = st.flights
-        self.assertEqual((first['bearing'], second['bearing']), (180, 270))
-
-    def test_a_well_too_small_to_divide_stays_one_run(self):
-        """Better a straight stair than two flights of three steps."""
-        tiny = [[0, 0], [20, 0], [20, 20], [0, 20]]
-        r = self.client.post('/admin-portal/add-stairway/', {
-            'floor_plan_id': self.plan.floor_plan_id,
-            'geometry': json.dumps(tiny), 'shape': 'half'}).json()
-        st = Stairway.objects.get(stairway_id=r['stairway']['stairway_id'])
-        self.assertIsNone(st.flights)
-
-    # The direction
-
-    def test_the_bearing_is_read_off_the_shape_when_none_is_given(self):
-        """It was a number box asking to convert a direction just drawn."""
-        r = self._add()                                   # no bearing sent
-        st = Stairway.objects.get(stairway_id=r['stairway']['stairway_id'])
-        self.assertEqual(st.bearing, 0, 'the well is taller than it is wide')
-
-        wide = [[100, 100], [500, 100], [500, 300], [100, 300]]
-        r = self.client.post('/admin-portal/add-stairway/', {
-            'floor_plan_id': self.plan.floor_plan_id,
-            'geometry': json.dumps(wide)}).json()
-        st = Stairway.objects.get(stairway_id=r['stairway']['stairway_id'])
-        self.assertEqual(st.bearing, 90, 'a wide well runs left to right')
-
-    def test_an_explicit_bearing_still_wins(self):
-        r = self._add(bearing=270)
-        st = Stairway.objects.get(stairway_id=r['stairway']['stairway_id'])
-        self.assertEqual(st.bearing, 270)
-
-    def test_turning_a_shaped_stair_redraws_what_is_inside_it(self):
-        """Arrows that disagree with the footprint they sit on are worse than none."""
-        r = self._add(shape='half', bearing=180)
-        sid = r['stairway']['stairway_id']
-        self.client.post('/admin-portal/edit-stairway/',
-                         {'stairway_id': sid, 'bearing': 0})
-        st = Stairway.objects.get(stairway_id=sid)
-        self.assertEqual([f['bearing'] for f in st.flights], [0, 0, 180])
-        self.assertEqual(len(st.flights), 3, 'it is still a half turn')
-
-    # What gets drawn
-
-    def test_each_flight_gets_its_own_treads(self):
-        r = self._add(shape='half', bearing=180)
-        parts = r['stairway']['parts']
-        self.assertEqual([p['kind'] for p in parts], ['flight', 'landing', 'flight'])
-        self.assertTrue(parts[0]['treads'])
-        self.assertTrue(parts[2]['treads'])
-
-    def test_a_landing_has_no_treads_because_it_is_a_floor(self):
-        """Steps across it would say you climb it."""
-        r = self._add(shape='half', bearing=180)
-        landing = r['stairway']['parts'][1]
-        self.assertEqual(landing['treads'], [])
-
-    def test_a_lift_has_no_treads_at_all(self):
-        """Drawing steps on one would be wrong, not merely decorative."""
-        r = self._add(kind='Elevator', shape='half')
-        self.assertEqual(r['stairway']['parts'], [])
+    def test_a_lift_has_no_treads(self):
+        r = self._add(kind='Elevator')
         self.assertEqual(r['stairway']['treads'], [])
 
-    def test_a_straight_stair_still_reports_treads_for_the_maps(self):
-        """Four maps draw a stair from this. None of them may go blank."""
-        r = self._add(shape='straight')
-        self.assertTrue(r['stairway']['treads'])
-        self.assertEqual(len(r['stairway']['parts']), 1)
+    def test_the_payload_names_the_room(self):
+        r = self._add()
+        self.assertEqual(r['stairway']['room_id'], self.room.room_id)
+        self.assertEqual(r['stairway']['room'], 'Lobby')
 
 
 class UnshelvedInMoverTests(TestCase):
@@ -7349,16 +7379,19 @@ class ElementPropertiesTests(TestCase):
 
     # Stairways
 
-    def test_a_stairway_can_be_reshaped_into_a_switchback(self):
+    def test_a_stairway_can_be_resized_by_its_sides(self):
         st = Stairway.objects.create(
-            floor_plan=self.plan, kind='Stairs', direction='up', bearing=0,
+            floor_plan=self.plan, kind='Stairs', direction='up', bearing=0, room=self.room,
             geometry=[[0, 0], [60, 0], [60, 200], [0, 200]], map_x=30, map_y=100)
+        wide = [[0, 0], [300, 0], [300, 200], [0, 200]]
         r = self._post('/admin-portal/edit-stairway/', stairway_id=st.stairway_id,
-                       shape='half', bearing=0)
+                       geometry=json.dumps(wide))
         self.assertTrue(r['success'], r)
         st.refresh_from_db()
-        # A switchback is more than one run; a straight flight is one or none.
-        self.assertGreater(len(st.flights or []), 1)
+        self.assertEqual(st.geometry, wide)
+        self.assertEqual((st.map_x, st.map_y), (150, 100))
+        # Now wider than tall, so the steps run across.
+        self.assertEqual(st.bearing % 180, 90)
 
     def test_a_stairway_can_be_closed_off_without_being_deleted(self):
         st = Stairway.objects.create(
@@ -7405,6 +7438,44 @@ class FloorPlanGroupActionTests(TestCase):
                 'items': json.dumps([{'kind': k, 'id': i} for k, i in items])}
         data.update(extra)
         return self.client.post(self.URL, data).json()
+
+    def test_rotating_a_room_turns_what_stands_in_it(self):
+        r = self._post('rotate', [('room', self.room.room_id)], degrees=90)
+        self.assertTrue(r['success'], r)
+        for obj in (self.room, self.door, self.shelf, self.wp_a, self.beacon, self.stair):
+            obj.refresh_from_db()
+        # About the room's centre (500, 400): the top wall becomes the right wall.
+        self.assertEqual(self.room.geometry[0], [600, 300])
+        self.assertEqual((self.door.map_x, self.door.map_y), (600, 400))
+        self.assertEqual(self.door.rotation, 90)
+        self.assertEqual((self.shelf.map_x, self.shelf.map_y), (500, 350))
+        self.assertEqual(self.shelf.rotation, 90)
+        self.assertEqual((self.wp_a.map_x, self.wp_a.map_y), (580, 320))
+        # Outside the room: left alone.
+        self.assertEqual((self.beacon.map_x, self.beacon.map_y), (100, 100))
+        self.assertEqual(self.stair.geometry[0], [700, 100])
+
+    def test_rotating_a_stair_turns_its_steps(self):
+        r = self._post('rotate', [('stairs', self.stair.stairway_id)], degrees=90)
+        self.assertTrue(r['success'], r)
+        self.stair.refresh_from_db()
+        self.assertEqual(self.stair.bearing % 180, 90)
+        xs = [p[0] for p in self.stair.geometry]
+        self.assertAlmostEqual(max(xs) - min(xs), 100, delta=0.01)
+
+    def test_a_rotation_can_be_undone(self):
+        before = [list(p) for p in self.room.geometry]
+        self._post('rotate', [('room', self.room.room_id)], degrees=45)
+        self.assertTrue(self._post('undo')['success'])
+        self.room.refresh_from_db(); self.shelf.refresh_from_db()
+        self.assertEqual(self.room.geometry, before)
+        self.assertEqual((self.shelf.map_x, self.shelf.map_y), (450, 400))
+
+    def test_a_locked_element_is_not_rotated(self):
+        self.stair.locked = True
+        self.stair.save()
+        r = self._post('rotate', [('stairs', self.stair.stairway_id)], degrees=90)
+        self.assertFalse(r['success'])
 
     def test_moving_a_group_carries_doors_with_their_room(self):
         r = self._post('move', [('room', self.room.room_id), ('shelf', self.shelf.shelf_id),
@@ -7519,6 +7590,118 @@ class FloorPlanGroupActionTests(TestCase):
         r = Client().post(self.URL, {'floor_plan_id': self.plan.floor_plan_id, 'action': 'undo'})
         self.assertEqual(r.status_code, 302)
 
+
+
+class FloorPlanUndoTests(TestCase):
+    """Every change in the floor plan editor can be taken back, one step at a time."""
+
+    def setUp(self):
+        self.client = _signed_in(_admin())
+        self.plan = FloorPlan.objects.create(name='Ground', floor_number=1, is_active=True,
+                                             canvas_width=1000, canvas_height=800)
+        self.upper = FloorPlan.objects.create(name='Upper', floor_number=2, is_active=True)
+        self.square = [[100, 100], [300, 100], [300, 300], [100, 300]]
+        self.room = Room.objects.create(floor_plan=self.plan, name='Hall', map_x=200, map_y=200,
+                                        geometry=self.square)
+        self.shelf = Shelf.objects.create(room=self.room, name='Shelf A', map_x=150, map_y=150)
+        self.level = ShelfLevel.objects.create(shelf=self.shelf, level_number=1)
+        self.book = Book.objects.create(title='Florante at Laura', author='Balagtas',
+                                        shelf_level=self.level, shelf_slot=3,
+                                        qr_code=str(uuid4()), status='Available')
+
+    def _undo(self):
+        return self.client.post('/admin-portal/floor-plan/undo/',
+                                {'floor_plan_id': self.plan.floor_plan_id}).json()
+
+    def _edit(self, geometry):
+        return self.client.post('/admin-portal/edit-room/', {
+            'room_id': self.room.room_id, 'undo_plan': self.plan.floor_plan_id,
+            'geometry': json.dumps(geometry)}, HTTP_X_REQUESTED_WITH='XMLHttpRequest').json()
+
+    def test_a_single_edit_can_be_undone(self):
+        wider = [[100, 100], [400, 100], [400, 300], [100, 300]]
+        r = self._edit(wider)
+        self.assertEqual(r['undo_label'], 'Edited a room')
+        self.assertEqual(r['undo_count'], 1)
+        r = self._undo()
+        self.assertTrue(r['success'], r)
+        self.room.refresh_from_db()
+        self.assertEqual(self.room.geometry, self.square)
+        self.assertIsNone(r['undo_label'])
+
+    def test_steps_come_back_in_reverse_order(self):
+        first = [[100, 100], [400, 100], [400, 300], [100, 300]]
+        second = [[100, 100], [500, 100], [500, 300], [100, 300]]
+        self._edit(first)
+        self._edit(second)
+        self._undo()
+        self.room.refresh_from_db()
+        self.assertEqual(self.room.geometry, first)
+        self._undo()
+        self.room.refresh_from_db()
+        self.assertEqual(self.room.geometry, self.square)
+        self.assertFalse(self._undo()['success'])
+
+    def test_undoing_an_add_removes_what_was_added(self):
+        r = self.client.post('/admin-portal/add-obstacle/', {
+            'floor_plan_id': self.plan.floor_plan_id, 'kind': 'Table',
+            'geometry': json.dumps([[10, 10], [40, 10], [40, 40], [10, 40]])}).json()
+        self.assertTrue(r['success'], r)
+        self.assertEqual(Obstacle.objects.count(), 1)
+        self._undo()
+        self.assertEqual(Obstacle.objects.count(), 0)
+
+    def test_a_delete_from_the_list_below_the_map_is_undone_with_its_books(self):
+        # The plain form: no plan id, no AJAX header, answered with a redirect.
+        self.client.post('/admin-portal/delete-room/', {'room_id': self.room.room_id})
+        self.assertFalse(Room.objects.filter(pk=self.room.pk).exists())
+        self.book.refresh_from_db()
+        self.assertIsNone(self.book.shelf_level_id)
+        self.assertTrue(self._undo()['success'])
+        self.assertTrue(Shelf.objects.filter(pk=self.shelf.pk).exists())
+        self.book.refresh_from_db()
+        self.assertEqual((self.book.shelf_level_id, self.book.shelf_slot), (self.level.pk, 3))
+
+    def test_a_change_that_changes_nothing_is_not_a_step(self):
+        r = self._edit(self.square)
+        self.assertTrue(r['success'], r)
+        self.assertEqual(r['undo_count'], 0)
+
+    def test_a_link_made_on_another_floor_is_taken_back_too(self):
+        here = Stairway.objects.create(floor_plan=self.plan, room=self.room, geometry=self.square,
+                                       map_x=200, map_y=200)
+        there = Stairway.objects.create(floor_plan=self.upper, geometry=self.square,
+                                        map_x=200, map_y=200)
+        self.client.post('/admin-portal/edit-stairway/', {
+            'stairway_id': here.stairway_id, 'partner_id': there.stairway_id,
+            'undo_plan': self.plan.floor_plan_id})
+        there.refresh_from_db()
+        self.assertEqual(there.partner_id, here.stairway_id)
+        self._undo()
+        here.refresh_from_db(); there.refresh_from_db()
+        self.assertIsNone(here.partner_id)
+        self.assertIsNone(there.partner_id)
+        self.assertIsNone(there.connects_to_id)
+
+    def test_history_is_capped(self):
+        from .floorplan_undo import HISTORY
+        for i in range(HISTORY + 3):
+            self._edit([[100, 100], [400 + i, 100], [400 + i, 300], [100, 300]])
+        from .models import FloorPlanUndo
+        self.assertEqual(FloorPlanUndo.objects.filter(floor_plan=self.plan).count(), HISTORY)
+
+    def test_the_map_says_what_undo_would_take_back(self):
+        self._edit([[100, 100], [400, 100], [400, 300], [100, 300]])
+        d = self.client.get('/admin-portal/map-data/',
+                            {'floor_plan_id': self.plan.floor_plan_id}).json()
+        self.assertEqual((d['undo_label'], d['undo_count']), ('Edited a room', 1))
+
+    def test_a_stranger_cannot_undo(self):
+        self._edit([[100, 100], [400, 100], [400, 300], [100, 300]])
+        r = Client().post('/admin-portal/floor-plan/undo/', {'floor_plan_id': self.plan.floor_plan_id})
+        self.assertEqual(r.status_code, 302)
+        self.room.refresh_from_db()
+        self.assertNotEqual(self.room.geometry, self.square)
 
 class CanvasResizeTests(TestCase):
     """The canvas a plan is drawn on, changed after it has been drawn on."""

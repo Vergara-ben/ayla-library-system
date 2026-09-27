@@ -1,11 +1,9 @@
-"""Group actions for the floor plan editor: move, delete, lock, unlock and undo."""
+"""Group actions for the floor plan editor: move, rotate, delete, lock, unlock and undo."""
 
 import json
 import math
 from collections import Counter
 
-from django.apps import apps
-from django.core import serializers
 from django.db import models, router, transaction
 from django.db.models import Q
 from django.db.models.deletion import Collector
@@ -32,6 +30,17 @@ MOVE_FIELDS = {
     'waypoint': ['map_x', 'map_y'],
 }
 
+# Fields a rotation changes, per kind.
+ROTATE_FIELDS = {
+    'room': ['geometry', 'map_x', 'map_y'],
+    'door': ['map_x', 'map_y', 'rotation'],
+    'shelf': ['geometry', 'map_x', 'map_y', 'rotation'],
+    'obstacle': ['geometry', 'map_x', 'map_y'],
+    'stairs': ['geometry', 'map_x', 'map_y', 'bearing', 'flights'],
+    'beacon': ['map_x', 'map_y'],
+    'waypoint': ['map_x', 'map_y'],
+}
+
 # Wording for the delete summary.
 PLURALS = {
     'room': 'rooms', 'door': 'doors', 'shelf': 'shelves', 'shelflevel': 'shelf levels',
@@ -47,9 +56,6 @@ UNLINKS = {
 
 MAX_ITEMS = 2000
 MAX_SHIFT = 10000
-UNDO_KEY = 'floorplan_undo'
-# Very large deletes are not kept for undo, to keep the session small.
-MAX_UNDO_BYTES = 4 * 1024 * 1024
 
 
 def _fail(message, **extra):
@@ -101,38 +107,17 @@ def _label(verb, n):
     return '%s %d element%s' % (verb, n, '' if n == 1 else 's')
 
 
-def _snapshot(objs, fields):
-    """Rows as they are now, so undo can put them back. fields=None means re-insert."""
-    return {'objects': serializers.serialize('json', list(objs)), 'fields': fields}
-
-
-def _remember(request, plan, action, label, restores, nulls=()):
-    record = {'plan': plan.floor_plan_id, 'action': action, 'label': label,
-              'restores': restores, 'nulls': list(nulls)}
-    if len(json.dumps(record)) > MAX_UNDO_BYTES:
-        request.session.pop(UNDO_KEY, None)
-        return False
-    request.session[UNDO_KEY] = record
-    return True
-
-
 def _move(found, dx, dy):
-    """Shift every selected element. Returns undo snapshots taken before the change."""
+    """Shift every selected element."""
     from .views import _snap_to_polygon_edge, _stair_flights, _stair_shape_of, _translate_geometry
-
-    restores = [_snapshot(objs, MOVE_FIELDS[kind]) for kind, objs in found.items()]
 
     room_ids = {r.room_id for r in found.get('room', [])}
     selected_doors = {d.door_id for d in found.get('door', [])}
     # Doors sit on a wall, so they ride with their room.
     carried = list(Door.objects.filter(room_id__in=room_ids).exclude(door_id__in=selected_doors))
-    if carried:
-        restores.append(_snapshot(carried, ['map_x', 'map_y']))
     waypoint_ids = [w.waypoint_id for w in found.get('waypoint', [])]
     links = list(WaypointConnection.objects.filter(
         Q(waypoint_from_id__in=waypoint_ids) | Q(waypoint_to_id__in=waypoint_ids)))
-    if links:
-        restores.append(_snapshot(links, ['distance']))
 
     def shift(obj, geometry=True):
         if geometry and obj.geometry and len(obj.geometry) >= 3:
@@ -177,7 +162,87 @@ def _move(found, dx, dy):
         a, b = link.waypoint_from, link.waypoint_to
         link.distance = math.hypot(a.map_x - b.map_x, a.map_y - b.map_y)
         link.save(update_fields=['distance'])
-    return restores
+
+
+def _points_of(kind, obj):
+    if getattr(obj, 'geometry', None) and len(obj.geometry) >= 3:
+        return [(float(p[0]), float(p[1])) for p in obj.geometry]
+    if obj.map_x is None or obj.map_y is None:
+        return []
+    return [(obj.map_x, obj.map_y)]
+
+
+def _rotate(found, degrees):
+    """Turn the selection about its centre. A room takes its doors and contents with it."""
+    from .routegen import point_in_polygon
+    from .views import _infer_stair_bearing, _snap_to_polygon_edge
+
+    everything = [(k, o) for k, objs in found.items() for o in objs]
+    pts = [p for k, o in everything for p in _points_of(k, o)]
+    if not pts:
+        return []
+    cx = (min(p[0] for p in pts) + max(p[0] for p in pts)) / 2.0
+    cy = (min(p[1] for p in pts) + max(p[1] for p in pts)) / 2.0
+    rad = math.radians(degrees)
+    cos, sin = math.cos(rad), math.sin(rad)
+
+    def turn(x, y):
+        dx, dy = x - cx, y - cy
+        return round(cx + dx * cos - dy * sin, 2), round(cy + dx * sin + dy * cos, 2)
+
+    # What stands in a turned room turns with it.
+    rooms = found.get('room', [])
+    chosen = {k: {o.pk for o in objs} for k, objs in found.items()}
+    carried = {}
+    if rooms:
+        room_ids = [r.room_id for r in rooms]
+        polys = [r.geometry for r in rooms if r.geometry and len(r.geometry) >= 3]
+        plan_id = rooms[0].floor_plan_id
+
+        def inside(o):
+            return (o.map_x is not None and o.map_y is not None
+                    and any(point_in_polygon(o.map_x, o.map_y, poly) for poly in polys))
+
+        carried['door'] = list(Door.objects.filter(room_id__in=room_ids))
+        carried['shelf'] = list(Shelf.objects.filter(room_id__in=room_ids, map_x__isnull=False))
+        for kind in ('obstacle', 'stairs', 'beacon', 'waypoint'):
+            carried[kind] = [o for o in KINDS[kind].objects.filter(floor_plan_id=plan_id) if inside(o)]
+        for kind in list(carried):
+            carried[kind] = [o for o in carried[kind] if o.pk not in chosen.get(kind, set())]
+
+    groups = {}
+    for kind, objs in list(found.items()) + list(carried.items()):
+        groups.setdefault(kind, []).extend(objs)
+
+    waypoint_ids = [w.waypoint_id for w in groups.get('waypoint', [])]
+    links = list(WaypointConnection.objects.filter(
+        Q(waypoint_from_id__in=waypoint_ids) | Q(waypoint_to_id__in=waypoint_ids)))
+
+    turned_rooms = {r.room_id for r in rooms}
+    for kind, objs in groups.items():
+        for obj in objs:
+            if getattr(obj, 'geometry', None) and len(obj.geometry) >= 3:
+                obj.geometry = [list(turn(p[0], p[1])) for p in obj.geometry]
+            if obj.map_x is not None and obj.map_y is not None:
+                obj.map_x, obj.map_y = turn(obj.map_x, obj.map_y)
+            if kind in ('shelf', 'door'):
+                obj.rotation = round(((obj.rotation or 0) + degrees) % 360, 2)
+            if kind == 'door' and obj.room_id not in turned_rooms:
+                # A door turned on its own stays on its wall.
+                outline = obj.room.geometry or []
+                if len(outline) >= 3:
+                    obj.map_x, obj.map_y, obj.rotation = _snap_to_polygon_edge(
+                        outline, obj.map_x, obj.map_y)
+            if kind == 'stairs':
+                obj.bearing = _infer_stair_bearing(obj.geometry)
+                obj.flights = None
+            obj.save(update_fields=ROTATE_FIELDS[kind])
+
+    for link in WaypointConnection.objects.filter(
+            pk__in=[l.pk for l in links]).select_related('waypoint_from', 'waypoint_to'):
+        a, b = link.waypoint_from, link.waypoint_to
+        link.distance = math.hypot(a.map_x - b.map_x, a.map_y - b.map_y)
+        link.save(update_fields=['distance'])
 
 
 def _full_rows(model, rows):
@@ -221,25 +286,6 @@ def _summary(groups, unlinks):
     }
 
 
-def _undo(request, plan):
-    record = request.session.get(UNDO_KEY)
-    if not record or record.get('plan') != plan.floor_plan_id:
-        return _fail('Nothing to undo.')
-    with transaction.atomic():
-        for part in record['restores']:
-            for item in serializers.deserialize('json', part['objects']):
-                if part['fields'] is None:
-                    item.save()
-                elif type(item.object).objects.filter(pk=item.object.pk).exists():
-                    item.object.save(update_fields=part['fields'])
-        for label, pk, attname, value, _name in record.get('nulls', []):
-            apps.get_model(label).objects.filter(pk=pk, **{attname: None}).update(**{attname: value})
-    request.session.pop(UNDO_KEY, None)
-    log_admin_action(request, 'Update', 'FloorPlan', plan.floor_plan_id,
-                     f'Undid "{record["label"]}" on {plan.name}')
-    return JsonResponse({'success': True, 'message': 'Undone: %s.' % record['label'].lower()})
-
-
 @admin_only_required
 def floorplan_bulk(request):
     """One endpoint for every group action in the floor plan editor."""
@@ -252,8 +298,10 @@ def floorplan_bulk(request):
 
     action = (request.POST.get('action') or '').strip()
     if action == 'undo':
-        return _undo(request, plan)
-    if action not in ('move', 'preview_delete', 'delete', 'lock', 'unlock'):
+        # The editor's history covers group actions too.
+        from .floorplan_undo import undo_latest
+        return undo_latest(request, plan)
+    if action not in ('move', 'rotate', 'preview_delete', 'delete', 'lock', 'unlock'):
         return _fail('Unknown action')
 
     found, error = _load_selection(plan, request.POST.get('items'))
@@ -264,16 +312,14 @@ def floorplan_bulk(request):
     if action in ('lock', 'unlock'):
         want = action == 'lock'
         with transaction.atomic():
-            restores = [_snapshot(objs, ['locked']) for objs in found.values()]
             for objs in found.values():
                 for obj in objs:
                     if obj.locked != want:
                         obj.locked = want
                         obj.save(update_fields=['locked'])
             label = _label('Locked' if want else 'Unlocked', count)
-            kept = _remember(request, plan, action, label, restores)
         log_admin_action(request, 'Update', 'FloorPlan', plan.floor_plan_id, f'{label} on {plan.name}')
-        return JsonResponse({'success': True, 'message': label + '.', 'undo': label if kept else None})
+        return JsonResponse({'success': True, 'message': label + '.', 'undo': label})
 
     locked = sum(1 for objs in found.values() for obj in objs if obj.locked)
     if locked:
@@ -293,12 +339,27 @@ def floorplan_bulk(request):
         if abs(dx) < 1e-9 and abs(dy) < 1e-9:
             return JsonResponse({'success': True, 'message': 'Nothing moved.', 'undo': None})
         with transaction.atomic():
-            restores = _move(found, dx, dy)
+            _move(found, dx, dy)
             label = _label('Moved', count)
-            kept = _remember(request, plan, 'move', label, restores)
         log_admin_action(request, 'Update', 'FloorPlan', plan.floor_plan_id,
                          f'{label} by ({dx:.0f}, {dy:.0f}) on {plan.name}')
-        return JsonResponse({'success': True, 'message': label + '.', 'undo': label if kept else None})
+        return JsonResponse({'success': True, 'message': label + '.', 'undo': label})
+
+    if action == 'rotate':
+        try:
+            degrees = float(request.POST.get('degrees'))
+        except (TypeError, ValueError):
+            return _fail('degrees must be a number')
+        if not math.isfinite(degrees) or abs(degrees) > 360:
+            return _fail('That turn is out of range.')
+        if abs(degrees % 360) < 1e-9:
+            return JsonResponse({'success': True, 'message': 'Nothing turned.', 'undo': None})
+        with transaction.atomic():
+            _rotate(found, degrees)
+            label = _label('Rotated', count)
+        log_admin_action(request, 'Update', 'FloorPlan', plan.floor_plan_id,
+                         f'{label} by {degrees:.0f}° on {plan.name}')
+        return JsonResponse({'success': True, 'message': label + '.', 'undo': label})
 
     # preview_delete and delete
     with transaction.atomic():
@@ -314,12 +375,8 @@ def floorplan_bulk(request):
         if action == 'preview_delete':
             return JsonResponse({'success': True, 'count': count, 'summary': summary})
 
-        # Parents first when putting rows back.
-        restores = ([_snapshot(rows, None) for _, rows in reversed(data_groups)]
-                    + [_snapshot(rows, None) for _, rows in fast_groups])
         collector.delete()
         label = _label('Deleted', count)
-        kept = _remember(request, plan, 'delete', label, restores, unlinks)
     log_admin_action(request, 'Delete', 'FloorPlan', plan.floor_plan_id, f'{label} from {plan.name}')
-    return JsonResponse({'success': True, 'message': label + '.', 'undo': label if kept else None,
+    return JsonResponse({'success': True, 'message': label + '.', 'undo': label,
                          'summary': summary})

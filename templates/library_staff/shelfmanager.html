@@ -324,6 +324,28 @@
         </div>
     </div>
 
+    {# Read-only list of what sits on a board or shelf. #}
+    <div id="viewPlacementModal" class="hidden absolute inset-0 bg-black/60 z-30 flex items-center justify-center p-4 overflow-y-auto">
+        <div class="w-full max-w-2xl rounded-2xl border p-6 flex flex-col gap-4 shadow-2xl my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color); max-height: 88vh;">
+            <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                    <h3 class="text-base font-bold text-slate-200 tracking-wide">Book Placement</h3>
+                    <p id="vpWhere" class="text-[11px] text-slate-500 mt-0.5 truncate"></p>
+                </div>
+                <button type="button" onclick="closeModal('viewPlacementModal')" class="w-7 h-7 flex-shrink-0 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40" aria-label="Close"><i class="fa-solid fa-xmark text-sm"></i></button>
+            </div>
+            <div class="relative">
+                <i class="fa-solid fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-xs"></i>
+                <input type="text" id="vpSearch" oninput="renderViewPlacement()" placeholder="Filter by title, author or call number..." class="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-3 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-cyan-800 placeholder-slate-600">
+            </div>
+            <div id="vpList" class="space-y-3 overflow-y-auto min-h-0" style="max-height: 58vh;"></div>
+            <div class="flex items-center justify-between gap-3">
+                <span id="vpCount" class="text-[11px] text-slate-500"></span>
+                <button type="button" onclick="closeModal('viewPlacementModal')" class="px-5 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:bg-slate-800/40 font-semibold text-xs min-w-[100px]">Close</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         const CSRF = "{{ csrf_token }}";
         const U = {
@@ -338,6 +360,7 @@
             delLevel: "{% url 'delete_shelf_level' %}",
             bookBase: "/admin-portal/book-details/",
             placementBooks: "{% url 'get_books_for_placement' %}",
+            boardBooks: "{% url 'get_board_books' %}",
             assignBooks: "{% url 'assign_books_to_level' %}",
             setShelfGrid: "{% url 'set_shelf_grid' %}",
             reorderBooks: "{% url 'reorder_books_on_level' %}",
@@ -395,6 +418,7 @@
             } else {
                 let a = '';
                 if (t.child) a += '<button class="tbtn add" title="Add ' + childWord[t.child] + '" onclick="openAdd(\'' + node.type + '\',' + node.id + ')"><i class="fa-solid fa-plus"></i></button>';
+                if (node.type === 'shelflevel') a += '<button class="tbtn view" title="View book placement" onclick="openViewPlacement(\'' + node.type + '\',' + node.id + ')"><i class="fa-solid fa-eye"></i></button>';
                 if (node.type === 'shelflevel') a += '<button class="tbtn view" title="Show on the front view" onclick="showElevation(' + node.id + ')"><i class="fa-solid fa-bars-staggered"></i></button>';
                 if (node.type === 'shelflevel') a += '<button class="tbtn add" title="Add Books" onclick="openPlacement(' + node.id + ', this)"><i class="fa-solid fa-book-medical"></i></button>';
                 if (t.edit) a += '<button class="tbtn edit" title="Rename" onclick="openEdit(\'' + node.type + '\',' + node.id + ',this)"><i class="fa-solid fa-pen"></i></button>';
@@ -854,6 +878,82 @@
                 + row('Year', d.publication_year) + row('Copies', d.copies);
         }
 
+        // Book placement, read-only.
+        const viewPlacement = { boards: [] };
+
+        window.openViewPlacement = async function (type, id) {
+            const list = document.getElementById('vpList');
+            document.getElementById('vpSearch').value = '';
+            document.getElementById('vpCount').textContent = '';
+            list.innerHTML = '<div class="text-xs text-slate-500"><i class="fa-solid fa-spinner fa-spin mr-2"></i>Loading…</div>';
+            openModal('viewPlacementModal');
+
+            let levelIds = [String(id)];
+            let where = '';
+            if (type === 'shelf') {
+                const row = document.querySelector('.trow[data-type="shelf"][data-id="' + id + '"]');
+                const node = row && row.closest('.tnode');
+                levelIds = node ? levelsOfShelfNode(node).map(function (lv) { return lv.id; }) : [];
+                where = row ? row.dataset.name : '';
+                if (!levelIds.length) {
+                    document.getElementById('vpWhere').textContent = where;
+                    list.innerHTML = '<div class="text-xs text-slate-500">This shelf has no boards yet.</div>';
+                    return;
+                }
+            }
+            let results;
+            try {
+                results = await Promise.all(levelIds.map(function (lid) {
+                    return getJSON(U.boardBooks + '?level=' + encodeURIComponent(lid));
+                }));
+            } catch (e) {
+                list.innerHTML = '<div class="text-xs text-rose-400">The books could not be loaded.</div>';
+                return;
+            }
+            viewPlacement.boards = results.filter(function (d) { return d && d.success; });
+            if (!viewPlacement.boards.length) {
+                list.innerHTML = '<div class="text-xs text-rose-400">' + esc((results[0] && results[0].error) || 'That board could not be opened.') + '</div>';
+                return;
+            }
+            const first = viewPlacement.boards[0];
+            document.getElementById('vpWhere').textContent = type === 'shelf'
+                ? (first.shelf || where) + ' · ' + viewPlacement.boards.length + ' board' + (viewPlacement.boards.length === 1 ? '' : 's')
+                : first.shelf + ' · ' + first.label;
+            renderViewPlacement();
+        };
+
+        window.renderViewPlacement = function () {
+            const q = (document.getElementById('vpSearch').value || '').trim().toLowerCase();
+            const many = viewPlacement.boards.length > 1;
+            let shown = 0, total = 0;
+            const html = viewPlacement.boards.map(function (board) {
+                total += board.books.length;
+                const books = board.books.filter(function (b) {
+                    return !q || (b.title + ' ' + b.author + ' ' + b.call_number).toLowerCase().indexOf(q) !== -1;
+                });
+                shown += books.length;
+                if (many && q && !books.length) return '';
+                const rows = books.length ? books.map(function (b, i) {
+                    const pos = b.slot != null ? b.slot : (i + 1);
+                    return '<button type="button" onclick="viewBook(' + b.book_id + ')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg border border-slate-800/70 hover:bg-slate-800/40" style="background-color: var(--bg-input);">'
+                        + '<span class="w-7 flex-shrink-0 text-center font-mono text-[10px] text-slate-500">#' + esc(pos) + '</span>'
+                        + '<span class="min-w-0 flex-1">'
+                        + '<span class="block text-[11px] font-semibold text-slate-200 truncate">' + esc(b.title) + '</span>'
+                        + '<span class="block text-[10px] text-slate-500 truncate">' + esc(b.author || '—')
+                        + (b.call_number ? ' · <span class="font-mono">' + esc(b.call_number) + '</span>' : '') + '</span>'
+                        + '</span>' + statusBadge(b.status) + '</button>';
+                }).join('') : '<div class="text-[11px] text-slate-500 px-3 py-2">' + (q ? 'No match on this board.' : 'No books on this board.') + '</div>';
+                return '<div>'
+                    + (many ? '<p class="text-[10px] uppercase tracking-wide font-bold text-slate-500 mb-1.5"><i class="fa-solid fa-bars-staggered text-blue-400 mr-1.5"></i>' + esc(board.label) + ' <span class="normal-case font-normal">(' + board.books.length + ')</span></p>' : '')
+                    + '<div class="space-y-1.5">' + rows + '</div></div>';
+            }).join('');
+            document.getElementById('vpList').innerHTML = html
+                || '<div class="text-xs text-slate-500">No books match that filter.</div>';
+            document.getElementById('vpCount').textContent = q
+                ? shown + ' of ' + total + ' book' + (total === 1 ? '' : 's')
+                : total + ' book' + (total === 1 ? '' : 's');
+        };
+
         // Table
         async function loadFlat() {
             const d = await getJSON(U.flat);
@@ -869,7 +969,7 @@
                 return '<tr class="border-b border-slate-800/40 hover:bg-slate-800/10' + (r.is_active ? '' : ' op50') + '">'
                     + '<td class="py-3 px-6 text-xs text-slate-400">' + esc(r.path) + ' <span class="text-slate-600">/</span> <span class="font-semibold text-slate-200">' + esc(r.category) + '</span></td>'
                     + '<td class="py-3 px-6 text-xs text-slate-400">Level ' + r.level_number + '</td>'
-                    + '<td class="py-3 px-6 text-center"><span class="bg-slate-800/60 text-slate-300 px-2 py-0.5 rounded text-[11px] font-semibold">' + r.book_count + '</span></td>'
+                    + '<td class="py-3 px-6 text-center"><button type="button" onclick="openViewPlacement(\'shelflevel\',' + r.id + ')" title="View book placement" class="bg-slate-800/60 hover:bg-slate-700/60 text-slate-300 px-2 py-0.5 rounded text-[11px] font-semibold"><i class="fa-solid fa-eye text-[9px] mr-1 text-slate-500"></i>' + r.book_count + '</button></td>'
                     + '<td class="py-3 px-6 text-center"><label class="sw"><input type="checkbox" ' + (r.is_active ? 'checked' : '') + ' onchange="tToggleFlat(this,' + r.id + ')"><span class="tk"></span></label></td>'
                     + '</tr>';
             }).join('');
@@ -893,8 +993,8 @@
             if (!tree && !flatData.length) loadFlat();
         }
 
-        document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { closeModal('addModal'); closeModal('editModal'); closeModal('bookModal'); closeModal('placementModal'); } });
-        ['addModal', 'editModal', 'bookModal', 'placementModal'].forEach(function (id) {
+        document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { if (document.getElementById('bookModal').classList.contains('hidden')) closeModal('viewPlacementModal'); closeModal('addModal'); closeModal('editModal'); closeModal('bookModal'); closeModal('placementModal'); } });
+        ['addModal', 'editModal', 'bookModal', 'placementModal', 'viewPlacementModal'].forEach(function (id) {
             const el = document.getElementById(id);
             // Guard against a missing modal.
             if (!el) return;

@@ -341,9 +341,12 @@
                                         {% elif not tx.return_date and tx.transaction_type == 'In-Library Reading' %}
                                             {# Reading ends the same way a loan does: the copy joins the reshelving queue. #}
                                             <button type="button" onclick="openTxAction({{ tx.transaction_id }}, 'return')" class="rounded-lg bg-sky-500/10 text-sky-400 border border-sky-500/20 px-2 py-1 text-[10px] font-semibold hover:bg-sky-500/20 hover:text-sky-100" title="Close this reading session and send the book to reshelving">Done Reading</button>
-                                        {% else %}
-                                            <span class="text-slate-500">—</span>
                                         {% endif %}
+                                        <div class="flex justify-center gap-1.5{% if not tx.return_date and tx.transaction_type != 'Return' %} mt-1.5{% endif %}">
+                                            <button type="button" onclick="openTxView({{ tx.transaction_id }})" class="w-7 h-7 rounded-lg bg-slate-700/30 text-slate-300 border border-slate-600/40 hover:bg-slate-700/50 text-[11px]" title="View" aria-label="View transaction #TX-{{ tx.transaction_id }}"><i class="fa-solid fa-eye"></i></button>
+                                            <button type="button" onclick="openTxEdit({{ tx.transaction_id }})" class="w-7 h-7 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/20 text-[11px]" title="Edit" aria-label="Edit transaction #TX-{{ tx.transaction_id }}"><i class="fa-solid fa-pen"></i></button>
+                                            <button type="button" onclick="deleteTx({{ tx.transaction_id }})" class="w-7 h-7 rounded-lg bg-rose-500/10 text-rose-400 border border-rose-500/20 hover:bg-rose-500/20 text-[11px]" title="Delete" aria-label="Delete transaction #TX-{{ tx.transaction_id }}"><i class="fa-solid fa-trash"></i></button>
+                                        </div>
                                     </td>
                                 </tr>
                             {% empty %}
@@ -553,6 +556,56 @@
         </div>
     </div>
 
+    {# View a transaction. #}
+    <div id="txViewModal" class="fixed inset-0 z-[70] hidden items-center justify-center p-4" style="background: var(--scrim);">
+        <div class="w-full max-w-md rounded-2xl border shadow-2xl max-h-[90vh] flex flex-col" style="background-color: var(--bg-modal); border-color: var(--border-modal);">
+            <div class="flex items-center justify-between px-6 py-4 border-b" style="border-color: var(--border-modal);">
+                <h3 id="txViewTitle" class="text-sm font-bold text-slate-200 tracking-wide">Transaction</h3>
+                <button type="button" onclick="closeTxModal('txViewModal')" class="text-slate-500 hover:text-slate-300" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div id="txViewBody" class="px-6 py-5 space-y-3 text-xs overflow-y-auto"></div>
+            <div class="flex items-center justify-end gap-2 px-6 pb-5">
+                <button type="button" onclick="closeTxModal('txViewModal')" class="text-xs font-semibold px-4 py-2 rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800/50">Close</button>
+                <button type="button" id="txViewEditBtn" class="text-xs font-bold px-4 py-2 rounded-lg border bg-amber-700/30 text-amber-200 border-amber-700/60 hover:bg-amber-700/50"><i class="fa-solid fa-pen mr-1.5"></i>Edit</button>
+            </div>
+        </div>
+    </div>
+
+    {# Correct a transaction's dates or fine. #}
+    <div id="txEditModal" class="fixed inset-0 z-[70] hidden items-center justify-center p-4" style="background: var(--scrim);">
+        <div class="w-full max-w-sm rounded-2xl border shadow-2xl" style="background-color: var(--bg-modal); border-color: var(--border-modal);">
+            <div class="flex items-center justify-between px-6 py-4 border-b" style="border-color: var(--border-modal);">
+                <h3 id="txEditTitle" class="text-sm font-bold text-slate-200 tracking-wide">Edit Transaction</h3>
+                <button type="button" onclick="closeTxModal('txEditModal')" class="text-slate-500 hover:text-slate-300" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="px-6 py-5 space-y-4">
+                <div class="rounded-lg border border-slate-800 px-3 py-2.5 text-xs space-y-1" style="background-color: var(--bg-main);">
+                    <div class="flex justify-between gap-3"><span class="text-slate-500">Book</span><span id="txeBook" class="text-slate-200 font-semibold text-right"></span></div>
+                    <div class="flex justify-between gap-3"><span class="text-slate-500">Patron</span><span id="txePatron" class="text-slate-200 text-right"></span></div>
+                    <div class="flex justify-between gap-3"><span class="text-slate-500">Borrowed</span><span id="txeDate" class="text-slate-300 text-right"></span></div>
+                </div>
+                <div id="txeDueWrap">
+                    <label for="txeDue" class="text-[10px] uppercase tracking-wide text-slate-500 font-bold">Due date</label>
+                    <input type="date" id="txeDue" class="mt-1.5 w-full bg-slate-950/80 border border-slate-800 rounded-lg px-3 py-2 text-xs font-mono text-slate-300 focus:outline-none focus:border-cyan-800">
+                </div>
+                <div id="txeReturnWrap">
+                    <label for="txeReturn" class="text-[10px] uppercase tracking-wide text-slate-500 font-bold">Return date</label>
+                    <input type="date" id="txeReturn" class="mt-1.5 w-full bg-slate-950/80 border border-slate-800 rounded-lg px-3 py-2 text-xs font-mono text-slate-300 focus:outline-none focus:border-cyan-800">
+                </div>
+                <div>
+                    <label for="txeFine" class="text-[10px] uppercase tracking-wide text-slate-500 font-bold">Fine (PHP)</label>
+                    <input type="number" id="txeFine" min="0" step="0.01" class="mt-1.5 w-full bg-slate-950/80 border border-slate-800 rounded-lg px-3 py-2 text-xs font-mono text-slate-300 focus:outline-none focus:border-cyan-800">
+                </div>
+                <p id="txeNote" class="text-[11px] text-slate-500 leading-relaxed">For correcting a record. To close an open loan, use Mark Returned so the book goes to reshelving.</p>
+                <div id="txEditError" class="hidden rounded-lg border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-rose-200 text-[11px]"></div>
+                <div class="flex items-center justify-end gap-2 pt-1">
+                    <button type="button" onclick="closeTxModal('txEditModal')" class="text-xs font-semibold px-4 py-2 rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800/50">Cancel</button>
+                    <button type="button" id="txEditSave" onclick="saveTxEdit()" class="text-xs font-bold px-4 py-2 rounded-lg border bg-cyan-700/40 text-cyan-200 border-cyan-700/60 hover:bg-cyan-700/60">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     {# Staff sets the due date directly. #}
     <div id="dueDateModal" class="fixed inset-0 z-[70] hidden items-center justify-center p-4" style="background: var(--scrim);">
         <div class="w-full max-w-sm rounded-2xl border shadow-2xl" style="background-color: var(--bg-modal); border-color: var(--border-modal);">
@@ -739,6 +792,172 @@
 
         document.getElementById('dueDateModal').addEventListener('click', function (e) {
             if (e.target === this) closeDueDateModal();
+        });
+
+        // View, edit and delete a transaction.
+        let txEditId = null, txEditBusy = false;
+
+        function txEsc(t) {
+            return String(t == null ? '' : t).replace(/[&<>"]/g, function (c) {
+                return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+            });
+        }
+
+        function txDate(iso) {
+            if (!iso) return '—';
+            const d = new Date(iso + 'T00:00:00');
+            return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        }
+
+        function openTxModal(id) {
+            const m = document.getElementById(id);
+            m.classList.remove('hidden'); m.classList.add('flex');
+        }
+
+        function closeTxModal(id) {
+            const m = document.getElementById(id);
+            m.classList.add('hidden'); m.classList.remove('flex');
+        }
+
+        async function loadTx(id) {
+            const res = await fetch('/admin-portal/transaction/' + id + '/detail/', {
+                headers: { 'X-Requested-With': 'XMLHttpRequest' },
+            });
+            const data = await res.json();
+            if (!data.success) throw new Error(data.error || 'Could not load the transaction.');
+            return data.transaction;
+        }
+
+        async function openTxView(id) {
+            const body = document.getElementById('txViewBody');
+            document.getElementById('txViewTitle').textContent = 'Transaction #TX-' + id;
+            body.innerHTML = '<div class="text-slate-400"><i class="fa-solid fa-spinner fa-spin mr-2"></i>Loading transaction…</div>';
+            document.getElementById('txViewEditBtn').onclick = function () {
+                closeTxModal('txViewModal'); openTxEdit(id);
+            };
+            openTxModal('txViewModal');
+            let t;
+            try { t = await loadTx(id); } catch (err) {
+                body.innerHTML = '<div class="rounded-lg border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-rose-200 text-[11px]">'
+                    + txEsc(err.message || 'Network error — please try again.') + '</div>';
+                return;
+            }
+            function row(label, value) {
+                return '<div class="flex justify-between gap-3"><span class="text-slate-500">' + label
+                    + '</span><span class="text-slate-200 text-right">' + value + '</span></div>';
+            }
+            let html = '<div class="rounded-lg border border-slate-800 px-3 py-2.5 space-y-1.5" style="background-color: var(--bg-main);">'
+                + row('Book', '<span class="font-semibold">' + txEsc(t.book) + '</span>'
+                      + (t.author ? '<span class="block text-[10px] text-slate-500">' + txEsc(t.author) + '</span>' : ''))
+                + row('Book status', txEsc(t.book_status || '—'))
+                + row('Patron', txEsc(t.patron) + (t.patron_id ? '<span class="block text-[10px] text-slate-500 font-mono">' + txEsc(t.patron_id) + '</span>' : ''))
+                + '</div>'
+                + '<div class="rounded-lg border border-slate-800 px-3 py-2.5 space-y-1.5" style="background-color: var(--bg-main);">'
+                + row('Type', txEsc(t.transaction_type))
+                + row('Status', txEsc(t.status))
+                + row('Borrow date', txDate(t.transaction_date))
+                + row('Due date', txDate(t.due_date))
+                + row('Returned', txDate(t.return_date))
+                + row('Fine', 'PHP ' + txEsc(t.fine_amount))
+                + row('Processed by', txEsc(t.processed_by || '—'))
+                + '</div>';
+            if (t.extensions.length) {
+                html += '<div class="rounded-lg border border-slate-800 px-3 py-2.5 space-y-1" style="background-color: var(--bg-main);">'
+                    + '<p class="text-[10px] uppercase tracking-wide text-slate-500 font-bold mb-1">Due date changes</p>';
+                t.extensions.forEach(function (e) {
+                    html += '<div class="flex justify-between gap-3 text-[11px]"><span class="text-slate-400">'
+                        + txDate(e.from) + ' → ' + txDate(e.to) + '</span><span class="text-slate-300">'
+                        + txEsc(e.status) + (e.by_patron ? ' · patron request' : ' · staff') + '</span></div>';
+                });
+                html += '</div>';
+            }
+            body.innerHTML = html;
+        }
+
+        async function openTxEdit(id) {
+            txEditId = null;
+            const err = document.getElementById('txEditError');
+            err.classList.add('hidden');
+            let t;
+            try { t = await loadTx(id); } catch (e) {
+                alert(e.message || 'Network error — please try again.');
+                return;
+            }
+            txEditId = id;
+            document.getElementById('txEditTitle').textContent = 'Edit #TX-' + id;
+            document.getElementById('txeBook').textContent = t.book;
+            document.getElementById('txePatron').textContent = t.patron;
+            document.getElementById('txeDate').textContent = txDate(t.transaction_date);
+            const due = document.getElementById('txeDue');
+            due.value = t.due_date; due.min = t.transaction_date;
+            document.getElementById('txeDueWrap').classList.toggle('hidden', t.transaction_type !== 'Borrow' && !t.due_date);
+            const ret = document.getElementById('txeReturn');
+            ret.value = t.return_date; ret.min = t.transaction_date;
+            // An open loan is closed with Mark Returned, not here.
+            document.getElementById('txeReturnWrap').classList.toggle('hidden', !t.return_date);
+            document.getElementById('txeFine').value = t.fine_amount;
+            openTxModal('txEditModal');
+        }
+
+        async function saveTxEdit() {
+            if (txEditBusy || txEditId === null) return;
+            txEditBusy = true;
+            const btn = document.getElementById('txEditSave');
+            const label = btn.textContent;
+            btn.textContent = 'Saving…';
+            const err = document.getElementById('txEditError');
+            err.classList.add('hidden');
+            try {
+                const fd = new FormData();
+                fd.append('due_date', document.getElementById('txeDue').value);
+                fd.append('return_date', document.getElementById('txeReturn').value);
+                fd.append('fine_amount', document.getElementById('txeFine').value);
+                const res = await fetch('/admin-portal/transaction/' + txEditId + '/edit/', {
+                    method: 'POST', body: fd,
+                    headers: { 'X-CSRFToken': getCookie('csrftoken'), 'X-Requested-With': 'XMLHttpRequest' },
+                });
+                const data = await res.json();
+                if (!data.success) {
+                    err.textContent = data.error || 'Could not save the changes.';
+                    err.classList.remove('hidden');
+                    return;
+                }
+                closeTxModal('txEditModal');
+                if (window.AylaDialog) AylaDialog.toast('Transaction #TX-' + txEditId + ' updated.', 'success');
+                window.location.reload();
+            } catch (e) {
+                err.textContent = 'Network error — please try again.';
+                err.classList.remove('hidden');
+            } finally {
+                txEditBusy = false;
+                btn.textContent = label;
+            }
+        }
+
+        async function deleteTx(id) {
+            const ok = await AylaDialog.confirm(
+                'Delete transaction #TX-' + id + '? This removes the record for good. '
+                + 'If it is an open loan, the book is set back to Available.',
+                { title: 'Delete transaction', confirmLabel: 'Delete', danger: true });
+            if (!ok) return;
+            try {
+                const res = await fetch('/admin-portal/transaction/' + id + '/delete/', {
+                    method: 'POST',
+                    headers: { 'X-CSRFToken': getCookie('csrftoken'), 'X-Requested-With': 'XMLHttpRequest' },
+                });
+                const data = await res.json();
+                if (!data.success) { alert(data.error || 'Could not delete the transaction.'); return; }
+                AylaDialog.toast('Transaction #TX-' + id + ' deleted.', 'success');
+                window.location.reload();
+            } catch (e) {
+                alert('Network error — please try again.');
+            }
+        }
+
+        ['txViewModal', 'txEditModal'].forEach(function (id) {
+            document.getElementById(id).addEventListener('click', function (e) {
+                if (e.target === this) closeTxModal(id);
+            });
         });
 
         // Extension request review
