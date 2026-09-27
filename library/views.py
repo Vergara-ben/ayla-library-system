@@ -27,6 +27,8 @@ import re
 
 from .auth_utils import (
     LOGIN_FAILED_TEXT,
+    new_otp,
+    otp_matches,
     check_password,
     clear_login_failures,
     login_locked_message,
@@ -223,16 +225,9 @@ def _name_from_post(request):
     return first, middle, last, None
 
 
-def _new_otp():
-    """6-digit numeric one-time password."""
-    return f'{secrets.randbelow(1000000):06d}'
-
-
-def _otp_matches(supplied, stored):
-    """Constant-time comparison of a supplied code against the stored one."""
-    if not stored or not supplied:
-        return False
-    return secrets.compare_digest(supplied.encode('utf-8'), stored.encode('utf-8'))
+# Shared with desk mode, so both issue and check codes the same way.
+_new_otp = new_otp
+_otp_matches = otp_matches
 
 
 # How long to wait between sending one code and the next, for the same account.
@@ -359,6 +354,31 @@ def terms_page(request):
     return render(request, 'patron/terms.html')
 
 
+def _release_archived_email(patron):
+    """Free an archived patron's email so the address can be registered again.
+
+    The record stays archived and keeps its history; only the address is given
+    up, and it is noted in the archive reason so the trail survives.
+    """
+    note = 'email %s released for a new registration' % patron.email
+    patron.archive_reason = (
+        ('%s; %s' % (patron.archive_reason, note)) if patron.archive_reason else note
+    )[:500]
+    patron.email = None
+    patron.save(update_fields=['email', 'archive_reason'])
+
+
+def _email_taken(email):
+    """True when a live patron already holds this email; archived ones release it."""
+    existing = Patron.all_objects.filter(email__iexact=email).first()
+    if existing is None:
+        return False
+    if existing.archived_at is None:
+        return True
+    _release_archived_email(existing)
+    return False
+
+
 def patron_register(request):
     """Online registration: form → email OTP → pending Administrator approval."""
     if request.method != 'POST':
@@ -453,15 +473,12 @@ def patron_register(request):
         return _form_error('Please read and agree to the terms and conditions to register.')
 
     existing = Patron.all_objects.filter(email__iexact=email).first()
+    archived_holder = None
     if existing is not None:
-        if existing.archived_at is not None and existing.account_status == 'Pending':
-            # Applying again after a rejection: the rejected application stays in the database, minus the email.
-            existing.archive_reason = ('%s (applied again as %s)'
-                                       % (existing.archive_reason, existing.email))[:500]
-            existing.email = None
-            existing.save(update_fields=['email', 'archive_reason'])
-        elif existing.archived_at is not None:
-            return _form_error('This email belongs to a removed account. Please contact the library.')
+        # A removed or rejected record stays archived, minus the email. It is only
+        # given up once the new account is actually being created.
+        if existing.archived_at is not None:
+            archived_holder = existing
         # A stale unverified application may be replaced; anything else is a duplicate.
         elif existing.account_status == 'Pending' and not existing.otp_verified:
             existing.delete()
@@ -482,6 +499,8 @@ def patron_register(request):
     from django.db import transaction as db_transaction
     from .models import PatronCredential
     with db_transaction.atomic():
+        if archived_holder is not None:
+            _release_archived_email(archived_holder)
         patron = Patron.objects.create(
             fullname=fullname,
             first_name=first_name,
@@ -1856,7 +1875,7 @@ def admin_add_patron(request):
             error = name_error
         elif not all([patron_type, email, password]):
             error = 'Patron type, email, and password are required.'
-        elif Patron.all_objects.filter(email=email).exists():
+        elif _email_taken(email):
             error = 'A patron with that email already exists.'
         elif not id_confirmed:
             error = 'Confirm that you checked the patron\'s physical ID before registering them.'
@@ -6023,6 +6042,41 @@ def set_floorplan_floor_number(request):
 
 
 @admin_only_required
+def set_floorplan_desk(request):
+    """Mark where the front-desk computer stands, or clear it."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
+
+    plan = FloorPlan.objects.filter(floor_plan_id=_posted_id(request, 'floorplan_id')).first()
+    if plan is None:
+        return JsonResponse({'success': False, 'error': 'Floor plan not found'})
+
+    if (request.POST.get('clear') or '').strip() == '1':
+        plan.desk_x = plan.desk_y = None
+        plan.save(update_fields=['desk_x', 'desk_y'])
+        log_admin_action(request, 'Update', 'FloorPlan', plan.floor_plan_id,
+                         'Desk position cleared')
+        return JsonResponse({'success': True, 'desk_x': None, 'desk_y': None})
+
+    try:
+        x = float((request.POST.get('desk_x') or '').strip())
+        y = float((request.POST.get('desk_y') or '').strip())
+    except (TypeError, ValueError):
+        return JsonResponse({'success': False, 'error': 'The desk position must be two numbers'})
+
+    width, height = _floorplan_canvas_size(plan)
+    if not (0 <= x <= width and 0 <= y <= height):
+        return JsonResponse({'success': False, 'error': 'That point is off the floor plan'})
+
+    # One desk per plan, so the kiosk is never unsure which one it stands at.
+    plan.desk_x, plan.desk_y = x, y
+    plan.save(update_fields=['desk_x', 'desk_y'])
+    log_admin_action(request, 'Update', 'FloorPlan', plan.floor_plan_id,
+                     'Desk position set to %.0f, %.0f' % (x, y))
+    return JsonResponse({'success': True, 'desk_x': x, 'desk_y': y})
+
+
+@admin_only_required
 def set_floorplan_north(request):
     """Record how far the plan's "up" is from magnetic north."""
     if request.method != 'POST':
@@ -6648,7 +6702,17 @@ def _shelf_page(request, template):
 @admin_only_required
 def position_test(request):
     """Check positioning against the real beacons, from the Administrator's side."""
-    return render(request, 'admin/positiontest.html')
+    floors = list(FloorPlan.objects.filter(is_active=True)
+                  .annotate(beacon_count=Count('blebeacon')))
+    raw = (request.GET.get('floor') or '').strip()
+    chosen = next((f for f in floors if raw.isdigit() and f.floor_plan_id == int(raw)), None)
+    # Default to a floor that has beacons to test against.
+    if chosen is None:
+        chosen = next((f for f in floors if f.beacon_count), floors[0] if floors else None)
+    return render(request, 'admin/positiontest.html', {
+        'floors': floors,
+        'chosen_floor_id': chosen.floor_plan_id if chosen else '',
+    })
 
 
 @admin_only_required
@@ -7174,6 +7238,7 @@ def edit_stairway(request):
         return JsonResponse({'success': False, 'error': 'Stairway not found'})
 
     fields = []
+    link_back = False
     if 'kind' in request.POST and request.POST['kind'] in dict(Stairway.KIND_CHOICES):
         st.kind = request.POST['kind']; fields.append('kind')
     if 'direction' in request.POST and request.POST['direction'] in dict(Stairway.DIRECTION_CHOICES):
@@ -7204,6 +7269,7 @@ def edit_stairway(request):
                                      'error': 'A stairway cannot connect a floor to itself.'})
             st.connects_to = dest
         fields.append('connects_to')
+        link_back = True
     if 'is_active' in request.POST:
         st.is_active = request.POST.get('is_active') in ('1', 'true', 'True', 'on')
         fields.append('is_active')
@@ -7211,7 +7277,105 @@ def edit_stairway(request):
     if fields:
         st.save(update_fields=fields)
         log_admin_action(request, 'Update', 'Stairway', st.stairway_id, f'Edited {st.label}')
+
+    # Pairing prefers a mutual link, so point the far end back at this floor.
+    if link_back and st.connects_to_id:
+        partner = _nearest_stairway_on(st.connects_to, st)
+        if partner is not None and partner.connects_to_id != st.floor_plan_id:
+            partner.connects_to = st.floor_plan
+            partner.save(update_fields=['connects_to'])
+
     return JsonResponse({'success': True, 'stairway': _stairway_payload(st)})
+
+
+def _nearest_stairway_on(floor, like):
+    """The stairway on that floor closest to this one, if any is near enough."""
+    if floor is None:
+        return None
+    options = list(Stairway.objects.filter(floor_plan=floor, is_active=True))
+    if not options:
+        return None
+    ppm = floor.pixels_per_meter or like.floor_plan.pixels_per_meter or 0
+    ceiling = (PAIR_MAX_OFFSET_METRES * ppm) if ppm else PAIR_MAX_OFFSET_FALLBACK
+    nearest = min(options, key=lambda o: math.hypot(o.map_x - like.map_x,
+                                                    o.map_y - like.map_y))
+    gap = math.hypot(nearest.map_x - like.map_x, nearest.map_y - like.map_y)
+    return nearest if gap <= ceiling else None
+
+
+@admin_or_module_required('shelf')
+def match_stairway(request):
+    """Draw the far end of a staircase on the floor it reaches, and link both ways."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
+
+    st = Stairway.objects.filter(stairway_id=_posted_id(request, 'stairway_id')).first()
+    if st is None:
+        return JsonResponse({'success': False, 'error': 'Stairway not found'})
+
+    raw = (request.POST.get('connects_to') or '').strip()
+    dest = (FloorPlan.objects.filter(floor_plan_id=int(raw), is_active=True).first()
+            if raw.isdigit() else st.connects_to)
+    if dest is None:
+        return JsonResponse({'success': False,
+                             'error': 'Say which floor this staircase reaches first.'})
+    if dest.floor_plan_id == st.floor_plan_id:
+        return JsonResponse({'success': False,
+                             'error': 'A stairway cannot connect a floor to itself.'})
+
+    existing = _nearest_stairway_on(dest, st)
+    if existing is not None:
+        # Already drawn: just make the link mutual.
+        existing.connects_to = st.floor_plan
+        existing.save(update_fields=['connects_to'])
+        made = False
+        partner = existing
+    else:
+        # Floors are stacked, so the same spot on the other floor is the best guess.
+        partner = Stairway.objects.create(
+            floor_plan=dest,
+            kind=st.kind,
+            name=st.name,
+            geometry=st.geometry,
+            map_x=st.map_x,
+            map_y=st.map_y,
+            flights=st.flights,
+            bearing=st.bearing,
+            direction=_opposite_direction(st, dest),
+            connects_to=st.floor_plan,
+            is_active=True,
+        )
+        made = True
+
+    if st.connects_to_id != dest.floor_plan_id:
+        st.connects_to = dest
+        st.save(update_fields=['connects_to'])
+
+    log_admin_action(request, 'Create' if made else 'Update', 'Stairway',
+                     partner.stairway_id,
+                     '%s %s on %s' % ('Added the matching' if made else 'Linked the existing',
+                                      partner.label, dest.floor_label))
+    return JsonResponse({
+        'success': True,
+        'created': made,
+        'floor': dest.floor_label,
+        'floor_plan_id': dest.floor_plan_id,
+        'stairway': _stairway_payload(partner),
+        'message': ('%s added on the %s, at the same spot. Drag it if it sits elsewhere.'
+                    % (partner.label, dest.floor_label)) if made
+                   else ('%s on the %s is now linked back to this floor.'
+                         % (partner.label, dest.floor_label)),
+    })
+
+
+def _opposite_direction(st, dest):
+    """If these stairs go up to that floor, the far end goes down."""
+    if st.direction == 'both':
+        return 'both'
+    here, there = st.floor_plan.floor_number, dest.floor_number
+    if here is None or there is None:
+        return 'both'
+    return 'down' if there > here else 'up'
 
 
 @admin_or_module_required('shelf')
@@ -8506,6 +8670,16 @@ def floor_plan_readiness(request):
             add('warning', '%d beacon(s) not calibrated' % len(uncalibrated),
                 'Without a measured 1 m reading every distance is a guess, and all of '
                 'them being wrong by the same factor moves the whole fix.')
+        groups = {}
+        for b in beacons:
+            groups.setdefault(_beacon_identity(b.advertisement_type, b.beacon_uuid, b.major, b.minor,
+                                               b.namespace_id, b.instance_id, b.label), []).append(b)
+        twins = [g for g in groups.values() if len(g) > 1]
+        if twins:
+            add('warning', '%d beacon(s) share identifiers' % sum(len(g) for g in twins),
+                'A phone cannot tell these apart, so their readings are mixed together: %s. '
+                'Correct the minor (or instance) number of one in each group.'
+                % '; '.join(' and '.join(b.label or str(b.beacon_id) for b in g) for g in twins))
         unmeasured = [b for b in beacons if b.height is None]
         if unmeasured:
             add('warning', '%d beacon(s) have no mounting height' % len(unmeasured),
@@ -8623,6 +8797,72 @@ def floor_plan_readiness(request):
                     'They are %.2f units apart. That is invisible on screen, but they '
                     'are two separate walls, so passing between them needs a door.' % gap)
 
+    # Stairs: the only thing that joins two floors, and the easiest to leave half done.
+    stairways = list(Stairway.objects.filter(floor_plan=plan, is_active=True))
+    other_floors = list(FloorPlan.objects.filter(is_active=True)
+                        .exclude(floor_plan_id=plan.floor_plan_id))
+    if other_floors:
+        every_stair = list(Stairway.objects.filter(
+            floor_plan__is_active=True, is_active=True))
+        scale = {f.floor_plan_id: (f.pixels_per_meter or 0)
+                 for f in FloorPlan.objects.filter(is_active=True)}
+        paired_ids = set()
+        for a, b in _pair_stairways(every_stair, scale):
+            paired_ids.add(a.stairway_id)
+            paired_ids.add(b.stairway_id)
+
+        if not stairways:
+            add('blocker', 'No stairway on this floor',
+                'This library has %d other floor(s), and stairs are the only way a '
+                'route crosses between them. Without one here, nothing on another '
+                'floor can be navigated to from this one.' % len(other_floors))
+        else:
+            unlinked = [st for st in stairways if not st.connects_to_id]
+            for st in unlinked:
+                add('warning', '%s is not linked to a floor' % st.label,
+                    'Until it says which floor it reaches, it is treated as a dead '
+                    'end and no route will ever use it to change floors.')
+
+            lonely = [st for st in stairways
+                      if st.connects_to_id and st.stairway_id not in paired_ids]
+            for st in lonely:
+                add('warning', '%s has no matching stairway on the %s'
+                    % (st.label, st.destination_label or 'other floor'),
+                    'Stairs join up in pairs. Draw the other end on that floor, near '
+                    'the same spot, and link it back to this one.')
+
+            if not any(st.stairway_id in paired_ids for st in stairways):
+                add('blocker', 'No stairway here reaches another floor',
+                    'Every staircase on this floor is unlinked or unpaired, so a '
+                    'patron cannot be routed to or from any other floor.')
+
+            # A staircase nobody can walk to is a staircase that does not exist.
+            if waypoints:
+                ppm = plan.pixels_per_meter or 0
+                reach = (STAIR_WAYPOINT_REACH_METRES * ppm) if ppm else PAIR_MAX_OFFSET_FALLBACK
+                for st in stairways:
+                    near = min((math.hypot(w.map_x - st.map_x, w.map_y - st.map_y)
+                                for w in waypoints), default=None)
+                    if near is not None and near > reach:
+                        add('warning', 'No waypoint near %s' % st.label,
+                            'The nearest waypoint is %.0f units away. Routes are walked '
+                            'along waypoints, so a patron cannot be led to these stairs.'
+                            % near)
+
+            # "Up" from the top floor, or "down" from the bottom, cannot be walked.
+            numbers = [f.floor_number for f in FloorPlan.objects.filter(is_active=True)
+                       if f.floor_number is not None]
+            if numbers and plan.floor_number is not None:
+                for st in stairways:
+                    if st.direction == 'up' and plan.floor_number >= max(numbers):
+                        add('warning', '%s goes up from the top floor' % st.label,
+                            'There is no floor above this one, so nothing can be reached '
+                            'by going up. Set it to "down" or "up and down".')
+                    elif st.direction == 'down' and plan.floor_number <= min(numbers):
+                        add('warning', '%s goes down from the lowest floor' % st.label,
+                            'There is no floor below this one. Set it to "up" or '
+                            '"up and down".')
+
     blockers = sum(1 for i in issues if i['level'] == 'blocker')
     # Counted by name rather than by subtraction.
     warnings = sum(1 for i in issues if i['level'] == 'warning')
@@ -8634,7 +8874,9 @@ def floor_plan_readiness(request):
         'warnings': warnings,
         'issues': issues,
         'counts': {'rooms': len(rooms), 'doors': doors,
-                   'waypoints': len(waypoints), 'beacons': len(beacons)},
+                   'waypoints': len(waypoints), 'beacons': len(beacons),
+                   'stairways': Stairway.objects.filter(
+                       floor_plan=plan, is_active=True).count()},
     })
 
 
@@ -8782,6 +9024,9 @@ def get_map_data(request):
         'canvas_height': height,
         'pixels_per_meter': floor_plan.pixels_per_meter,
         'north_offset_deg': floor_plan.north_offset_deg or 0,
+        # Where the front desk stands, for the pin and the kiosk's route.
+        'desk_x': floor_plan.desk_x,
+        'desk_y': floor_plan.desk_y,
         'beacons': beacons,
         'waypoints': waypoints,
         'connections': connections,
@@ -8952,6 +9197,14 @@ def _stair_treads(geometry, bearing, count=None):
     return treads
 
 
+def _stairway_is_paired(st):
+    """True when this stairway meets a matching one on the floor it reaches."""
+    if not st.connects_to_id:
+        return False
+    partner = _nearest_stairway_on(st.connects_to, st)
+    return partner is not None
+
+
 def _stairway_payload(st):
     """Everything a map needs to draw one stairway and say where it goes."""
     return {
@@ -8967,6 +9220,8 @@ def _stairway_payload(st):
         'direction': st.direction,
         'connects_to': st.connects_to_id,
         'destination': st.destination_label,
+        # Whether this end actually meets one on the other floor.
+        'paired': _stairway_is_paired(st),
         'is_active': st.is_active,
         'locked': st.locked,
         'shape': _stair_shape_of(st),
@@ -9010,6 +9265,38 @@ def _beacon_payload(b):
         'label': b.label or '',
         'locked': b.locked,
     }
+
+
+def _beacon_identity(adv_type, beacon_uuid, major, minor, namespace_id, instance_id, label):
+    """What a phone tells this beacon apart by, the way the map matches it."""
+    def hex_only(v):
+        return re.sub(r'[^0-9a-f]', '', (v or '').lower())
+    adv_type = adv_type or 'iBeacon'
+    if adv_type == 'Eddystone':
+        return (adv_type, hex_only(namespace_id), hex_only(instance_id))
+    if adv_type == 'DeviceName':
+        return (adv_type, (label or '').strip())
+    if adv_type == 'ServiceUUID':
+        return (adv_type, hex_only(beacon_uuid))
+    return (adv_type, hex_only(beacon_uuid), major, minor)
+
+
+def _beacon_clash(identity, exclude_id=None):
+    """Another beacon, on any floor, that a phone could not tell apart from this one."""
+    for b in BLEBeacon.objects.exclude(beacon_id=exclude_id):
+        if _beacon_identity(b.advertisement_type, b.beacon_uuid, b.major, b.minor,
+                            b.namespace_id, b.instance_id, b.label) == identity:
+            return b
+    return None
+
+
+def _clash_error(other):
+    return JsonResponse({
+        'success': False,
+        'error': 'Beacon "%s" already uses these identifiers, so a phone could not tell the two '
+                 'apart. Check the minor (or instance) number printed on the beacon.'
+                 % (other.label or other.beacon_id),
+    })
 
 
 @admin_only_required
@@ -9069,6 +9356,12 @@ def add_beacon(request):
         return JsonResponse({'success': False,
                              'error': 'Mounting height is measured in metres above the floor, '
                                       'so it should be between 0 and 10.'})
+
+    clash = _beacon_clash(_beacon_identity(
+        adv_type, beacon_uuid, major, minor, request.POST.get('namespace_id'),
+        request.POST.get('instance_id'), label))
+    if clash is not None:
+        return _clash_error(clash)
 
     beacon = BLEBeacon.objects.create(
         floor_plan=floor_plan,
@@ -9181,6 +9474,17 @@ def update_beacon(request):
         return JsonResponse({'success': False,
                              'error': 'Mounting height is measured in metres above the floor, '
                                       'so it should be between 0 and 10.'})
+
+    old_identity = _beacon_identity(beacon.advertisement_type, beacon.beacon_uuid, beacon.major,
+                                    beacon.minor, beacon.namespace_id, beacon.instance_id, beacon.label)
+    new_identity = _beacon_identity(adv_type, uuid_value, _int('major'), _int('minor'),
+                                    request.POST.get('namespace_id'), request.POST.get('instance_id'),
+                                    (request.POST.get('label') or '').strip())
+    # Only a changed identity is refused, so a clash already saved can still be edited away.
+    if new_identity != old_identity:
+        clash = _beacon_clash(new_identity, exclude_id=beacon.beacon_id)
+        if clash is not None:
+            return _clash_error(clash)
 
     before = beacon.advertisement_type
     beacon.beacon_uuid = uuid_value
@@ -9464,6 +9768,7 @@ STAIR_LINK_NEIGHBOURS = 2
 # How far apart two ends of one staircase can be.
 PAIR_MAX_OFFSET_METRES = 6.0
 PAIR_MAX_OFFSET_FALLBACK = 90.0      # canvas units, when a plan has no scale set
+STAIR_WAYPOINT_REACH_METRES = 6.0    # a staircase further than this is unreachable
 
 
 def _stair_node(stairway_id):
@@ -9669,6 +9974,9 @@ def get_patron_map_data(request):
         # Scale is required for positioning.
         'pixels_per_meter': floor_plan.pixels_per_meter,
         'north_offset_deg': floor_plan.north_offset_deg or 0,
+        # Where the front desk stands, for the pin and the kiosk's route.
+        'desk_x': floor_plan.desk_x,
+        'desk_y': floor_plan.desk_y,
         'floor_number': floor_plan.floor_number,
         'floor_label': floor_plan.floor_label,
         # What the floor switcher is built from.
@@ -9770,6 +10078,12 @@ def get_navigation_route(request):
     edges = edges_by_floor.get(here_id, [])
     # Stop if the floor has no waypoints.
     if not any(isinstance(n, int) and f == here_id for n, f in node_floor.items()):
+        if resolving_shelf is not None and not crossing_floors:
+            return JsonResponse({
+                'success': False,
+                'error': 'Turn-by-turn directions are not set up on the %s yet. '
+                         '%s is highlighted on the map.' % (floor_plan.floor_label, resolving_shelf.name),
+            })
         return JsonResponse({'success': False, 'error': 'No waypoints configured for this floor plan'})
 
     def nearest_waypoint(x, y, floor_id):
@@ -9851,13 +10165,15 @@ def get_navigation_route(request):
         else:
             goal_wp = nearest_waypoint(target_shelf.map_x, target_shelf.map_y,
                                        target_floor.floor_plan_id)
-        if goal_wp is None:
+        # Across floors, a target floor with no waypoints still gets the walk to the stairs.
+        if goal_wp is None and not crossing_floors:
             return JsonResponse({
                 'success': False,
                 'error': 'No waypoints have been drawn on the %s yet.' % target_floor.floor_label,
             })
 
-    path, total = _astar(start_wp, goal_wp, coords, adjacency)
+    path, total = (_astar(start_wp, goal_wp, coords, adjacency)
+                   if goal_wp is not None else (None, None))
 
     # No continuous path across the floors, so the two are two islands in the graph.
     stairs_only = False
@@ -9871,8 +10187,11 @@ def get_navigation_route(request):
         if options:
             fallback_stairway = min(
                 options, key=lambda st: math.hypot(st.map_x - start_x, st.map_y - start_y))
-            stair_goal = nearest_waypoint(
-                fallback_stairway.map_x, fallback_stairway.map_y, here_id)
+            # End at the staircase itself when it is hooked into this floor.
+            stair_goal = _stair_node(fallback_stairway.stairway_id)
+            if not adjacency.get(stair_goal):
+                stair_goal = nearest_waypoint(
+                    fallback_stairway.map_x, fallback_stairway.map_y, here_id)
             if stair_goal is not None:
                 path, total = _astar(start_wp, stair_goal, coords, adjacency)
                 if path is not None:
@@ -9972,14 +10291,53 @@ def get_navigation_route(request):
             verb = 'Take the lift' if via_stairway.kind == 'Elevator' else (
                 'Take the ramp' if via_stairway.kind == 'Ramp' else 'Take the stairs')
             arrow = {'up': 'up', 'down': 'down', 'both': ''}.get(via_stairway.direction, '')
+            # A two-way staircase still goes one way on this trip.
+            if not arrow and floor_plan.floor_number is not None and target_floor.floor_number is not None:
+                if target_floor.floor_number > floor_plan.floor_number:
+                    arrow = 'up'
+                elif target_floor.floor_number < floor_plan.floor_number:
+                    arrow = 'down'
             # Only name it when it has been given a name.
             where = ' at %s' % via_stairway.label if (via_stairway.name or '').strip() else ''
             going = ' %s' % arrow if arrow else ''
+
+            arrival = _arrival_on(via_stairway, target_floor, floors)
+            response['arrival'] = arrival
+            shelf_name = resolving_shelf.name if resolving_shelf is not None else 'the shelf'
+            if stairs_only and not any(
+                    isinstance(n, int) and f == target_floor.floor_plan_id for n, f in node_floor.items()):
+                # No route network there yet, so point at the shelf instead of drawing a walk.
+                then = ('then head to %s, highlighted on the %s map.'
+                        % (shelf_name, target_floor.floor_label))
+            else:
+                then = 'then follow the map from there.'
             response['instruction'] = (
-                '%s%s%s to the %s, then follow the map from there.'
-                % (verb, where, going, target_floor.floor_label)
-            )
+                '%s%s%s to the %s, %s' % (verb, where, going, target_floor.floor_label, then))
     return JsonResponse(response)
+
+
+def _arrival_on(via_stairway, target_floor, floors):
+    """Where a patron comes off the given stairs on the target floor."""
+    landings = list(Stairway.objects.filter(floor_plan=target_floor, is_active=True))
+    scale = {f.floor_plan_id: (f.pixels_per_meter or 0) for f in floors}
+    landing = None
+    for a, b in _pair_stairways([via_stairway] + landings, scale):
+        if via_stairway.stairway_id in (a.stairway_id, b.stairway_id):
+            landing = b if a.stairway_id == via_stairway.stairway_id else a
+            break
+    if landing is None:
+        linked = [s for s in landings if s.connects_to_id == via_stairway.floor_plan_id]
+        pool = linked or landings
+        if pool:
+            landing = min(pool, key=lambda s: math.hypot(s.map_x - via_stairway.map_x,
+                                                         s.map_y - via_stairway.map_y))
+    if landing is not None:
+        return {'floor_plan_id': target_floor.floor_plan_id, 'stairway_id': landing.stairway_id,
+                'label': landing.label, 'x': landing.map_x, 'y': landing.map_y, 'estimated': False}
+    # No stairs drawn there yet: floors are stacked, so the same spot one storey away.
+    return {'floor_plan_id': target_floor.floor_plan_id, 'stairway_id': None,
+            'label': via_stairway.label, 'x': via_stairway.map_x, 'y': via_stairway.map_y,
+            'estimated': True}
 
 # Entry and exit logging, and patron registration.
 def _patron_brief(patron):
@@ -10083,7 +10441,7 @@ def entry_log_register(request):
     except _ValidationError:
         return JsonResponse({'success': False, 'error': 'Please enter a valid email address.'})
 
-    if Patron.all_objects.filter(email__iexact=email).exists():
+    if _email_taken(email):
         return JsonResponse({'success': False, 'error': 'A patron with this email already exists.'})
 
     verifier = User.objects.filter(admin_id=request.session.get('admin_id')).first()

@@ -267,14 +267,19 @@ elif EMAIL_HOST_USER and EMAIL_HOST_PASSWORD:
     EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 
 else:
-    # Nothing configured.
+    # Nothing configured. Mail is printed, not sent, and EMAIL_CONFIGURED says so
+    # rather than letting the app report a delivery that never happened.
     EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+    EMAIL_CONFIGURED = False
     # Say so: otherwise pages report "code sent" while nothing reaches an inbox.
     import logging as _logging
     _logging.getLogger('ayla.email').warning(
         'EMAIL_PROVIDER is smtp but EMAIL_HOST_USER or EMAIL_HOST_PASSWORD is empty, '
         'so emails (including verification codes) are only printed to this console. '
         'Set both in .env to send real email.')
+
+# True unless the branch above fell through with no transport at all.
+EMAIL_CONFIGURED = globals().get('EMAIL_CONFIGURED', True)
 
 # Logging to the console and a rotating file.
 LOG_DIR = BASE_DIR / 'logs'

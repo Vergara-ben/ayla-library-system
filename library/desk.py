@@ -1,10 +1,13 @@
 """Desk mode: the Log Management page, handed to the patron."""
 
+import copy
+import json
 import logging
 from datetime import datetime, time, timedelta
+from urllib.parse import urlencode
 
 from django.contrib import messages
-from django.http import JsonResponse
+from django.http import JsonResponse, QueryDict
 from django.shortcuts import redirect
 from django.utils import timezone
 
@@ -13,16 +16,25 @@ from .auth_utils import (
     clear_login_failures,
     hash_password,
     login_locked_message,
+    new_otp,
+    otp_matches,
     record_login_failure,
+    waste_password_time,
 )
 from .audit import log_system_action
-from .models import Patron, PatronLog, User
+from .emails import account_action_otp_email
+from .models import FloorPlan, Patron, PatronLog, Shelf, User
 from .names import name_matches, parse_name, tokenise
 
 logger = logging.getLogger(__name__)
 
 
 DESK_SESSION_KEY = 'desk_mode'
+
+# The emailed way out, kept in the session: it belongs to this screen only.
+UNLOCK_CODE_KEY = 'desk_unlock_code'
+UNLOCK_CODE_EXPIRY = timedelta(minutes=10)
+UNLOCK_CODE_MAX_ATTEMPTS = 5
 
 # Time before a repeat sign-in counts as a new visit.
 RETURN_THRESHOLD = timedelta(minutes=15)
@@ -131,40 +143,260 @@ def arm_desk_mode(request):
     return redirect(desk_log_path(request))
 
 
+WRONG_ACCOUNT = 'That email and password do not match an active account.'
+
+
+def _mask_address(email):
+    """Show enough of an address to recognise it, not enough to harvest it."""
+    name, _, domain = (email or '').partition('@')
+    if not domain:
+        return ''
+    head = name[:2] if len(name) > 2 else name[:1]
+    return head + '*' * max(len(name) - len(head), 1) + '@' + domain
+
+
+def _emailed_code_ok(request, supplied):
+    """Check a code emailed to the signed-in account, counting the attempt."""
+    held = request.session.get(UNLOCK_CODE_KEY) or {}
+    code = held.get('code')
+    expires = held.get('expires')
+    if not code or not expires or timezone.now().timestamp() > expires:
+        return False, 'That code has expired. Send a new one.'
+    if held.get('attempts', 0) >= UNLOCK_CODE_MAX_ATTEMPTS:
+        return False, 'Too many incorrect codes. Send a new one.'
+    if not otp_matches(supplied, code):
+        held['attempts'] = held.get('attempts', 0) + 1
+        request.session[UNLOCK_CODE_KEY] = held
+        request.session.modified = True
+        left = UNLOCK_CODE_MAX_ATTEMPTS - held['attempts']
+        return False, 'That code is not correct. %d attempt(s) left.' % left
+    request.session.pop(UNLOCK_CODE_KEY, None)
+    request.session.modified = True
+    return True, None
+
+
 def unlock_desk_mode(request):
-    """Take the machine back with the account password."""
+    """Take the machine back: the signed-in account, another one, or an emailed code."""
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST is allowed.'})
 
-    user = User.objects.filter(admin_id=request.session.get('admin_id')).first()
-    password = request.POST.get('password') or ''
-    if user is None:
+    signed_in = User.objects.filter(admin_id=request.session.get('admin_id')).first()
+    if signed_in is None:
         request.session.flush()
         return JsonResponse({'success': False, 'redirect': '/admin-portal/login/',
                              'error': 'This session has expired. Please sign in again.'})
 
-    # Limit failed unlock attempts.
+    password = request.POST.get('password') or ''
+    code = (request.POST.get('code') or '').strip()
+    email = (request.POST.get('email') or '').strip()
+
+    # A colleague can free the machine with their own account.
+    other = None
+    if email and email.lower() != (signed_in.email or '').lower():
+        other = User.objects.filter(email__iexact=email, account_status='Active').first()
+        if other is None:
+            # Same wording and cost either way, so this cannot be used to find accounts.
+            waste_password_time()
+            return JsonResponse({'success': False, 'error': WRONG_ACCOUNT})
+
+    user = other or signed_in
     scope, identity = 'desk', str(user.admin_id)
     locked = login_locked_message(scope, identity)
     if locked:
         return JsonResponse({'success': False, 'error': locked})
 
-    if not password or not check_password(password, user.password_hash):
+    if code:
+        # The code went to the signed-in account, so it only frees that one.
+        ok, problem = _emailed_code_ok(request, code)
+        if not ok:
+            return JsonResponse({'success': False, 'error': problem})
+        user, other = signed_in, None
+    elif not password or not check_password(password, user.password_hash):
         remaining = record_login_failure(scope, identity)
         log_system_action('Unlock failed', 'Auth', user.admin_id,
-                          f'Failed desk-mode unlock for {user.fullname}')
-        error = 'That password is not correct.'
+                          'Failed desk-mode unlock for %s' % user.fullname)
+        error = WRONG_ACCOUNT if other is not None else 'That password is not correct.'
         if remaining is not None and 0 < remaining <= 2:
-            error += f' {remaining} attempt(s) left before this is locked.'
+            error += ' %d attempt(s) left before this is locked.' % remaining
         return JsonResponse({'success': False, 'error': error})
 
     clear_login_failures(scope, identity)
+    request.session.pop(UNLOCK_CODE_KEY, None)
     request.session.pop(DESK_SESSION_KEY, None)
     request.session.modified = True
+
+    if other is not None:
+        # Someone else freed the machine. End the session rather than hand them
+        # the armed account's portal.
+        log_system_action('Unlock', 'Auth', other.admin_id,
+                          '%s ended desk mode opened by %s' % (other.fullname, signed_in.fullname))
+        request.session.flush()
+        return JsonResponse({'success': True, 'redirect': '/admin-portal/login/',
+                             'signed_out': True})
+
     destination = ('/library-staff/dashboard/'
                    if request.session.get('admin_role') == 'Staff'
                    else '/admin-portal/dashboard/')
     return JsonResponse({'success': True, 'redirect': destination})
+
+
+# Finding a book, for whoever is standing at the desk
+
+DESK_FIND_LIMIT = 12
+
+
+def _shelf_location(book):
+    """Room, shelf, level and floor for one copy, as far as it is known."""
+    level = getattr(book, 'shelf_level', None)
+    shelf = getattr(level, 'shelf', None) if level else None
+    if shelf is None:
+        return {'shelved': False, 'where': 'Not yet shelved', 'floor': '', 'room': ''}
+    room = getattr(shelf, 'room', None)
+    plan = getattr(room, 'floor_plan', None) if room else None
+    return {
+        'shelved': True,
+        'where': '%s \u00b7 %s' % (shelf.name, level.label),
+        'room': room.name if room else '',
+        'floor': plan.floor_label if plan else '',
+    }
+
+
+def desk_find_book(request):
+    """Catalogue lookup for the kiosk. Public catalogue data only, no patron details."""
+    # Imported here: views imports this module, so it cannot be imported at the top.
+    from .views import _catalogue_query, _catalogue_rows
+
+    term = (request.GET.get('search') or '').strip()
+    if len(term) < 2:
+        return JsonResponse({'success': True, 'results': [], 'count': 0, 'term': term})
+
+    query = _catalogue_query({'search': term, 'sort': 'title'})
+    rows = _catalogue_rows(list(query['titles'][:DESK_FIND_LIMIT]))
+
+    results = []
+    for row in rows:
+        book = row.get('book')
+        if book is None:
+            continue
+        place = _shelf_location(book)
+        results.append({
+            'title': row['title'],
+            'author': row['author'] or '',
+            'year': row['year'] or '',
+            'genre': row['genre_name'] or '',
+            'copies': row['copies'],
+            'available': row['available'],
+            'status': book.get_status_display(),
+            'shelf_id': getattr(getattr(book.shelf_level, 'shelf', None), 'shelf_id', None),
+            'shelved': place['shelved'],
+            'where': place['where'],
+            'room': place['room'],
+            'floor': place['floor'],
+        })
+
+    return JsonResponse({
+        'success': True,
+        'results': results,
+        'count': query['titles'].count(),
+        'shown': len(results),
+        'term': term,
+    })
+
+
+def desk_floor():
+    """The floor whose plan has the desk marked on it."""
+    return (FloorPlan.objects
+            .filter(is_active=True, desk_x__isnull=False, desk_y__isnull=False)
+            .order_by('floor_number', 'floor_plan_id')
+            .first())
+
+
+def _sub_request(request, params):
+    """The same request, asking a different question of another view."""
+    sub = copy.copy(request)
+    sub.GET = QueryDict(urlencode(params))
+    return sub
+
+
+def desk_way_to_book(request):
+    """Draw the way from the desk computer to a shelf, on the desk's own floor."""
+    # Imported here: views imports this module.
+    from .views import get_navigation_route, get_patron_map_data
+
+    raw = (request.GET.get('shelf_id') or '').strip()
+    if not raw.isdigit():
+        return JsonResponse({'success': False, 'error': 'Which shelf?'})
+
+    start = desk_floor()
+    if start is None:
+        return JsonResponse({
+            'success': False,
+            'no_desk': True,
+            'error': 'The desk has not been marked on the floor plan yet.'})
+
+    shelf = Shelf.objects.filter(shelf_id=int(raw)).first()
+    if shelf is None or shelf.map_x is None:
+        return JsonResponse({'success': False,
+                             'error': 'That shelf is not placed on the floor plan.'})
+
+    route = json.loads(get_navigation_route(_sub_request(request, {
+        'start_x': start.desk_x,
+        'start_y': start.desk_y,
+        'from_floor': start.floor_plan_id,
+        'target_shelf_id': shelf.shelf_id,
+    })).content)
+
+    # The plan drawn is always the one the patron is standing on: the desk's.
+    plan = json.loads(get_patron_map_data(_sub_request(request, {
+        'floor': start.floor_plan_id,
+    })).content)
+
+    return JsonResponse({
+        'success': bool(route.get('success')),
+        'error': route.get('error', ''),
+        'desk': {'x': start.desk_x, 'y': start.desk_y,
+                 'floor_plan_id': start.floor_plan_id,
+                 'floor': start.floor_label},
+        'route': route.get('route') or [],
+        'instruction': route.get('instruction') or '',
+        'cross_floor': bool(route.get('cross_floor')),
+        'target_floor': route.get('target_floor') or {},
+        'target_shelf': route.get('target_shelf') or {},
+        'plan': plan if plan.get('success') else {},
+    })
+
+
+def send_desk_unlock_code(request):
+    """Email a one-time code to the account that armed the desk."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST is allowed.'})
+
+    user = User.objects.filter(admin_id=request.session.get('admin_id')).first()
+    if user is None:
+        request.session.flush()
+        return JsonResponse({'success': False, 'redirect': '/admin-portal/login/',
+                             'error': 'This session has expired. Please sign in again.'})
+    if not user.email:
+        return JsonResponse({'success': False,
+                             'error': 'This account has no email address on file.'})
+
+    code = new_otp()
+    request.session[UNLOCK_CODE_KEY] = {
+        'code': code,
+        'expires': (timezone.now() + UNLOCK_CODE_EXPIRY).timestamp(),
+        'attempts': 0,
+    }
+    request.session.modified = True
+
+    if not account_action_otp_email(user.email, user.fullname, code, 'unlock desk mode on'):
+        request.session.pop(UNLOCK_CODE_KEY, None)
+        request.session.modified = True
+        return JsonResponse({'success': False,
+                             'error': 'We could not send the code. Use a password instead.'})
+
+    log_system_action('Unlock code', 'Auth', user.admin_id,
+                      'Desk-mode unlock code emailed to %s' % user.fullname)
+    return JsonResponse({'success': True, 'sent_to': _mask_address(user.email)})
 
 
 # Visits that nobody closed

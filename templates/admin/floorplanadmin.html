@@ -390,6 +390,17 @@
         .map-dot:active { cursor: grabbing; }
         .map-dot.beacon { background: var(--info); }
         .map-dot.waypoint { background: var(--success); }
+        /* The front desk: a pin you can tell apart at a glance. */
+        .map-dot.desk-dot {
+            background: var(--warning);
+            color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            border-radius: 6px;
+            box-shadow: 0 0 0 2px rgba(255, 255, 255, .85);
+        }
         .map-dot.waypoint.selected { background: var(--warning); }
 
         /* Group selection and locks. */
@@ -744,6 +755,9 @@
                             </button>
                             <button id="btnWaypoint" type="button" onclick="setMode('waypoint')" class="mode-btn rail-btn" title="Put a waypoint where you click">
                                 <i class="fa-solid fa-circle-nodes"></i><span>Waypoint</span>
+                            </button>
+                            <button id="btnDesk" type="button" onclick="setMode('desk')" class="mode-btn rail-btn" title="Mark where the front-desk computer stands. The kiosk draws the way to a book from here.">
+                                <i class="fa-solid fa-headset"></i><span>Desk</span>
                             </button>
                             <div class="rail-sep"></div>
                             {# Only ever useful mid-shape, so it is only ever shown then. #}
@@ -1542,7 +1556,9 @@
             addRoom: "{% url 'add_room' %}",
             addObstacle: "{% url 'add_obstacle' %}",
             addStairway: "{% url 'add_stairway' %}",
+            setDesk: "{% url 'set_floorplan_desk' %}",
             editStairway: "{% url 'edit_stairway' %}",
+            matchStairway: "{% url 'match_stairway' %}",
             deleteStairway: "{% url 'delete_stairway' %}",
             editObstacle: "{% url 'edit_obstacle' %}",
             editWaypoint: "{% url 'edit_waypoint' %}",
@@ -1965,6 +1981,53 @@
             if (mode === 'beacon') openBeaconModal();
             else if (mode === 'waypoint') openWaypointModal();
             else if (mode === 'shelf') openShelfPlace();
+            else if (mode === 'desk') saveDeskPosition(pending.x, pending.y);
+        }
+
+        // The front desk. One per floor plan, so there is only ever one marker.
+        let deskMarker = null;
+
+        function drawDeskMarker(x, y) {
+            if (x === null || y === null || x === undefined || y === undefined) {
+                if (deskMarker) { lmap.removeLayer(deskMarker); deskMarker = null; }
+                return;
+            }
+            if (deskMarker) { deskMarker.setLatLng(toLatLng(x, y)); return; }
+
+            deskMarker = L.marker(toLatLng(x, y), {
+                draggable: true,
+                icon: L.divIcon({
+                    className: 'map-dot desk-dot',
+                    html: '<i class="fa-solid fa-headset"></i>',
+                    iconSize: [22, 22], iconAnchor: [11, 11],
+                }),
+            }).addTo(lmap);
+            deskMarker.bindTooltip('Front desk \u2014 the kiosk draws the way from here',
+                                   { direction: 'top' });
+            deskMarker.on('dragend', async function () {
+                const pos = canvasXY(deskMarker.getLatLng());
+                await saveDeskPosition(pos.x, pos.y, true);
+            });
+            // Right-click takes it off again.
+            deskMarker.on('contextmenu', async function (e) {
+                L.DomEvent.stop(e);
+                if (!confirm('Remove the desk position from this floor plan?')) return;
+                const r = await postData(URLS.setDesk, {
+                    floorplan_id: floorPlanId, clear: '1' });
+                if (r && r.success) drawDeskMarker(null, null);
+            });
+        }
+
+        async function saveDeskPosition(x, y, silent) {
+            const r = await postData(URLS.setDesk, {
+                floorplan_id: floorPlanId, desk_x: x, desk_y: y });
+            if (r && r.success) {
+                drawDeskMarker(r.desk_x, r.desk_y);
+                if (!silent) setMode(null);
+            } else if (r && r.error) {
+                alert(r.error);
+            }
+            return r;
         }
 
         // Beacons.
@@ -2458,8 +2521,15 @@
             }).addTo(lmap);
             layers.push(poly);
 
-            const tip = st.label + (st.destination ? ' → ' + st.destination
-                                                   : ' (not linked to a floor yet)');
+            // A staircase that does not meet one on the other floor joins nothing,
+            // so it is drawn as the dashed outline it effectively is.
+            if (!st.paired && st.is_active !== false) {
+                poly.setStyle({ dashArray: '7 5', fillOpacity: 0.05, weight: 2.4 });
+            }
+            const tip = st.label + (!st.destination
+                ? ' — not linked to a floor yet'
+                : (st.paired ? ' → ' + st.destination
+                             : ' — no matching stairway on ' + st.destination));
             poly.bindTooltip(tip, { direction: 'top', sticky: true });
             poly.on('contextmenu', function (e) {
                 L.DomEvent.stop(e);
@@ -2608,10 +2678,16 @@
                 + '<button class="map-action-btn" onclick="applyStairsInspector(' + id + ')"><i class="fa-solid fa-check"></i> Apply changes</button>'
                 + '<button class="map-action-btn danger" onclick="removeStairwayById(' + id + ')"><i class="fa-solid fa-trash"></i> Delete stairway</button>'
                 + '</div>'
+                + '<div class="map-actions">'
+                + '<button class="map-action-btn" onclick="matchStairwayById(' + id + ')">'
+                + '<i class="fa-solid fa-layer-group"></i> Draw the far end on the other floor</button>'
+                + '</div>'
                 + '<p class="insp-note">'
-                + (st.destination
-                    ? 'Patrons routing to a book on ' + esc(st.destination) + ' are sent through here.'
-                    : '<span style="color:var(--warning)">Not linked to a floor yet</span> — until it is, cross-floor navigation cannot use it.')
+                + (!st.destination
+                    ? '<span style="color:var(--warning)">Not linked to a floor yet</span> — until it is, cross-floor navigation cannot use it.'
+                    : st.paired
+                        ? 'Paired with the stairway on ' + esc(st.destination) + '. Patrons routing to a book there are sent through here.'
+                        : '<span style="color:var(--warning)">No matching stairway on ' + esc(st.destination) + '</span> — stairs join up in pairs, so this one leads nowhere until the far end is drawn.')
                 + '</p>'
                 + '<p class="insp-note">The footprint alone cannot say which end is the bottom, so the '
                 + 'bearing is what the treads and the direction arrow are drawn from.</p>');
@@ -2619,6 +2695,19 @@
         window.showStairsInspector = showStairsInspector;
 
         // Look up the label to avoid quote issues.
+        window.matchStairwayById = async function (id) {
+            const entry = stairwayShapes[id];
+            const to = document.getElementById('inspStairTo');
+            const r = await postData(URLS.matchStairway, {
+                stairway_id: id,
+                connects_to: (to && to.value) || (entry && entry.data && entry.data.connects_to) || '',
+            });
+            if (!r || !r.success) { alert((r && r.error) || 'Could not draw the far end.'); return; }
+            alert(r.message);
+            // The far end lives on another floor, so reload to pick up the new link.
+            location.reload();
+        };
+
         window.removeStairwayById = function (id) {
             const entry = stairwayShapes[id];
             removeStairway(id, (entry && entry.data && entry.data.label) || 'this stairway');
@@ -5606,6 +5695,7 @@
             renderUnplacedShelves(data.shelves);
             (data.shelves || []).forEach(addShelfMarker);
             (data.beacons || []).forEach(addBeaconMarker);
+            drawDeskMarker(data.desk_x, data.desk_y);
             (data.waypoints || []).forEach(addWaypointMarker);
             (data.connections || []).forEach(addConnectionLine);
 
