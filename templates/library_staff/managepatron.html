@@ -265,6 +265,45 @@
             </div>
             {% endif %}
 
+            {% if pending_photos %}
+            <div class="rounded-xl border border-sky-800/60 overflow-hidden shadow-2xl" style="background-color: var(--bg-card);">
+                <div class="p-5 border-b border-slate-800 flex items-center gap-2">
+                    <i class="fa-solid fa-camera text-sky-400 text-xs"></i>
+                    <h4 class="text-sm font-bold text-slate-200 tracking-wide">Card Photo Requests</h4>
+                    <span class="bg-sky-500/10 text-sky-400 border border-sky-500/30 px-2 py-0.5 rounded text-[10px] font-bold">{{ pending_photos|length }}</span>
+                </div>
+                <div class="divide-y divide-slate-800/40">
+                    {% for ph in pending_photos %}
+                    <div class="p-4 flex flex-col sm:flex-row sm:items-center gap-3 justify-between">
+                        <div class="flex items-center gap-3 text-xs min-w-0">
+                            <a href="{% url 'card_photo' ph.photo_id %}" target="_blank" rel="noopener" title="Open full size" class="flex-shrink-0">
+                                <img src="{% url 'card_photo' ph.photo_id %}" alt="Photo sent by {{ ph.patron.fullname }}" class="w-14 h-14 rounded-lg object-cover border border-slate-700 hover:border-sky-400 transition-colors">
+                            </a>
+                            <div class="min-w-0">
+                                <div class="font-semibold text-slate-200">{{ ph.patron.fullname }}</div>
+                                <div class="text-slate-500 mt-0.5">{{ ph.patron.email }} &middot; sent {{ ph.uploaded_at|date:"M j, Y" }}</div>
+                                <a href="{% url 'patron_library_card' ph.patron.patron_id %}" target="_blank" class="inline-flex items-center gap-1 text-sky-400 hover:text-sky-300 mt-1"><i class="fa-solid fa-id-card text-[10px]"></i> View card</a>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-1.5 flex-shrink-0">
+                            <form method="post" action="{% url 'respond_to_card_photo' ph.photo_id %}" class="inline-block" data-confirm="Approve this photo for {{ ph.patron.fullname }}'s library card?">
+                                {% csrf_token %}
+                                <input type="hidden" name="action" value="approve">
+                                <button type="submit" class="rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2.5 py-1.5 text-[10px] font-semibold hover:bg-emerald-500/20 hover:text-emerald-100">Approve</button>
+                            </form>
+                            <form method="post" action="{% url 'respond_to_card_photo' ph.photo_id %}" class="inline-block" onsubmit="return fillPhotoRejectNote(this)">
+                                {% csrf_token %}
+                                <input type="hidden" name="action" value="reject">
+                                <input type="hidden" name="staff_note" value="">
+                                <button type="submit" class="rounded-lg bg-rose-500/10 text-rose-400 border border-rose-500/20 px-2.5 py-1.5 text-[10px] font-semibold hover:bg-rose-500/20 hover:text-rose-100">Reject</button>
+                            </form>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
                     <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Total Patrons</p>
@@ -723,6 +762,19 @@
         let rvPatron = null;
 
         // Asks, then collects the reason, then submits.
+        async function fillPhotoRejectNote(form) {
+            if (form.dataset.aylaConfirmed === '1') return true;
+            if (!await AylaDialog.confirm('Reject this card photo?',
+                    { title: 'Reject photo', confirmLabel: 'Reject' })) return false;
+            const note = await AylaDialog.prompt(
+                'Reason for rejecting — optional, and shown to the patron.', '',
+                { title: 'Reason', multiline: true, confirmLabel: 'Reject photo' });
+            if (note === null) return false;
+            form.querySelector('[name=staff_note]').value = note;
+            form.dataset.aylaConfirmed = '1';
+            form.requestSubmit ? form.requestSubmit() : form.submit();
+            return false;
+        }
         async function fillRejectNote(form) {
             if (form.dataset.aylaConfirmed === '1') return true;
             if (!await AylaDialog.confirm('Reject this reactivation request?',
