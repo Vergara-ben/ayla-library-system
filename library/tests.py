@@ -872,7 +872,7 @@ class TransactionRecordTests(TestCase):
         new_due = self.today - timedelta(days=1)
         data = self.client.post(self._url('edit'), {
             'due_date': new_due.isoformat(), 'return_date': '', 'fine_amount': '12.5',
-        }).json()
+            'admin_password': 'SmokeTest123'}).json()
         self.assertTrue(data['success'], data)
         self.loan.refresh_from_db()
         self.assertEqual(self.loan.due_date, new_due)
@@ -885,7 +885,7 @@ class TransactionRecordTests(TestCase):
         data = self.client.post(self._url('edit'), {
             'due_date': self.loan.due_date.isoformat(),
             'return_date': self.today.isoformat(), 'fine_amount': '0',
-        }).json()
+            'admin_password': 'SmokeTest123'}).json()
         self.assertFalse(data['success'])
         self.loan.refresh_from_db()
         self.assertIsNone(self.loan.return_date)
@@ -893,29 +893,83 @@ class TransactionRecordTests(TestCase):
     def test_edit_rejects_a_negative_fine(self):
         data = self.client.post(self._url('edit'), {
             'due_date': self.loan.due_date.isoformat(), 'fine_amount': '-1',
-        }).json()
+            'admin_password': 'SmokeTest123'}).json()
         self.assertFalse(data['success'])
 
     def test_deleting_an_open_loan_frees_the_book(self):
-        data = self.client.post(self._url('delete')).json()
+        data = self.client.post(self._url('delete'), {'admin_password': 'SmokeTest123'}).json()
         self.assertTrue(data['success'])
         self.assertTrue(data['book_freed'])
         self.assertFalse(Transaction.objects.filter(pk=self.loan.pk).exists())
         self.book.refresh_from_db()
         self.assertEqual(self.book.status, 'Available')
 
+    def test_a_deleted_record_is_archived_not_erased(self):
+        self.client.post(self._url('delete'), {'admin_password': 'SmokeTest123',
+                                               'reason': 'Entered by mistake'})
+        kept = Transaction.all_objects.get(pk=self.loan.pk)
+        self.assertIsNotNone(kept.archived_at)
+        self.assertEqual(kept.archived_by, 'Smoke Admin')
+        self.assertEqual(kept.archive_reason, 'Entered by mistake')
+        # Gone from the list and the counts.
+        page = self.client.get('/admin-portal/transaction/').content.decode()
+        self.assertNotIn('#TX-%d' % self.loan.pk, page)
+
     def test_deleting_a_closed_loan_leaves_the_book_alone(self):
         self.loan.return_date = self.today
         self.loan.save()
         self.book.status = 'For Reshelving'
         self.book.save()
-        self.assertTrue(self.client.post(self._url('delete')).json()['success'])
+        self.assertTrue(self.client.post(self._url('delete'), {'admin_password': 'SmokeTest123'}).json()['success'])
         self.book.refresh_from_db()
         self.assertEqual(self.book.status, 'For Reshelving')
 
     def test_delete_needs_post(self):
         self.client.get(self._url('delete'))
         self.assertTrue(Transaction.objects.filter(pk=self.loan.pk).exists())
+
+    def test_editing_needs_the_admins_password(self):
+        for password in ('', 'not-my-password'):
+            data = self.client.post(self._url('edit'), {
+                'due_date': self.loan.due_date.isoformat(), 'fine_amount': '99',
+                'admin_password': password}).json()
+            self.assertFalse(data['success'])
+            self.assertTrue(data['password'])
+        self.loan.refresh_from_db()
+        self.assertEqual(self.loan.fine_amount, 0)
+        self.assertTrue(SystemLog.objects.filter(action='Denied').exists())
+
+    def test_deleting_needs_the_admins_password(self):
+        data = self.client.post(self._url('delete'), {'admin_password': 'wrong'}).json()
+        self.assertFalse(data['success'])
+        self.assertTrue(Transaction.objects.filter(pk=self.loan.pk).exists())
+
+    def test_five_wrong_passwords_lock_the_check(self):
+        for _ in range(5):
+            self.client.post(self._url('delete'), {'admin_password': 'wrong'})
+        data = self.client.post(self._url('delete'), {'admin_password': 'SmokeTest123'}).json()
+        self.assertFalse(data['success'])
+        self.assertIn('Too many', data['error'])
+        self.assertTrue(Transaction.objects.filter(pk=self.loan.pk).exists())
+
+    def test_staff_cannot_edit_or_delete_even_with_a_password(self):
+        staff = User.objects.create(
+            fullname='Desk Staff', email='desk-staff@example.invalid',
+            password_hash=hash_password('SmokeTest123'), role='Staff',
+            account_status='Active', modules='transactions')
+        desk = _signed_in(staff)
+        desk.post(self._url('edit'), {'due_date': self.loan.due_date.isoformat(),
+                                      'fine_amount': '50', 'admin_password': 'SmokeTest123'})
+        desk.post(self._url('delete'), {'admin_password': 'SmokeTest123'})
+        self.loan.refresh_from_db()
+        self.assertEqual(self.loan.fine_amount, 0)
+        self.assertTrue(Transaction.objects.filter(pk=self.loan.pk).exists())
+        # Staff still see the record.
+        self.assertTrue(desk.get(self._url('detail')).json()['success'])
+        page = desk.get('/library-staff/transactions/').content.decode()
+        self.assertNotIn('openTxEdit', page)
+        self.assertNotIn('deleteTx', page)
+
 
 class DeskModeTests(TestCase):
     """Arming the desk confines the browser to the log page."""
@@ -955,9 +1009,55 @@ class DeskFindBookTests(TestCase):
         row = next(r for r in data['results'] if r['title'] == 'Noli Me Tangere')
         self.assertEqual(row['available'], 1)
 
-    def test_a_short_term_searches_nothing(self):
-        data = self.client.get('/desk/find-book/', {'search': 'n'}).json()
-        self.assertEqual(data['results'], [])
+    def test_with_no_search_every_book_is_listed(self):
+        Book.objects.create(title='El Filibusterismo', author='Rizal', genre='FIC', status='Available')
+        data = self.client.get('/desk/find-book/').json()
+        self.assertEqual(data['count'], 2)
+        self.assertEqual({r['title'] for r in data['results']},
+                         {'Noli Me Tangere', 'El Filibusterismo'})
+
+    def _shelved(self, title, genre='FIC'):
+        plan = FloorPlan.objects.create(name='Ground', floor_number=1, is_active=True)
+        room = Room.objects.create(floor_plan=plan, name='Reading Room', map_x=0, map_y=0)
+        shelf = Shelf.objects.create(room=room, name='Shelf A', map_x=5, map_y=5)
+        level = ShelfLevel.objects.create(shelf=shelf, level_number=2)
+        book = Book.objects.create(title=title, author='Balagtas', genre=genre,
+                                   status='Available', shelf_level=level)
+        return room, shelf, level, book
+
+    def test_the_list_narrows_by_room_shelf_and_level(self):
+        room, shelf, level, _book = self._shelved('Florante at Laura')
+        for key, value in (('room', room.room_id), ('shelf', shelf.shelf_id),
+                           ('level', level.shelf_level_id)):
+            with self.subTest(key=key):
+                data = self.client.get('/desk/find-book/', {key: value}).json()
+                self.assertEqual([r['title'] for r in data['results']], ['Florante at Laura'])
+
+    def test_the_list_narrows_by_category_and_type(self):
+        self._shelved('Florante at Laura', genre='POE')
+        data = self.client.get('/desk/find-book/', {'genre': 'POE'}).json()
+        self.assertEqual([r['title'] for r in data['results']], ['Florante at Laura'])
+        data = self.client.get('/desk/find-book/', {'material': 'Book'}).json()
+        self.assertEqual(data['count'], 2)
+
+    def test_the_filter_choices_come_from_the_shelves(self):
+        room, shelf, level, _book = self._shelved('Florante at Laura')
+        options = self.client.get('/desk/find-book/', {'options': '1'}).json()['options']
+        self.assertIn('FIC', options['genres'])
+        self.assertEqual([r['id'] for r in options['rooms']], [room.room_id])
+        self.assertEqual([x['id'] for x in options['shelves']], [shelf.shelf_id])
+        self.assertEqual([x['id'] for x in options['levels']], [level.shelf_level_id])
+
+    def test_the_list_comes_a_page_at_a_time(self):
+        from .desk import DESK_FIND_PAGE
+        for i in range(DESK_FIND_PAGE + 3):
+            Book.objects.create(title='Book %02d' % i, author='A', status='Available')
+        first = self.client.get('/desk/find-book/').json()
+        self.assertEqual(len(first['results']), DESK_FIND_PAGE)
+        self.assertTrue(first['has_more'])
+        second = self.client.get('/desk/find-book/', {'page': 2}).json()
+        self.assertEqual(len(second['results']), 4)
+        self.assertFalse(second['has_more'])
 
     def test_nothing_about_a_patron_is_returned(self):
         data = self.client.get('/desk/find-book/', {'search': 'noli'}).json()
@@ -7592,6 +7692,46 @@ class FloorPlanGroupActionTests(TestCase):
 
 
 
+
+class InventoryPasswordTests(TestCase):
+    """Changing or removing an inventory record asks the administrator for their password."""
+
+    def setUp(self):
+        self.client = _signed_in(_admin(modules='inventory,books'))
+        self.book = Book.objects.create(title='Ibong Adarna', author='Anonymous',
+                                        qr_code=str(uuid4()), status='Available')
+        self.record = InventoryRecord.objects.filter(book=self.book).first() or \
+            InventoryRecord.objects.create(book=self.book, qr_label=self.book.qr_code)
+
+    def test_each_change_is_refused_without_the_password(self):
+        posts = [
+            ('/admin-portal/inventory/condition/', {'condition': 'Damaged', 'reason': 'Torn'}),
+            ('/admin-portal/inventory/update/', {'book_id': self.book.book_id, 'source': 'Existing',
+                                                 'reason': 'Typo'}),
+            ('/admin-portal/inventory/deaccession/', {'reason': 'Entered twice'}),
+        ]
+        before = (self.record.condition, self.record.status)
+        for url, data in posts:
+            with self.subTest(url=url):
+                data = dict(data, inventory_id=self.record.inventory_id, admin_password='wrong')
+                self.client.post(url, data)
+                self.record.refresh_from_db()
+                self.assertEqual((self.record.condition, self.record.status), before)
+        self.assertTrue(Book.objects.filter(pk=self.book.pk).exists())
+
+    def test_the_right_password_lets_it_through(self):
+        self.client.post('/admin-portal/inventory/condition/', {
+            'inventory_id': self.record.inventory_id, 'condition': 'Damaged', 'reason': 'Torn',
+            'admin_password': 'SmokeTest123'})
+        self.record.refresh_from_db()
+        self.assertEqual(self.record.condition, 'Damaged')
+
+    def test_a_wrong_password_is_shown_to_the_admin(self):
+        r = self.client.post('/admin-portal/inventory/deaccession/', {
+            'inventory_id': self.record.inventory_id, 'reason': 'Entered twice',
+            'admin_password': 'wrong'}, follow=True)
+        self.assertContains(r, 'That password is not right.')
+
 class FloorPlanUndoTests(TestCase):
     """Every change in the floor plan editor can be taken back, one step at a time."""
 
@@ -8702,7 +8842,8 @@ class OneCopyPerBookTests(TestCase):
             'level': self.level.shelf_level_id, 'missing_ids': [book.book_id]})
         record = InventoryRecord.objects.get(book=book)
         self.client.post('/admin-portal/inventory/write-off-missing/', {
-            'inventory_ids': [record.inventory_id], 'reason': 'Not found in two counts'})
+            'inventory_ids': [record.inventory_id], 'reason': 'Not found in two counts',
+            'admin_password': 'SmokeTest123'})
         self.assertEqual(Book.objects.get(pk=book.pk).status, 'Lost')
 
     # Removing books
@@ -8719,7 +8860,8 @@ class OneCopyPerBookTests(TestCase):
         book = self._add_book()
         record = InventoryRecord.objects.get(book=book)
         self.client.post('/admin-portal/inventory/deaccession/', {
-            'inventory_id': record.inventory_id, 'reason': 'Entered twice'})
+            'inventory_id': record.inventory_id, 'reason': 'Entered twice',
+            'admin_password': 'SmokeTest123'})
         self.assertFalse(Book.objects.filter(pk=book.pk).exists())
 
     def test_a_copy_on_loan_cannot_be_deaccessioned(self):
@@ -8727,7 +8869,8 @@ class OneCopyPerBookTests(TestCase):
         Book.objects.filter(pk=book.pk).update(status='Borrowed')
         record = InventoryRecord.objects.get(book=book)
         self.client.post('/admin-portal/inventory/deaccession/', {
-            'inventory_id': record.inventory_id, 'reason': 'Entered twice'})
+            'inventory_id': record.inventory_id, 'reason': 'Entered twice',
+            'admin_password': 'SmokeTest123'})
         record.refresh_from_db()
         self.assertEqual(record.status, 'In Stock')
 
@@ -8737,7 +8880,8 @@ class OneCopyPerBookTests(TestCase):
 
         def mark(condition):
             self.client.post('/admin-portal/inventory/condition/', {
-                'inventory_id': record.inventory_id, 'condition': condition, 'reason': 'Checked'})
+                'inventory_id': record.inventory_id, 'condition': condition, 'reason': 'Checked',
+                'admin_password': 'SmokeTest123'})
 
         mark('Damaged')
         self.assertEqual(Book.objects.get(pk=book.pk).condition, 'Damaged')
@@ -8777,7 +8921,8 @@ class OneCopyPerBookTests(TestCase):
         second = self._add_book('El Filibusterismo')
         record = InventoryRecord.objects.get(book=second)
         self.client.post('/admin-portal/inventory/update/', {
-            'inventory_id': record.inventory_id, 'book_id': first.book_id, 'source': 'Existing'})
+            'inventory_id': record.inventory_id, 'book_id': first.book_id, 'source': 'Existing',
+            'admin_password': 'SmokeTest123'})
         record.refresh_from_db()
         self.assertEqual(record.book_id, second.book_id)
 

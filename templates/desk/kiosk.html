@@ -65,6 +65,11 @@
             font-size: .95rem;
         }
         .kiosk-field:focus { outline: none; border-color: rgb(8 145 178); }
+        /* Find a book: the filters under the search box. */
+        .find-filters { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: .5rem; }
+        @media (max-width: 900px) { .find-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+        .find-filters select { padding: .6rem .75rem; font-size: .85rem; }
+        .find-filters select:disabled { opacity: .45; }
         .kiosk-label {
             display: block;
             font-size: .7rem;
@@ -158,22 +163,41 @@
             <section id="screenFind" class="hidden">
                 <div class="text-center mb-7">
                     <h1 class="text-2xl sm:text-3xl font-bold text-slate-100 tracking-tight">Find a book</h1>
-                    <p class="text-slate-400 mt-2 text-sm">Search by title, author, ISBN or subject.</p>
+                    <p class="text-slate-400 mt-2 text-sm">Browse every book, or search by title, author, ISBN or subject.</p>
                 </div>
 
-                <div class="flex gap-2 max-w-xl mx-auto">
+                <div class="flex gap-2 max-w-5xl mx-auto">
                     <input type="text" id="findValue" class="kiosk-field flex-1" autocomplete="off"
-                           placeholder="e.g. Noli Me Tangere" onkeydown="if(event.key==='Enter')kioskFindBook()">
+                           placeholder="e.g. Noli Me Tangere" oninput="kioskFindSoon()"
+                           onkeydown="if(event.key==='Enter')kioskFindBook()">
                     <button type="button" id="findBtn" onclick="kioskFindBook()"
                             class="bg-emerald-700 hover:bg-emerald-600 text-white text-sm font-bold px-6 rounded-xl">
                         Search
                     </button>
                 </div>
 
-                <p id="findCount" class="hidden text-center text-[12px] text-slate-500 mt-5"></p>
-                <div id="findResults" class="mt-4 space-y-3 max-w-xl mx-auto"></div>
+                <div class="find-filters max-w-5xl mx-auto mt-3" aria-label="Filter the books">
+                    <select id="findGenre" class="kiosk-field" aria-label="Category" onchange="kioskFindBook()"><option value="">All categories</option></select>
+                    <select id="findMaterial" class="kiosk-field" aria-label="Type" onchange="kioskFindBook()"><option value="">All types</option></select>
+                    <select id="findRoom" class="kiosk-field" aria-label="Room" onchange="kioskFindPlace('room')"><option value="">All rooms</option></select>
+                    <select id="findShelf" class="kiosk-field" aria-label="Shelf" onchange="kioskFindPlace('shelf')"><option value="">All shelves</option></select>
+                    <select id="findLevel" class="kiosk-field" aria-label="Shelf level" onchange="kioskFindBook()"><option value="">All shelf levels</option></select>
+                </div>
+                <div class="text-center mt-2">
+                    <button type="button" id="findReset" onclick="kioskFindReset()"
+                            class="hidden text-[12px] font-semibold text-cyan-300 hover:text-cyan-200 underline">Clear filters</button>
+                </div>
+
+                <p id="findCount" class="hidden text-center text-[12px] text-slate-500 mt-4"></p>
+                <div id="findResults" class="mt-4 space-y-3 max-w-5xl mx-auto"></div>
+                <div class="text-center mt-4">
+                    <button type="button" id="findMore" onclick="kioskFindBook(true)"
+                            class="hidden text-sm font-semibold px-6 py-2.5 rounded-xl border border-slate-700 text-slate-200 hover:bg-slate-800/50">
+                        Show more
+                    </button>
+                </div>
                 <div id="findEmpty" class="hidden text-center text-slate-500 text-sm mt-10">
-                    Nothing matched that. Try fewer words, or ask at the desk.
+                    Nothing matched that. Try fewer words or fewer filters, or ask at the desk.
                 </div>
 
                 <div class="text-center mt-8">
@@ -522,8 +546,9 @@
         if (name === 'find') {
             const box = document.getElementById('findValue');
             box.value = '';
+            kioskFindReset(true);
+            kioskFindBook();
             box.focus();
-            kioskClearFind();
         }
         kioskTouch();
     }
@@ -532,6 +557,72 @@
         document.getElementById('findResults').innerHTML = '';
         document.getElementById('findCount').classList.add('hidden');
         document.getElementById('findEmpty').classList.add('hidden');
+        document.getElementById('findMore').classList.add('hidden');
+    }
+
+    // Filter choices, fetched once with the first list.
+    let findOptions = null;
+    let findPage = 1;
+    let findSeq = 0;
+    let findTimer = null;
+    const FIND_SELECTS = { genre: 'findGenre', material: 'findMaterial', room: 'findRoom',
+                           shelf: 'findShelf', level: 'findLevel' };
+
+    function kioskFillSelect(id, allLabel, items, keep) {
+        const sel = document.getElementById(id);
+        const current = keep ? sel.value : '';
+        sel.innerHTML = '<option value="">' + allLabel + '</option>' + items.map(function (it) {
+            return '<option value="' + kioskEscape(it[0]) + '">' + kioskEscape(it[1]) + '</option>';
+        }).join('');
+        sel.value = items.some(function (it) { return String(it[0]) === current; }) ? current : '';
+        sel.disabled = !items.length;
+    }
+
+    // Rooms narrow the shelves, and shelves narrow the levels.
+    function kioskPaintPlaces() {
+        if (!findOptions) return;
+        const room = document.getElementById('findRoom').value;
+        const shelves = findOptions.shelves.filter(function (s) { return !room || String(s.room) === room; });
+        kioskFillSelect('findShelf', 'All shelves', shelves.map(function (s) { return [s.id, s.name]; }), true);
+        const shelf = document.getElementById('findShelf').value;
+        const shelfIds = shelves.map(function (s) { return String(s.id); });
+        const levels = findOptions.levels.filter(function (l) {
+            return shelf ? String(l.shelf) === shelf : (!room || shelfIds.indexOf(String(l.shelf)) >= 0);
+        });
+        const names = {};
+        findOptions.shelves.forEach(function (s) { names[s.id] = s.name; });
+        kioskFillSelect('findLevel', 'All shelf levels', levels.map(function (l) {
+            return [l.id, shelf ? l.name : (names[l.shelf] || '') + ' · ' + l.name];
+        }), true);
+    }
+
+    function kioskPaintOptions(o) {
+        findOptions = o;
+        kioskFillSelect('findGenre', 'All categories', o.genres.map(function (g) { return [g, g]; }), true);
+        kioskFillSelect('findMaterial', 'All types', o.materials, true);
+        kioskFillSelect('findRoom', 'All rooms', o.rooms.map(function (r) {
+            return [r.id, r.name + (r.floor ? ' (' + r.floor + ')' : '')];
+        }), true);
+        kioskPaintPlaces();
+    }
+
+    function kioskFindPlace(which) {
+        if (which === 'room') document.getElementById('findShelf').value = '';
+        document.getElementById('findLevel').value = '';
+        kioskPaintPlaces();
+        kioskFindBook();
+    }
+
+    function kioskFindReset(quiet) {
+        Object.keys(FIND_SELECTS).forEach(function (k) { document.getElementById(FIND_SELECTS[k]).value = ''; });
+        kioskPaintPlaces();
+        if (!quiet) kioskFindBook();
+    }
+
+    // Search as the patron types, once they pause.
+    function kioskFindSoon() {
+        clearTimeout(findTimer);
+        findTimer = setTimeout(kioskFindBook, 350);
     }
 
     function kioskEscape(value) {
@@ -540,39 +631,57 @@
         return d.innerHTML;
     }
 
-    async function kioskFindBook() {
-        const term = document.getElementById('findValue').value.trim();
+    // Every book at first; the search box and the filters narrow it.
+    async function kioskFindBook(more) {
+        clearTimeout(findTimer);
         kioskTouch();
-        if (term.length < 2) { kioskClearFind(); return; }
+        findPage = more ? findPage + 1 : 1;
+        const q = new URLSearchParams({ search: document.getElementById('findValue').value.trim(),
+                                        page: String(findPage) });
+        let filtered = false;
+        Object.keys(FIND_SELECTS).forEach(function (k) {
+            const v = document.getElementById(FIND_SELECTS[k]).value;
+            if (v) { q.set(k, v); filtered = true; }
+        });
+        document.getElementById('findReset').classList.toggle('hidden', !filtered);
+        if (!findOptions) q.set('options', '1');
 
+        const seq = ++findSeq;
         const btn = document.getElementById('findBtn');
         btn.disabled = true;
         try {
-            const r = await fetch(DESK_URLS.findBook + '?search=' + encodeURIComponent(term),
+            const r = await fetch(DESK_URLS.findBook + '?' + q.toString(),
                                   { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
             const d = await r.json();
-            kioskRenderFind(d);
+            if (seq !== findSeq) return;           // a newer search has already answered
+            if (d.options) kioskPaintOptions(d.options);
+            kioskRenderFind(d, !!more);
         } catch (e) {
+            if (seq !== findSeq) return;
             kioskClearFind();
             document.getElementById('findEmpty').classList.remove('hidden');
         } finally {
-            btn.disabled = false;
+            if (seq === findSeq) btn.disabled = false;
         }
     }
 
-    function kioskRenderFind(d) {
+    function kioskRenderFind(d, append) {
         const box = document.getElementById('findResults');
         const tally = document.getElementById('findCount');
         const empty = document.getElementById('findEmpty');
         const rows = (d && d.results) || [];
 
-        box.innerHTML = '';
-        empty.classList.toggle('hidden', rows.length > 0);
-        if (!rows.length) { tally.classList.add('hidden'); return; }
+        if (!append) box.innerHTML = '';
+        const shown = box.children.length + rows.length;
+        empty.classList.toggle('hidden', shown > 0);
+        document.getElementById('findMore').classList.toggle('hidden', !(d && d.has_more));
+        if (!shown) { tally.classList.add('hidden'); return; }
 
-        tally.textContent = d.count > rows.length
-            ? 'Showing the first ' + rows.length + ' of ' + d.count + ' matches'
-            : rows.length + (rows.length === 1 ? ' match' : ' matches');
+        const noun = (d.term || !document.getElementById('findReset').classList.contains('hidden'))
+            ? (d.count === 1 ? ' match' : ' matches') : (d.count === 1 ? ' book' : ' books');
+        tally.textContent = d.count > shown
+            ? 'Showing ' + shown + ' of ' + d.count + noun
+            : d.count + noun;
         tally.classList.remove('hidden');
 
         rows.forEach(function (b) {

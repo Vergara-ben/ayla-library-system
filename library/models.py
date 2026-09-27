@@ -987,7 +987,7 @@ class PatronPhoto(models.Model):
 
 
 # Transactions
-class Transaction(models.Model):
+class Transaction(Archivable):
 
     TRANSACTION_TYPE_CHOICES = [
         ('Borrow', 'Borrow'),

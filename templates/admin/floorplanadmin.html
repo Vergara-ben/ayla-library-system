@@ -102,14 +102,6 @@
             overflow: hidden;
             z-index: 0; /* contain Leaflet's high z-index panes so modals sit on top */
         }
-        /* Full-window mode. */
-        body.map-full .map-editor {
-            position: fixed; inset: 0; z-index: 60; border-radius: 0;
-            margin: 0; display: flex; flex-direction: column;
-        }
-        body.map-full .map-editor .map-scroll { flex: 1; min-height: 0; overflow-y: auto; }
-        body.map-full #mapConfig { height: calc(100vh - 190px) !important; resize: none; }
-
         /* Tool rail. */
         .map-rail {
             display: flex; flex-direction: column; gap: 4px;
@@ -688,7 +680,6 @@
                                 <button type="button" class="map-action-btn" onclick="setMapHeight(440)"><i class="fa-solid fa-compress"></i> Short</button>
                                 <button type="button" class="map-action-btn" onclick="setMapHeight(560)"><i class="fa-solid fa-equals"></i> Standard</button>
                                 <button type="button" class="map-action-btn" onclick="setMapHeight(820)"><i class="fa-solid fa-expand"></i> Tall</button>
-                                <button type="button" class="map-action-btn" onclick="toggleMapFullscreen()"><i class="fa-solid fa-up-right-and-down-left-from-center"></i> Fill the window</button>
                                 <p class="insp-note" style="padding:6px 6px 2px">Or drag the bottom-right corner of the map.</p>
                             </div>
                         </div>
@@ -5065,18 +5056,6 @@
                 if (el) el.style.height = px + 'px';
             }
         }
-
-        window.toggleMapFullscreen = function () {
-            document.body.classList.toggle('map-full');
-            if (lmap) setTimeout(function () { lmap.invalidateSize(); }, 80);
-        };
-
-        // Esc leaves the filled-window view.
-        document.addEventListener('keydown', function (e) {
-            if (e.key === 'Escape' && document.body.classList.contains('map-full')) {
-                window.toggleMapFullscreen();
-            }
-        });
 
         // Resize Leaflet when the box is resized.
         function watchMapResize() {

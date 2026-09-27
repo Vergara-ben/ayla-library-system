@@ -23,7 +23,7 @@ from .auth_utils import (
 )
 from .audit import log_system_action
 from .emails import account_action_otp_email
-from .models import FloorPlan, Patron, PatronLog, Shelf, User
+from .models import Book, FloorPlan, Patron, PatronLog, Shelf, ShelfLevel, User
 from .names import name_matches, parse_name, tokenise
 
 logger = logging.getLogger(__name__)
@@ -242,7 +242,9 @@ def unlock_desk_mode(request):
 
 # Finding a book, for whoever is standing at the desk
 
-DESK_FIND_LIMIT = 12
+DESK_FIND_PAGE = 20
+# What the kiosk may narrow the list by.
+DESK_FIND_FILTERS = ('genre', 'material', 'room', 'shelf', 'level')
 
 
 def _shelf_location(book):
@@ -255,23 +257,60 @@ def _shelf_location(book):
     plan = getattr(room, 'floor_plan', None) if room else None
     return {
         'shelved': True,
-        'where': '%s \u00b7 %s' % (shelf.name, level.label),
+        'where': '%s · %s' % (shelf.name, level.label),
         'room': room.name if room else '',
         'floor': plan.floor_label if plan else '',
     }
 
 
+def _desk_find_options():
+    """The filter choices that would find something on the shelves."""
+    from .views import CATALOGUE_HIDDEN_STATUSES
+
+    visible = Book.objects.exclude(status__in=CATALOGUE_HIDDEN_STATUSES)
+    genres = sorted({g for g in visible.values_list('genre', flat=True).distinct() if g})
+    in_use = set(visible.values_list('material_type', flat=True).distinct())
+    materials = [[k, v] for k, v in Book.MATERIAL_TYPE_CHOICES if k in in_use]
+
+    level_ids = (visible.filter(shelf_level__isnull=False)
+                 .values_list('shelf_level_id', flat=True).distinct())
+    levels = (ShelfLevel.objects.filter(pk__in=list(level_ids), shelf__is_active=True)
+              .select_related('shelf', 'shelf__room', 'shelf__room__floor_plan')
+              .order_by('shelf__room__name', 'shelf__name', 'level_number', 'column_number'))
+    rooms, shelves, out_levels = {}, {}, []
+    for lv in levels:
+        shelf, room = lv.shelf, lv.shelf.room
+        if room is not None and room.room_id not in rooms:
+            plan = room.floor_plan
+            rooms[room.room_id] = {'id': room.room_id, 'name': room.name,
+                                   'floor': plan.floor_label if plan else ''}
+        if shelf.shelf_id not in shelves:
+            shelves[shelf.shelf_id] = {'id': shelf.shelf_id, 'name': shelf.name,
+                                       'room': shelf.room_id}
+        out_levels.append({'id': lv.shelf_level_id, 'name': lv.label, 'shelf': shelf.shelf_id})
+    return {'genres': genres, 'materials': materials, 'rooms': list(rooms.values()),
+            'shelves': list(shelves.values()), 'levels': out_levels}
+
+
 def desk_find_book(request):
-    """Catalogue lookup for the kiosk. Public catalogue data only, no patron details."""
+    """Catalogue list for the kiosk: every book at first, narrowed by search and filters.
+
+    Public catalogue data only, no patron details.
+    """
     # Imported here: views imports this module, so it cannot be imported at the top.
     from .views import _catalogue_query, _catalogue_rows
 
     term = (request.GET.get('search') or '').strip()
-    if len(term) < 2:
-        return JsonResponse({'success': True, 'results': [], 'count': 0, 'term': term})
+    params = {'search': term, 'sort': 'title'}
+    for key in DESK_FIND_FILTERS:
+        params[key] = (request.GET.get(key) or '').strip()
+    raw_page = (request.GET.get('page') or '1').strip()
+    page = int(raw_page) if raw_page.isdigit() and int(raw_page) > 0 else 1
 
-    query = _catalogue_query({'search': term, 'sort': 'title'})
-    rows = _catalogue_rows(list(query['titles'][:DESK_FIND_LIMIT]))
+    query = _catalogue_query(params)
+    total = query['titles'].count()
+    start = (page - 1) * DESK_FIND_PAGE
+    rows = _catalogue_rows(list(query['titles'][start:start + DESK_FIND_PAGE]))
 
     results = []
     for row in rows:
@@ -294,13 +333,17 @@ def desk_find_book(request):
             'floor': place['floor'],
         })
 
-    return JsonResponse({
+    data = {
         'success': True,
         'results': results,
-        'count': query['titles'].count(),
-        'shown': len(results),
+        'count': total,
+        'page': page,
+        'has_more': start + len(rows) < total,
         'term': term,
-    })
+    }
+    if request.GET.get('options'):
+        data['options'] = _desk_find_options()
+    return JsonResponse(data)
 
 
 def desk_floor():

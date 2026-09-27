@@ -38,6 +38,7 @@ from .auth_utils import (
     patron_login_required,
     admin_login_required,
     admin_only_required,
+    admin_password_error,
     admin_module_required,
     granted_module_required,
     staff_only_required,
@@ -562,6 +563,8 @@ def _catalogue_query(params):
     material = (params.get('material') or '').strip()
     availability = (params.get('availability') or '').strip()
     shelf = (params.get('shelf') or '').strip()
+    room = (params.get('room') or '').strip()
+    level = (params.get('level') or '').strip()
     sort = (params.get('sort') or 'title').strip()
 
     visible = Book.objects.exclude(status__in=CATALOGUE_HIDDEN_STATUSES)
@@ -581,6 +584,14 @@ def _catalogue_query(params):
         copies = copies.filter(shelf_level__shelf_id=int(shelf))
     else:
         shelf = ''
+    if room.isdigit():
+        copies = copies.filter(shelf_level__shelf__room_id=int(room))
+    else:
+        room = ''
+    if level.isdigit():
+        copies = copies.filter(shelf_level_id=int(level))
+    else:
+        level = ''
 
     titles = (copies.order_by().values('title', 'author').annotate(
         copies=Count('book_id'),
@@ -607,7 +618,7 @@ def _catalogue_query(params):
     titles = titles.order_by(*sorts[sort])
 
     filters = {'search': search_query, 'genre': genre, 'material': material,
-               'availability': availability, 'shelf': shelf,
+               'availability': availability, 'shelf': shelf, 'room': room, 'level': level,
                'sort': sort if sort != 'title' else ''}
     return {
         'visible': visible,
@@ -2804,11 +2815,14 @@ def transaction_detail(request, transaction_id):
     return JsonResponse({'success': True, 'transaction': _tx_json(tx)})
 
 
-@granted_module_required('transactions')
+@admin_only_required
 def edit_transaction(request, transaction_id):
-    """Correct the dates or fine on a transaction record."""
+    """Correct the dates or fine on a transaction record. Administrators only, with their password."""
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
+    refusal = admin_password_error(request, 'a transaction edit')
+    if refusal:
+        return JsonResponse({'success': False, 'error': refusal, 'password': True})
     tx = (Transaction.objects.select_related('book', 'patron', 'processed_by')
           .filter(transaction_id=transaction_id).first())
     if tx is None:
@@ -2868,11 +2882,17 @@ def edit_transaction(request, transaction_id):
     return JsonResponse({'success': True, 'transaction': _tx_json(tx)})
 
 
-@granted_module_required('transactions')
+@admin_only_required
 def delete_transaction(request, transaction_id):
-    """Remove a transaction record, freeing the book if it was its open loan."""
+    """Archive a transaction record, freeing the book if it was its open loan. Administrators only.
+
+    The row stays in the database with who removed it, when and why; it is only hidden.
+    """
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
+    refusal = admin_password_error(request, 'a transaction delete')
+    if refusal:
+        return JsonResponse({'success': False, 'error': refusal, 'password': True})
     with transaction.atomic():
         tx = (Transaction.objects.select_for_update()
               .filter(transaction_id=transaction_id).first())
@@ -2883,7 +2903,13 @@ def delete_transaction(request, transaction_id):
         was_open = tx.return_date is None and tx.transaction_type in ('Borrow', 'In-Library Reading')
         label = f'{tx.transaction_type} of "{book.title if book else ""}"' + (
             f' by {patron.fullname}' if patron else '')
-        tx.delete()
+        reason = (request.POST.get('reason') or '').strip()
+        tx.archive(_actor_name(request), reason or 'Deleted from Transactions')
+        # A request to extend a loan that is gone has nothing left to extend.
+        DueDateExtension.objects.filter(transaction=tx, status='Pending').update(
+            status='Declined', resolved_at=timezone.now(),
+            resolved_by=User.objects.filter(admin_id=request.session.get('admin_id')).first(),
+            staff_note='The loan record was removed.')
 
         # Nothing else holds the copy, so it is back on the shelf.
         freed = False
@@ -2897,7 +2923,7 @@ def delete_transaction(request, transaction_id):
                 freed = True
 
     log_admin_action(request, 'Delete', 'Transaction', transaction_id,
-                     f'Deleted #TX-{transaction_id}: {label}'
+                     f'Archived #TX-{transaction_id}: {label}'
                      + (' — book set back to Available' if freed else ''),
                      patron=patron)
     return JsonResponse({'success': True, 'book_freed': freed})
@@ -3002,7 +3028,7 @@ def _transaction_page(request, template):
 
     # Always show pending requests.
     pending_extensions = (DueDateExtension.objects
-                          .filter(status='Pending')
+                          .filter(status='Pending', transaction__archived_at__isnull=True)
                           .select_related('transaction', 'transaction__book', 'transaction__patron')
                           .order_by('requested_at'))
 
@@ -11335,6 +11361,11 @@ def update_copy_condition(request):
         messages.error(request, 'Inventory record not found.')
         return redirect('inventory_management')
 
+    refusal = admin_password_error(request, 'a condition change')
+    if refusal:
+        messages.error(request, refusal)
+        return redirect('inventory_management')
+
     new_condition = (request.POST.get('condition') or '').strip()
     reason = (request.POST.get('reason') or '').strip()
     if new_condition not in dict(InventoryRecord.CONDITION_CHOICES):
@@ -11378,6 +11409,11 @@ def update_inventory_record(request):
         inventory_id=_posted_id(request, 'inventory_id')).first()
     if record is None:
         messages.error(request, 'Inventory record not found.')
+        return redirect('inventory_management')
+
+    refusal = admin_password_error(request, 'an inventory edit')
+    if refusal:
+        messages.error(request, refusal)
         return redirect('inventory_management')
 
     book_id = (request.POST.get('book_id') or '').strip()
@@ -11429,6 +11465,11 @@ def deaccession_copy(request):
         inventory_id=_posted_id(request, 'inventory_id')).first()
     if record is None:
         messages.error(request, 'Inventory record not found.')
+        return redirect('inventory_management')
+
+    refusal = admin_password_error(request, 'a deaccession')
+    if refusal:
+        messages.error(request, refusal)
         return redirect('inventory_management')
 
     reason = (request.POST.get('reason') or '').strip()
@@ -11932,6 +11973,10 @@ def write_off_missing(request):
         return redirect('/admin-portal/inventory/?tab=missing')
     if not reason:
         messages.error(request, 'A write-off needs a reason — it is a permanent correction.')
+        return redirect('/admin-portal/inventory/?tab=missing')
+    refusal = admin_password_error(request, 'a write-off')
+    if refusal:
+        messages.error(request, refusal)
         return redirect('/admin-portal/inventory/?tab=missing')
 
     written_off = 0

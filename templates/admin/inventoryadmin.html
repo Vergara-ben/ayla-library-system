@@ -98,6 +98,7 @@
     <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
     <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
     <script src="{% static 'js/ayla-dialog.js' %}"></script>
+    <script src="{% static 'js/password-toggle.js' %}" defer></script>
 </head>
 <body class="flex h-screen overflow-hidden">
 <a href="#main-content" class="skip-link">Skip to main content</a>
@@ -304,6 +305,7 @@
 
                         <div class="mt-4 space-y-2">
                             <input type="text" name="reason" class="field-input" placeholder="Reason for writing these off — required">
+                            <input type="password" name="admin_password" class="field-input" autocomplete="current-password" placeholder="Your password — needed to write copies off" aria-label="Your password" required>
                             <button type="submit" class="w-full bg-rose-600/15 text-rose-300 border border-rose-700/50 px-4 py-2.5 rounded-lg text-xs font-bold hover:bg-rose-600/25 transition-colors">
                                 <i class="fa-solid fa-triangle-exclamation mr-1"></i> Write off the ticked copies as lost
                             </button>
@@ -683,6 +685,10 @@
                     <label for="f_reason" class="field-label">Reason (recorded in the movement history)</label>
                     <input id="f_reason" type="text" name="reason" class="field-input" placeholder="Water damage found during shelving" required>
                 </div>
+                <div>
+                    <label for="f_pw_1" class="field-label">Your password</label>
+                    <input id="f_pw_1" type="password" name="admin_password" class="field-input" autocomplete="current-password" placeholder="Needed to change a record" required>
+                </div>
                 <div class="flex items-center justify-end gap-2 pt-2">
                     <button type="button" onclick="closeModal('conditionModal')" class="text-xs font-semibold px-4 py-2 rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800/50">Cancel</button>
                     <button type="submit" class="text-xs font-bold px-4 py-2 rounded-lg bg-amber-700/40 text-amber-300 border border-amber-700/60 hover:bg-amber-700/60">Save condition</button>
@@ -747,6 +753,10 @@
                     <input id="f_reason_2" type="text" name="reason" class="field-input" placeholder="Wrong donor recorded at intake">
                 </div>
                 <p class="text-[10px] text-slate-500">Editing details never changes how many copies are on record — receive or remove copies for that.</p>
+                <div>
+                    <label for="f_pw_2" class="field-label">Your password</label>
+                    <input id="f_pw_2" type="password" name="admin_password" class="field-input" autocomplete="current-password" placeholder="Needed to change a record" required>
+                </div>
                 <div class="flex items-center justify-end gap-2 pt-2">
                     <button type="button" onclick="closeModal('editModal')" class="text-xs font-semibold px-4 py-2 rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800/50">Cancel</button>
                     <button type="submit" class="text-xs font-bold px-4 py-2 rounded-lg bg-cyan-700/40 text-cyan-300 border border-cyan-700/60 hover:bg-cyan-700/60">Save</button>
@@ -773,6 +783,10 @@
                 <div>
                     <label for="f_reason_3" class="field-label">Reason</label>
                     <input id="f_reason_3" type="text" name="reason" class="field-input" placeholder="Duplicate entry created during intake" required>
+                </div>
+                <div>
+                    <label for="f_pw_3" class="field-label">Your password</label>
+                    <input id="f_pw_3" type="password" name="admin_password" class="field-input" autocomplete="current-password" placeholder="Needed to change a record" required>
                 </div>
                 <div class="flex items-center justify-end gap-2 pt-2">
                     <button type="button" onclick="closeModal('deaccessionModal')" class="text-xs font-semibold px-4 py-2 rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800/50">Cancel</button>

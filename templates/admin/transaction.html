@@ -123,6 +123,7 @@
     <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
     <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
     <script src="{% static 'js/ayla-dialog.js' %}"></script>
+    <script src="{% static 'js/password-toggle.js' %}" defer></script>
 </head>
 <body class="flex h-screen overflow-hidden">
 <a href="#main-content" class="skip-link">Skip to main content</a>
@@ -597,10 +598,40 @@
                     <input type="number" id="txeFine" min="0" step="0.01" class="mt-1.5 w-full bg-slate-950/80 border border-slate-800 rounded-lg px-3 py-2 text-xs font-mono text-slate-300 focus:outline-none focus:border-cyan-800">
                 </div>
                 <p id="txeNote" class="text-[11px] text-slate-500 leading-relaxed">For correcting a record. To close an open loan, use Mark Returned so the book goes to reshelving.</p>
+                <div>
+                    <label for="txePassword" class="text-[10px] uppercase tracking-wide text-slate-500 font-bold">Your password</label>
+                    <input type="password" id="txePassword" autocomplete="current-password" placeholder="Needed to change a record" class="mt-1.5 w-full bg-slate-950/80 border border-slate-800 rounded-lg px-3 py-2 text-xs font-mono text-slate-300 focus:outline-none focus:border-cyan-800">
+                </div>
                 <div id="txEditError" class="hidden rounded-lg border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-rose-200 text-[11px]"></div>
                 <div class="flex items-center justify-end gap-2 pt-1">
                     <button type="button" onclick="closeTxModal('txEditModal')" class="text-xs font-semibold px-4 py-2 rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800/50">Cancel</button>
                     <button type="button" id="txEditSave" onclick="saveTxEdit()" class="text-xs font-bold px-4 py-2 rounded-lg border bg-cyan-700/40 text-cyan-200 border-cyan-700/60 hover:bg-cyan-700/60">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {# Deleting a record asks for the administrator's password. #}
+    <div id="txDeleteModal" class="fixed inset-0 z-[70] hidden items-center justify-center p-4" style="background: var(--scrim);">
+        <div class="w-full max-w-sm rounded-2xl border shadow-2xl" style="background-color: var(--bg-modal); border-color: var(--border-modal);">
+            <div class="flex items-center justify-between px-6 py-4 border-b" style="border-color: var(--border-modal);">
+                <h3 id="txDeleteTitle" class="text-sm font-bold text-slate-200 tracking-wide">Delete Transaction</h3>
+                <button type="button" onclick="closeTxModal('txDeleteModal')" class="text-slate-500 hover:text-slate-300" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="px-6 py-5 space-y-4">
+                <p class="text-xs text-slate-300 leading-relaxed">The record leaves the transactions list and is kept in the archive, with who removed it and when. If it is an open loan, the book is set back to Available.</p>
+                <div>
+                    <label for="txDelReason" class="text-[10px] uppercase tracking-wide text-slate-500 font-bold">Reason (optional)</label>
+                    <input type="text" id="txDelReason" maxlength="500" placeholder="e.g. Entered by mistake" class="mt-1.5 w-full bg-slate-950/80 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-300 focus:outline-none focus:border-cyan-800">
+                </div>
+                <div>
+                    <label for="txDelPassword" class="text-[10px] uppercase tracking-wide text-slate-500 font-bold">Your password</label>
+                    <input type="password" id="txDelPassword" autocomplete="current-password" placeholder="Needed to delete a record" class="mt-1.5 w-full bg-slate-950/80 border border-slate-800 rounded-lg px-3 py-2 text-xs font-mono text-slate-300 focus:outline-none focus:border-cyan-800">
+                </div>
+                <div id="txDeleteError" class="hidden rounded-lg border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-rose-200 text-[11px]"></div>
+                <div class="flex items-center justify-end gap-2 pt-1">
+                    <button type="button" onclick="closeTxModal('txDeleteModal')" class="text-xs font-semibold px-4 py-2 rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800/50">Cancel</button>
+                    <button type="button" id="txDeleteConfirm" onclick="confirmTxDelete()" class="text-xs font-bold px-4 py-2 rounded-lg border bg-rose-700/40 text-rose-200 border-rose-700/60 hover:bg-rose-700/60">Delete</button>
                 </div>
             </div>
         </div>
@@ -896,6 +927,7 @@
             // An open loan is closed with Mark Returned, not here.
             document.getElementById('txeReturnWrap').classList.toggle('hidden', !t.return_date);
             document.getElementById('txeFine').value = t.fine_amount;
+            document.getElementById('txePassword').value = '';
             openTxModal('txEditModal');
         }
 
@@ -912,6 +944,7 @@
                 fd.append('due_date', document.getElementById('txeDue').value);
                 fd.append('return_date', document.getElementById('txeReturn').value);
                 fd.append('fine_amount', document.getElementById('txeFine').value);
+                fd.append('admin_password', document.getElementById('txePassword').value);
                 const res = await fetch('/admin-portal/transaction/' + txEditId + '/edit/', {
                     method: 'POST', body: fd,
                     headers: { 'X-CSRFToken': getCookie('csrftoken'), 'X-Requested-With': 'XMLHttpRequest' },
@@ -934,27 +967,62 @@
             }
         }
 
-        async function deleteTx(id) {
-            const ok = await AylaDialog.confirm(
-                'Delete transaction #TX-' + id + '? This removes the record for good. '
-                + 'If it is an open loan, the book is set back to Available.',
-                { title: 'Delete transaction', confirmLabel: 'Delete', danger: true });
-            if (!ok) return;
+        let txDeleteId = null, txDeleteBusy = false;
+
+        function deleteTx(id) {
+            txDeleteId = id;
+            document.getElementById('txDeleteTitle').textContent = 'Delete #TX-' + id;
+            document.getElementById('txDelPassword').value = '';
+            document.getElementById('txDelReason').value = '';
+            document.getElementById('txDeleteError').classList.add('hidden');
+            openTxModal('txDeleteModal');
+            setTimeout(function () { document.getElementById('txDelPassword').focus(); }, 50);
+        }
+
+        async function confirmTxDelete() {
+            if (txDeleteBusy || txDeleteId === null) return;
+            const err = document.getElementById('txDeleteError');
+            const password = document.getElementById('txDelPassword').value;
+            if (!password) {
+                err.textContent = 'Enter your password to confirm.';
+                err.classList.remove('hidden');
+                return;
+            }
+            txDeleteBusy = true;
+            const btn = document.getElementById('txDeleteConfirm');
+            btn.textContent = 'Deleting…';
             try {
-                const res = await fetch('/admin-portal/transaction/' + id + '/delete/', {
-                    method: 'POST',
+                const fd = new FormData();
+                fd.append('admin_password', password);
+                fd.append('reason', document.getElementById('txDelReason').value.trim());
+                const res = await fetch('/admin-portal/transaction/' + txDeleteId + '/delete/', {
+                    method: 'POST', body: fd,
                     headers: { 'X-CSRFToken': getCookie('csrftoken'), 'X-Requested-With': 'XMLHttpRequest' },
                 });
                 const data = await res.json();
-                if (!data.success) { alert(data.error || 'Could not delete the transaction.'); return; }
-                AylaDialog.toast('Transaction #TX-' + id + ' deleted.', 'success');
+                if (!data.success) {
+                    err.textContent = data.error || 'Could not delete the transaction.';
+                    err.classList.remove('hidden');
+                    document.getElementById('txDelPassword').value = '';
+                    return;
+                }
+                closeTxModal('txDeleteModal');
+                AylaDialog.toast('Transaction #TX-' + txDeleteId + ' archived.', 'success');
                 window.location.reload();
             } catch (e) {
-                alert('Network error — please try again.');
+                err.textContent = 'Network error — please try again.';
+                err.classList.remove('hidden');
+            } finally {
+                txDeleteBusy = false;
+                btn.textContent = 'Delete';
             }
         }
 
-        ['txViewModal', 'txEditModal'].forEach(function (id) {
+        document.getElementById('txDelPassword').addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') confirmTxDelete();
+        });
+
+        ['txViewModal', 'txEditModal', 'txDeleteModal'].forEach(function (id) {
             document.getElementById(id).addEventListener('click', function (e) {
                 if (e.target === this) closeTxModal(id);
             });
