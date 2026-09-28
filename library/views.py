@@ -7101,7 +7101,10 @@ def get_shelf_tree(request):
                 }
                 
                 # Structure, not a book list.
-                levels = list(shelf.shelflevel_set.all())
+                # Level 1 upward, then Top and Underneath, so the list reads in order.
+                levels = sorted(shelf.shelflevel_set.all(),
+                                key=lambda lv: (lv.column_number or 1, lv.is_under, lv.is_top,
+                                                lv.level_number, lv.shelf_level_id))
                 columns = sorted({(lv.column_number or 1) for lv in levels})
 
                 for shelf_level in levels:
@@ -7159,9 +7162,11 @@ def get_shelf_tree(request):
 @admin_or_module_required('shelf')
 def get_shelf_levels_flat(request):
     """Returns flattened list of all ShelfLevels with breadcrumb path"""
+    # Grouped by floor, room and shelf, then Level 1 upward, then Top and Underneath.
     shelf_levels = ShelfLevel.objects.select_related(
         'shelf__room__floor_plan'
-    ).all()
+    ).order_by('shelf__room__floor_plan__floor_number', 'shelf__room__name', 'shelf__name',
+               'column_number', 'is_under', 'is_top', 'level_number', 'shelf_level_id')
 
     flat_data = []
     for sl in shelf_levels:
