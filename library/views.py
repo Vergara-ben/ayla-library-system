@@ -12,6 +12,7 @@ from django.core.paginator import Paginator
 from datetime import date, datetime, timedelta
 from io import BytesIO
 from decimal import Decimal, InvalidOperation
+import hashlib
 import json
 
 from uuid import uuid4
@@ -8761,6 +8762,36 @@ def _room_adjacency(floor_plan):
     return pairs
 
 
+def _warning_key(issue):
+    """Stable id for one readiness warning; any change in its wording makes a new one."""
+    raw = (issue['level'] + '|' + issue['text'] + '|' + (issue.get('detail') or '')).encode('utf-8')
+    return hashlib.sha1(raw).hexdigest()[:16]
+
+
+@admin_or_module_required('shelf')
+def floor_plan_dismiss_warning(request):
+    """Hide one readiness warning on a floor plan, or bring it back."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST is allowed.'})
+    raw_id = (request.POST.get('floor_plan_id') or '').strip()
+    plan = FloorPlan.objects.filter(floor_plan_id=int(raw_id)).first() if raw_id.isdigit() else None
+    if plan is None:
+        return JsonResponse({'success': False, 'error': 'Floor plan not found'})
+    key = (request.POST.get('key') or '').strip()
+    restore = request.POST.get('restore') == '1'
+    keys = list(plan.dismissed_warnings or [])
+    if restore:
+        keys = [] if key == 'all' else [k for k in keys if k != key]
+    elif key and key not in keys:
+        keys.append(key)
+    plan.dismissed_warnings = keys[-200:]
+    plan.save(update_fields=['dismissed_warnings'])
+    log_admin_action(request, 'Restore warning' if restore else 'Dismiss warning',
+                     'FloorPlan', plan.floor_plan_id,
+                     (request.POST.get('text') or '')[:200])
+    return JsonResponse({'success': True})
+
+
 @admin_or_module_required('shelf')
 def floor_plan_readiness(request):
     """What still stops this floor plan working, in one list."""
@@ -8990,15 +9021,22 @@ def floor_plan_readiness(request):
                             'There is no floor below this one. Set it to "up" or '
                             '"up and down".')
 
+    # Dismissed warnings stay out of the count; blockers cannot be dismissed.
+    dismissed = set(plan.dismissed_warnings or [])
+    for i in issues:
+        i['key'] = _warning_key(i)
+        i['dismissed'] = i['level'] == 'warning' and i['key'] in dismissed
+
     blockers = sum(1 for i in issues if i['level'] == 'blocker')
     # Counted by name rather than by subtraction.
-    warnings = sum(1 for i in issues if i['level'] == 'warning')
+    warnings = sum(1 for i in issues if i['level'] == 'warning' and not i['dismissed'])
     return JsonResponse({
         'success': True,
         'plan': plan.name,
         'ready': blockers == 0,
         'blockers': blockers,
         'warnings': warnings,
+        'dismissed': sum(1 for i in issues if i['dismissed']),
         'issues': issues,
         'counts': {'rooms': len(rooms), 'doors': doors,
                    'waypoints': len(waypoints), 'beacons': len(beacons),

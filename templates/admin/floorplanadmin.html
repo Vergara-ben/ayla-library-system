@@ -290,6 +290,12 @@
         .readiness-dot.info { background-color: var(--text-muted); }
         .readiness-text { font-size: 13px; font-weight: 600; color: var(--text-primary); }
         .readiness-detail { font-size: 12px; color: var(--text-muted); line-height: 1.5; margin-top: 2px; }
+        .readiness-item.is-dismissed { opacity: .55; }
+        .readiness-act { margin-left: auto; flex-shrink: 0; font-size: 12px; font-weight: 600; color: var(--text-muted);
+                         background: none; border: 1px solid rgba(148, 163, 184, .3); border-radius: 6px; padding: 2px 8px; cursor: pointer; }
+        .readiness-act:hover { color: var(--text-main); border-color: rgba(148, 163, 184, .6); }
+        .readiness-more { padding: 7px 12px; font-size: 12px; }
+        .readiness-more button { background: none; border: none; padding: 0; color: var(--text-muted); text-decoration: underline; cursor: pointer; font-size: 12px; }
         .readiness-counts { font-size: 12px; color: var(--text-muted); font-weight: 500; }
 
         .map-inspector {
@@ -1632,6 +1638,7 @@
             moveDoor: "{% url 'move_door' %}",
             editDoor: "{% url 'edit_door' %}",
             readiness: "{% url 'floor_plan_readiness' %}",
+            dismissWarning: "{% url 'floor_plan_dismiss_warning' %}",
             generateWaypoints: "{% url 'generate_waypoints' %}",
             clearWaypoints: "{% url 'clear_waypoints' %}",
             deleteDoor: "{% url 'delete_door' %}",
@@ -4601,27 +4608,65 @@
                 + c.doors + ' doors &middot; ' + c.waypoints + ' waypoints &middot; '
                 + c.beacons + ' beacons</span>';
 
+            const hidden = data.dismissed
+                ? ' &nbsp;<span class="readiness-counts">' + data.dismissed + ' dismissed</span>' : '';
             if (data.ready && !data.warnings) {
-                summary.innerHTML = '<span style="color:var(--success)">\u2713 Ready to go live</span> &nbsp; ' + counts;
+                summary.innerHTML = '<span style="color:var(--success)">✓ Ready to go live</span> &nbsp; ' + counts + hidden;
             } else {
                 const parts = [];
                 if (data.blockers) parts.push('<span style="color:var(--danger)">' + data.blockers
                     + (data.blockers === 1 ? ' blocker' : ' blockers') + '</span>');
                 if (data.warnings) parts.push('<span style="color:var(--warning)">' + data.warnings
                     + (data.warnings === 1 ? ' warning' : ' warnings') + '</span>');
-                summary.innerHTML = parts.join(' &middot; ') + ' &nbsp; ' + counts;
+                summary.innerHTML = parts.join(' &middot; ') + ' &nbsp; ' + counts + hidden;
             }
 
-            body.innerHTML = (data.issues || []).map(function (i) {
-                return '<div class="readiness-item">'
+            const item = function (i) {
+                // Only warnings can be dismissed; a blocker has to be fixed.
+                const act = i.level !== 'warning' ? ''
+                    : '<button type="button" class="readiness-act" data-key="' + esc(i.key) + '" data-text="' + esc(i.text)
+                      + '" data-restore="' + (i.dismissed ? '1' : '0') + '">' + (i.dismissed ? 'Restore' : 'Dismiss') + '</button>';
+                return '<div class="readiness-item' + (i.dismissed ? ' is-dismissed' : '') + '">'
                     + '<span class="readiness-dot ' + i.level + '"></span>'
                     + '<span><span class="readiness-text">' + esc(i.text) + '</span>'
                     + (i.detail ? '<div class="readiness-detail">' + esc(i.detail) + '</div>' : '')
-                    + '</span></div>';
-            }).join('') || '<div class="readiness-item"><span class="readiness-text">'
+                    + '</span>' + act + '</div>';
+            };
+            const issues = data.issues || [];
+            const live = issues.filter(function (i) { return !i.dismissed; });
+            const gone = issues.filter(function (i) { return i.dismissed; });
+            let html = live.map(item).join('') || '<div class="readiness-item"><span class="readiness-text">'
                           + 'Nothing outstanding.</span></div>';
+            if (gone.length) {
+                html += '<div class="readiness-more"><button type="button" id="readinessShowDismissed">'
+                      + (showDismissed ? 'Hide' : 'Show') + ' ' + gone.length + ' dismissed</button></div>';
+                if (showDismissed) html += gone.map(item).join('');
+            }
+            body.innerHTML = html;
         }
         window.refreshReadiness = refreshReadiness;
+
+        let showDismissed = false;
+        document.getElementById('readinessBody').addEventListener('click', async function (e) {
+            if (e.target.id === 'readinessShowDismissed') {
+                showDismissed = !showDismissed;
+                refreshReadiness();
+                return;
+            }
+            const btn = e.target.closest('.readiness-act');
+            if (!btn || !floorPlanId) return;
+            btn.disabled = true;
+            try {
+                await fetch(URLS.dismissWarning, {
+                    method: 'POST',
+                    headers: { 'X-CSRFToken': CSRF, 'X-Requested-With': 'XMLHttpRequest',
+                               'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: new URLSearchParams({ floor_plan_id: floorPlanId, key: btn.dataset.key,
+                                                text: btn.dataset.text, restore: btn.dataset.restore }).toString(),
+                });
+            } catch (err) { /* the refresh below shows the real state */ }
+            refreshReadiness();
+        });
 
         function wireDrawingAids() {
             // Geoman fires vertex events on the shape being drawn, not on the map.

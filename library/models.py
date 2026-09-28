@@ -74,6 +74,8 @@ class FloorPlan(Archivable):
     is_active = models.BooleanField(default=True)
     renovation_notice = models.CharField(max_length=255, blank=True, null=True)
     renovation_message = models.TextField(blank=True, null=True)
+    # Readiness warnings an admin has dismissed, by key; a changed warning gets a new key.
+    dismissed_warnings = models.JSONField(default=list, blank=True)
     uploaded_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

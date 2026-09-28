@@ -491,6 +491,12 @@
                                                     data-first="{{ patron.first_name }}"
                                                     data-middle="{{ patron.middle_name }}"
                                                     data-last="{{ patron.last_name }}"
+                                                    data-type="{{ patron.patron_type }}"
+                                                    data-school="{{ patron.school|default:'' }}"
+                                                    data-email="{{ patron.email|default:'' }}"
+                                                    data-contact="{{ patron.contact_number|default:'' }}"
+                                                    data-address="{{ patron.address|default:'' }}"
+                                                    data-status="{{ patron.account_status }}"
                                                     class="w-7 h-7 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 transition-colors flex items-center justify-center" aria-label="Edit"><i class="fa-solid fa-pencil text-[10px]"></i></button>
                                             <form method="post" action="{% url 'admin_delete_patron' patron.patron_id %}" class="inline-block" data-confirm="Delete {{ patron.fullname }}? They can no longer sign in or borrow. Their history is kept." data-confirm-title="Delete patron" data-confirm-label="Delete">
                                                 {% csrf_token %}
@@ -912,16 +918,15 @@
             for (let row of rows) {
                 const editBtn = row.querySelector('button[onclick*="' + patronId + '"]');
                 if (editBtn) {
-                    const cells = row.querySelectorAll('td');
                     document.getElementById('firstName').value = editBtn.dataset.first || '';
                     document.getElementById('middleName').value = editBtn.dataset.middle || '';
                     document.getElementById('lastName').value = editBtn.dataset.last || '';
-                    document.getElementById('patronType').value = cells[2].querySelector('span').textContent;
-                    document.getElementById('email').value = cells[4].textContent;
-                    document.getElementById('address').value = cells[3].textContent;
-                    document.getElementById('contactNumber').value = '';
+                    document.getElementById('patronType').value = editBtn.dataset.type || '';
+                    document.getElementById('email').value = editBtn.dataset.email || '';
+                    document.getElementById('address').value = editBtn.dataset.address || '';
+                    document.getElementById('contactNumber').value = editBtn.dataset.contact || '';
                     document.getElementById('school').value = editBtn.dataset.school || '';
-                    document.getElementById('accountStatus').value = cells[6].querySelector('span').textContent;
+                    document.getElementById('accountStatus').value = editBtn.dataset.status || '';
                     syncSchoolField();
                     break;
                 }

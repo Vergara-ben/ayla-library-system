@@ -1,0 +1,80 @@
+{# Hamburger that opens and closes the portal sidebar, and no login autofill in portal forms. #}
+<style>
+    html.sidebar-closed aside.w-64 { display: none !important; }
+    .sidebar-toggle {
+        width: 36px; height: 36px; margin-right: 14px; flex-shrink: 0;
+        display: inline-flex; align-items: center; justify-content: center;
+        border-radius: 10px; border: 1px solid var(--border-color);
+        background: transparent; color: var(--text-muted, #94a3b8); cursor: pointer;
+        transition: color .15s ease, background-color .15s ease;
+    }
+    .sidebar-toggle:hover { color: var(--text-main, #e2e8f0); background: rgba(148, 163, 184, .12); }
+</style>
+<script>
+(function () {
+    const KEY = 'ayla.sidebar';
+    // Applied before the page paints, so a closed sidebar does not flash open.
+    try { if (localStorage.getItem(KEY) === 'closed') document.documentElement.classList.add('sidebar-closed'); } catch (e) { /* open */ }
+
+    function setOpen(open) {
+        document.documentElement.classList.toggle('sidebar-closed', !open);
+        try { localStorage.setItem(KEY, open ? 'open' : 'closed'); } catch (e) { /* not kept */ }
+        const btn = document.getElementById('sidebarToggle');
+        if (btn) btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+        // Maps and charts measure their box, so tell them it changed.
+        window.dispatchEvent(new Event('resize'));
+    }
+
+    function addButton() {
+        const header = Array.prototype.find.call(document.querySelectorAll('header'),
+            function (h) { return !h.closest('aside'); });
+        if (!header || document.getElementById('sidebarToggle')) return;
+        let left = header.firstElementChild;
+        if (!left) return;
+        // A bare title gets a row to share with the button.
+        if (/^H\d$/.test(left.tagName)) {
+            const row = document.createElement('div');
+            row.style.display = 'flex';
+            row.style.alignItems = 'center';
+            header.insertBefore(row, left);
+            row.appendChild(left);
+            left = row;
+        }
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.id = 'sidebarToggle';
+        btn.className = 'sidebar-toggle';
+        btn.title = 'Show or hide the menu';
+        btn.setAttribute('aria-label', 'Toggle menu');
+        btn.setAttribute('aria-expanded', document.documentElement.classList.contains('sidebar-closed') ? 'false' : 'true');
+        btn.innerHTML = '<i class="fa-solid fa-bars" aria-hidden="true"></i>';
+        btn.addEventListener('click', function () {
+            setOpen(document.documentElement.classList.contains('sidebar-closed'));
+        });
+        left.insertBefore(btn, left.firstChild);
+    }
+
+    // A password box makes the browser treat the page as a login and pour the
+    // saved email into nearby fields. Portal forms never want that.
+    function noAutofill(root) {
+        const fields = Array.prototype.slice.call(root.querySelectorAll('input, textarea, select'));
+        if (root.matches && root.matches('input, textarea, select')) fields.push(root);
+        fields.forEach(function (el) {
+            if (el.type === 'hidden' || el.dataset.autofillOff) return;
+            el.dataset.autofillOff = '1';
+            el.setAttribute('autocomplete', el.type === 'password' ? 'new-password' : 'off');
+        });
+    }
+
+    document.addEventListener('DOMContentLoaded', function () {
+        addButton();
+        noAutofill(document);
+        // Forms drawn later (modals, rows added by script) too.
+        new MutationObserver(function (records) {
+            records.forEach(function (r) {
+                r.addedNodes.forEach(function (n) { if (n.nodeType === 1) noAutofill(n); });
+            });
+        }).observe(document.body, { childList: true, subtree: true });
+    });
+})();
+</script>

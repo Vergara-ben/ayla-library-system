@@ -66,7 +66,7 @@
         <main id="main-content" tabindex="-1" class="flex-1 overflow-hidden p-6">
             <div class="h-full grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-4">
 
-                {# All patrons, unanswered first. #}
+                {# Patrons with messages, unanswered first; a search finds anyone. #}
                 <div class="rounded-xl border border-slate-800/80 overflow-hidden flex flex-col" style="background-color: var(--bg-card);">
                     <div class="p-3 border-b border-slate-800">
                         <form method="get" class="relative">
@@ -101,7 +101,7 @@
                         </a>
                         {% empty %}
                         <p class="px-4 py-12 text-center text-xs text-slate-500 leading-relaxed">
-                            {% if query %}Nobody matches &ldquo;{{ query }}&rdquo;.{% else %}No patrons registered yet.{% endif %}
+                            {% if query %}Nobody matches &ldquo;{{ query }}&rdquo;.{% else %}No conversations yet. Search for a patron to write to them.{% endif %}
                         </p>
                         {% endfor %}
                     </div>

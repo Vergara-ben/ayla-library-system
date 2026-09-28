@@ -241,6 +241,7 @@ urlpatterns = [
     path('admin-portal/move-door/', views.move_door, name='move_door'),
     path('admin-portal/edit-door/', views.edit_door, name='edit_door'),
     path('admin-portal/floor-plan-readiness/', views.floor_plan_readiness, name='floor_plan_readiness'),
+    path('admin-portal/floor-plan-readiness/dismiss/', views.floor_plan_dismiss_warning, name='floor_plan_dismiss_warning'),
     path('admin-portal/generate-waypoints/', views.generate_waypoints, name='generate_waypoints'),
     path('admin-portal/clear-waypoints/', views.clear_waypoints, name='clear_waypoints'),
     path('admin-portal/reorder-books-on-level/', views.reorder_books_on_level, name='reorder_books_on_level'),
