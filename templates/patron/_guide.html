@@ -22,7 +22,8 @@
     <section id="guidePanelVideo" role="tabpanel" aria-labelledby="guideTabVideo">
       <div class="guide-video">
         <video id="guideVideo" controls preload="none" playsinline>
-          <source src="{% static 'videos/patron-guide.mp4' %}" type="video/mp4">
+          {# Plain prefix, not {% static %}: the manifest 500s while the video is missing. #}
+          <source src="{% get_static_prefix %}videos/patron-guide.mp4" type="video/mp4">
         </video>
         <div class="guide-video-missing" id="guideVideoMissing" hidden>
           <i class="fa-solid fa-clapperboard" aria-hidden="true"></i>
