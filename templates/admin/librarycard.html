@@ -491,7 +491,7 @@
           <li>This card belongs to {{ library_name }} and may be used only by the person named on the front.</li>
           {# From the current borrowing rule. #}
           <li>Up to {{ rule.max_books_per_patron }} book{{ rule.max_books_per_patron|pluralize }} may be borrowed at a time, for {{ rule.loan_period_days }} days.</li>
-          {% if rule.fine_per_day %}<li>Books returned late are charged ₱{{ rule.fine_per_day|floatformat:2 }} per day{% if rule.grace_period_days %}, after {{ rule.grace_period_days }} day{{ rule.grace_period_days|pluralize }} of grace{% endif %}.</li>{% endif %}
+          {% if rule.fine_per_day %}<li>Books returned late are charged ₱{{ rule.fine_per_day|floatformat:2 }} per day.</li>{% endif %}
           <li>Report a lost or damaged card at the desk at once. Until it is reported, borrowing on it is the holder's responsibility.</li>
           <li>Present this card when borrowing, returning, or entering the library.</li>
         </ol>

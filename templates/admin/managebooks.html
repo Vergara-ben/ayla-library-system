@@ -413,6 +413,11 @@
                         <input type="text" name="ISBN" id="addIsbn" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
                     </div>
                 </div>
+                <div class="space-y-1.5">
+                    <label for="addPrice" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Price (₱)</label>
+                    <input type="number" name="price" id="addPrice" min="0" step="0.01" placeholder="e.g. 350.00" value="" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                    <p class="text-[10px] text-slate-500">What the library charges if this book is lost. Leave blank if not known yet.</p>
+                </div>
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div class="space-y-1.5">
                         <label for="addGenre" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Genre</label>
@@ -493,6 +498,11 @@
                         <label for="editIsbn" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">ISBN</label>
                         <input type="text" name="ISBN" id="editIsbn" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
                     </div>
+                </div>
+                <div class="space-y-1.5">
+                    <label for="editPrice" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Price (₱)</label>
+                    <input type="number" name="price" id="editPrice" min="0" step="0.01" placeholder="e.g. 350.00" value="{{ initial.price|default:"" }}" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                    <p class="text-[10px] text-slate-500">What the library charges if this book is lost. Leave blank if not known yet.</p>
                 </div>
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div class="space-y-1.5">
@@ -819,6 +829,7 @@
                                 <span id="detailGenre" class="text-xs px-2 py-0.5 rounded bg-blue-950/60 text-blue-400 border border-blue-900 font-medium">Genre</span>
                                 <span id="detailShelf" class="text-xs px-2 py-0.5 rounded bg-teal-950/60 text-teal-400 border border-teal-900 font-medium">Shelf Level</span>
                                 <span id="detailYear" class="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-400 font-medium">Year</span>
+                                <span id="detailPrice" class="hidden text-xs px-2 py-0.5 rounded bg-amber-950/60 text-amber-400 border border-amber-900 font-medium"></span>
                             </div>
                         </div>
                         <span id="detailStatus" class="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs px-3 py-1 rounded-full font-semibold tracking-wide whitespace-nowrap">
@@ -992,6 +1003,9 @@
                         document.getElementById('detailGenre').textContent = data.genre;
                         document.getElementById('detailShelf').textContent = data.shelf_level;
                         document.getElementById('detailYear').textContent = data.publication_year;
+                        const priceTag = document.getElementById('detailPrice');
+                        priceTag.textContent = data.price ? '₱' + data.price : '';
+                        priceTag.classList.toggle('hidden', !data.price);
                         document.getElementById('detailISBN').textContent = data.ISBN;
                         document.getElementById('detailSection').textContent = data.category;
                         document.getElementById('detailLocation').textContent = data.shelf;

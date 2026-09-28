@@ -29,7 +29,7 @@ def check_patron_eligibility(patron):
         violations.append("Has overdue item(s)")
 
     # 3. No outstanding lost-book penalty (an unreturned borrow whose book is Lost).
-    has_lost = active_borrows.filter(book__status='Lost').exists()
+    has_lost = active_borrows.filter(Q(marked_lost=True) | Q(book__status='Lost')).exists()
     if has_lost:
         violations.append("Has outstanding lost-book penalty")
 

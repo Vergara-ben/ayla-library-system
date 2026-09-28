@@ -17,6 +17,9 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" integrity="sha384-c6Rcwz4e4CITMbu/NBmnNS8yN2sC3cUElMEMfP3vqqKFp7GOYaaBBCqmaWBjmkjb" crossorigin="anonymous" referrerpolicy="no-referrer"/>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" integrity="sha384-NElt3Op+9NBMCYaef5HxeJmU4Xeard/Lku8ek6hoPTvYkQPh3zLIrJP7KiRocsxO" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="{% static 'js/route-arrows.js' %}"></script>
     <link rel="stylesheet" href="{% static 'css/theme.css' %}">
     <link rel="stylesheet" href="{% static 'css/readability.css' %}">
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -65,6 +68,67 @@
             font-size: .95rem;
         }
         .kiosk-field:focus { outline: none; border-color: rgb(8 145 178); }
+        /* The way to a book, drawn like the patron map. */
+        #routeMap {
+            --surface: #ffffff; --surface2: #eff3f8; --border: #7f8b9e; --text: #0f172a;
+            --muted: #55637a; --blue: #1d4ed8; --accent: #0038A8; --accent2: #b45309;
+            --on-accent: #ffffff; --page-bg: #e4eaf2;
+            --label-bg: linear-gradient(160deg, #ffffff 0%, #f3f6fb 100%); --label-edge: rgba(15, 23, 42, 0.06);
+            height: 54vh; min-height: 320px; border-radius: 1rem; overflow: hidden;
+        }
+        html[data-theme="dark"] #routeMap {
+            --surface: #111a2b; --surface2: #16203a; --border: #5e7092; --text: #e9eef7;
+            --muted: #93a3bd; --blue: #60a5fa; --accent: #60A5FA; --accent2: #fbbf24;
+            --on-accent: #06132b; --page-bg: #0a101c;
+            --label-bg: linear-gradient(160deg, #1d2942 0%, #151e32 100%); --label-edge: rgba(148, 163, 184, 0.14);
+        }
+        #routeMap.leaflet-container {
+            background-color: var(--page-bg);
+            background-image:
+                radial-gradient(color-mix(in srgb, var(--accent) 22%, transparent) 1.2px, transparent 1.5px),
+                radial-gradient(circle at 50% 40%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 65%);
+            background-size: 24px 24px, 100% 100%;
+            font-family: inherit;
+        }
+        #routeMap .map-floor { filter: drop-shadow(0 24px 40px rgba(15, 23, 42, 0.35)); }
+        html[data-theme="dark"] #routeMap .map-floor { filter: drop-shadow(0 24px 44px rgba(0, 0, 0, 0.65)); }
+        #routeMap .map-shelf { filter: drop-shadow(0 0 4px rgba(59, 130, 246, 0.45)); }
+        #routeMap .map-shelf.is-target { animation: desk-target-glow 1.8s ease-in-out infinite; }
+        @keyframes desk-target-glow {
+            0%, 100% { filter: drop-shadow(0 0 4px rgba(245, 158, 11, 0.6)); stroke-width: 2px; }
+            50%      { filter: drop-shadow(0 0 16px rgba(245, 158, 11, 0.95)); stroke-width: 4px; }
+        }
+        #routeMap .map-me { animation: desk-me-pulse 1.6s ease-in-out infinite; }
+        @keyframes desk-me-pulse {
+            0%, 100% { filter: drop-shadow(0 0 3px rgba(59, 130, 246, 0.9)); }
+            50%      { filter: drop-shadow(0 0 14px rgba(59, 130, 246, 1)) drop-shadow(0 0 26px rgba(59, 130, 246, 0.5)); }
+        }
+        #routeMap .route-arrow { background: none; border: none; }
+        #routeMap .route-arrow svg {
+            filter: drop-shadow(0 0 3px rgba(59, 130, 246, 0.8));
+            animation: desk-route-glow 1.2s ease-in-out infinite;
+        }
+        @keyframes desk-route-glow { 0%, 100% { opacity: 0.75; } 50% { opacity: 1; } }
+        #routeMap .map-label { background: none; border: none; }
+        #routeMap .map-label span {
+            display: inline-block; transform: translateX(-50%); white-space: nowrap;
+            font-size: 12px; font-weight: 700; color: var(--text);
+            background: var(--label-bg); border: 1px solid var(--label-edge); border-radius: 999px;
+            padding: 2px 9px; box-shadow: 0 4px 10px -4px rgba(15, 23, 42, 0.4);
+        }
+        #routeMap .map-label.target span {
+            background: linear-gradient(135deg, #fbbf24, #d97706); color: #fff; border: none;
+            box-shadow: 0 8px 18px -6px rgba(217, 119, 6, 0.7);
+        }
+        #routeMap .map-label.me span { background: var(--blue); color: #fff; border: none; }
+        #routeMap .map-label.stairs span { background: #be123c; color: #fff; border: none; }
+        #routeMap .leaflet-bar a { width: 40px; height: 40px; line-height: 40px; font-size: 20px; }
+        @media (prefers-reduced-motion: reduce) {
+            #routeMap .map-shelf.is-target, #routeMap .map-me, #routeMap .route-arrow svg { animation: none; }
+        }
+        .route-legend { display: flex; flex-wrap: wrap; justify-content: center; gap: .5rem 1.25rem; margin-top: .75rem; font-size: 12px; color: var(--text-muted); }
+        .route-legend i { margin-right: .35rem; }
+
         /* Find a book: the filters under the search box. */
         .find-filters { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: .5rem; }
         @media (max-width: 900px) { .find-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
@@ -215,12 +279,26 @@
                     <p id="routeWhere" class="text-slate-400 mt-1 text-sm"></p>
                 </div>
 
+                {# One tab per floor the walk passes through. #}
+                <div id="routeTabs" class="hidden flex flex-wrap justify-center gap-2 mb-3" role="tablist" aria-label="Floors on the way"></div>
+
                 <div id="routeCanvasWrap" class="rounded-2xl border border-slate-700/60 bg-slate-900/40 p-3">
-                    <svg id="routeSvg" class="w-full" style="max-height:46vh" preserveAspectRatio="xMidYMid meet"></svg>
+                    <div id="routeMap" role="img" aria-label="Map of the way to your book"></div>
+                </div>
+                <div class="route-legend" aria-hidden="true">
+                    <span><i class="fa-solid fa-circle" style="color:#1d4ed8"></i>You are here</span>
+                    <span><i class="fa-solid fa-chevron-right" style="color:#1d4ed8"></i>Follow the arrows</span>
+                    <span><i class="fa-solid fa-stairs" style="color:#be123c"></i>Stairs</span>
+                    <span><i class="fa-solid fa-square" style="color:#d97706"></i>Your book's shelf</span>
                 </div>
 
                 <p id="routeNote" class="text-center text-[13px] text-cyan-300/90 mt-4 px-4 leading-relaxed"></p>
                 <p id="routeProblem" class="hidden text-center text-[13px] text-amber-300 mt-4 px-4 leading-relaxed"></p>
+                <ol id="routeSteps" class="hidden max-w-xl mx-auto mt-4 space-y-2"></ol>
+                <div class="text-center mt-4">
+                    <button type="button" id="routeNextFloor" onclick="kioskNextFloor()"
+                            class="hidden text-sm font-bold px-6 py-3 rounded-xl bg-cyan-700 hover:bg-cyan-600 text-white"></button>
+                </div>
 
                 <div class="flex items-center justify-center gap-2 mt-6">
                     <button type="button" onclick="kioskGo('find')"
@@ -722,17 +800,86 @@
         });
     }
 
-    const SVG_NS = 'http://www.w3.org/2000/svg';
+    // The map box, made once and redrawn for each floor.
+    let routeMap = null, routeLayer = null, arrowLayer = null, routeImgH = 0;
+    const SHELF_W = 46, SHELF_D = 14;
 
-    function svgNode(name, attrs) {
-        const el = document.createElementNS(SVG_NS, name);
-        Object.keys(attrs).forEach(function (k) { el.setAttribute(k, attrs[k]); });
-        return el;
+    function mapColor(token) {
+        const el = document.getElementById('routeMap');
+        return (getComputedStyle(el).getPropertyValue(token) || '').trim() || '#888888';
+    }
+    function mapLL(x, y) { return [routeImgH - y, x]; }
+
+    function ensureRouteMap() {
+        if (routeMap) return;
+        routeMap = L.map('routeMap', {
+            crs: L.CRS.Simple, zoomSnap: 0.25, zoomDelta: 0.5, minZoom: -5, maxZoom: 4,
+            attributionControl: false,
+        });
+        routeLayer = L.layerGroup().addTo(routeMap);
+        arrowLayer = L.layerGroup().addTo(routeMap);
+        // Keep the arrows the same distance apart on screen at any zoom.
+        routeMap.on('zoomend', function () { drawArrows(arrowPts); });
     }
 
-    function svgPoly(points, attrs) {
-        return svgNode('polygon', Object.assign(
-            { points: points.map(function (p) { return p[0] + ',' + p[1]; }).join(' ') }, attrs));
+    function mapLabel(x, y, text, kind) {
+        L.marker(mapLL(x, y), {
+            interactive: false, keyboard: false,
+            icon: L.divIcon({ className: 'map-label ' + (kind || ''),
+                              html: '<span>' + kioskEscape(text) + '</span>',
+                              iconSize: [Math.max(80, String(text).length * 7), 18], iconAnchor: [0, 9] }),
+        }).addTo(routeLayer);
+    }
+
+    function deskDoorArc(d) {
+        const rad = (d.rotation || 0) * Math.PI / 180;
+        const ux = Math.cos(rad), uy = Math.sin(rad);
+        const half = (d.width || 28) / 2;
+        const swing = (d.swing === -1) ? -1 : 1;
+        const nx = -uy * swing, ny = ux * swing;
+        const a = [d.x - ux * half, d.y - uy * half];
+        const b = [d.x + ux * half, d.y + uy * half];
+        const arc = [];
+        for (let i = 0; i <= 10; i++) {
+            const t = (i / 10) * (Math.PI / 2);
+            arc.push([a[0] + (ux * Math.cos(t) + nx * Math.sin(t)) * half * 2,
+                      a[1] + (uy * Math.cos(t) + ny * Math.sin(t)) * half * 2]);
+        }
+        return { a: a, b: b, arc: arc };
+    }
+
+    function shelfOutline(sh) {
+        if (sh.footprint && sh.footprint.length >= 3) return sh.footprint.map(function (p) { return mapLL(p[0], p[1]); });
+        const rad = (sh.rotation || 0) * Math.PI / 180, cos = Math.cos(rad), sin = Math.sin(rad);
+        const hw = (sh.width || SHELF_W) / 2, hd = (sh.depth || SHELF_D) / 2;
+        return [[-hw, -hd], [hw, -hd], [hw, hd], [-hw, hd]].map(function (p) {
+            return mapLL(sh.x + p[0] * cos - p[1] * sin, sh.y + p[0] * sin + p[1] * cos);
+        });
+    }
+
+    // The way itself is drawn by the shared route script, the same as the patron map.
+    let arrowPts = [];
+    function drawArrows(pts) {
+        arrowPts = pts || [];
+        arrowLayer.clearLayers();
+        AylaRoute.draw({ map: routeMap, layer: arrowLayer, points: arrowPts,
+                         toLatLng: mapLL, color: mapColor('--blue') });
+    }
+
+    // The part of the plan worth looking at: what is drawn, not the empty canvas.
+    function drawnBounds(plan) {
+        const pts = [];
+        const add = function (g) { (g || []).forEach(function (p) { pts.push(p); }); };
+        (plan.rooms || []).forEach(function (r) { add(r.geometry); });
+        (plan.stairways || []).forEach(function (st) { add(st.geometry); });
+        (plan.shelves || []).forEach(function (sh) {
+            if (sh.footprint && sh.footprint.length) add(sh.footprint);
+            else if (sh.x != null) pts.push([sh.x, sh.y]);
+        });
+        if (pts.length < 2) return null;
+        const xs = pts.map(function (p) { return p[0]; }), ys = pts.map(function (p) { return p[1]; });
+        return [mapLL(Math.min.apply(null, xs), Math.max.apply(null, ys)),
+                mapLL(Math.max.apply(null, xs), Math.min.apply(null, ys))];
     }
 
     async function kioskShowRoute(book) {
@@ -743,7 +890,10 @@
             [book.where, book.room, book.floor].filter(Boolean).join(' \u00b7 ');
         document.getElementById('routeNote').textContent = 'Finding the way...';
         document.getElementById('routeProblem').classList.add('hidden');
-        document.getElementById('routeSvg').innerHTML = '';
+        if (routeLayer) routeLayer.clearLayers();
+        ['routeTabs', 'routeSteps', 'routeNextFloor'].forEach(function (id) {
+            document.getElementById(id).classList.add('hidden');
+        });
 
         let d;
         try {
@@ -765,75 +915,231 @@
         bad.classList.remove('hidden');
     }
 
+    // The walk as the patron will read it: one floor at a time.
+    let wayData = null, wayBook = null, wayFloor = 0;
+
     function kioskDrawWay(d, book) {
-        const svg = document.getElementById('routeSvg');
-        const plan = (d && d.plan) || {};
-        const note = document.getElementById('routeNote');
+        wayData = d || {};
+        wayBook = book;
+        wayFloor = 0;
+        const floors = wayData.floors || [];
 
-        if (!plan.canvas_width) {
-            kioskWayProblem((d && d.error) || 'There is no floor plan to show yet.');
+        if (!wayData.success) {
+            // Still show the desk's floor, so the patron sees where they are.
+            kioskDrawPlan(wayData.plan || {}, [], {
+                desk: wayData.desk, targetShelfId: book.shelf_id });
+            kioskWayProblem(wayData.error || 'The way could not be worked out. Please ask at the desk.');
+            return;
+        }
+        if (floors.length < 2) {
+            kioskDrawPlan(wayData.plan || (floors[0] && floors[0].plan) || {}, wayData.route || [], {
+                desk: wayData.desk, target: wayData.target_shelf,
+                targetShelfId: (wayData.target_shelf && wayData.target_shelf.shelf_id) || book.shelf_id });
+            document.getElementById('routeNote').textContent = wayData.instruction
+                || ('You are at the orange dot. Follow the line to ' + (book.where || 'the shelf') + '.');
             return;
         }
 
-        const W = plan.canvas_width, H = plan.canvas_height;
-        svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
-
-        // Rooms, then the things standing in them, then the way through.
-        (plan.rooms || []).forEach(function (r) {
-            if (!r.geometry || r.geometry.length < 3) return;
-            svg.appendChild(svgPoly(r.geometry, {
-                fill: 'rgba(148,163,184,0.10)', stroke: 'rgba(148,163,184,0.45)', 'stroke-width': 3 }));
-        });
-        (plan.obstacles || []).forEach(function (o) {
-            const g = o.geometry || o.footprint;
-            if (!g || g.length < 3) return;
-            svg.appendChild(svgPoly(g, { fill: 'rgba(100,116,139,0.35)', stroke: 'none' }));
-        });
-        (plan.stairways || []).forEach(function (st) {
-            const g = st.geometry || st.footprint;
-            if (!g || g.length < 3) return;
-            svg.appendChild(svgPoly(g, { fill: 'rgba(251,191,36,0.20)',
-                                         stroke: 'rgba(251,191,36,0.65)', 'stroke-width': 3 }));
-        });
-
-        const targetId = (d.target_shelf && d.target_shelf.shelf_id) || book.shelf_id;
-        (plan.shelves || []).forEach(function (sh) {
-            const g = sh.footprint || sh.geometry;
-            if (!g || g.length < 3) return;
-            const isTarget = String(sh.shelf_id) === String(targetId);
-            svg.appendChild(svgPoly(g, isTarget
-                ? { fill: 'rgba(52,211,153,0.85)', stroke: '#34d399', 'stroke-width': 5 }
-                : { fill: 'rgba(148,163,184,0.30)', stroke: 'rgba(148,163,184,0.5)', 'stroke-width': 2 }));
-        });
-
-        const pts = d.route || [];
-        if (pts.length > 1) {
-            svg.appendChild(svgNode('polyline', {
-                points: pts.map(function (p) { return p.x + ',' + p.y; }).join(' '),
-                fill: 'none', stroke: '#22d3ee', 'stroke-width': 9,
-                'stroke-linecap': 'round', 'stroke-linejoin': 'round', opacity: '0.95' }));
-        }
-
-        if (d.desk) {
-            svg.appendChild(svgNode('circle', {
-                cx: d.desk.x, cy: d.desk.y, r: 15,
-                fill: '#f59e0b', stroke: '#fff', 'stroke-width': 4 }));
-        }
-        if (d.target_shelf && d.target_shelf.x != null) {
-            svg.appendChild(svgNode('circle', {
-                cx: d.target_shelf.x, cy: d.target_shelf.y, r: 15,
-                fill: '#34d399', stroke: '#fff', 'stroke-width': 4 }));
-        }
-
-        // What to actually do, in words.
-        if (!d.success) {
-            kioskWayProblem(d.error || 'The way could not be worked out. Please ask at the desk.');
-            return;
-        }
-        document.getElementById('routeProblem').classList.add('hidden');
-        note.textContent = d.instruction
-            || ('You are at the orange dot. Follow the line to ' + (book.where || 'the shelf') + '.');
+        kioskRouteSteps(floors, book);
+        kioskShowFloor(0);
     }
+
+    function kioskFloorTag(i, count) {
+        return i === 0 ? 'You are here' : (i === count - 1 ? 'Your book' : 'On the way');
+    }
+
+    // The walk in words, numbered, across every floor.
+    function kioskRouteSteps(floors, book) {
+        const via = wayData.via_stairway || {};
+        const lift = via.kind === 'Elevator';
+        const steps = [];
+        steps.push('Follow the line to the ' + (via.label || (lift ? 'lift' : 'stairs'))
+                   + ' on the ' + floors[0].label + '.');
+        for (let i = 1; i < floors.length; i++) {
+            const before = floors[i - 1].number, after = floors[i].number;
+            const way = (before != null && after != null) ? (after > before ? 'up' : 'down') : '';
+            steps.push((lift ? 'Take the lift ' : 'Go ' + (way ? way + ' the stairs ' : ''))
+                       + (lift && way ? way + ' ' : '') + 'to the ' + floors[i].label + '.');
+            steps.push(i === floors.length - 1
+                ? 'From the stairs, follow the line to ' + (book.where || 'the shelf') + '.'
+                : 'Follow the line to the next stairs.');
+        }
+        const list = document.getElementById('routeSteps');
+        list.innerHTML = steps.map(function (text, i) {
+            return '<li class="flex items-start gap-3 rounded-xl border border-slate-700/60 bg-slate-900/40 px-4 py-2.5">'
+                + '<span class="shrink-0 w-6 h-6 rounded-full bg-cyan-700 text-white text-[12px] font-bold flex items-center justify-center">'
+                + (i + 1) + '</span><span class="text-sm text-slate-200 leading-snug">' + kioskEscape(text) + '</span></li>';
+        }).join('');
+        list.classList.remove('hidden');
+        document.getElementById('routeNote').textContent =
+            'Your book is on the ' + floors[floors.length - 1].label
+            + '. Tap a floor to see that part of the walk.';
+    }
+
+    function kioskShowFloor(i) {
+        kioskTouch();
+        const floors = wayData.floors;
+        wayFloor = i;
+        const floor = floors[i];
+        const pts = floor.points || [];
+        const last = i === floors.length - 1;
+        const first = pts[0], end = pts[pts.length - 1];
+        kioskDrawPlan(floor.plan || {}, pts, {
+            desk: i === 0 ? wayData.desk : null,
+            arrive: i > 0 && first ? first : null,
+            stairs: !last && end ? end : null,
+            target: last ? wayData.target_shelf : null,
+            targetShelfId: last ? ((wayData.target_shelf && wayData.target_shelf.shelf_id) || wayBook.shelf_id) : null,
+        });
+
+        const tabs = document.getElementById('routeTabs');
+        tabs.innerHTML = '';
+        floors.forEach(function (f, j) {
+            const on = j === i;
+            const tab = document.createElement('button');
+            tab.type = 'button';
+            tab.setAttribute('role', 'tab');
+            tab.setAttribute('aria-selected', on ? 'true' : 'false');
+            tab.className = 'text-sm font-bold px-4 py-2.5 rounded-xl border '
+                + (on ? 'bg-cyan-700 border-cyan-600 text-white'
+                      : 'border-slate-700 text-slate-300 hover:bg-slate-800/50');
+            tab.innerHTML = kioskEscape(f.label) + ' <span class="font-normal opacity-80">&middot; '
+                + kioskFloorTag(j, floors.length) + '</span>';
+            tab.onclick = function () { kioskShowFloor(j); };
+            tabs.appendChild(tab);
+        });
+        tabs.classList.remove('hidden');
+
+        const next = document.getElementById('routeNextFloor');
+        next.textContent = last ? '‹ Back to the ' + floors[0].label
+                                : 'Next: ' + floors[i + 1].label + ' ›';
+        next.classList.remove('hidden');
+    }
+
+    function kioskNextFloor() {
+        if (!wayData || !wayData.floors) return;
+        kioskShowFloor(wayFloor < wayData.floors.length - 1 ? wayFloor + 1 : 0);
+    }
+
+    // One floor, drawn the way the patron map draws it: rooms and doors, stairs,
+    // shelves with the book's one glowing, and chevrons along the walk.
+    function kioskDrawPlan(plan, pts, marks) {
+        ensureRouteMap();
+        routeLayer.clearLayers();
+        if (!plan.canvas_width) {
+            kioskWayProblem('There is no floor plan to show yet.');
+            return;
+        }
+        routeImgH = plan.canvas_height;
+        const whole = [[0, 0], [plan.canvas_height, plan.canvas_width]];
+
+        L.rectangle(whole, { color: 'transparent', fillColor: mapColor('--surface'), fillOpacity: 1,
+                             interactive: false, className: 'map-floor' }).addTo(routeLayer);
+
+        (plan.rooms || []).forEach(function (room) {
+            if (!room.geometry || room.geometry.length < 3) return;
+            const open = room.patron_access !== false;
+            L.polygon(room.geometry.map(function (p) { return mapLL(p[0], p[1]); }), {
+                color: mapColor(open ? '--border' : '--muted'), weight: open ? 2 : 1.6,
+                dashArray: open ? null : '6,4',
+                fillColor: mapColor(open ? '--surface2' : '--muted'), fillOpacity: open ? 1 : 0.1,
+                interactive: false,
+            }).addTo(routeLayer);
+            (room.doors || []).forEach(function (d) {
+                const g = deskDoorArc(d);
+                L.polyline([mapLL(g.a[0], g.a[1]), mapLL(g.b[0], g.b[1])],
+                           { color: mapColor('--surface2'), weight: 6, interactive: false }).addTo(routeLayer);
+                L.polyline([mapLL(g.a[0], g.a[1]), mapLL(g.b[0], g.b[1])],
+                           { color: mapColor('--accent2'), weight: 3, interactive: false }).addTo(routeLayer);
+                L.polyline(g.arc.map(function (p) { return mapLL(p[0], p[1]); }),
+                           { color: mapColor('--accent2'), weight: 1, opacity: 0.6, dashArray: '3,3',
+                             interactive: false }).addTo(routeLayer);
+            });
+        });
+
+        (plan.stairways || []).forEach(function (st) {
+            if (!st.geometry || st.geometry.length < 3) return;
+            L.polygon(st.geometry.map(function (p) { return mapLL(p[0], p[1]); }), {
+                color: '#be123c', weight: 1.8, fillColor: '#be123c', fillOpacity: 0.14, interactive: false,
+            }).addTo(routeLayer);
+            (st.treads || []).forEach(function (t) {
+                L.polyline([mapLL(t[0][0], t[0][1]), mapLL(t[1][0], t[1][1])],
+                           { color: '#be123c', weight: 1, opacity: 0.75, interactive: false }).addTo(routeLayer);
+            });
+        });
+
+        (plan.obstacles || []).forEach(function (o) {
+            if (!o.geometry || o.geometry.length < 3) return;
+            const solid = (o.kind === 'Pillar') ? 0.5 : (o.kind === 'Counter' ? 0.3 : 0.2);
+            L.polygon(o.geometry.map(function (p) { return mapLL(p[0], p[1]); }), {
+                color: '#b45309', weight: 1.4, fillColor: '#b45309', fillOpacity: solid,
+                dashArray: (o.kind === 'Partition' || o.kind === 'Seating') ? '5,4' : null, interactive: false,
+            }).addTo(routeLayer);
+        });
+
+        let target = null;
+        (plan.shelves || []).forEach(function (sh) {
+            const isTarget = marks.targetShelfId != null && String(sh.shelf_id) === String(marks.targetShelfId);
+            const tint = mapColor(isTarget ? '--accent2' : '--accent');
+            L.polygon(shelfOutline(sh), {
+                color: tint, weight: 2, fillColor: tint,
+                fillOpacity: sh.elevated ? 0.12 : (isTarget ? 0.8 : 0.4),
+                dashArray: sh.elevated ? '6,4' : null, interactive: false,
+                className: isTarget ? 'map-shelf is-target' : 'map-shelf',
+            }).addTo(routeLayer);
+            if (isTarget) target = sh;
+        });
+
+        arrowLayer.clearLayers();
+
+        // Where this floor's part of the walk starts and ends.
+        if (marks.desk) {
+            L.circleMarker(mapLL(marks.desk.x, marks.desk.y), {
+                radius: 10, color: mapColor('--surface'), weight: 3,
+                fillColor: mapColor('--blue'), fillOpacity: 1, className: 'map-me', interactive: false,
+            }).addTo(routeLayer);
+            mapLabel(marks.desk.x, marks.desk.y - 24, 'You are here', 'me');
+        }
+        if (marks.arrive) {
+            L.circleMarker(mapLL(marks.arrive.x, marks.arrive.y), {
+                radius: 16, color: mapColor('--blue'), weight: 3,
+                fillColor: mapColor('--blue'), fillOpacity: 0.15, className: 'map-me', interactive: false,
+            }).addTo(routeLayer);
+            mapLabel(marks.arrive.x, marks.arrive.y - 28, 'You arrive here', 'me');
+        }
+        if (marks.stairs) {
+            L.circleMarker(mapLL(marks.stairs.x, marks.stairs.y), {
+                radius: 16, color: '#be123c', weight: 3, fillColor: '#be123c', fillOpacity: 0.15,
+                interactive: false,
+            }).addTo(routeLayer);
+            mapLabel(marks.stairs.x, marks.stairs.y - 28, 'Take the stairs', 'stairs');
+        }
+        if (target) {
+            const heading = target.label || target.name || 'Your book';
+            mapLabel(target.x, target.y - ((target.depth || SHELF_D) / 2 + 16), heading, 'target');
+        }
+
+        // The walk ends in the aisle; its last leg points into the shelf.
+        const walk = target ? AylaRoute.intoShelf(pts, target) : pts;
+
+        // Fit what is drawn, once the box has its size.
+        const bounds = drawnBounds(plan) || whole;
+        const fit = function () {
+            routeMap.invalidateSize();
+            routeMap.fitBounds(bounds, { padding: [24, 24] });
+            drawArrows(walk);
+        };
+        fit();
+        setTimeout(fit, 150);
+        document.getElementById('routeProblem').classList.add('hidden');
+    }
+
+    // The map's colours follow the theme.
+    document.addEventListener('ayla:themechange', function () {
+        if (!wayData || document.getElementById('screenRoute').classList.contains('hidden')) return;
+        if (wayData.floors && wayData.floors.length > 1) kioskShowFloor(wayFloor);
+        else kioskDrawWay(wayData, wayBook);
+    });
 
     function show(id, text) {
         const el = document.getElementById(id);

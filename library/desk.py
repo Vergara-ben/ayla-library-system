@@ -362,7 +362,11 @@ def _sub_request(request, params):
 
 
 def desk_way_to_book(request):
-    """Draw the way from the desk computer to a shelf, on the desk's own floor."""
+    """The way from the desk computer to a shelf, floor by floor.
+
+    A patron without a phone reads the whole walk here, so every floor it passes
+    through comes back with its plan and its part of the route.
+    """
     # Imported here: views imports this module.
     from .views import get_navigation_route, get_patron_map_data
 
@@ -389,12 +393,33 @@ def desk_way_to_book(request):
         'target_shelf_id': shelf.shelf_id,
     })).content)
 
-    # The plan drawn is always the one the patron is standing on: the desk's.
+    # The plan drawn first is always the one the patron is standing on: the desk's.
     plan = json.loads(get_patron_map_data(_sub_request(request, {
         'floor': start.floor_plan_id,
     })).content)
 
+    # Every floor the walk passes through, in the order it is walked.
+    legs = route.get('legs') or []
+    numbers = dict(FloorPlan.objects.filter(
+        floor_plan_id__in=[leg['floor_plan_id'] for leg in legs])
+        .values_list('floor_plan_id', 'floor_number'))
+    floors = []
+    for leg in legs:
+        fid = leg['floor_plan_id']
+        floor_plan = plan if fid == start.floor_plan_id else json.loads(
+            get_patron_map_data(_sub_request(request, {'floor': fid})).content)
+        floors.append({
+            'floor_plan_id': fid,
+            'label': leg.get('floor_label') or '',
+            'number': numbers.get(fid),
+            'points': leg.get('points') or [],
+            'distance': leg.get('distance') or 0,
+            'plan': floor_plan if floor_plan.get('success') else {},
+        })
+
     return JsonResponse({
+        'floors': floors,
+        'via_stairway': route.get('via_stairway') or {},
         'success': bool(route.get('success')),
         'error': route.get('error', ''),
         'desk': {'x': start.desk_x, 'y': start.desk_y,
