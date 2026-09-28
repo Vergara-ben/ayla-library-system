@@ -88,6 +88,25 @@
   .status-dot.amber{background:var(--accent2);box-shadow:0 0 6px var(--accent2);}
 
   .btn-row{display:flex;gap:8px;}
+  /* The panel is a sheet: compact by default, details on demand. */
+  .sheet-handle{
+    display:flex;justify-content:center;align-items:center;width:100%;
+    margin:-8px 0 6px;padding:6px 0;background:none;border:none;cursor:pointer;touch-action:none;
+  }
+  .sheet-handle span{width:44px;height:5px;border-radius:999px;background:var(--muted);opacity:.45;}
+  .sheet-handle:hover span,.sheet-handle:focus-visible span{opacity:.8;}
+  .info-panel.collapsed .sheet-details,
+  .info-panel.collapsed .nav-status,
+  .info-panel.collapsed .shelf-dot{display:none;}
+  .info-panel.collapsed .shelf-info{margin-bottom:8px;}
+  .info-panel.collapsed .shelf-path{
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+  }
+  .info-panel.collapsed .floor-note{
+    margin:0 0 8px;padding:7px 10px;
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+  }
+  .btn-row .btn-nav{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .btn-nav{
     flex:1;padding:13px;
     background:var(--accent);
@@ -204,10 +223,8 @@
     .info-panel{padding:12px 14px;}
     .shelf-info{flex-direction:column;align-items:flex-start;gap:8px;}
     .shelf-dot{margin-bottom:4px;}
-    .btn-row{flex-direction:column;}
-    .btn-nav{width:100%;}
-    .btn-layers{width:100%;}
-    .btn-row .btn-layers{order:2;}
+    .btn-row .btn-layers{order:2;flex:0 0 52px;padding:13px 0;}
+    .btn-row .btn-layers .btn-label{display:none;}
     .map-legend{top:8px;right:8px;padding:8px 10px;font-size:10px;}
     .legend-item{margin-bottom:5px;}
     .modal{padding:24px 20px;}
@@ -257,15 +274,19 @@
   </div>
 </div>
 
-<div class="info-panel">
+<div class="info-panel collapsed" id="infoPanel">
+  <button type="button" class="sheet-handle" id="sheetHandle" onclick="toggleSheet()"
+          aria-expanded="false" aria-controls="sheetDetails" aria-label="Show more details"><span></span></button>
   <div class="shelf-info">
     <div class="shelf-dot"></div>
     <div class="shelf-details">
       <div class="shelf-name" id="shelfName">{% if target.shelf_name %}Target: {{ target.shelf_name }}{% else %}Browse the map{% endif %}</div>
       <div class="shelf-path" id="shelfPath">{% if target.book_title %}{{ target.book_title }}{% else %}Enable Bluetooth to see your position{% endif %}</div>
-      <div class="shelf-strip hidden" id="shelfStrip"></div>
-      <div class="shelf-track hidden" id="shelfTrack"></div>
-      <div class="shelf-neighbours hidden" id="shelfNeighbours"></div>
+      <div class="sheet-details" id="sheetDetails">
+        <div class="shelf-strip hidden" id="shelfStrip"></div>
+        <div class="shelf-track hidden" id="shelfTrack"></div>
+        <div class="shelf-neighbours hidden" id="shelfNeighbours"></div>
+      </div>
     </div>
     <div class="nav-status" id="navStatus">
       <div class="status-dot amber" id="statusDot"></div>
@@ -274,7 +295,7 @@
   </div>
   <div class="btn-row">
     {# The map could only be pointed at a book from the catalogue. #}
-    <button type="button" class="btn-layers" id="findBtn" onclick="openFind()"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i> Find a book</button>
+    <button type="button" class="btn-layers" id="findBtn" onclick="openFind()" aria-label="Find a book" title="Find a book"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i><span class="btn-label"> Find a book</span></button>
     <button class="btn-nav" id="navBtn" onclick="showBTModal()"><i class="fa-solid fa-tower-broadcast" aria-hidden="true"></i> Enable Navigation</button>
   </div>
 </div>
@@ -338,6 +359,9 @@ const targetData = (function () {
 
 const map = L.map('map', {
   crs: L.CRS.Simple,
+  // Fine steps, so fitting the plan does not round down to a much smaller zoom.
+  zoomSnap: 0.25,
+  zoomDelta: 0.5,
   minZoom: -5,
   maxZoom: 4,
   zoomControl: false,
@@ -346,6 +370,73 @@ const map = L.map('map', {
 
 let imgW = 0, imgH = 0;
 let mapData = null;
+let planBounds = null;           // what is drawn on the floor shown, for fitting the view
+
+// Fit the view to what is drawn, not the empty canvas around it.
+function fitPlan() {
+  if (!planBounds) return;
+  map.invalidateSize();
+  map.fitBounds(planBounds, { padding: [16, 16] });
+}
+
+function drawnBounds(data) {
+  const pts = [];
+  const add = function (geom) { (geom || []).forEach(function (pt) { pts.push(pt); }); };
+  (data.rooms || []).forEach(function (r) { add(r.geometry); });
+  (data.stairways || []).forEach(function (st) { add(st.geometry); });
+  (data.obstacles || []).forEach(function (o) { add(o.geometry); });
+  (data.shelves || []).forEach(function (sh) {
+    if (sh.footprint && sh.footprint.length) add(sh.footprint);
+    else if (sh.x != null && sh.y != null) pts.push([sh.x, sh.y]);
+  });
+  if (pts.length < 2) return null;
+  const xs = pts.map(function (p) { return p[0]; });
+  const ys = pts.map(function (p) { return p[1]; });
+  const x0 = Math.min.apply(null, xs), x1 = Math.max.apply(null, xs);
+  const y0 = Math.min.apply(null, ys), y1 = Math.max.apply(null, ys);
+  if (x1 - x0 < 1 || y1 - y0 < 1) return null;
+  return [toLatLng(x0, y1), toLatLng(x1, y0)];
+}
+
+// The bottom sheet: compact by default, so the map keeps the screen.
+function setSheet(open, remember) {
+  const panel = document.getElementById('infoPanel');
+  const handle = document.getElementById('sheetHandle');
+  if (!panel) return;
+  panel.classList.toggle('collapsed', !open);
+  if (handle) {
+    handle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    handle.setAttribute('aria-label', open ? 'Show less' : 'Show more details');
+  }
+  if (remember) {
+    try { localStorage.setItem('ayla.map.sheet', open ? 'open' : 'closed'); } catch (e) { /* not kept */ }
+  }
+  requestAnimationFrame(fitPlan);
+}
+function toggleSheet() {
+  const panel = document.getElementById('infoPanel');
+  setSheet(panel && panel.classList.contains('collapsed'), true);
+}
+(function () {
+  let open = false;
+  try { open = localStorage.getItem('ayla.map.sheet') === 'open'; } catch (e) { /* closed */ }
+  if (open) setSheet(true, false);
+  // Swipe the handle up to open, down to close.
+  const handle = document.getElementById('sheetHandle');
+  let startY = null;
+  handle.addEventListener('pointerdown', function (e) { startY = e.clientY; });
+  handle.addEventListener('pointerup', function (e) {
+    if (startY === null) return;
+    const dy = e.clientY - startY;
+    startY = null;
+    if (Math.abs(dy) < 20) return;          // a tap: the click handler toggles
+    handle.dataset.swiped = '1';
+    setSheet(dy < 0, true);
+  });
+  handle.addEventListener('click', function (e) {
+    if (handle.dataset.swiped) { delete handle.dataset.swiped; e.stopImmediatePropagation(); e.preventDefault(); }
+  }, true);
+})();
 let patronPos = null;            // {x, y} in floor-plan pixels (top-left origin) -- the latest smoothed estimate
 let displayedPos = null;         // {x, y} of wherever the marker is actually drawn right now
 let lastRoutePoints = null;      // the most recent full route the server returned
@@ -885,10 +976,7 @@ function drawFloor(data) {
   renderShelfStrip();
 
   // Measure, then fit, in that order, and again once the layout has settled.
-  const fitPlan = function () {
-    map.invalidateSize();
-    map.fitBounds(bounds, { padding: [24, 24] });
-  };
+  planBounds = drawnBounds(data) || bounds;
   fitPlan();
   setTimeout(fitPlan, 200);
   // Fit the map once the container has a size.
@@ -1308,7 +1396,8 @@ function showFloorHandover(r) {
     row.appendChild(btn);
   }
   if (btn) {
-    btn.textContent = 'Continue on the ' + r.target_floor.label;
+    btn.textContent = 'Show ' + r.target_floor.label;
+    btn.title = 'Continue on the ' + r.target_floor.label;
     btn.onclick = function () { switchFloor(r.target_floor.floor_plan_id); };
   }
 

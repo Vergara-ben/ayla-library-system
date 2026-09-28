@@ -102,14 +102,6 @@
             overflow: hidden;
             z-index: 0; /* contain Leaflet's high z-index panes so modals sit on top */
         }
-        /* Full-window mode. */
-        body.map-full .map-editor {
-            position: fixed; inset: 0; z-index: 60; border-radius: 0;
-            margin: 0; display: flex; flex-direction: column;
-        }
-        body.map-full .map-editor .map-scroll { flex: 1; min-height: 0; overflow-y: auto; }
-        body.map-full #mapConfig { height: calc(100vh - 190px) !important; resize: none; }
-
         /* Tool rail. */
         .map-rail {
             display: flex; flex-direction: column; gap: 4px;
@@ -128,6 +120,13 @@
         }
         .rail-btn i { width: 14px; text-align: center; font-size: 14px; }
         .rail-btn:hover { background: var(--bg-card); color: var(--text-primary); }
+        .rail-btn:disabled { opacity: .35; cursor: not-allowed; }
+        .rail-btn:disabled:hover { background: none; color: var(--text-muted); }
+        .rail-count {
+            margin-left: auto; font-size: 12px; font-weight: 700; line-height: 1;
+            padding: 2px 5px; border-radius: 999px;
+            background: var(--bg-card); color: var(--text-muted);
+        }
         .rail-btn.mode-active {
             background: var(--accent-strong); color: var(--on-accent);
             border-color: var(--accent-strong);
@@ -379,6 +378,7 @@
         }
         .geo-handle.rotate:active { cursor: grabbing; }
         .geo-outline { pointer-events: none; }
+        .geo-handle.side { border-radius: 50%; cursor: move; }
 
         /* Beacon and waypoint markers. */
         .map-dot {
@@ -479,11 +479,11 @@
 
         <main id="main-content" tabindex="-1" class="flex-1 overflow-y-auto p-8 space-y-6">
             
-            {% if error %}
-                <div class="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">{{ error }}</div>
-            {% endif %}
+            <div id="fpError">{% if error %}
+                <div data-error class="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">{{ error }}</div>
+            {% endif %}</div>
 
-            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div id="fpStats" class="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
                     <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Total Floor Plans</p>
                     <p class="text-3xl font-bold text-cyan-400 mt-2">{{ floorplans|length }}</p>
@@ -501,7 +501,7 @@
                 </div>
             </div>
 
-            <div class="rounded-xl border border-slate-800/80 overflow-hidden shadow-2xl flex flex-col" style="background-color: var(--bg-card);">
+            <div id="fpTableCard" class="rounded-xl border border-slate-800/80 overflow-hidden shadow-2xl flex flex-col" style="background-color: var(--bg-card);">
                 
                 <div class="p-5 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div class="flex items-center gap-2">
@@ -680,7 +680,6 @@
                                 <button type="button" class="map-action-btn" onclick="setMapHeight(440)"><i class="fa-solid fa-compress"></i> Short</button>
                                 <button type="button" class="map-action-btn" onclick="setMapHeight(560)"><i class="fa-solid fa-equals"></i> Standard</button>
                                 <button type="button" class="map-action-btn" onclick="setMapHeight(820)"><i class="fa-solid fa-expand"></i> Tall</button>
-                                <button type="button" class="map-action-btn" onclick="toggleMapFullscreen()"><i class="fa-solid fa-up-right-and-down-left-from-center"></i> Fill the window</button>
                                 <p class="insp-note" style="padding:6px 6px 2px">Or drag the bottom-right corner of the map.</p>
                             </div>
                         </div>
@@ -770,6 +769,11 @@
                             <button id="btnArea" type="button" onclick="setMode('area')" class="mode-btn rail-btn" title="Drag a box to select several elements (V). Shift+drag works in Select too.">
                                 <i class="fa-regular fa-object-group"></i><span>Area select</span>
                             </button>
+                            <div class="rail-sep"></div>
+                            {# Every change on the map can be taken back, one step at a time. #}
+                            <button id="btnUndo" type="button" onclick="runUndo()" class="rail-btn" disabled title="Nothing to undo yet">
+                                <i class="fa-solid fa-rotate-left"></i><span>Undo</span><span id="undoCount" class="rail-count hidden"></span>
+                            </button>
                         </nav>
                         <div class="map-canvas-col">
                         {# What area select picks up. #}
@@ -815,6 +819,7 @@
             {% endif %}
 
             <!-- Rooms, Shelves, Sections, and Shelf Levels Management -->
+            <div id="fpStructure" class="space-y-6">
             {% for floorplan in floorplans %}
             <div class="rounded-xl border border-slate-800/80 overflow-hidden shadow-2xl flex flex-col" style="background-color: var(--bg-card);">
                 <div class="p-5 border-b border-slate-800">
@@ -917,6 +922,7 @@
                 </div>
             </div>
             {% endfor %}
+            </div>
 
         </main>
     </div>
@@ -1228,8 +1234,9 @@
                     const res = await fetch(form.action, { method: 'POST', body: new FormData(form) });
                     const data = await res.json();
                     if (!data.success) throw new Error(data.error || 'Could not save the room.');
-                    // Reload so the map and readiness panel update.
-                    window.location.reload();
+                    closeEditRoomModal();
+                    if (btn) btn.disabled = false;
+                    refreshAll('Room saved.');
                 } catch (err) {
                     if (btn) btn.disabled = false;
                     alert(err.message || 'Could not save the room.');
@@ -1276,7 +1283,7 @@
             });
             const data = await res.json();
             if (!data.success) { alert(data.error || 'Could not save the scale.'); return; }
-            window.location.reload();
+            refreshAll('Scale saved.');
         }
 
         async function saveFloorNumber(planId) {
@@ -1292,12 +1299,84 @@
             });
             const data = await res.json();
             if (!data.success) { alert(data.error || 'Could not save the floor number.'); return; }
-            window.location.reload();
+            refreshAll('Floor number saved.');
         }
 
         function toggleSidebar() {
             document.querySelector('aside').classList.toggle('open');
         }
+
+        // Swap in the parts of the page the server draws, from a fresh copy of it.
+        async function refreshPageParts() {
+            let doc;
+            try {
+                const res = await fetch(window.location.href);
+                doc = new DOMParser().parseFromString(await res.text(), 'text/html');
+            } catch (e) { return; }
+            ['fpError', 'fpStats', 'fpTableCard', 'fpStructure'].forEach(function (id) {
+                const here = document.getElementById(id), there = doc.getElementById(id);
+                if (here && there) here.innerHTML = there.innerHTML;
+            });
+            const pick = document.getElementById('planPicker');
+            const fresh = doc.getElementById('planPicker');
+            // The first plan was added, or the last one deleted: the editor itself comes or goes.
+            if (!pick !== !fresh) { window.location.reload(); return; }
+            if (!pick) return;
+            const current = pick.value;
+            pick.innerHTML = fresh.innerHTML;
+            if (Array.prototype.some.call(pick.options, function (o) { return o.value === current; })) {
+                pick.value = current;
+            } else if (window.switchPlan) {
+                // The plan on screen was deleted; show the one the server would open.
+                window.switchPlan(pick.value);
+            }
+        }
+
+        // Redraw the map and the lists after a change.
+        function refreshAll(message, opts) {
+            return Promise.all([
+                window.refreshMap ? window.refreshMap(message, opts) : null,
+                refreshPageParts(),
+            ]);
+        }
+        window.refreshAll = refreshAll;
+
+        // Plain forms on the page post in the background instead of reloading it.
+        document.addEventListener('submit', async function (ev) {
+            const form = ev.target;
+            if (ev.defaultPrevented || !form.closest) return;
+            if (!form.closest('#fpTableCard, #fpStructure, #addFloorPlanModal, #renovationModal')) return;
+            if ((form.getAttribute('method') || '').toLowerCase() !== 'post') return;
+            ev.preventDefault();
+            // Ask again next time, now that the page is not reloaded.
+            delete form.dataset.aylaConfirmed;
+            const buttons = form.querySelectorAll('button[type="submit"]');
+            buttons.forEach(function (b) { b.disabled = true; });
+            const done = function () { buttons.forEach(function (b) { b.disabled = false; }); };
+            let res, text;
+            try {
+                res = await fetch(form.getAttribute('action') || window.location.href,
+                                  { method: 'POST', body: new FormData(form) });
+                text = await res.text();
+            } catch (e) {
+                done();
+                alert('The server did not answer. Nothing was changed.');
+                return;
+            }
+            if ((res.headers.get('Content-Type') || '').indexOf('json') !== -1) {
+                let data = {};
+                try { data = JSON.parse(text); } catch (e) { /* not JSON after all */ }
+                if (data.success === false) { done(); alert(data.error || 'That could not be done.'); return; }
+            } else if (!res.redirected) {
+                // A form the server re-drew with an error in it.
+                const err = new DOMParser().parseFromString(text, 'text/html').querySelector('#fpError [data-error]');
+                if (err && err.textContent.trim()) { done(); alert(err.textContent.trim()); return; }
+            }
+            done();
+            if (form.closest('#addFloorPlanModal')) { form.reset(); closeAddModal(); }
+            if (form.closest('#renovationModal')) closeRenovationModal();
+            refreshAll('Saved.');
+        });
 
         // Close modals on escape key
         document.addEventListener('keydown', function(e) {
@@ -1374,34 +1453,18 @@
                 </div>
                 <div class="space-y-1.5">
                     <label for="placeStairsTo" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Reaches which floor?</label>
-                    <select id="placeStairsTo" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-rose-700 font-medium" style="background-color: var(--bg-input);"></select>
+                    <select id="placeStairsTo" onchange="fillStairPartners('placeStairsTo', 'placeStairsPartner', '')" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-rose-700 font-medium" style="background-color: var(--bg-input);"></select>
                     <p class="text-[10px] text-slate-500">This is what lets the map walk a patron to the right stairs when their book is on another floor.</p>
                 </div>
-                {# Shape, not a second traced outline per flight. #}
                 <div class="space-y-1.5">
-                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Shape</label>
-                    <div class="grid grid-cols-3 gap-2" id="placeStairsShape">
-                        <button type="button" data-shape="straight" onclick="pickStairShape('straight')" class="stair-shape on"><i class="fa-solid fa-arrow-up-long"></i><span>Straight</span></button>
-                        <button type="button" data-shape="quarter" onclick="pickStairShape('quarter')" class="stair-shape"><i class="fa-solid fa-arrow-turn-up"></i><span>Quarter turn</span></button>
-                        <button type="button" data-shape="half" onclick="pickStairShape('half')" class="stair-shape"><i class="fa-solid fa-rotate-left"></i><span>Half turn</span></button>
-                    </div>
-                    <p class="text-[10px] text-slate-500" id="placeStairsShapeNote">One straight run of steps.</p>
+                    <label for="placeStairsPartner" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Meets which stairway there?</label>
+                    <select id="placeStairsPartner" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-rose-700 font-medium" style="background-color: var(--bg-input);"></select>
+                    <p class="text-[10px] text-slate-500">The stairway a patron comes out of on that floor. Leave it for later if that floor is not drawn yet.</p>
                 </div>
-
-                {# The direction, read off the shape rather than typed in degrees. #}
                 <div class="space-y-1.5">
-                    <label class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Which way do the steps climb?</label>
-                    <div class="flex items-center gap-2">
-                        <div class="flex-1 rounded-lg px-3 py-2.5 border border-slate-700/60 flex items-center gap-2.5" style="background-color: var(--bg-input);">
-                            <i id="placeStairsArrow" class="fa-solid fa-arrow-up text-rose-400"></i>
-                            <span id="placeStairsDirWords" class="text-slate-300 font-medium">Towards the top of the map</span>
-                        </div>
-                        <button type="button" onclick="flipStairBearing()" class="px-3 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:text-slate-100 hover:bg-slate-800/40 font-semibold text-[11px] flex items-center gap-1.5">
-                            <i class="fa-solid fa-arrows-up-down text-[10px]"></i> Flip
-                        </button>
-                    </div>
-                    <input type="hidden" id="placeStairsBearing" value="0">
-                    <p class="text-[10px] text-slate-500">Taken from the shape you drew. The treads run across it, and a turn puts the landing at the far end.</p>
+                    <label for="placeStairsRoom" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Opens into which room?</label>
+                    <select id="placeStairsRoom" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-rose-700 font-medium" style="background-color: var(--bg-input);"></select>
+                    <p class="text-[10px] text-slate-500">Routes reach the stairs only from this room, never through a wall.</p>
                 </div>
                 <div class="space-y-1.5">
                     <label for="placeStairsName" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Label (optional)</label>
@@ -1552,13 +1615,13 @@
         const URLS = {
             mapData: "{% url 'get_map_data' %}",
             bulk: "{% url 'floorplan_bulk' %}",
+            undo: "{% url 'floorplan_undo' %}",
             setCanvas: "{% url 'set_floorplan_canvas' %}",
             addRoom: "{% url 'add_room' %}",
             addObstacle: "{% url 'add_obstacle' %}",
             addStairway: "{% url 'add_stairway' %}",
             setDesk: "{% url 'set_floorplan_desk' %}",
             editStairway: "{% url 'edit_stairway' %}",
-            matchStairway: "{% url 'match_stairway' %}",
             deleteStairway: "{% url 'delete_stairway' %}",
             editObstacle: "{% url 'edit_obstacle' %}",
             editWaypoint: "{% url 'edit_waypoint' %}",
@@ -1741,9 +1804,7 @@
                 } else {
                     return;
                 }
-                mapToast('Pasted. Drag it where you want it.');
-                // Reload to draw the pasted copy.
-                setTimeout(function () { window.location.reload(); }, 350);
+                refreshAll('Pasted. Drag it where you want it.');
             } catch (err) {
                 mapToast('Paste failed', 'error');
             }
@@ -1825,9 +1886,11 @@
                     'X-Requested-With': 'XMLHttpRequest',
                     'Content-Type': 'application/x-www-form-urlencoded',
                 },
-                body: new URLSearchParams(data).toString(),
+                body: new URLSearchParams(Object.assign(
+                    floorPlanId ? { undo_plan: floorPlanId } : {}, data)).toString(),
             });
             const payload = await res.json();
+            if (payload && 'undo_label' in payload) setUndoState(payload.undo_label, payload.undo_count);
             // Refresh the readiness panel after any change.
             if (payload && payload.success) {
                 scheduleReadiness();
@@ -1962,14 +2025,14 @@
                 if (el) el.style.cursor = '';
                 const pos = { x: e.latlng.lng, y: imgH - e.latlng.lat };
                 const r = await postData(URLS.placeShelf, { shelf_id: id, map_x: pos.x, map_y: pos.y });
-                if (r.success) window.location.reload();
+                if (r.success) refreshAll('Shelf placed.');
                 else alert(r.error || 'Failed to place the shelf');
                 return;
             }
 
             // Click empty canvas to deselect.
             if (selectedShelfId !== null) { deselectShelf(); return; }
-            if (resizeRoomId !== null) { stopRoomResize(); return; }
+            if (sideEdit) { stopSideEdit(); return; }
 
             // Clicking empty canvas ends a group selection.
             if (!mode && groupSel.size) { clearGroupSelection(false); return; }
@@ -2082,8 +2145,7 @@
             if (body) {
                 body.innerHTML = '<p class="map-inspector-empty">'
                     + 'Click a room, shelf, furniture, stairway, waypoint, beacon or door on the map to edit it here.</p>'
-                    + '<p class="insp-note">Shift+drag, or Area select, picks several at once.</p>'
-                    + (undoLabel() ? '<div class="map-actions">' + undoButtonHtml() + '</div>' : '');
+                    + '<p class="insp-note">Shift+drag, or Area select, picks several at once.</p>';
             }
             if (typeof selectedShelfId !== 'undefined' && selectedShelfId !== null) deselectShelf();
             if (typeof selectedDoorId !== 'undefined' && selectedDoorId !== null) window.deselectDoor();
@@ -2526,7 +2588,7 @@
             if (!st.paired && st.is_active !== false) {
                 poly.setStyle({ dashArray: '7 5', fillOpacity: 0.05, weight: 2.4 });
             }
-            const tip = st.label + (!st.destination
+            const tip = st.label + (st.room ? ' · ' + st.room : ' · no room') + (!st.destination
                 ? ' — not linked to a floor yet'
                 : (st.paired ? ' → ' + st.destination
                              : ' — no matching stairway on ' + st.destination));
@@ -2549,42 +2611,6 @@
                  .addTo(lmap));
             });
 
-            // Draw landings without treads.
-            (st.parts || []).forEach(function (p) {
-                if (p.kind !== 'landing' || !p.geometry || p.geometry.length < 3) return;
-                layers.push(L.polygon(geometryToLatLngs(p.geometry), {
-                    color: rose, weight: 1, dashArray: '3 3', fill: false,
-                    opacity: 0.6, interactive: false,
-                }).addTo(lmap));
-            });
-
-            // Which way is up, once per flight.
-            if (st.direction !== 'both') {
-                const runs = (st.parts || []).filter(function (p) { return p.kind === 'flight'; });
-                (runs.length ? runs
-                             : [{ bearing: st.bearing || 0, geometry: st.geometry }]
-                ).forEach(function (run) {
-                    const xs = run.geometry.map(function (p) { return p[0]; });
-                    const ys = run.geometry.map(function (p) { return p[1]; });
-                    const cx = (Math.min.apply(null, xs) + Math.max.apply(null, xs)) / 2;
-                    const cy = (Math.min.apply(null, ys) + Math.max.apply(null, ys)) / 2;
-                    const rad = (run.bearing || 0) * Math.PI / 180;
-                    const ux = Math.sin(rad), uy = -Math.cos(rad);
-                    const sign = (st.direction === 'down') ? -1 : 1;
-                    const reach = 18;
-                    const x1 = cx - ux * reach * sign, y1 = cy - uy * reach * sign;
-                    const x2 = cx + ux * reach * sign, y2 = cy + uy * reach * sign;
-                    layers.push(L.polyline([toLatLng(x1, y1), toLatLng(x2, y2)],
-                               { color: rose, weight: 2, opacity: 0.95, interactive: false }).addTo(lmap));
-                    // Arrowhead as two short strokes back from the tip.
-                    [1, -1].forEach(function (side) {
-                        const a = rad * sign + side * 2.6;
-                        layers.push(L.polyline([toLatLng(x2, y2),
-                                    toLatLng(x2 - Math.sin(a) * 8, y2 + Math.cos(a) * 8)],
-                                   { color: rose, weight: 2, opacity: 0.95, interactive: false }).addTo(lmap));
-                    });
-                });
-            }
             stairwayShapes[st.stairway_id] = { layers: layers, poly: poly, data: st };
         }
 
@@ -2659,54 +2685,40 @@
                 + selectField('Direction', 'inspStairDir',
                               [['up', 'Goes up'], ['down', 'Goes down'], ['both', 'Up and down']],
                               st.direction)
+                + '<div class="insp-field" style="margin-bottom:6px"><label for="inspStairRoom">Opens into which room</label>'
+                + '<select id="inspStairRoom"></select></div>'
                 + selectField('Reaches which floor', 'inspStairTo', floors, st.connects_to || '')
-                + '<div class="insp-field" style="margin-bottom:6px">'
-                + '<label for="inspStairBearing">Which way the steps run (degrees)</label>'
-                + '<input id="inspStairBearing" type="number" min="0" max="359" step="15" value="'
-                + Math.round(st.bearing || 0) + '"></div>'
-                + selectField('How it turns', 'inspStairShape',
-                              [['straight', 'Straight flight'],
-                               ['quarter', 'Quarter turn (one landing)'],
-                               ['half', 'Half turn (switchback)']],
-                              st.shape || 'straight')
+                + '<div class="insp-field" style="margin-bottom:6px"><label for="inspStairPartner">Meets which stairway there</label>'
+                + '<select id="inspStairPartner"></select></div>'
                 + toggleField('On the patron map', 'inspStairShown', st.is_active !== false,
-                              'Shown \u2014 routes may use it', 'Closed off')
+                              'Shown — routes may use it', 'Closed off')
                 + '<div class="insp-field" style="margin-bottom:6px">'
                 + '<label for="inspStairName">Label</label>'
                 + '<input id="inspStairName" type="text" value="' + esc(st.name || '') + '" placeholder="e.g. North Stairs"></div>'
                 + '<div class="map-actions">'
                 + '<button class="map-action-btn" onclick="applyStairsInspector(' + id + ')"><i class="fa-solid fa-check"></i> Apply changes</button>'
+                + '</div>'
+                + rotateRowHtml('stairs', id)
+                + '<div class="map-actions">'
+                + sideEditButtonHtml('stairs', id)
                 + '<button class="map-action-btn danger" onclick="removeStairwayById(' + id + ')"><i class="fa-solid fa-trash"></i> Delete stairway</button>'
                 + '</div>'
-                + '<div class="map-actions">'
-                + '<button class="map-action-btn" onclick="matchStairwayById(' + id + ')">'
-                + '<i class="fa-solid fa-layer-group"></i> Draw the far end on the other floor</button>'
-                + '</div>'
                 + '<p class="insp-note">'
-                + (!st.destination
-                    ? '<span style="color:var(--warning)">Not linked to a floor yet</span> — until it is, cross-floor navigation cannot use it.'
-                    : st.paired
-                        ? 'Paired with the stairway on ' + esc(st.destination) + '. Patrons routing to a book there are sent through here.'
-                        : '<span style="color:var(--warning)">No matching stairway on ' + esc(st.destination) + '</span> — stairs join up in pairs, so this one leads nowhere until the far end is drawn.')
-                + '</p>'
-                + '<p class="insp-note">The footprint alone cannot say which end is the bottom, so the '
-                + 'bearing is what the treads and the direction arrow are drawn from.</p>');
+                + (!st.room_id
+                    ? '<span style="color:var(--danger)">No room chosen</span> — pick the room it opens into.'
+                    : !st.destination
+                        ? '<span style="color:var(--warning)">Not linked to a floor yet</span> — until it is, cross-floor navigation cannot use it.'
+                        : st.partner_id
+                            ? 'Meets ' + esc(st.partner) + ' on ' + esc(st.destination) + '. Patrons routing to a book there are sent through here.'
+                            : '<span style="color:var(--warning)">No stairway chosen on ' + esc(st.destination) + '</span> — pick the one it meets there.')
+                + '</p>');
+            roomOptions('inspStairRoom', st.room_id || '');
+            fillStairPartners('inspStairTo', 'inspStairPartner', st.partner_id || '', id);
+            document.getElementById('inspStairTo').onchange = function () {
+                fillStairPartners('inspStairTo', 'inspStairPartner', '', id);
+            };
         }
         window.showStairsInspector = showStairsInspector;
-
-        // Look up the label to avoid quote issues.
-        window.matchStairwayById = async function (id) {
-            const entry = stairwayShapes[id];
-            const to = document.getElementById('inspStairTo');
-            const r = await postData(URLS.matchStairway, {
-                stairway_id: id,
-                connects_to: (to && to.value) || (entry && entry.data && entry.data.connects_to) || '',
-            });
-            if (!r || !r.success) { alert((r && r.error) || 'Could not draw the far end.'); return; }
-            alert(r.message);
-            // The far end lives on another floor, so reload to pick up the new link.
-            location.reload();
-        };
 
         window.removeStairwayById = function (id) {
             const entry = stairwayShapes[id];
@@ -2720,18 +2732,14 @@
                 kind: document.getElementById('inspStairKind').value,
                 direction: document.getElementById('inspStairDir').value,
                 connects_to: document.getElementById('inspStairTo').value,
-                bearing: document.getElementById('inspStairBearing').value || 0,
-                // Straight, quarter turn or switchback.
-                shape: selVal('inspStairShape'),
+                partner_id: document.getElementById('inspStairPartner').value,
+                room_id: document.getElementById('inspStairRoom').value,
                 is_active: selVal('inspStairShown'),
                 name: document.getElementById('inspStairName').value.trim(),
             });
             if (!r.success) { alert(r.error || 'Failed to save the stairway'); return; }
-            // Redraw with the updated treads.
-            removeStairwayShape(id);
-            addStairwayShape(r.stairway);
-            showStairsInspector(id);
-            inspectorSaved('Stairway saved.');
+            // The stairway on the other floor may have changed too.
+            refreshAll('Stairway saved.', { reopen: { kind: 'stairs', id: id } });
         };
 
 
@@ -2795,23 +2803,35 @@
             if (marks.length) roomAngleMarks[r.room_id] = L.layerGroup(marks).addTo(lmap);
 
             // Drag the body to move the whole room.
-            let dragStartBox = null;
+            let dragStart = null, dragBy = [0, 0];
             makeBodyDraggable(poly, {
                 // Selecting a room is enough to move it.
                 enabled: function () {
-                    return resizeRoomId === r.room_id
+                    return isSideEditing('room', r.room_id)
                         || (mapSelection.kind === 'room' && mapSelection.id === r.room_id);
                 },
-                onDragStart: function () { dragStartBox = Object.assign({}, resizeBox); },
-                onMove: function (dx, dy) {
-                    resizeBox = {
-                        minX: dragStartBox.minX + dx, maxX: dragStartBox.maxX + dx,
-                        minY: dragStartBox.minY + dy, maxY: dragStartBox.maxY + dy,
-                    };
-                    poly.setLatLngs(geometryToLatLngs(scaledGeometry()));
-                    positionHandles();
+                onDragStart: function () {
+                    dragStart = latLngsToGeometry(poly.getLatLngs());
+                    dragBy = [0, 0];
+                    if (isSideEditing('room', r.room_id)) clearSideHandles();
                 },
-                onEnd: function () { commitRoomResize(); },
+                onMove: function (dx, dy) {
+                    dragBy = [dx, dy];
+                    poly.setLatLngs(geometryToLatLngs(dragStart.map(function (p) { return [p[0] + dx, p[1] + dy]; })));
+                },
+                onEnd: async function () {
+                    const editing = isSideEditing('room', r.room_id);
+                    const res = await postGroup('move', [{ kind: 'room', id: r.room_id }],
+                                                { dx: dragBy[0].toFixed(2), dy: dragBy[1].toFixed(2) });
+                    if (!res.success) {
+                        mapToast(res.error || 'Could not move the room.', 'error');
+                        poly.setLatLngs(geometryToLatLngs(dragStart));
+                        if (editing) drawSideHandles();
+                        return;
+                    }
+                    rememberUndo(res.undo);
+                    reopenEditing('room', r.room_id, 'Room moved.', editing);
+                },
             });
         }
 
@@ -2819,7 +2839,7 @@
             mapSelection = { kind: 'room', id: id };
             const poly = roomShapes[id]; if (!poly) return;
             const editingPoints = roomEditingId === id;
-            const resizing = resizeRoomId === id;
+            const resizing = isSideEditing('room', id);
             const name = esc(poly._aylaRoomName || 'Room');
             const d = roomData[id] || {};
             renderInspector('room', 'Room', id, name,
@@ -2835,10 +2855,11 @@
                 + '<button class="map-action-btn" onclick="applyRoomInspector(' + id + ')"><i class="fa-solid fa-check"></i> Apply changes</button>'
                 + '</div>'
                 + '<p class="insp-note">Room #' + id + '</p>'
+                + rotateRowHtml('room', id)
                 + '<div class="map-actions">'
                 + (resizing
                     ? '<button class="map-action-btn" onclick="stopRoomResize()"><i class="fa-solid fa-check"></i> Done resizing</button>'
-                    : '<button class="map-action-btn" onclick="startResizeRoom(' + id + ')"><i class="fa-solid fa-up-right-and-down-left-from-center"></i> Resize (drag sides)</button>')
+                    : '<button class="map-action-btn" onclick="startResizeRoom(' + id + ')"><i class="fa-solid fa-up-right-and-down-left-from-center"></i> Resize / rotate (drag)</button>')
                 + (editingPoints
                     ? '<button class="map-action-btn" onclick="stopRoomEdit()"><i class="fa-solid fa-check"></i> Done editing points</button>'
                     : '<button class="map-action-btn" onclick="startReshapeRoom(' + id + ')"><i class="fa-solid fa-draw-polygon"></i> Edit points</button>')
@@ -2863,8 +2884,7 @@
                 is_active: selVal('inspRoomShown'),
             });
             if (!r.success) { alert(r.error || 'Failed to save the room'); return; }
-            // Reload to redraw the room.
-            window.location.reload();
+            refreshAll('Room saved.', { reopen: { kind: 'room', id: id } });
         };
 
         // Rename is done in the panel.
@@ -2873,7 +2893,7 @@
             const poly = roomShapes[id]; if (!poly) return;
             if (!await AylaDialog.confirm('Delete "' + (poly._aylaRoomName || 'this room') + '"?\n\nIts shelves and their book placements are removed with it. This cannot be undone.')) return;
             const r = await postData(URLS.deleteRoom, { room_id: id });
-            if (r.success) window.location.reload();
+            if (r.success) refreshAll('Room deleted.');
             else alert(r.error || 'Failed to delete the room');
         };
 
@@ -2990,6 +3010,8 @@
                 + '<div class="map-actions">'
                 + '<button class="map-action-btn" onclick="applyObstacleInspector(' + id + ')"><i class="fa-solid fa-check"></i> Apply changes</button>'
                 + '</div>'
+                + rotateRowHtml('obstacle', id)
+                + '<div class="map-actions">' + sideEditButtonHtml('obstacle', id) + '</div>'
                 + '<p class="insp-note">'
                 + ((o.geometry && o.geometry.length) ? o.geometry.length + ' corners' : 'No shape')
                 + '</p>'
@@ -3369,23 +3391,11 @@
             if (el) el.style.cursor = 'crosshair';
         };
 
-        // Bounding-box resize.
-        const HANDLES = [
-            { id: 'nw', fx: 0, fy: 0, minX: 1, minY: 1, corner: 1 },
-            { id: 'n', fx: 0.5, fy: 0, minY: 1 },
-            { id: 'ne', fx: 1, fy: 0, maxX: 1, minY: 1, corner: 1 },
-            { id: 'e', fx: 1, fy: 0.5, maxX: 1 },
-            { id: 'se', fx: 1, fy: 1, maxX: 1, maxY: 1, corner: 1 },
-            { id: 's', fx: 0.5, fy: 1, maxY: 1 },
-            { id: 'sw', fx: 0, fy: 1, minX: 1, maxY: 1, corner: 1 },
-            { id: 'w', fx: 0, fy: 0.5, minX: 1 },
-        ];
-        const MIN_ROOM_SIZE = 20;      // canvas units; stops a room collapsing
-
-        let resizeRoomId = null;
-        let resizeHandles = [];
-        let resizeBase = null;         // geometry + bbox as it was when resize began
-        let resizeBox = null;          // bbox being dragged
+        // Resize by pushing a real side; rotate with the round knob above.
+        const MIN_SHAPE_AREA = 100;    // canvas units squared; stops a shape collapsing
+        let sideEdit = null;           // { kind, id, points }
+        let sideHandles = [];
+        let rotateKnob = null;
 
         function bboxOf(points) {
             const xs = points.map(function (p) { return p[0]; });
@@ -3395,132 +3405,242 @@
                 minY: Math.min.apply(null, ys), maxY: Math.max.apply(null, ys),
             };
         }
-
-        // Map the original vertices from the starting bbox onto the dragged one.
-        function scaledGeometry() {
-            const b = resizeBase.box, n = resizeBox;
-            const bw = Math.max(b.maxX - b.minX, 1e-6);
-            const bh = Math.max(b.maxY - b.minY, 1e-6);
-            const sx = (n.maxX - n.minX) / bw;
-            const sy = (n.maxY - n.minY) / bh;
-            return resizeBase.points.map(function (p) {
-                return [n.minX + (p[0] - b.minX) * sx, n.minY + (p[1] - b.minY) * sy];
+        function shapeCentre(points) {
+            const b = bboxOf(points);
+            return [(b.minX + b.maxX) / 2, (b.minY + b.maxY) / 2];
+        }
+        function polyArea(points) {
+            let a = 0;
+            for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+                a += points[j][0] * points[i][1] - points[i][0] * points[j][1];
+            }
+            return a / 2;
+        }
+        // Same turn as the server: clockwise on screen for positive degrees.
+        function rotatePoints(points, deg, c) {
+            const rad = deg * Math.PI / 180, cos = Math.cos(rad), sin = Math.sin(rad);
+            return points.map(function (p) {
+                const dx = p[0] - c[0], dy = p[1] - c[1];
+                return [c[0] + dx * cos - dy * sin, c[1] + dx * sin + dy * cos];
             });
         }
-
-        function handleLatLng(spec) {
-            const b = resizeBox;
-            return toLatLng(b.minX + spec.fx * (b.maxX - b.minX),
-                            b.minY + spec.fy * (b.maxY - b.minY));
+        function sideMid(points, i) {
+            const a = points[i], b = points[(i + 1) % points.length];
+            return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+        }
+        function knobPoint(points) {
+            const b = bboxOf(points);
+            return [(b.minX + b.maxX) / 2, b.minY - 26];
         }
 
-        function positionHandles() {
-            resizeHandles.forEach(function (entry) {
-                entry.marker.setLatLng(handleLatLng(entry.spec));
+        // Move side i by d along its normal; the sides either end keep their line and stretch.
+        function pushSide(points, i, d) {
+            const n = points.length;
+            const a = points[i], b = points[(i + 1) % n];
+            const prev = points[(i - 1 + n) % n], next = points[(i + 2) % n];
+            const ex = b[0] - a[0], ey = b[1] - a[1];
+            const len = Math.hypot(ex, ey) || 1;
+            const nx = -ey / len, ny = ex / len;
+            const a0 = [a[0] + nx * d, a[1] + ny * d];
+            const b0 = [b[0] + nx * d, b[1] + ny * d];
+            function meet(q, f, fallback) {
+                const den = ex * f[1] - ey * f[0];
+                if (Math.abs(den) < 1e-9 * len * (Math.hypot(f[0], f[1]) || 1)) return fallback;
+                const t = ((q[0] - a0[0]) * ey - (q[1] - a0[1]) * ex) / den;
+                return [q[0] + f[0] * t, q[1] + f[1] * t];
+            }
+            const out = points.map(function (p) { return p.slice(); });
+            out[i] = meet(a, [a[0] - prev[0], a[1] - prev[1]], a0);
+            out[(i + 1) % n] = meet(b, [b[0] - next[0], b[1] - next[1]], b0);
+            return out;
+        }
+
+        function editableLayer(kind, id) {
+            if (kind === 'room') return roomShapes[id] || null;
+            if (kind === 'obstacle') return obstacleShapes[id] || null;
+            if (kind === 'stairs') return stairwayShapes[id] ? stairwayShapes[id].poly : null;
+            return null;
+        }
+        function isSideEditing(kind, id) {
+            return !!(sideEdit && sideEdit.kind === kind && String(sideEdit.id) === String(id));
+        }
+
+        function clearSideHandles() {
+            sideHandles.forEach(function (m) { lmap.removeLayer(m); });
+            sideHandles = [];
+            if (rotateKnob) { lmap.removeLayer(rotateKnob); rotateKnob = null; }
+        }
+
+        function placeSideHandles(points, skip) {
+            sideHandles.forEach(function (m, i) {
+                if (i !== skip) m.setLatLng(toLatLng.apply(null, sideMid(points, i)));
             });
+            if (rotateKnob && skip !== 'knob') rotateKnob.setLatLng(toLatLng.apply(null, knobPoint(points)));
         }
 
-        function drawResizeHandles() {
-            clearResizeHandles();
-            HANDLES.forEach(function (spec) {
-                const size = spec.corner ? 12 : 10;
-                const marker = L.marker(handleLatLng(spec), {
-                    draggable: true,
-                    zIndexOffset: 1000,
-                    icon: L.divIcon({
-                        className: 'geo-handle h-' + spec.id + (spec.corner ? ' corner' : ''),
-                        iconSize: [size, size],
-                        iconAnchor: [size / 2, size / 2],
-                    }),
-                }).addTo(lmap);
-
-                marker.on('drag', function (e) {
-                    const p = { x: e.latlng.lng, y: imgH - e.latlng.lat };
-                    if (spec.minX) resizeBox.minX = p.x;
-                    if (spec.maxX) resizeBox.maxX = p.x;
-                    if (spec.minY) resizeBox.minY = p.y;
-                    if (spec.maxY) resizeBox.maxY = p.y;
-
-                    // Never let a side cross its opposite or collapse to nothing.
-                    if (resizeBox.maxX - resizeBox.minX < MIN_ROOM_SIZE) {
-                        if (spec.minX) resizeBox.minX = resizeBox.maxX - MIN_ROOM_SIZE;
-                        else resizeBox.maxX = resizeBox.minX + MIN_ROOM_SIZE;
-                    }
-                    if (resizeBox.maxY - resizeBox.minY < MIN_ROOM_SIZE) {
-                        if (spec.minY) resizeBox.minY = resizeBox.maxY - MIN_ROOM_SIZE;
-                        else resizeBox.maxY = resizeBox.minY + MIN_ROOM_SIZE;
-                    }
-
-                    const poly = roomShapes[resizeRoomId];
-                    if (poly) poly.setLatLngs(geometryToLatLngs(scaledGeometry()));
-                    positionHandles();
-                    showResizeSize();
-                });
-
-                marker.on('dragend', function () { commitRoomResize(); });
-                resizeHandles.push({ spec: spec, marker: marker });
-            });
-        }
-
-        function clearResizeHandles() {
-            resizeHandles.forEach(function (entry) { lmap.removeLayer(entry.marker); });
-            resizeHandles = [];
-        }
-
-        function showResizeSize() {
+        function showSideSize(points, deg) {
             const hint = document.getElementById('mapModeHint');
-            if (!hint || !resizeBox) return;
-            hint.innerHTML = '<strong class="text-cyan-400">Resizing</strong> — '
-                + Math.round(resizeBox.maxX - resizeBox.minX) + ' × '
-                + Math.round(resizeBox.maxY - resizeBox.minY)
-                + ' canvas units. Drag a side or corner; right-click the room to finish.';
+            if (!hint) return;
+            const b = bboxOf(points);
+            hint.innerHTML = '<strong class="text-cyan-400">' + (deg ? 'Rotating ' + deg + '°' : 'Resizing') + '</strong> — '
+                + Math.round(b.maxX - b.minX) + ' × ' + Math.round(b.maxY - b.minY)
+                + ' canvas units across. Drag a dot on a side to push that side, or the round knob to rotate '
+                + '(Shift for any angle). Click empty canvas to finish.';
         }
 
-        window.startResizeRoom = function (id) {
-            const poly = roomShapes[id]; if (!poly) return;
-            if (refuseLocked('room', id)) return;
+        function drawSideHandles() {
+            clearSideHandles();
+            const layer = editableLayer(sideEdit.kind, sideEdit.id);
+            if (!layer) return;
+            sideEdit.points.forEach(function (_, i) {
+                const m = L.marker(toLatLng.apply(null, sideMid(sideEdit.points, i)), {
+                    draggable: true, zIndexOffset: 1000,
+                    icon: L.divIcon({ className: 'geo-handle side', iconSize: [12, 12], iconAnchor: [6, 6] }),
+                }).addTo(lmap);
+                let base = null, start = null, next = null;
+                m.on('dragstart', function () {
+                    base = sideEdit.points.map(function (p) { return p.slice(); });
+                    start = sideMid(base, i);
+                    next = null;
+                });
+                m.on('drag', function (e) {
+                    const a = base[i], b = base[(i + 1) % base.length];
+                    const len = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+                    const nx = -(b[1] - a[1]) / len, ny = (b[0] - a[0]) / len;
+                    const c = canvasXY(e.latlng);
+                    const d = (c.x - start[0]) * nx + (c.y - start[1]) * ny;
+                    const moved = pushSide(base, i, d);
+                    const area = polyArea(moved);
+                    if (Math.sign(area) !== Math.sign(polyArea(base)) || Math.abs(area) < MIN_SHAPE_AREA) return;
+                    next = moved;
+                    layer.setLatLngs(geometryToLatLngs(moved));
+                    placeSideHandles(moved, i);
+                    showSideSize(moved);
+                });
+                m.on('dragend', function () {
+                    if (next) commitSideEdit(next);
+                    else placeSideHandles(sideEdit.points);
+                });
+                sideHandles.push(m);
+            });
+
+            rotateKnob = L.marker(toLatLng.apply(null, knobPoint(sideEdit.points)), {
+                draggable: true, zIndexOffset: 1001,
+                icon: L.divIcon({ className: 'geo-handle rotate', iconSize: [14, 14], iconAnchor: [7, 7] }),
+            }).addTo(lmap);
+            rotateKnob.bindTooltip('Drag to rotate · hold Shift for any angle', { direction: 'top' });
+            let base = null, centre = null, a0 = 0, deg = 0;
+            rotateKnob.on('dragstart', function () {
+                base = sideEdit.points.map(function (p) { return p.slice(); });
+                centre = shapeCentre(base);
+                const k = knobPoint(base);
+                a0 = Math.atan2(k[1] - centre[1], k[0] - centre[0]);
+                deg = 0;
+            });
+            rotateKnob.on('drag', function (e) {
+                const c = canvasXY(e.latlng);
+                let raw = (Math.atan2(c.y - centre[1], c.x - centre[0]) - a0) * 180 / Math.PI;
+                raw = ((raw % 360) + 540) % 360 - 180;
+                deg = freeRotateHeld ? Math.round(raw) : Math.round(raw / 15) * 15;
+                const turned = rotatePoints(base, deg, centre);
+                layer.setLatLngs(geometryToLatLngs(turned));
+                placeSideHandles(turned, 'knob');
+                showSideSize(turned, deg);
+            });
+            rotateKnob.on('dragend', function () {
+                if (!deg) { layer.setLatLngs(geometryToLatLngs(base)); placeSideHandles(base); showSideSize(base); return; }
+                window.rotateElement(sideEdit.kind, sideEdit.id, deg);
+            });
+        }
+
+        function startSideEdit(kind, id) {
+            const layer = editableLayer(kind, id);
+            if (!layer) return;
+            if (refuseLocked(kind, id)) return;
             lmap.closePopup();
             clearMode();
-            resizeRoomId = id;
-            const points = latLngsToGeometry(poly.getLatLngs());
-            resizeBase = { points: points.map(function (p) { return p.slice(); }), box: bboxOf(points) };
-            resizeBox = Object.assign({}, resizeBase.box);
-            poly._aylaOriginal = poly.getLatLngs();
-            drawResizeHandles();
-            showResizeSize();
-        };
+            stopCornerEdit();
+            sideEdit = { kind: kind, id: id, points: latLngsToGeometry(layer.getLatLngs()) };
+            drawSideHandles();
+            showSideSize(sideEdit.points);
+            refreshInspector();
+        }
+        window.startSideEdit = startSideEdit;
+        window.startResizeRoom = function (id) { startSideEdit('room', id); };
 
-        async function commitRoomResize() {
-            const id = resizeRoomId;
-            const poly = roomShapes[id]; if (!poly) return;
-            const geometry = scaledGeometry();
-            const r = await postData(URLS.editRoom, {
-                room_id: id, geometry: JSON.stringify(geometry),
-            });
-            if (r.success) {
-                // Treat the saved shape as the new baseline for further drags.
-                poly._aylaOriginal = poly.getLatLngs();
-                resizeBase = { points: geometry.map(function (p) { return p.slice(); }), box: bboxOf(geometry) };
-                resizeBox = Object.assign({}, resizeBase.box);
-                positionHandles();
-                redrawDoorsForRoom(id);
-            } else {
-                alert(r.error || 'Failed to save the new size');
-                if (poly._aylaOriginal) poly.setLatLngs(poly._aylaOriginal);
-                resizeBox = Object.assign({}, resizeBase.box);
-                positionHandles();
+        function stopSideEdit() {
+            if (!sideEdit) return;
+            const was = sideEdit;
+            clearSideHandles();
+            sideEdit = null;
+            resetModeHint();
+            if (lmap) lmap.closePopup();
+            if (inspectorSel && inspectorSel.kind === was.kind && String(inspectorSel.id) === String(was.id)) {
+                refreshInspector();
             }
         }
-
-        function stopRoomResize() {
-            if (resizeRoomId === null) return;
-            clearResizeHandles();
-            resizeRoomId = null;
-            resizeBase = resizeBox = null;
-            if (lmap) lmap.closePopup();
-            resetModeHint();
-        }
+        window.stopSideEdit = stopSideEdit;
+        // Older callers still ask for this by name.
+        function stopRoomResize() { stopSideEdit(); }
         window.stopRoomResize = stopRoomResize;
+
+        // Redraw, then carry on editing the same shape.
+        function reopenEditing(kind, id, message, keepEditing) {
+            refreshAll(message, { reopen: { kind: kind, id: id },
+                                  then: keepEditing ? function () { startSideEdit(kind, id); } : null });
+        }
+
+        async function commitSideEdit(points) {
+            const kind = sideEdit.kind, id = sideEdit.id;
+            const geometry = points.map(function (p) {
+                return [Math.round(p[0] * 100) / 100, Math.round(p[1] * 100) / 100];
+            });
+            const url = { room: URLS.editRoom, obstacle: URLS.editObstacle, stairs: URLS.editStairway }[kind];
+            const body = { geometry: JSON.stringify(geometry) };
+            body[{ room: 'room_id', obstacle: 'obstacle_id', stairs: 'stairway_id' }[kind]] = id;
+            const r = await postData(url, body);
+            if (!r.success) {
+                alert(r.error || 'Could not save the new size');
+                const layer = editableLayer(kind, id);
+                if (layer && sideEdit) layer.setLatLngs(geometryToLatLngs(sideEdit.points));
+                if (sideEdit) placeSideHandles(sideEdit.points);
+                return;
+            }
+            reopenEditing(kind, id, 'Size saved.', true);
+        }
+
+        // Turn one element; a room takes what stands in it along.
+        window.rotateElement = async function (kind, id, deg) {
+            const editing = isSideEditing(kind, id);
+            const r = await postGroup('rotate', [{ kind: kind, id: id }], { degrees: deg });
+            if (!r.success) {
+                mapToast(r.error || 'Could not rotate it.', 'error');
+                const layer = editableLayer(kind, id);
+                if (editing && layer) { layer.setLatLngs(geometryToLatLngs(sideEdit.points)); placeSideHandles(sideEdit.points); }
+                return;
+            }
+            rememberUndo(r.undo);
+            reopenEditing(kind, id, 'Rotated ' + deg + '°.', editing);
+        };
+
+        function rotateRowHtml(kind, id) {
+            return '<div class="insp-field" style="margin-bottom:4px"><label>Rotate</label></div>'
+                + '<div class="insp-rot-row">'
+                + [[-90, 'fa-rotate-left', '90'], [-15, 'fa-rotate-left', '15'],
+                   [15, 'fa-rotate-right', '15'], [90, 'fa-rotate-right', '90']].map(function (b) {
+                    return '<button type="button" class="insp-rot-btn" title="Rotate ' + b[0] + '°" '
+                        + 'onclick="rotateElement(\'' + kind + '\',' + id + ',' + b[0] + ')">'
+                        + '<i class="fa-solid ' + b[1] + '"></i> ' + b[2] + '&deg;</button>';
+                }).join('')
+                + '</div>';
+        }
+
+        function sideEditButtonHtml(kind, id) {
+            return isSideEditing(kind, id)
+                ? '<button class="map-action-btn" onclick="stopSideEdit()"><i class="fa-solid fa-check"></i> Done resizing</button>'
+                : '<button class="map-action-btn" onclick="startSideEdit(\'' + kind + '\',' + id + ')">'
+                  + '<i class="fa-solid fa-up-right-and-down-left-from-center"></i> Resize / rotate (drag)</button>';
+        }        window.stopRoomResize = stopRoomResize;
         // Shelves.
         const SHELF_W = 46, SHELF_D = 14;
         const shelfShapes = {};    // shelf_id -> { poly, data }
@@ -4065,7 +4185,7 @@
             lmap.closePopup();
             if (!await AylaDialog.confirm('Remove "' + entry.data.name + '" from the floor plan?\n\nThe shelf and its books are kept — only its position is cleared.')) return;
             const r = await postData(URLS.unplaceShelf, { shelf_id: id });
-            if (r.success) window.location.reload();
+            if (r.success) refreshAll('Shelf taken off the plan.');
             else alert(r.error || 'Failed to unplace the shelf');
         };
 
@@ -4352,9 +4472,9 @@
                      + 'between them: ' + r.parts.map(function (p) { return p.join(' + '); }).join(' | ')
                      + '. Add a door where these rooms connect, then generate again.';
             }
+            await refreshAll();
             await AylaDialog.confirm(msg, {
-                title: 'Route generated', confirmLabel: 'Reload the map', cancelLabel: 'Stay' })
-                && window.location.reload();
+                title: 'Route generated', confirmLabel: 'OK', cancelLabel: 'Close' });
         };
 
         window.clearWaypoints = async function () {
@@ -4619,7 +4739,7 @@
             const r = await postData(URLS.editRoom, {
                 room_id: roomId, geometry: JSON.stringify(pendingGeometry),
             });
-            if (r.success) { window.location.reload(); }
+            if (r.success) { refreshAll('Room shape saved.', { reopen: { kind: 'room', id: roomId } }); }
             else {
                 alert(r.error || 'Failed to save the room shape');
                 if (drawnRoomLayer) { lmap.removeLayer(drawnRoomLayer); drawnRoomLayer = null; }
@@ -4704,65 +4824,63 @@
                 description: document.getElementById('placeRoomDesc').value.trim(),
                 geometry: JSON.stringify(pendingGeometry),
             });
-            if (r.success) { drawnRoomLayer = null; window.location.reload(); }
+            if (r.success) { window.closeRoomPlaceModal(); refreshAll('Room added.'); }
             else alert(r.error || 'Failed to save room');
         };
 
         // Stairways.
-        let stairShape = 'straight';
+        function insidePoly(x, y, poly) {
+            let hit = false;
+            for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+                const xi = poly[i][0], yi = poly[i][1], xj = poly[j][0], yj = poly[j][1];
+                if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / ((yj - yi) || 1e-12) + xi) hit = !hit;
+            }
+            return hit;
+        }
 
-        const STAIR_SHAPE_NOTES = {
-            straight: 'One straight run of steps.',
-            quarter: 'Up to a landing, then a quarter turn and out sideways.',
-            half: 'Up one flight, about turn on a half-landing, and back over it — '
-                + 'the shape your existing staircase is.',
-        };
-
-        window.pickStairShape = function (shape) {
-            stairShape = shape;
-            document.querySelectorAll('#placeStairsShape .stair-shape').forEach(function (b) {
-                b.classList.toggle('on', b.dataset.shape === shape);
+        // The smallest room a point stands in.
+        function roomAtPoint(x, y) {
+            let best = null, bestArea = Infinity;
+            (rooms || []).forEach(function (r) {
+                if (!r.geometry || r.geometry.length < 3 || !insidePoly(x, y, r.geometry)) return;
+                const a = Math.abs(polyArea(r.geometry));
+                if (a < bestArea) { best = r; bestArea = a; }
             });
-            document.getElementById('placeStairsShapeNote').textContent =
-                STAIR_SHAPE_NOTES[shape] || '';
-        };
-
-        // The long axis of what was drawn is the direction of travel.
-        function inferStairBearing(geom) {
-            if (!geom || geom.length < 3) return 0;
-            const xs = geom.map(function (p) { return p[0]; });
-            const ys = geom.map(function (p) { return p[1]; });
-            const w = Math.max.apply(null, xs) - Math.min.apply(null, xs);
-            const h = Math.max.apply(null, ys) - Math.min.apply(null, ys);
-            return h >= w ? 0 : 90;
+            return best;
         }
 
-        const STAIR_WORDS = { 0: 'Towards the top of the map', 90: 'Towards the right',
-                              180: 'Towards the bottom of the map', 270: 'Towards the left' };
-        const STAIR_ICONS = { 0: 'fa-arrow-up', 90: 'fa-arrow-right',
-                              180: 'fa-arrow-down', 270: 'fa-arrow-left' };
-
-        function paintStairBearing() {
-            const b = Number(document.getElementById('placeStairsBearing').value) || 0;
-            document.getElementById('placeStairsDirWords').textContent = STAIR_WORDS[b] || '';
-            document.getElementById('placeStairsArrow').className =
-                'fa-solid ' + (STAIR_ICONS[b] || 'fa-arrow-up') + ' text-rose-400';
+        function roomOptions(selectId, current) {
+            const sel = document.getElementById(selectId);
+            if (!sel) return;
+            sel.innerHTML = '<option value="">Choose a room…</option>'
+                + (rooms || []).slice().sort(function (a, b) { return (a.name || '').localeCompare(b.name || ''); })
+                    .map(function (r) {
+                        return '<option value="' + r.room_id + '"' + (String(r.room_id) === String(current) ? ' selected' : '')
+                            + '>' + esc(r.name || ('Room #' + r.room_id)) + '</option>';
+                    }).join('');
         }
 
-        window.flipStairBearing = function () {
-            const box = document.getElementById('placeStairsBearing');
-            box.value = String(((Number(box.value) || 0) + 180) % 360);
-            paintStairBearing();
-        };
+        // The stairways on the chosen floor, for "meets which stairway there".
+        function fillStairPartners(floorSelectId, partnerSelectId, current, selfId) {
+            const floorId = (document.getElementById(floorSelectId) || {}).value;
+            const sel = document.getElementById(partnerSelectId);
+            if (!sel) return;
+            const floor = (otherFloors || []).filter(function (f) { return String(f.floor_plan_id) === String(floorId); })[0];
+            const list = (floor && floor.stairways) || [];
+            sel.innerHTML = '<option value="">' + (!floorId ? 'Pick the floor first' : list.length ? 'Not chosen yet' : 'No stairway drawn on that floor yet') + '</option>'
+                + list.map(function (o) {
+                    const taken = o.partner_id && String(o.partner_id) !== String(selfId || '');
+                    return '<option value="' + o.stairway_id + '"' + (String(o.stairway_id) === String(current) ? ' selected' : '') + '>'
+                        + esc(o.label) + (o.room ? ' — ' + esc(o.room) : '') + (taken ? ' (linked elsewhere)' : '') + '</option>';
+                }).join('');
+            sel.disabled = !floorId || !list.length;
+        }
+        window.fillStairPartners = fillStairPartners;
 
         window.openStairsPlace = function () {
             document.getElementById('placeStairsName').value = '';
             document.getElementById('placeStairsKind').value = 'Stairs';
             document.getElementById('placeStairsDir').value = 'both';
-            pickStairShape('straight');
-            document.getElementById('placeStairsBearing').value =
-                String(inferStairBearing(pendingGeometry));
-            paintStairBearing();
             const sel = document.getElementById('placeStairsTo');
             sel.innerHTML = '<option value="">Not linked yet</option>';
             (otherFloors || []).forEach(function (f) {
@@ -4771,6 +4889,14 @@
                 o.textContent = f.label + (f.name && f.name !== f.label ? ' — ' + f.name : '');
                 sel.appendChild(o);
             });
+            fillStairPartners('placeStairsTo', 'placeStairsPartner', '');
+            // Start on the room the stairs were drawn in.
+            let guess = null;
+            if (pendingGeometry && pendingGeometry.length) {
+                const c = shapeCentre(pendingGeometry);
+                guess = roomAtPoint(c[0], c[1]);
+            }
+            roomOptions('placeStairsRoom', guess ? guess.room_id : '');
             document.getElementById('placeStairsModal').classList.remove('hidden');
         };
         window.closeStairsPlaceModal = function () {
@@ -4780,23 +4906,25 @@
         };
         window.submitStairsPlace = async function () {
             if (!pendingGeometry) { alert('Draw the stairway shape on the map first.'); return; }
+            const room = document.getElementById('placeStairsRoom').value;
+            if (!room) { alert('Pick the room this stairway opens into.'); return; }
             const r = await postData(URLS.addStairway, {
                 floor_plan_id: floorPlanId,
                 kind: document.getElementById('placeStairsKind').value,
                 direction: document.getElementById('placeStairsDir').value,
-                bearing: document.getElementById('placeStairsBearing').value || 0,
-                shape: stairShape,
                 connects_to: document.getElementById('placeStairsTo').value,
+                partner_id: document.getElementById('placeStairsPartner').value,
+                room_id: room,
                 name: document.getElementById('placeStairsName').value.trim(),
                 geometry: JSON.stringify(pendingGeometry),
             });
-            if (r.success) { drawnRoomLayer = null; window.location.reload(); }
+            if (r.success) { window.closeStairsPlaceModal(); refreshAll('Stairway added.'); }
             else alert(r.error || 'Failed to save the stairway');
         };
         window.removeStairway = async function (id, label) {
             if (!await AylaDialog.confirm('Remove ' + label + ' from the floor plan?')) return;
             const r = await postData(URLS.deleteStairway, { stairway_id: id });
-            if (r.success) window.location.reload();
+            if (r.success) refreshAll('Removed.');
             else alert(r.error || 'Failed to remove it');
         };
 
@@ -4822,13 +4950,13 @@
                 geometry: JSON.stringify(pendingGeometry),
                 holds_books: holds ? '1' : '0',
             });
-            if (r.success) { drawnRoomLayer = null; window.location.reload(); }
+            if (r.success) { window.closeObstaclePlaceModal(); refreshAll('Furniture added.'); }
             else alert(r.error || 'Failed to save the obstacle');
         };
         window.removeObstacle = async function (id, label) {
             if (!await AylaDialog.confirm('Remove ' + label + ' from the floor plan?')) return;
             const r = await postData(URLS.deleteObstacle, { obstacle_id: id });
-            if (r.success) window.location.reload();
+            if (r.success) refreshAll('Removed.');
             else alert(r.error || 'Failed to remove it');
         };
 
@@ -4874,7 +5002,7 @@
                 payload.map_y = pending.y;
             }
             const r = await postData(URLS.addShelf, payload);
-            if (r.success) { drawnRoomLayer = null; window.location.reload(); }
+            if (r.success) { window.closeShelfPlaceModal(); refreshAll('Shelf added.'); }
             else alert(r.error || 'Failed to save shelf');
         };
 
@@ -4928,18 +5056,6 @@
                 if (el) el.style.height = px + 'px';
             }
         }
-
-        window.toggleMapFullscreen = function () {
-            document.body.classList.toggle('map-full');
-            if (lmap) setTimeout(function () { lmap.invalidateSize(); }, 80);
-        };
-
-        // Esc leaves the filled-window view.
-        document.addEventListener('keydown', function (e) {
-            if (e.key === 'Escape' && document.body.classList.contains('map-full')) {
-                window.toggleMapFullscreen();
-            }
-        });
 
         // Resize Leaflet when the box is resized.
         function watchMapResize() {
@@ -5002,8 +5118,8 @@
                 err.classList.remove('hidden');
                 return;
             }
-            // Reload after changing the canvas.
-            window.location.reload();
+            window.closeCanvasSize();
+            refreshAll('Canvas size saved.');
         };
 
         function showCanvasNote() {
@@ -5014,7 +5130,11 @@
 
         window.switchPlan = function (planId) {
             if (!planId) return;
-            window.location.href = '?plan=' + encodeURIComponent(planId);
+            if (!lmap) { window.location.href = '?plan=' + encodeURIComponent(planId); return; }
+            history.replaceState(null, '', '?plan=' + encodeURIComponent(planId));
+            const picker = document.getElementById('planPicker');
+            if (picker) picker.value = String(planId);
+            window.refreshMap(null, { planId: planId });
         };
 
         // Started once the map exists, so the first invalidateSize has something to resize.
@@ -5034,7 +5154,6 @@
         const VIEW_KEY = 'ayla.floorplan.view';
         const TOAST_KEY = 'ayla.floorplan.toast';
         const GROUP_KEY = 'ayla.floorplan.group';
-        const UNDO_KEY = 'ayla.floorplan.undo';
         const REOPEN_KEY = 'ayla.floorplan.reopen';
 
         const groupSel = new Map();       // 'kind:id' -> { kind, id }
@@ -5235,20 +5354,27 @@
                 .map(function (m) { return { kind: m.kind, id: m.id }; });
         }
 
-        function undoLabel() {
-            const u = stored(UNDO_KEY);
-            return (u && u.plan === floorPlanId) ? u.label : null;
+        // What Undo would take back, as the server last reported it.
+        let undoState = { label: null, count: 0 };
+        function setUndoState(label, count) {
+            undoState = { label: label || null, count: label ? (count || 1) : 0 };
+            const btn = document.getElementById('btnUndo');
+            if (btn) {
+                btn.disabled = !undoState.label;
+                btn.title = undoState.label
+                    ? 'Undo: ' + undoState.label.toLowerCase() + ' (Ctrl+Z)'
+                      + (undoState.count > 1 ? ' — ' + undoState.count + ' steps back available' : '')
+                    : 'Nothing to undo yet';
+            }
+            const badge = document.getElementById('undoCount');
+            if (badge) {
+                badge.textContent = undoState.count;
+                badge.classList.toggle('hidden', undoState.count < 2);
+            }
         }
-        function rememberUndo(label) {
-            store(UNDO_KEY, label ? { plan: floorPlanId, label: label } : null);
-        }
-        function undoButtonHtml() {
-            const label = undoLabel();
-            return label
-                ? '<button class="map-action-btn" onclick="runUndo()"><i class="fa-solid fa-rotate-left"></i> Undo: '
-                  + esc(label.toLowerCase()) + ' (Ctrl+Z)</button>'
-                : '';
-        }
+        function undoLabel() { return undoState.label; }
+        // Kept for the callers that still report a label; the server now keeps the history.
+        function rememberUndo() {}
 
         function renderGroupPanel(skippedLocked) {
             if (!groupSel.size) { clearInspector(); return; }
@@ -5265,11 +5391,12 @@
                       + (skippedLocked === 1 ? ' was' : 's were') + ' left out.</p>'
                     : '')
                 + '<div class="map-actions">'
+                + '<button class="map-action-btn" onclick="groupRotate(-90)"><i class="fa-solid fa-rotate-left"></i> Rotate 90&deg;</button>'
+                + '<button class="map-action-btn" onclick="groupRotate(90)"><i class="fa-solid fa-rotate-right"></i> Rotate 90&deg;</button>'
                 + '<button class="map-action-btn" onclick="groupLock(true)"><i class="fa-solid fa-lock"></i> Lock</button>'
                 + '<button class="map-action-btn" onclick="groupLock(false)"><i class="fa-solid fa-lock-open"></i> Unlock</button>'
                 + '<button class="map-action-btn danger" onclick="groupDelete()"><i class="fa-solid fa-trash"></i> Delete (Del)</button>'
                 + '<button class="map-action-btn" onclick="clearGroupSelection()"><i class="fa-solid fa-xmark"></i> Clear selection (Esc)</button>'
-                + undoButtonHtml()
                 + '</div>'
                 + '<p class="insp-note">Drag any selected element to move them together, or use the '
                 + 'arrow keys (hold Shift for 10). Shift+click adds or removes one element.'
@@ -5511,9 +5638,9 @@
                 store(VIEW_KEY, { plan: floorPlanId, lat: c.lat, lng: c.lng, zoom: lmap.getZoom() });
             }
             store(TOAST_KEY, message || null);
-            store(GROUP_KEY, keepSelection && groupSel.size
-                ? { plan: floorPlanId, keys: Array.from(groupSel.keys()), area: mode === 'area' } : null);
-            window.location.reload();
+            // Redrawn in place now; the view stays where it is.
+            store(VIEW_KEY, null);
+            refreshAll(message, { keepSelection: keepSelection });
         }
 
         function restoreMapView() {
@@ -5565,6 +5692,15 @@
             reloadKeepingView(r.message, true);
         }
 
+        window.groupRotate = async function (deg) {
+            const items = unlockedMembers();
+            if (!items.length) { mapToast('Everything selected is locked.', 'error'); return; }
+            const r = await postGroup('rotate', items, { degrees: deg });
+            if (!r.success) { mapToast(r.error || 'Could not rotate the selection.', 'error'); return; }
+            rememberUndo(r.undo);
+            reloadKeepingView(r.message, true);
+        };
+
         window.groupLock = async function (on) {
             const items = Array.from(groupSel.values()).map(function (m) { return { kind: m.kind, id: m.id }; });
             if (!items.length) return;
@@ -5605,12 +5741,26 @@
             reloadKeepingView(r.message, false);
         };
 
+        let undoBusy = false;
         window.runUndo = async function () {
+            if (undoBusy) return;
             if (!undoLabel()) { mapToast('Nothing to undo.'); return; }
-            const r = await postGroup('undo', []);
-            rememberUndo(null);
-            if (!r.success) { mapToast(r.error || 'Nothing to undo.', 'error'); return; }
-            reloadKeepingView(r.message, false);
+            undoBusy = true;
+            const btn = document.getElementById('btnUndo');
+            if (btn) btn.disabled = true;
+            let r;
+            try {
+                r = await postData(URLS.undo, { floor_plan_id: floorPlanId });
+            } catch (err) {
+                r = { success: false, error: 'The server did not answer. Nothing was changed.' };
+            }
+            undoBusy = false;
+            if (!r.success) {
+                setUndoState(undoState.label, undoState.count);
+                mapToast(r.error || 'Nothing to undo.', 'error');
+                return;
+            }
+            refreshAll(r.message);
         };
 
         // Keyboard: V, Esc, Delete, arrows and Ctrl+Z.
@@ -5636,6 +5786,8 @@
             if (delta) { e.preventDefault(); nudgeGroup(delta[0], delta[1]); }
         });
 
+        let baseRect = null;       // the canvas outline, kept across redraws
+
         async function initMapConfig() {
             const picker = document.getElementById('planPicker');
             const planId = picker ? picker.value : '';
@@ -5647,17 +5799,8 @@
             } catch (err) { return; }
             if (!data.success) return;
 
-            // Make it obvious when the plan being edited is not the live one.
-            const badge = document.getElementById('planLiveBadge');
-            if (badge) badge.classList.toggle('hidden', !!data.is_active);
-
-            floorPlanId = data.floor_plan_id;
-            imgW = data.canvas_width; imgH = data.canvas_height;
-            planScale = (typeof data.pixels_per_meter === 'number') ? data.pixels_per_meter : null;
-            populateShelves(data.shelves);
-            rooms = data.rooms || [];
+            applyPlanHeader(data);
             restoreMapHeight();
-            showCanvasNote();
 
             lmap = L.map('mapConfig', {
                 crs: L.CRS.Simple, minZoom: -5, maxZoom: 4,
@@ -5665,7 +5808,7 @@
             });
             const bounds = [[0, 0], [imgH, imgW]];
             // Outline of the canvas area.
-            L.rectangle(bounds, {
+            baseRect = L.rectangle(bounds, {
                 color: AylaTheme.color('--border-color'), weight: 1,
                 fillColor: AylaTheme.color('--bg-card'), fillOpacity: 1, interactive: false,
             }).addTo(lmap);
@@ -5684,7 +5827,26 @@
             refreshReadiness();
             drawGrid();
             setTimeout(function () { lmap.invalidateSize(); }, 200);
+            drawPlanShapes(data);
+        }
 
+        // The plan's own settings, from map data.
+        function applyPlanHeader(data) {
+            // Make it obvious when the plan being edited is not the live one.
+            const badge = document.getElementById('planLiveBadge');
+            if (badge) badge.classList.toggle('hidden', !!data.is_active);
+
+            floorPlanId = data.floor_plan_id;
+            imgW = data.canvas_width; imgH = data.canvas_height;
+            planScale = (typeof data.pixels_per_meter === 'number') ? data.pixels_per_meter : null;
+            setUndoState(data.undo_label, data.undo_count);
+            populateShelves(data.shelves);
+            rooms = data.rooms || [];
+            showCanvasNote();
+        }
+
+        // Everything drawn on the plan, from map data.
+        function drawPlanShapes(data) {
             (data.rooms || []).forEach(addRoomShape);
             // After rooms so furniture sits on top of the floor it stands on.
             (data.obstacles || []).forEach(addObstacleShape);
@@ -5704,6 +5866,68 @@
             paintPickChips();
             drawLockBadges();
             restoreGroupSelection();
+        }
+
+        // Redraw the plan in place after a change, instead of reloading the page.
+        let refreshQueue = Promise.resolve();
+        window.refreshMap = function (message, opts) {
+            refreshQueue = refreshQueue.then(function () { return redrawMap(message, opts || {}); });
+            return refreshQueue;
+        };
+
+        async function redrawMap(message, opts) {
+            if (!lmap) { window.location.reload(); return; }
+            const planId = opts.planId || floorPlanId;
+            let data;
+            try {
+                const res = await fetch(URLS.mapData + '?floor_plan_id=' + encodeURIComponent(planId),
+                                        { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+                data = await res.json();
+            } catch (err) { data = null; }
+            if (!data || !data.success) { window.location.reload(); return; }
+
+            // Carried over the same way a reload carried them.
+            store(GROUP_KEY, opts.keepSelection && groupSel.size
+                ? { plan: planId, keys: Array.from(groupSel.keys()), area: mode === 'area' } : null);
+            if (opts.reopen) store(REOPEN_KEY, Object.assign({ plan: planId }, opts.reopen));
+            store(TOAST_KEY, message || null);
+
+            clearMode();
+            clearInspector();
+            lmap.closePopup();
+
+            // Take everything off the map but the canvas and its grid.
+            const keep = new Set([baseRect]);
+            if (gridLayer) { keep.add(gridLayer); gridLayer.eachLayer(function (l) { keep.add(l); }); }
+            const doomed = [];
+            lmap.eachLayer(function (l) { if (!keep.has(l)) doomed.push(l); });
+            doomed.forEach(function (l) { lmap.removeLayer(l); });
+
+            [roomAngleMarks, beaconMarkers, waypointMarkers, connections, roomShapes, roomData,
+             obstacleShapes, obstacleData, stairwayShapes, doorShapes, shelfShapes].forEach(function (o) {
+                Object.keys(o).forEach(function (k) { delete o[k]; });
+            });
+            deskMarker = null; lockBadges = []; marquee = null; groupDrag = null; nudge = null;
+            selectedWaypointId = null; editingBeaconId = null; selectedDoorId = null; selectedShelfId = null;
+            shelfLive = null; shelfResizeHandles = []; shelfRotateHandleMarker = null; doorHandles = [];
+            sideHandles = []; rotateKnob = null; sideEdit = null; roomEditingId = null; cornerEdit = null;
+            mapSelection = { kind: null, id: null }; pending = null;
+            drawnRoomLayer = null; pendingGeometry = null; guideLayer = null; drawVertices = []; drawing = false;
+            groupSel.clear();
+
+            const switched = data.floor_plan_id !== floorPlanId;
+            const resized = data.canvas_width !== imgW || data.canvas_height !== imgH;
+            applyPlanHeader(data);
+            if (switched || resized) {
+                const bounds = [[0, 0], [imgH, imgW]];
+                baseRect.setBounds(bounds);
+                drawGrid();
+                if (switched) lmap.fitBounds(bounds);
+            }
+            otherFloors = data.other_floors || [];
+            drawPlanShapes(data);
+            refreshReadiness();
+            if (typeof opts.then === 'function') opts.then();
         }
 
         document.addEventListener('DOMContentLoaded', function () {

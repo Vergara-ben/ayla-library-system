@@ -288,6 +288,16 @@ class Stairway(models.Model):
         FloorPlan, on_delete=models.SET_NULL, null=True, blank=True,
         related_name='stairways_arriving', db_column='connects_to_id',
     )
+    # The room it opens into; routes reach it only from there.
+    room = models.ForeignKey(
+        'Room', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='stairways', db_column='room_id',
+    )
+    # The stairway it meets on the other floor.
+    partner = models.ForeignKey(
+        'self', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='+', db_column='partner_id',
+    )
 
     is_active = models.BooleanField(default=True)
     # Locked in the editor: cannot be moved or deleted.
@@ -977,7 +987,7 @@ class PatronPhoto(models.Model):
 
 
 # Transactions
-class Transaction(models.Model):
+class Transaction(Archivable):
 
     TRANSACTION_TYPE_CHOICES = [
         ('Borrow', 'Borrow'),
@@ -1614,3 +1624,26 @@ class LoginAttempt(models.Model):
     def __str__(self):
         return f'{self.scope}:{self.identifier} ({self.failures})'
 
+
+
+class FloorPlanUndo(models.Model):
+    """One step back in the floor plan editor: the plan as it was before a change."""
+
+    undo_id = models.AutoField(primary_key=True)
+    floor_plan = models.ForeignKey(
+        FloorPlan, on_delete=models.CASCADE, db_column='floor_plan_id',
+        related_name='undo_steps',
+    )
+    admin = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, db_column='admin_id',
+    )
+    label = models.CharField(max_length=255)
+    snapshot = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'FloorPlanUndo'
+        indexes = [models.Index(fields=['floor_plan', '-undo_id'])]
+
+    def __str__(self):
+        return f'{self.label} ({self.floor_plan_id})'

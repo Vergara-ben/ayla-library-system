@@ -4,11 +4,13 @@ from . import desk
 from . import chat
 from . import tasks
 from . import floorplan_bulk
+from .floorplan_undo import floorplan_undo, wrap_editor_views
 from . import openstatus
 
 urlpatterns = [
     # Floor plan editor: move, delete, lock and undo several elements at once.
     path('admin-portal/floor-plan/bulk/', floorplan_bulk.floorplan_bulk, name='floorplan_bulk'),
+    path('admin-portal/floor-plan/undo/', floorplan_undo, name='floorplan_undo'),
     # Hosting: uptime pings and the daily task trigger.
     path('healthz/', tasks.healthz, name='healthz'),
     path('network/', tasks.network_address, name='network_address'),
@@ -127,6 +129,9 @@ urlpatterns = [
     path('admin-portal/transaction/', views.admin_transaction, name='admin_transaction'),
     path('admin-portal/transaction/<int:transaction_id>/preview/', views.transaction_action_preview, name='transaction_action_preview'),
     path('admin-portal/transaction/<int:transaction_id>/action/', views.admin_transaction_action, name='admin_transaction_action'),
+    path('admin-portal/transaction/<int:transaction_id>/detail/', views.transaction_detail, name='transaction_detail'),
+    path('admin-portal/transaction/<int:transaction_id>/edit/', views.edit_transaction, name='edit_transaction'),
+    path('admin-portal/transaction/<int:transaction_id>/delete/', views.delete_transaction, name='delete_transaction'),
     path('admin-portal/respond-to-extension/', views.respond_to_extension, name='respond_to_extension'),
     path('admin-portal/adjust-due-date/', views.adjust_due_date, name='adjust_due_date'),
     path('admin-portal/indoor-map/', views.admin_indoor_map, name='admin_indoor_map'),
@@ -182,7 +187,6 @@ urlpatterns = [
     path('admin-portal/add-obstacle/', views.add_obstacle, name='add_obstacle'),
     path('admin-portal/add-stairway/', views.add_stairway, name='add_stairway'),
     path('admin-portal/edit-stairway/', views.edit_stairway, name='edit_stairway'),
-    path('admin-portal/match-stairway/', views.match_stairway, name='match_stairway'),
     path('admin-portal/delete-stairway/', views.delete_stairway, name='delete_stairway'),
     path('admin-portal/edit-obstacle/', views.edit_obstacle, name='edit_obstacle'),
     path('admin-portal/delete-obstacle/', views.delete_obstacle, name='delete_obstacle'),
@@ -254,3 +258,6 @@ urlpatterns = [
     path('admin-portal/add-waypoint-connection/', views.add_waypoint_connection, name='add_waypoint_connection'),
     path('admin-portal/delete-waypoint-connection/', views.delete_waypoint_connection, name='delete_waypoint_connection'),
 ]
+
+# Every floor plan editor action can be undone.
+wrap_editor_views(urlpatterns)

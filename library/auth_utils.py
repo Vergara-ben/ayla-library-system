@@ -24,6 +24,39 @@ def check_password(plain_password, hashed_password):
     return django_check_password(plain_password, hashed_password)
 
 
+# Re-entering the password before changing or deleting a record.
+CONFIRM_LIMIT = 5
+CONFIRM_WINDOW_SECONDS = 15 * 60
+_CONFIRM_KEY = 'password_confirm_fails'
+
+
+def admin_password_error(request, what='this'):
+    """None when the signed-in administrator typed their own password; otherwise why not."""
+    import time
+    from .audit import log_admin_action
+    from .models import User
+
+    user = User.objects.filter(admin_id=request.session.get('admin_id')).first()
+    if user is None or user.role != 'Admin':
+        return 'Only an administrator can do this.'
+    now = time.time()
+    fails = [t for t in request.session.get(_CONFIRM_KEY, []) if now - t < CONFIRM_WINDOW_SECONDS]
+    if len(fails) >= CONFIRM_LIMIT:
+        return 'Too many wrong passwords. Try again in 15 minutes.'
+    password = request.POST.get('admin_password') or ''
+    if not password:
+        return 'Enter your password to confirm.'
+    if django_check_password(password, user.password_hash):
+        if fails:
+            request.session[_CONFIRM_KEY] = []
+        return None
+    fails.append(now)
+    request.session[_CONFIRM_KEY] = fails
+    log_admin_action(request, 'Denied', 'Password', user.admin_id,
+                     f'Wrong password when confirming {what}')
+    return 'That password is not right.'
+
+
 # Login throttling.
 
 def _throttle_row(scope, identifier):

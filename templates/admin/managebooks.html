@@ -2099,9 +2099,9 @@
                 window.printLabelsForBooks(importedIds);
                 return;
             }
-            // Asked to print and there is nothing to print: every row was skipped.
+            // Close the modal and say what happened.
             printAfterImport = false;
-            document.getElementById('importResultModal').classList.remove('hidden');
+            finishImport(data);
         };
 
         // Say what the import did, then get out of the way.
