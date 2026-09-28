@@ -130,6 +130,9 @@
     cursor: pointer; transition: background-color 0.2s;
   }
   .btn-primary:hover { background: var(--accent-strong); }
+  /* The button renders light here, so white text washed out. */
+  body.neu-app .btn-row .btn-primary,
+  body.neu-app .btn-row .btn-primary:hover { color: var(--accent) !important; }
 
   .error-text { color: var(--danger); margin-bottom: 20px; font-size: 14px; }
 

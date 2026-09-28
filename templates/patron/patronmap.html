@@ -256,7 +256,7 @@
 </head>
 <body class="neu-app">
 <nav class="navbar">
-  <a href="{% if target.book_id %}{% url 'patron_book_details' target.book_id %}{% else %}{% url 'patron_catalog' %}{% endif %}" class="back-btn" aria-label="Back"><i class="fa-solid fa-arrow-left" aria-hidden="true"></i></a>
+  <a id="backBtn" href="{% if target.book_id %}{% url 'patron_book_details' target.book_id %}{% else %}{% url 'patron_catalog' %}{% endif %}" class="back-btn" aria-label="Back"><i class="fa-solid fa-arrow-left" aria-hidden="true"></i></a>
   <div class="nav-title" id="navTitle">Floor Map</div>
   {# Hidden unless there is more than one floor. #}
   <select id="floorPicker" class="floor-picker" onchange="switchFloor(this.value)" style="display:none" aria-label="Choose a floor"></select>
@@ -547,7 +547,13 @@ function renderShelfStrip() {
   const strip = document.getElementById('shelfStrip');
   const near = document.getElementById('shelfNeighbours');
   const rows = targetData.layout || [];
-  if (!strip || !rows.length) return;
+  if (!strip) return;
+  // Cleared first, so a switched-to book never shows the last one's shelf.
+  ['shelfStrip', 'shelfTrack', 'shelfNeighbours'].forEach(function (id) {
+    const el = document.getElementById(id);
+    if (el) el.classList.add('hidden');
+  });
+  if (!rows.length) return;
 
   let focus = rows.findIndex(function (r) { return r.is_focus; });
   if (focus < 0) focus = 0;                    // no target: show the near end
@@ -2049,6 +2055,75 @@ document.getElementById('findInput').addEventListener('input', function () {
 });
 document.addEventListener('keydown', function (e) {
   if (e.key === 'Escape') { closeFind(); closeBLEHelp(); }
+});
+
+// Picking another book retargets this page instead of reloading it:
+// a reload would stop the Bluetooth scan and ask for navigation again.
+const BOOK_URL = "{% url 'patron_book_details' 0 %}";
+const CATALOG_URL = "{% url 'patron_catalog' %}";
+let switchSeq = 0;
+
+async function switchTarget(bookId, push) {
+  const seq = ++switchSeq;
+  let res;
+  try {
+    res = await fetchJSON(MAP_URL + '?book_id=' + encodeURIComponent(bookId || '') + '&format=json');
+  } catch (e) {
+    if (seq === switchSeq) showMapNotice('That book could not be loaded. Check your connection.');
+    return;
+  }
+  if (seq !== switchSeq) return;                 // a newer pick won
+  const next = (res && res.target) || {};
+
+  Object.keys(targetData).forEach(function (k) { delete targetData[k]; });
+  Object.assign(targetData, next);
+
+  // The target floor comes with the map data for the new shelf.
+  targetFloorCache = null;
+  targetFloorId = null;
+  if (targetData.shelf_id) {
+    try {
+      const data = await fetchJSON(NAV_DATA_URL + '?shelf=' + targetData.shelf_id);
+      if (seq !== switchSeq) return;
+      if (data && data.success) {
+        floorCache[data.floor_plan_id] = data;
+        targetFloorId = data.target_floor_id || null;
+      }
+    } catch (e) { /* the route still finds the floor */ }
+  }
+
+  // Start the walk over, keeping the patron's position and the scan.
+  hasArrived = false;
+  targetPoint = null;
+  lastRoutedFrom = null;
+  lastRoutePoints = null;
+  const navBtn = document.getElementById('navBtn');
+  if (navBtn && patronFloorId !== null) navBtn.textContent = 'Navigating…';
+
+  const back = document.getElementById('backBtn');
+  if (back) back.href = targetData.book_id ? BOOK_URL.replace('/0/', '/' + targetData.book_id + '/') : CATALOG_URL;
+  if (push) history.pushState(null, '', MAP_URL + (targetData.book_id ? '?book_id=' + targetData.book_id : ''));
+
+  document.getElementById('shelfName').textContent = targetData.shelf_name
+    ? 'Target: ' + targetData.shelf_name : 'Browse the map';
+  // Where the patron stands wins; otherwise open on the book's floor.
+  const floor = patronFloorId !== null ? patronFloorId : (targetFloorId || shownFloorId);
+  if (floor !== null) await showFloor(floor);
+}
+
+document.getElementById('findResults').addEventListener('click', function (e) {
+  const link = e.target.closest('a.find-item');
+  if (!link || e.ctrlKey || e.metaKey || e.shiftKey || e.button !== 0) return;
+  const id = new URL(link.href, location.href).searchParams.get('book_id');
+  if (!id) return;
+  e.preventDefault();
+  closeFind();
+  switchTarget(id, true);
+});
+
+window.addEventListener('popstate', function () {
+  const id = new URLSearchParams(location.search).get('book_id') || '';
+  if (String(id) !== String(targetData.book_id || '')) switchTarget(id, false);
 });
 
 async function enableBLE() {
