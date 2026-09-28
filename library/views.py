@@ -851,6 +851,9 @@ def patron_map(request):
                               f'Opened the map to "{book.title[:60]}"'
                               + (f' at {target["shelf_name"]}' if target.get('shelf_name')
                                  else ' (shelf not placed on the map)'))
+    # The open map switches books through this, so the Bluetooth scan keeps running.
+    if request.GET.get('format') == 'json':
+        return JsonResponse({'target': target})
     return render(request, 'patron/patronmap.html', {'target': target})
 
 
