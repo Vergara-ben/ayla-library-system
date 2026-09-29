@@ -21,9 +21,10 @@ from .auth_utils import (
     record_login_failure,
     waste_password_time,
 )
-from .audit import log_system_action
+from .audit import log_admin_action, log_patron_action, log_system_action
 from .emails import account_action_otp_email
-from .models import Book, FloorPlan, Patron, PatronLog, Shelf, ShelfLevel, User
+from .models import (Book, FloorPlan, LibraryStatus, Patron, PatronLog, Shelf,
+                     ShelfLevel, User)
 from .names import name_matches, parse_name, tokenise
 
 logger = logging.getLogger(__name__)
@@ -292,6 +293,17 @@ def _desk_find_options():
             'shelves': list(shelves.values()), 'levels': out_levels}
 
 
+def _log_kiosk(request, action, entity_id, detail):
+    """Kiosk searches go to the patron who just signed in, else to the desk account."""
+    viewer = desk_viewer_id(request)
+    patron = Patron.objects.filter(patron_id=viewer).first() if viewer else None
+    if patron is not None:
+        log_patron_action(request, action, 'Book', entity_id,
+                          'At the desk kiosk: ' + detail, patron=patron)
+    else:
+        log_admin_action(request, action, 'Book', entity_id, 'Desk mode: ' + detail)
+
+
 def desk_find_book(request):
     """Catalogue list for the kiosk: every book at first, narrowed by search and filters.
 
@@ -319,6 +331,7 @@ def desk_find_book(request):
             continue
         place = _shelf_location(book)
         results.append({
+            'book_id': book.book_id,
             'title': row['title'],
             'author': row['author'] or '',
             'year': row['year'] or '',
@@ -332,6 +345,11 @@ def desk_find_book(request):
             'room': place['room'],
             'floor': place['floor'],
         })
+
+    if term and page == 1:
+        # Only log actual searches, not every page of one.
+        _log_kiosk(request, 'Search', None,
+                   f'Searched the catalogue for "{term[:80]}" ({total} title(s))')
 
     data = {
         'success': True,
@@ -386,6 +404,8 @@ def desk_way_to_book(request):
         return JsonResponse({'success': False,
                              'error': 'That shelf is not placed on the floor plan.'})
 
+    _log_way(request, shelf)
+
     route = json.loads(get_navigation_route(_sub_request(request, {
         'start_x': start.desk_x,
         'start_y': start.desk_y,
@@ -434,6 +454,14 @@ def desk_way_to_book(request):
     })
 
 
+def _log_way(request, shelf):
+    raw_book = (request.GET.get('book_id') or '').strip()
+    book = Book.objects.filter(book_id=int(raw_book)).first() if raw_book.isdigit() else None
+    what = f'"{book.title[:60]}"' if book else 'a book'
+    _log_kiosk(request, 'Navigate', book.book_id if book else None,
+               f'Showed the way to {what} at {shelf.name}')
+
+
 def send_desk_unlock_code(request):
     """Email a one-time code to the account that armed the desk."""
     if request.method != 'POST':
@@ -477,7 +505,8 @@ def close_stale_visits():
     closed = 0
     for log in stale:
         day = timezone.localtime(log.entry_time).date()
-        assumed = timezone.make_aware(datetime.combine(day, time(23, 59)))
+        # Nobody is inside after closing, so the visit ended by then.
+        assumed = timezone.make_aware(datetime.combine(day, LibraryStatus.CLOSING_TIME))
         # Exit time is never before entry time.
         if assumed <= log.entry_time:
             assumed = log.entry_time + timedelta(minutes=1)

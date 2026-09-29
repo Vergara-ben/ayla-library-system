@@ -897,7 +897,8 @@
 
         let d;
         try {
-            const r = await fetch(DESK_URLS.wayToBook + '?shelf_id=' + encodeURIComponent(book.shelf_id),
+            const r = await fetch(DESK_URLS.wayToBook + '?shelf_id=' + encodeURIComponent(book.shelf_id)
+                                  + '&book_id=' + encodeURIComponent(book.book_id || ''),
                                   { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
             d = await r.json();
         } catch (e) {
