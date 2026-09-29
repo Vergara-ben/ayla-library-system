@@ -12,6 +12,7 @@ from django.core.paginator import Paginator
 from datetime import date, datetime, timedelta
 from io import BytesIO
 from decimal import Decimal, InvalidOperation
+import hashlib
 import json
 
 from uuid import uuid4
@@ -22,6 +23,7 @@ import qrcode
 import os
 import math
 import heapq
+import itertools
 import secrets
 import re
 
@@ -77,6 +79,7 @@ from .emails import (
     bulk_connection,
     return_receipt_email,
     lost_book_email,
+    lost_book_paid_email,
     extension_approved_email,
     extension_declined_email,
     otp_email,
@@ -1784,9 +1787,10 @@ def admin_add_book(request):
         call_number = (request.POST.get('call_number') or '').strip() or None
         publication_year = request.POST.get('publication_year', '').strip()
         cover_img_url = request.POST.get('cover_img_url', '').strip()
+        price, price_error = _parse_price(request.POST.get('price'))
 
-        if not title or not author:
-            error = 'Title and author are required.'
+        if not title or not author or price_error:
+            error = price_error or 'Title and author are required.'
             if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
                 from django.http import JsonResponse
                 return JsonResponse({'success': False, 'error': error})
@@ -1811,6 +1815,7 @@ def admin_add_book(request):
                 call_number=call_number,
                 publication_year=int(publication_year) if publication_year else None,
                 cover_img_url=cover_img_url if cover_img_url else None,
+                price=price,
                 qr_code=qr_code
             )
             _add_existing_copy(book, request)
@@ -2441,6 +2446,7 @@ def admin_edit_book(request, book_id):
         'shelf_slot': book.shelf_slot or '',
         'condition': book.condition or 'Good',
         'call_number': book.call_number or '',
+        'price': book.price if book.price is not None else '',
     }
 
     if request.method == 'POST':
@@ -2452,9 +2458,10 @@ def admin_edit_book(request, book_id):
         cover_img_url = request.POST.get('cover_img_url', '').strip()
         status = request.POST.get('status', '').strip()
         shelf_level_id = request.POST.get('shelf_level', '').strip()
+        price, price_error = _parse_price(request.POST.get('price'))
 
-        if not title or not author:
-            error = 'Title and author are required.'
+        if not title or not author or price_error:
+            error = price_error or 'Title and author are required.'
             if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
                 from django.http import JsonResponse
                 return JsonResponse({'success': False, 'error': error})
@@ -2478,6 +2485,8 @@ def admin_edit_book(request, book_id):
             if 'call_number' in request.POST:
                 # Cleared deliberately means "renumber it": save() fills a blank.
                 book.call_number = (request.POST.get('call_number') or '').strip() or None
+            if 'price' in request.POST:
+                book.price = price
             book.save()
             log_admin_action(request, 'Update', 'Book', book.book_id, f'Updated "{book.title}"')
             success = 'Book details updated successfully.'
@@ -2584,6 +2593,20 @@ def record_return(request, tx, book=None):
     return tx.fine_amount
 
 
+def _settle_lost_book(request, tx):
+    """The patron paid a lost book's charge: the loan closes, the book stays Lost."""
+    tx.return_date = timezone.localdate()
+    tx.save(update_fields=['return_date'])
+    title = tx.book.title if tx.book else ''
+    log_admin_action(
+        request, 'Payment', 'Transaction', tx.transaction_id,
+        f'Collected ₱{tx.fine_amount:.2f} lost-book payment from '
+        f'{tx.patron.fullname if tx.patron else "the patron"} for "{title}"',
+        patron=tx.patron)
+    if tx.patron and tx.book:
+        lost_book_paid_email(tx.patron, tx.book, f'{tx.fine_amount:.2f}')
+
+
 @granted_module_required('transactions')
 def transaction_action_preview(request, transaction_id):
     """What Mark Returned / Mark Lost would do, for the confirmation modal."""
@@ -2609,15 +2632,54 @@ def transaction_action_preview(request, transaction_id):
         # A reading session is closed by the same action, worded differently.
         'is_reading': tx.transaction_type == 'In-Library Reading',
     }
-    if action == 'lost':
+    data['marked_lost'] = tx.marked_lost
+    if action == 'pay':
+        data.update({'action': 'pay', 'total_fine': f'{tx.fine_amount:.2f}'})
+    elif action == 'lost':
+        # A lost book is charged its own price; the admin types one when none is on record.
+        price = tx.book.price if tx.book else None
         data.update({
             'action': 'lost',
-            'lost_fee': f'{rule.lost_book_fee:.2f}',
-            'total_fine': f'{(overdue_fine + rule.lost_book_fee):.2f}',
+            'lost_fee': f'{price:.2f}' if price is not None else '',
+            'price_set': price is not None,
+            'total_fine': f'{(overdue_fine + (price or 0)):.2f}',
         })
     else:
         data.update({'action': 'return', 'total_fine': f'{overdue_fine:.2f}'})
     return JsonResponse({'success': True, 'preview': data})
+
+
+def _parse_price(raw):
+    """(price or None, error) from a typed or imported value; blank means no price."""
+    text = str(raw if raw is not None else '').strip().replace(',', '')
+    for mark in ('\u20b1', 'PHP', 'Php', 'php', 'P'):
+        if text.startswith(mark):
+            text = text[len(mark):].strip()
+    if not text:
+        return None, None
+    try:
+        price = Decimal(text)
+    except (InvalidOperation, ValueError):
+        return None, 'The price "%s" is not a number.' % str(raw).strip()[:20]
+    if not price.is_finite() or price < 0 or price >= Decimal('100000000'):
+        return None, 'The price must be between 0 and 99,999,999.99.'
+    return price.quantize(Decimal('0.01')), None
+
+
+def _lost_book_charge(request, book):
+    """(amount to charge for a lost book, error). The amount typed wins; else the book's price."""
+    raw = (request.POST.get('lost_fee') or '').strip()
+    if raw:
+        try:
+            fee = Decimal(raw)
+        except (InvalidOperation, ValueError):
+            return None, 'Enter the amount to charge as a number.'
+        if not fee.is_finite() or fee < 0 or fee >= Decimal('100000000'):
+            return None, 'Enter a valid amount to charge for the lost book.'
+        return fee.quantize(Decimal('0.01')), None
+    if book is not None and book.price is not None:
+        return book.price, None
+    return None, 'This book has no price on record. Enter the amount to charge for it.'
 
 
 @granted_module_required('transactions')
@@ -2625,17 +2687,38 @@ def admin_transaction_action(request, transaction_id):
     if request.method == 'POST':
         action = request.POST.get('action')
         tx = Transaction.objects.select_related('book', 'patron').filter(transaction_id=transaction_id).first()
-        if tx and action == 'return' and tx.return_date is None:
+        if tx and action in ('return', 'lost') and tx.marked_lost:
+            error = 'This book is already marked lost. Record the payment instead.'
+            if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                return JsonResponse({'success': False, 'error': error})
+            messages.error(request, error)
+            return portal_redirect(request, 'admin_transaction')
+        if tx and action == 'pay':
+            if not (tx.marked_lost and tx.return_date is None):
+                error = 'There is no unpaid lost-book charge on this loan.'
+                if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                    return JsonResponse({'success': False, 'error': error})
+                messages.error(request, error)
+                return portal_redirect(request, 'admin_transaction')
+            _settle_lost_book(request, tx)
+        elif tx and action == 'return' and tx.return_date is None:
             record_return(request, tx)
             # A reading session ends at the desk; there is nothing to receipt.
             if tx.patron and tx.book and tx.transaction_type == 'Borrow':
                 return_receipt_email(tx.patron, [tx.book], had_overdue=tx.overdue_flag)
         elif tx and action == 'lost' and tx.return_date is None and tx.transaction_type == 'Borrow':
+            fee, fee_error = _lost_book_charge(request, tx.book)
+            if fee_error:
+                if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                    return JsonResponse({'success': False, 'error': fee_error})
+                messages.error(request, fee_error)
+                return portal_redirect(request, 'admin_transaction')
             rule = BorrowingRule.current()
             today = timezone.localdate()
-            # Total owed = any accrued overdue fine + the configured lost-book fee.
+            # Total owed = any accrued overdue fine + what this book is worth.
             tx.overdue_flag = bool(tx.due_date and today > tx.due_date)
-            tx.fine_amount = rule.compute_fine(tx.due_date, today) + rule.lost_book_fee
+            tx.fine_amount = rule.compute_fine(tx.due_date, today) + fee
+            tx.marked_lost = True
             tx.save()  # transaction stays open so it counts as an outstanding lost-book penalty
             if tx.book:
                 tx.book.status = 'Lost'
@@ -2649,7 +2732,10 @@ def admin_transaction_action(request, transaction_id):
                              f'Marked "{tx.book.title if tx.book else ""}" lost (fine {tx.fine_amount})'
                              + (' — inventory copy flagged' if flagged else ''),
                              patron=tx.patron)
-            if tx.patron and tx.book:
+            # A patron who comes in empty-handed can pay on the spot.
+            if request.POST.get('pay_now') == '1':
+                _settle_lost_book(request, tx)
+            elif tx.patron and tx.book:
                 lost_book_email(tx.patron, tx.book, tx.fine_amount)
 
         # The confirmation modal posts by fetch and refreshes the table itself.
@@ -2970,6 +3056,8 @@ def staff_book_detail(request):
 
 def _transaction_status(tx, today):
     """What a loan is right now, rather than what the nightly sweep last wrote."""
+    if tx.marked_lost:
+        return 'Lost, paid' if tx.return_date else 'Lost, unpaid'
     if tx.return_date:
         return ('Returned late'
                 if (tx.due_date and tx.return_date > tx.due_date) else 'Returned')
@@ -2995,11 +3083,13 @@ def _transaction_page(request, template):
     if status == 'borrowed':
         transactions_queryset = transactions_queryset.filter(transaction_type='Borrow', return_date__isnull=True)
     elif status == 'returned':
-        transactions_queryset = transactions_queryset.filter(return_date__isnull=False)
+        transactions_queryset = transactions_queryset.filter(return_date__isnull=False, marked_lost=False)
+    elif status == 'lost':
+        transactions_queryset = transactions_queryset.filter(marked_lost=True)
     elif status == 'overdue':
         # Past its due date and still out, whether or not the sweep has run.
         transactions_queryset = transactions_queryset.filter(
-            transaction_type='Borrow', return_date__isnull=True,
+            transaction_type='Borrow', return_date__isnull=True, marked_lost=False,
             due_date__lt=timezone.localdate())
 
     def _parse_date(s):
@@ -3021,7 +3111,8 @@ def _transaction_page(request, template):
     currently_out = Transaction.objects.filter(transaction_type='Borrow', return_date__isnull=True).count()
     today = timezone.localdate()
     overdue_count = Transaction.objects.filter(
-        transaction_type='Borrow', return_date__isnull=True, due_date__lt=today).count()
+        transaction_type='Borrow', return_date__isnull=True, marked_lost=False,
+        due_date__lt=today).count()
     transaction_count = transactions_queryset.count()
 
     paginator = Paginator(transactions_queryset, 20)
@@ -3869,6 +3960,7 @@ def admin_book_details_ajax(request, book_id):
         'status': book.status,
         'cover_img_url': book.cover_img_url,
         'qr_code': book.qr_code,
+        'price': f'{book.price:.2f}' if book.price is not None else '',
         'category': book.shelf_level.category if book.shelf_level else 'N/A',
         'shelf': book.shelf_level.shelf.name if (book.shelf_level and book.shelf_level.shelf) else 'N/A',
         'shelf_id': book.shelf_level.shelf.shelf_id if (book.shelf_level and book.shelf_level.shelf) else None,
@@ -4080,6 +4172,7 @@ def _book_qr_payload(book):
         'status': book.status,
         'cover_img_url': book.cover_img_url,
         'qr_code': book.qr_code,
+        'price': f'{book.price:.2f}' if book.price is not None else '',
         'category': book.shelf_level.category if book.shelf_level else 'N/A',
         'shelf_level': (book.shelf_level.label if book.shelf_level else 'N/A'),
     }
@@ -4194,6 +4287,8 @@ def download_book_template(request):
         ('Code Label', False, 'The call number on the spine. Leave blank to have it worked out.',
          'FIC A31p 1963'),
         ('Quantity', False, 'How many copies, 1 to 50. Blank means 1.', 1),
+        ('Price', False, 'What the book is worth in pesos, charged if it is lost. Blank means '
+                         'not set yet.', 350),
         ('Location', False, 'The shelf board, long or short: Shelf A Column 1 Level 2, A C1 L2, '
                             'Table 1 Top. A board that does not exist yet is listed before '
                             'anything is saved.', 'Shelf A Column 1 Level 2'),
@@ -4811,6 +4906,8 @@ def _import_books_body(request):
         'whereitis': 'storage_area',
         'quantity': 'quantity', 'qty': 'quantity', 'copies': 'quantity',
         'numberofcopies': 'quantity',
+        'price': 'price', 'cost': 'price', 'value': 'price', 'replacementcost': 'price',
+        'bookprice': 'price', 'amount': 'price',
         'condition': 'condition', 'bookcondition': 'condition', 'state': 'condition',
         'materialtype': 'material_type', 'material': 'material_type',
         'format': 'material_type', 'itemtype': 'material_type', 'mediatype': 'material_type',
@@ -4854,6 +4951,7 @@ def _import_books_body(request):
         created_ids = []
         unmatched_areas = set()
         unreadable_conditions = set()
+        unreadable_prices = set()
         unreadable_materials = set()
         # Boards named by the sheet that did not exist, in the order first met.
         new_boards = []
@@ -4933,6 +5031,10 @@ def _import_books_body(request):
             if clash:
                 copies_of_existing += 1
 
+            price, price_error = _parse_price(field(row, 'price'))
+            if price_error:
+                unreadable_prices.add(str(field(row, 'price')).strip()[:20])
+
             raw_year = field(row, 'publication_year')
             publication_year = None
             if raw_year:
@@ -5004,6 +5106,7 @@ def _import_books_body(request):
                     call_number=field(row, 'call_number') or None,
                     shelf_level=shelf_level,
                     status='Available',
+                    price=price,
                     qr_code=str(uuid4()),
                 )
                 _add_existing_copy(book, request, reason='Imported from the existing collection')
@@ -5035,6 +5138,10 @@ def _import_books_body(request):
             parts.append('could not read the condition "'
                          + '", "'.join(sorted(unreadable_conditions)[:5])
                          + '" — filed as Good')
+        if unreadable_prices:
+            parts.append('could not read the price "'
+                         + '", "'.join(sorted(unreadable_prices)[:5])
+                         + '" — left without a price')
         if unreadable_materials:
             parts.append('could not read the material type "'
                          + '", "'.join(sorted(unreadable_materials)[:5])
@@ -6751,23 +6858,19 @@ def admin_borrowing_rules(request):
         try:
             loan = int(request.POST.get('loan_period_days', rule.loan_period_days))
             maxb = int(request.POST.get('max_books_per_patron', rule.max_books_per_patron))
-            grace = int(request.POST.get('grace_period_days', rule.grace_period_days))
             fine = Decimal(request.POST.get('fine_per_day') or '0')
-            lost = Decimal(request.POST.get('lost_book_fee') or '0')
 
             if loan < 1 or maxb < 1:
                 error = 'Loan period and borrowing limit must be at least 1.'
-            elif grace < 0 or fine < 0 or lost < 0:
-                error = 'Grace period and fees cannot be negative.'
+            elif fine < 0:
+                error = 'The daily fine cannot be negative.'
             else:
                 rule.loan_period_days = loan
                 rule.max_books_per_patron = maxb
-                rule.grace_period_days = grace
                 rule.fine_per_day = fine
-                rule.lost_book_fee = lost
                 rule.save()
                 log_admin_action(request, 'Update', 'BorrowingRule', rule.rule_id,
-                                 f'loan {loan}d, max {maxb}, fine {fine}/day, grace {grace}d')
+                                 f'loan {loan}d, max {maxb}, fine {fine}/day')
                 saved = True
         except (ValueError, InvalidOperation):
             error = 'Please enter valid numeric values.'
@@ -6862,22 +6965,6 @@ def _shelf_page(request, template):
                             .exclude(status__in=WRITTEN_OFF).count()),
         # Shelves whose recorded room disagrees with where they are drawn.
         'room_mismatches': _shelf_room_mismatches(),
-    })
-
-
-@admin_only_required
-def position_test(request):
-    """Check positioning against the real beacons, from the Administrator's side."""
-    floors = list(FloorPlan.objects.filter(is_active=True)
-                  .annotate(beacon_count=Count('blebeacon')))
-    raw = (request.GET.get('floor') or '').strip()
-    chosen = next((f for f in floors if raw.isdigit() and f.floor_plan_id == int(raw)), None)
-    # Default to a floor that has beacons to test against.
-    if chosen is None:
-        chosen = next((f for f in floors if f.beacon_count), floors[0] if floors else None)
-    return render(request, 'admin/positiontest.html', {
-        'floors': floors,
-        'chosen_floor_id': chosen.floor_plan_id if chosen else '',
     })
 
 
@@ -7100,7 +7187,10 @@ def get_shelf_tree(request):
                 }
                 
                 # Structure, not a book list.
-                levels = list(shelf.shelflevel_set.all())
+                # Level 1 upward, then Top and Underneath, so the list reads in order.
+                levels = sorted(shelf.shelflevel_set.all(),
+                                key=lambda lv: (lv.column_number or 1, lv.is_under, lv.is_top,
+                                                lv.level_number, lv.shelf_level_id))
                 columns = sorted({(lv.column_number or 1) for lv in levels})
 
                 for shelf_level in levels:
@@ -7158,9 +7248,11 @@ def get_shelf_tree(request):
 @admin_or_module_required('shelf')
 def get_shelf_levels_flat(request):
     """Returns flattened list of all ShelfLevels with breadcrumb path"""
+    # Grouped by floor, room and shelf, then Level 1 upward, then Top and Underneath.
     shelf_levels = ShelfLevel.objects.select_related(
         'shelf__room__floor_plan'
-    ).all()
+    ).order_by('shelf__room__floor_plan__floor_number', 'shelf__room__name', 'shelf__name',
+               'column_number', 'is_under', 'is_top', 'level_number', 'shelf_level_id')
 
     flat_data = []
     for sl in shelf_levels:
@@ -8761,6 +8853,36 @@ def _room_adjacency(floor_plan):
     return pairs
 
 
+def _warning_key(issue):
+    """Stable id for one readiness warning; any change in its wording makes a new one."""
+    raw = (issue['level'] + '|' + issue['text'] + '|' + (issue.get('detail') or '')).encode('utf-8')
+    return hashlib.sha1(raw).hexdigest()[:16]
+
+
+@admin_or_module_required('shelf')
+def floor_plan_dismiss_warning(request):
+    """Hide one readiness warning on a floor plan, or bring it back."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST is allowed.'})
+    raw_id = (request.POST.get('floor_plan_id') or '').strip()
+    plan = FloorPlan.objects.filter(floor_plan_id=int(raw_id)).first() if raw_id.isdigit() else None
+    if plan is None:
+        return JsonResponse({'success': False, 'error': 'Floor plan not found'})
+    key = (request.POST.get('key') or '').strip()
+    restore = request.POST.get('restore') == '1'
+    keys = list(plan.dismissed_warnings or [])
+    if restore:
+        keys = [] if key == 'all' else [k for k in keys if k != key]
+    elif key and key not in keys:
+        keys.append(key)
+    plan.dismissed_warnings = keys[-200:]
+    plan.save(update_fields=['dismissed_warnings'])
+    log_admin_action(request, 'Restore warning' if restore else 'Dismiss warning',
+                     'FloorPlan', plan.floor_plan_id,
+                     (request.POST.get('text') or '')[:200])
+    return JsonResponse({'success': True})
+
+
 @admin_or_module_required('shelf')
 def floor_plan_readiness(request):
     """What still stops this floor plan working, in one list."""
@@ -8990,15 +9112,22 @@ def floor_plan_readiness(request):
                             'There is no floor below this one. Set it to "up" or '
                             '"up and down".')
 
+    # Dismissed warnings stay out of the count; blockers cannot be dismissed.
+    dismissed = set(plan.dismissed_warnings or [])
+    for i in issues:
+        i['key'] = _warning_key(i)
+        i['dismissed'] = i['level'] == 'warning' and i['key'] in dismissed
+
     blockers = sum(1 for i in issues if i['level'] == 'blocker')
     # Counted by name rather than by subtraction.
-    warnings = sum(1 for i in issues if i['level'] == 'warning')
+    warnings = sum(1 for i in issues if i['level'] == 'warning' and not i['dismissed'])
     return JsonResponse({
         'success': True,
         'plan': plan.name,
         'ready': blockers == 0,
         'blockers': blockers,
         'warnings': warnings,
+        'dismissed': sum(1 for i in issues if i['dismissed']),
         'issues': issues,
         'counts': {'rooms': len(rooms), 'doors': doors,
                    'waypoints': len(waypoints), 'beacons': len(beacons),
@@ -10033,13 +10162,16 @@ def _astar(start_id, goal_id, coords, adjacency):
         gx, gy = coords[goal_id]
         return math.hypot(ax - gx, ay - gy)
 
-    open_heap = [(h(start_id), 0.0, start_id)]
+    # The counter breaks ties, so two waypoints never have to be compared:
+    # node ids mix numbers and 'stair:<id>' strings.
+    order = itertools.count()
+    open_heap = [(h(start_id), 0.0, next(order), start_id)]
     came_from = {}
     g_score = {start_id: 0.0}
     visited = set()
 
     while open_heap:
-        _, g_cur, current = heapq.heappop(open_heap)
+        _, g_cur, _, current = heapq.heappop(open_heap)
         if current == goal_id:
             path = [current]
             while current in came_from:
@@ -10055,7 +10187,7 @@ def _astar(start_id, goal_id, coords, adjacency):
             if neighbor not in g_score or tentative < g_score[neighbor]:
                 g_score[neighbor] = tentative
                 came_from[neighbor] = current
-                heapq.heappush(open_heap, (tentative + h(neighbor), tentative, neighbor))
+                heapq.heappush(open_heap, (tentative + h(neighbor), tentative, next(order), neighbor))
     return None, None
 
 
@@ -11275,7 +11407,11 @@ def receive_stock(request):
         condition = (item.get('condition') or 'Good').strip()
         if condition not in dict(InventoryRecord.CONDITION_CHOICES):
             condition = 'Good'
-        parsed.append((item, quantity, condition))
+        price, price_error = _parse_price(item.get('price'))
+        if price_error:
+            messages.error(request, 'Line ' + str(index) + ': ' + price_error)
+            return _receiving_redirect(request)
+        parsed.append((item, quantity, condition, price))
         total_copies += quantity
 
     if total_copies > 500:
@@ -11288,7 +11424,7 @@ def receive_stock(request):
     new_titles = 0
     try:
         with transaction.atomic():
-            for item, quantity, condition in parsed:
+            for item, quantity, condition, price in parsed:
                 book, was_created = _resolve_intake_book(item, source)
                 if was_created:
                     new_titles += 1
@@ -11298,6 +11434,9 @@ def receive_stock(request):
                     # Each copy is a book record of its own; a new title's first copy is the new record.
                     copy_book = _intake_book_for_copy(book, was_created and copy_no == 0,
                                                       source, condition)
+                    if price is not None:
+                        copy_book.price = price
+                        copy_book.save(update_fields=['price'])
                     record = InventoryRecord.objects.create(
                         book=copy_book,
                         source=source,

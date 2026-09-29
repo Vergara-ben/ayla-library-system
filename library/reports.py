@@ -811,8 +811,7 @@ def _unreturned(start, end):
             overdue += 1
             total_days_over += days_over
             # What the fine would be if it came back today.
-            billable = max(days_over - (rule.grace_period_days or 0), 0)
-            fine_today = Decimal(billable) * (rule.fine_per_day or Decimal('0'))
+            fine_today = Decimal(days_over) * (rule.fine_per_day or Decimal('0'))
             accruing += fine_today
         rows.append([
             tx.transaction_id,

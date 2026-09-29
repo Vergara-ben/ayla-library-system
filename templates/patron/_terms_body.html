@@ -30,19 +30,14 @@
   <h3>4. Overdue, damaged and lost books</h3>
   <ul>
     {% if rule.fine_per_day > 0 %}
-    <li>An overdue book is charged <strong>&#8369;{{ rule.fine_per_day }}</strong> per day
-      {% if rule.grace_period_days %}after a grace period of {{ rule.grace_period_days }}
-      day{{ rule.grace_period_days|pluralize }}{% endif %}.</li>
+    <li>An overdue book is charged <strong>&#8369;{{ rule.fine_per_day }}</strong> for each day
+      after its due date.</li>
     {% else %}
     <li>No overdue fine is charged at present, but overdue books stop you borrowing until they
       are returned.</li>
     {% endif %}
-    {% if rule.lost_book_fee > 0 %}
-    <li>A lost book is charged <strong>&#8369;{{ rule.lost_book_fee }}</strong>, or its
-      replacement, as the library decides.</li>
-    {% else %}
-    <li>A lost book must be replaced or paid for, as the library decides.</li>
-    {% endif %}
+    <li>A lost book is charged its own price, as recorded by the library, or must be replaced,
+      as the library decides.</li>
     <li>A damaged book may be charged for repair or replacement.</li>
   </ul>
 

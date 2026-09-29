@@ -140,6 +140,9 @@
         .sw .tk:before { content: ''; position: absolute; width: 12px; height: 12px; left: 2px; top: 2px; background: var(--text-muted); border-radius: 50%; transition: .2s; }
         .sw input:checked + .tk { background: var(--accent-strong); }
         .sw input:checked + .tk:before { transform: translateX(14px); background: var(--accent); }
+            details.vp-level > summary { list-style: none; }
+        details.vp-level > summary::-webkit-details-marker { display: none; }
+        details.vp-level[open] .vp-chev { transform: rotate(90deg); }
     </style>
     <link rel="stylesheet" href="{% static 'css/admin-enhance.css' %}">
     <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
@@ -1746,7 +1749,8 @@
         }
 
         // Book placement, read-only.
-        const viewPlacement = { boards: [] };
+        // Levels start collapsed; the ones opened are remembered while the list redraws.
+        const viewPlacement = { boards: [], open: new Set() };
 
         window.openViewPlacement = async function (type, id) {
             const list = document.getElementById('vpList');
@@ -1778,6 +1782,7 @@
                 return;
             }
             viewPlacement.boards = results.filter(function (d) { return d && d.success; });
+            viewPlacement.open = new Set();
             if (!viewPlacement.boards.length) {
                 list.innerHTML = '<div class="text-xs text-rose-400">' + esc((results[0] && results[0].error) || 'That board could not be opened.') + '</div>';
                 return;
@@ -1810,12 +1815,25 @@
                         + (b.call_number ? ' · <span class="font-mono">' + esc(b.call_number) + '</span>' : '') + '</span>'
                         + '</span>' + statusBadge(b.status) + '</button>';
                 }).join('') : '<div class="text-[11px] text-slate-500 px-3 py-2">' + (q ? 'No match on this board.' : 'No books on this board.') + '</div>';
-                return '<div>'
-                    + (many ? '<p class="text-[10px] uppercase tracking-wide font-bold text-slate-500 mb-1.5"><i class="fa-solid fa-bars-staggered text-blue-400 mr-1.5"></i>' + esc(board.label) + ' <span class="normal-case font-normal">(' + board.books.length + ')</span></p>' : '')
-                    + '<div class="space-y-1.5">' + rows + '</div></div>';
+                if (!many) return '<div><div class="space-y-1.5">' + rows + '</div></div>';
+                // A filter opens every level with a match.
+                const open = q ? books.length > 0 : viewPlacement.open.has(board.label);
+                return '<details class="vp-level" data-label="' + esc(board.label) + '"' + (open ? ' open' : '') + '>'
+                    + '<summary class="cursor-pointer select-none flex items-center gap-1.5 px-2 py-1.5 rounded-lg hover:bg-slate-800/40 text-[10px] uppercase tracking-wide font-bold text-slate-500">'
+                    + '<i class="fa-solid fa-chevron-right vp-chev text-[9px] transition-transform"></i>'
+                    + '<i class="fa-solid fa-bars-staggered text-blue-400"></i>' + esc(board.label)
+                    + ' <span class="normal-case font-normal">(' + (q ? books.length + ' of ' : '') + board.books.length + ')</span></summary>'
+                    + '<div class="space-y-1.5 mt-1.5 mb-2">' + rows + '</div></details>';
             }).join('');
-            document.getElementById('vpList').innerHTML = html
+            const listEl = document.getElementById('vpList');
+            listEl.innerHTML = html
                 || '<div class="text-xs text-slate-500">No books match that filter.</div>';
+            listEl.querySelectorAll('details.vp-level').forEach(function (d) {
+                d.addEventListener('toggle', function () {
+                    if (q) return;
+                    if (d.open) viewPlacement.open.add(d.dataset.label); else viewPlacement.open.delete(d.dataset.label);
+                });
+            });
             document.getElementById('vpCount').textContent = q
                 ? shown + ' of ' + total + ' book' + (total === 1 ? '' : 's')
                 : total + ' book' + (total === 1 ? '' : 's');

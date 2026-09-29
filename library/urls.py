@@ -171,7 +171,6 @@ urlpatterns = [
     path('admin-portal/delete-announcement/', views.delete_announcement, name='delete_announcement'),
     # Floor Plan Management
     path('admin-portal/floorplan-management/', views.floorplan_management, name='floorplan_management'),
-    path('admin-portal/position-test/', views.position_test, name='position_test'),
     path('admin-portal/calibrate-beacon/', views.calibrate_beacon, name='calibrate_beacon'),
     path('admin-portal/set-active-floorplan/', views.set_active_floorplan, name='set_active_floorplan'),
     path('admin-portal/set-floorplan-scale/', views.set_floorplan_scale, name='set_floorplan_scale'),
@@ -241,6 +240,7 @@ urlpatterns = [
     path('admin-portal/move-door/', views.move_door, name='move_door'),
     path('admin-portal/edit-door/', views.edit_door, name='edit_door'),
     path('admin-portal/floor-plan-readiness/', views.floor_plan_readiness, name='floor_plan_readiness'),
+    path('admin-portal/floor-plan-readiness/dismiss/', views.floor_plan_dismiss_warning, name='floor_plan_dismiss_warning'),
     path('admin-portal/generate-waypoints/', views.generate_waypoints, name='generate_waypoints'),
     path('admin-portal/clear-waypoints/', views.clear_waypoints, name='clear_waypoints'),
     path('admin-portal/reorder-books-on-level/', views.reorder_books_on_level, name='reorder_books_on_level'),

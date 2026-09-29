@@ -221,6 +221,7 @@
                             <button onclick="setTxStatus('borrowed')" class="px-3 py-1 rounded text-xs font-semibold {% if status == 'borrowed' %}bg-violet-700/30 text-violet-400 border border-violet-800/50{% else %}text-slate-500 hover:text-slate-300 transition-colors{% endif %}">Borrowed</button>
                             <button onclick="setTxStatus('returned')" class="px-3 py-1 rounded text-xs font-semibold {% if status == 'returned' %}bg-violet-700/30 text-violet-400 border border-violet-800/50{% else %}text-slate-500 hover:text-slate-300 transition-colors{% endif %}">Returned</button>
                             <button onclick="setTxStatus('overdue')" class="px-3 py-1 rounded text-xs font-semibold {% if status == 'overdue' %}bg-violet-700/30 text-violet-400 border border-violet-800/50{% else %}text-slate-500 hover:text-slate-300 transition-colors{% endif %}">Overdue</button>
+                            <button onclick="setTxStatus('lost')" class="px-3 py-1 rounded text-xs font-semibold {% if status == 'lost' %}bg-violet-700/30 text-violet-400 border border-violet-800/50{% else %}text-slate-500 hover:text-slate-300 transition-colors{% endif %}">Lost</button>
                         </div>
                     </div>
                 </div>
@@ -311,6 +312,10 @@
                                     <td class="py-4 px-6 text-center">
                                         {% if tx.status_label == 'Overdue' %}
                                             <span class="inline-block bg-rose-500/10 text-rose-400 border border-rose-500/20 px-2 py-0.5 rounded text-[10px] font-medium min-w-[76px]">Overdue</span>
+                                        {% elif tx.status_label == 'Lost, unpaid' %}
+                                            <span class="inline-block bg-rose-500/10 text-rose-300 border border-rose-500/30 px-2 py-0.5 rounded text-[10px] font-medium min-w-[76px]" title="Marked lost; the charge is not paid yet">Lost, unpaid</span>
+                                        {% elif tx.status_label == 'Lost, paid' %}
+                                            <span class="inline-block bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded text-[10px] font-medium min-w-[76px]" title="Marked lost; the charge was paid">Lost, paid</span>
                                         {% elif tx.status_label == 'Returned late' %}
                                             <span class="inline-block bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded text-[10px] font-medium min-w-[76px]" title="Returned after the due date">Returned late</span>
                                         {% elif tx.status_label == 'Returned' %}
@@ -331,7 +336,10 @@
                                         {% if tx.fine_amount %}PHP {{ tx.fine_amount|floatformat:2 }}{% else %}&mdash;{% endif %}
                                     </td>
                                     <td class="py-4 px-6 text-center">
-                                        {% if not tx.return_date and tx.transaction_type == 'Borrow' %}
+                                        {% if tx.marked_lost and not tx.return_date %}
+                                            {# Lost: nothing to return, only the charge to collect. #}
+                                            <button type="button" onclick="openTxAction({{ tx.transaction_id }}, 'pay')" class="rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-1 text-[10px] font-semibold hover:bg-amber-500/20 hover:text-amber-100" title="The patron paid for the lost book">Record Payment</button>
+                                        {% elif not tx.return_date and tx.transaction_type == 'Borrow' %}
                                             {# Both actions charge money, so each is confirmed in a modal that shows the exact figure first. #}
                                             <div class="inline-flex justify-center gap-1.5">
                                                 <button type="button" onclick="openTxAction({{ tx.transaction_id }}, 'return')" class="rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-1 text-[10px] font-semibold hover:bg-emerald-500/20 hover:text-emerald-100" title="Close this loan from its record - use the desk scanner when the patron is at the counter">Mark Returned</button>
@@ -596,11 +604,14 @@
 
         async function openTxAction(id, kind) {
             txActionId = id; txActionKind = kind; txActionBusy = false;
-            const isLost = kind === 'lost';
-            document.getElementById('txActionTitle').textContent = isLost ? 'Mark Book Lost' : 'Mark Book Returned';
+            const isLost = kind === 'lost', isPay = kind === 'pay';
+            document.getElementById('txActionTitle').textContent =
+                isPay ? 'Record Lost-Book Payment' : (isLost ? 'Mark Book Lost' : 'Mark Book Returned');
             const btn = document.getElementById('txActionConfirm');
-            btn.textContent = isLost ? 'Mark Lost' : 'Mark Returned';
-            btn.className = 'text-xs font-bold px-4 py-2 rounded-lg border ' + (isLost
+            btn.textContent = isPay ? 'Record Payment' : (isLost ? 'Mark Lost' : 'Mark Returned');
+            btn.className = 'text-xs font-bold px-4 py-2 rounded-lg border ' + (isPay
+                ? 'bg-amber-700/40 text-amber-200 border-amber-700/60 hover:bg-amber-700/60'
+                : isLost
                 ? 'bg-rose-700/40 text-rose-200 border-rose-700/60 hover:bg-rose-700/60'
                 : 'bg-emerald-700/40 text-emerald-200 border-emerald-700/60 hover:bg-emerald-700/60');
             document.getElementById('txActionLoading').classList.remove('hidden');
@@ -627,15 +638,46 @@
             document.getElementById('txaDue').textContent = p.due_date + (p.is_overdue ? ' (overdue)' : '');
 
             const fines = document.getElementById('txaFines');
-            if (isLost) {
+            if (isPay) {
+                fines.className = 'rounded-lg border border-amber-800/50 bg-amber-950/30 px-3 py-2.5 text-xs space-y-1';
+                fines.innerHTML =
+                    '<div class="flex justify-between"><span class="font-bold text-amber-300">Amount to collect</span><span class="font-bold text-amber-200">PHP ' + p.total_fine + '</span></div>';
+                document.getElementById('txaNote').textContent =
+                    'The loan is closed as paid, the book stays Lost in Inventory, the patron can borrow '
+                    + 'again, and they are emailed a receipt.';
+            } else if (isLost) {
                 fines.className = 'rounded-lg border border-rose-800/50 bg-rose-950/30 px-3 py-2.5 text-xs space-y-1';
+                // The book's own price, which the admin can change or must type when none is set.
                 fines.innerHTML =
                     '<div class="flex justify-between"><span class="text-slate-400">Overdue fine</span><span class="text-slate-200">PHP ' + p.overdue_fine + '</span></div>'
-                    + '<div class="flex justify-between"><span class="text-slate-400">Lost-book fee</span><span class="text-slate-200">PHP ' + p.lost_fee + '</span></div>'
-                    + '<div class="flex justify-between border-t border-rose-800/40 pt-1 mt-1"><span class="font-bold text-rose-300">Total charged</span><span class="font-bold text-rose-200">PHP ' + p.total_fine + '</span></div>';
-                document.getElementById('txaNote').textContent =
-                    'The loan stays open as an outstanding penalty, the copy is marked Lost in Inventory, '
-                    + 'and the patron is emailed. This blocks them from borrowing until it is settled.';
+                    + '<div class="flex items-center justify-between gap-3"><label for="txaLostFee" class="text-slate-400">Book price</label>'
+                    + '<span class="flex items-center gap-1 text-slate-200">PHP <input id="txaLostFee" type="number" min="0" step="0.01" value="' + (p.lost_fee || '') + '"'
+                    + ' placeholder="Enter amount" class="w-28 text-right bg-slate-950/80 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200"></span></div>'
+                    + (p.price_set ? '' : '<p class="text-[11px] text-amber-300">This book has no price on record. Enter what to charge.</p>')
+                    + '<div class="flex justify-between border-t border-rose-800/40 pt-1 mt-1"><span class="font-bold text-rose-300">Total charged</span><span id="txaTotal" class="font-bold text-rose-200"></span></div>';
+                const feeBox = document.getElementById('txaLostFee');
+                const paintTotal = function () {
+                    const fee = parseFloat(feeBox.value);
+                    document.getElementById('txaTotal').textContent = 'PHP '
+                        + (parseFloat(p.overdue_fine) + (isNaN(fee) ? 0 : fee)).toFixed(2);
+                };
+                feeBox.addEventListener('input', paintTotal);
+                paintTotal();
+                // A patron who comes in without the book often pays there and then.
+                fines.insertAdjacentHTML('beforeend',
+                    '<label class="flex items-center gap-2 pt-2 mt-1 border-t border-rose-800/40 text-slate-300 cursor-pointer">'
+                    + '<input type="checkbox" id="txaPayNow" class="accent-amber-500"> The patron is paying this now</label>');
+                const payNow = document.getElementById('txaPayNow');
+                const paintNote = function () {
+                    btn.textContent = payNow.checked ? 'Mark Lost and Record Payment' : 'Mark Lost';
+                    document.getElementById('txaNote').textContent = payNow.checked
+                        ? 'The copy is marked Lost in Inventory and the loan is closed as paid. '
+                          + 'The patron can borrow again and is emailed a receipt.'
+                        : 'The loan stays open as an unpaid charge, the copy is marked Lost in Inventory, '
+                          + 'and the patron is emailed. They cannot borrow until it is paid.';
+                };
+                payNow.addEventListener('change', paintNote);
+                paintNote();
             } else {
                 fines.className = 'rounded-lg border border-emerald-800/50 bg-emerald-950/30 px-3 py-2.5 text-xs space-y-1';
                 fines.innerHTML =
@@ -674,6 +716,12 @@
             try {
                 const fd = new FormData();
                 fd.append('action', txActionKind);
+                if (txActionKind === 'lost') {
+                    const fee = (document.getElementById('txaLostFee') || {}).value || '';
+                    if (!fee.trim()) { txActionErr('Enter the amount to charge for the lost book.'); return; }
+                    fd.append('lost_fee', fee.trim());
+                    if ((document.getElementById('txaPayNow') || {}).checked) fd.append('pay_now', '1');
+                }
                 const res = await fetch('/admin-portal/transaction/' + txActionId + '/action/', {
                     method: 'POST', body: fd,
                     headers: { 'X-CSRFToken': getCookie('csrftoken'), 'X-Requested-With': 'XMLHttpRequest' },

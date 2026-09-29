@@ -26,7 +26,9 @@ class Command(BaseCommand):
                         .select_related('patron', 'book')
                         .filter(transaction_type='Borrow',
                                 return_date__isnull=True,
-                                due_date__lt=today))
+                                due_date__lt=today)
+                        # A lost book's charge is fixed at Mark Lost; the sweep must not reset it.
+                        .exclude(marked_lost=True))
 
         by_patron = {}
         flagged = 0

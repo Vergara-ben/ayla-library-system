@@ -346,6 +346,7 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" integrity="sha384-NElt3Op+9NBMCYaef5HxeJmU4Xeard/Lku8ek6hoPTvYkQPh3zLIrJP7KiRocsxO" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="{% static 'js/route-arrows.js' %}"></script>
 <script>
 // Read the target data safely.
 const targetData = (function () {
@@ -897,6 +898,7 @@ function drawFloor(data) {
   [baseLayer, shelfLayer, sectionLayer, levelLayer, routeLayer, positionLayer]
     .forEach(function (lyr) { lyr.clearLayers(); });
   routeArrows = [];
+  lastArrowRoute = null;
   stairHighlight = null;
   arrivalMarker = null;
   patronMarker = null;
@@ -1417,57 +1419,27 @@ function showFloorHandover(r) {
 }
 
 // Direction arrows along the route.
-const ARROW_SPACING_M = 1.1;   // roughly one chevron per stride
 
-function chevronIcon(bearingDeg, big) {
-  const color = AylaTheme.color('--blue');
-  const size = big ? 20 : 14;
-  return L.divIcon({
-    className: 'route-arrow',
-    html: '<svg width="' + size + '" height="' + size + '" viewBox="0 0 14 14" '
-        + 'style="display:block;transform:rotate(' + bearingDeg + 'deg)">'
-        + '<path d="M3 2 L10 7 L3 12" fill="none" stroke="' + color + '" '
-        + 'stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-    iconSize: [size, size], iconAnchor: [size / 2, size / 2],
-  });
-}
-
+// The way itself is drawn by the shared route script, the same as at the desk:
+// a faint trail and chevrons a fixed distance apart on screen, re-spaced on zoom.
+let lastArrowRoute = null;
 function drawRouteArrows(route) {
   routeArrows.forEach((m) => routeLayer.removeLayer(m));
   routeArrows = [];
+  lastArrowRoute = route || null;
   if (!route || route.length < 2) return;
-
-  // Arrow angle from the canvas coordinates.
-  const ppm = (mapData && mapData.pixels_per_meter) || 1;
-  const spacing = Math.max(ARROW_SPACING_M * ppm, 24);   // never so dense it smears together
-
-  for (let i = 0; i < route.length - 1; i++) {
-    const a = route[i], b = route[i + 1];
-    const dx = b.x - a.x, dy = b.y - a.y;
-    const length = Math.hypot(dx, dy);
-    if (length < 1e-6) continue;
-    const bearing = Math.atan2(dy, dx) * 180 / Math.PI;
-    const isLastSegment = i === route.length - 2;
-
-    const count = Math.max(1, Math.floor(length / spacing));
-    for (let k = 1; k <= count; k++) {
-      const t = k / (count + 1);
-      const px = a.x + dx * t, py = a.y + dy * t;
-      const marker = L.marker(toLatLng(px, py), {
-        icon: chevronIcon(bearing, false), interactive: false, keyboard: false,
-      }).addTo(routeLayer);
-      routeArrows.push(marker);
-    }
-
-    // Larger arrow near the shelf.
-    if (isLastSegment) {
-      const endMarker = L.marker(toLatLng(b.x - dx * 0.08, b.y - dy * 0.08), {
-        icon: chevronIcon(bearing, true), interactive: false, keyboard: false,
-      }).addTo(routeLayer);
-      routeArrows.push(endMarker);
-    }
+  let pts = route;
+  // On the book's floor the walk ends in the aisle; its last leg points into the shelf.
+  if (targetData.shelf_id && shownFloorId === targetFloorId) {
+    const shelf = ((mapData && mapData.shelves) || []).find(function (s) { return s.shelf_id === targetData.shelf_id; });
+    if (shelf) pts = AylaRoute.intoShelf(route, shelf);
   }
+  routeArrows = AylaRoute.draw({ map: map, layer: routeLayer, points: pts,
+                                 toLatLng: toLatLng, color: AylaTheme.color('--blue') });
 }
+map.on('zoomend', function () {
+  if (lastArrowRoute && !hasArrived) drawRouteArrows(lastArrowRoute);
+});
 
 // Bluetooth positioning
 function showBTModal() { document.getElementById('btModal').classList.add('show'); }

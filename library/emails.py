@@ -180,6 +180,20 @@ def lost_book_email(patron, book, fine_amount):
     return send_email(f"[{lib}] Lost Book Notice", body, patron.email)
 
 
+def lost_book_paid_email(patron, book, amount):
+    """Receipt for a lost book's charge; borrowing is open again."""
+    lib = _library_name()
+    title = book.title if hasattr(book, 'title') else str(book)
+    body = (
+        f"Dear {patron.fullname},\n\n"
+        f"We received your payment of ₱{amount} for the lost item:\n\n"
+        f"  - {title}\n\n"
+        f"The charge is settled and you may borrow again.\n\n"
+        f"Thank you,\n{lib}"
+    )
+    return send_email(f"[{lib}] Lost Book Payment Received", body, patron.email)
+
+
 def otp_email(email, fullname, code):
     """Email the one-time password for online registration verification."""
     lib = _library_name()

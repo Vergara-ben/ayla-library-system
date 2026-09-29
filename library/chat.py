@@ -169,6 +169,10 @@ def _patron_directory(query):
     patrons = Patron.objects.exclude(account_status='Visitor')
     if query:
         patrons = patrons.filter(Q(fullname__icontains=query) | Q(email__icontains=query))
+    else:
+        # Unsearched, the list holds only patrons with a message either way.
+        patrons = patrons.filter(patron_id__in=ChatMessage.objects
+                                 .values('conversation__patron_id'))
     patrons = list(patrons.order_by('fullname'))
 
     unread = dict(ChatMessage.objects

@@ -726,7 +726,6 @@ class ReturnPathTests(TestCase):
         )
         self.rule = BorrowingRule.current()
         self.rule.loan_period_days = 2
-        self.rule.grace_period_days = 1
         self.rule.fine_per_day = 5
         self.rule.save()
         self.book = Book.objects.create(title='Return Book', author='Tester',
@@ -753,14 +752,14 @@ class ReturnPathTests(TestCase):
         self.book.refresh_from_db()
         self.assertEqual(self.book.status, 'For Reshelving')
         self.assertTrue(loan.overdue_flag)
-        # 4 days past due, 1 day of grace, PHP 5 a day.
-        self.assertEqual(loan.fine_amount, 15)
+        # 4 days past due, PHP 5 a day, from the first day late.
+        self.assertEqual(loan.fine_amount, 20)
 
         logs = SystemLog.objects.filter(entity_id=str(loan.transaction_id))
         self.assertTrue(logs.filter(action='Process').exists())
         payment = logs.filter(action='Payment').first()
         self.assertIsNotNone(payment, 'the penalty was collected without a log line')
-        self.assertIn('15.00', payment.detail)
+        self.assertIn('20.00', payment.detail)
 
     def test_an_on_time_return_writes_no_payment_line(self):
         loan = Transaction.objects.create(
@@ -1575,6 +1574,40 @@ class CrossFloorRoutingTests(TestCase):
                          [w.waypoint_id for w in self.lower])
         self.assertEqual(data['distance'], 400)
         self.assertEqual(len(data['legs']), 1)
+
+    def test_a_tie_between_a_waypoint_and_a_stairway_does_not_crash(self):
+        """Two steps of exactly equal cost used to compare a number with 'stair:<id>'."""
+        from .views import _astar
+        coords = {1: (0, 0), 2: (10, 0), 'stair:9': (10, 0), 3: (20, 0)}
+        adjacency = {1: [(2, 10), ('stair:9', 10)], 2: [(3, 10)], 'stair:9': [(3, 10)], 3: []}
+        path, cost = _astar(1, 3, coords, adjacency)
+        self.assertEqual(cost, 20)
+        self.assertEqual((path[0], path[-1]), (1, 3))
+
+    def _desk_way(self):
+        from .desk import DESK_SESSION_KEY
+        self.f1.desk_x, self.f1.desk_y = 100, 200
+        self.f1.save()
+        kiosk = _signed_in(_admin(modules='logs'))
+        session = kiosk.session
+        session[DESK_SESSION_KEY] = True
+        session.save()
+        return kiosk.get('/desk/way/', {'shelf_id': self.shelf.shelf_id}).json()
+
+    def test_the_desk_shows_every_floor_of_the_walk(self):
+        """A patron with no phone reads the upstairs half at the desk too."""
+        data = self._desk_way()
+        self.assertTrue(data['success'], data)
+        floors = data['floors']
+        self.assertEqual([f['floor_plan_id'] for f in floors],
+                         [self.f1.floor_plan_id, self.f2.floor_plan_id])
+        self.assertEqual([f['number'] for f in floors], [1, 2])
+        for floor in floors:
+            self.assertTrue(floor['points'], floor['label'])
+            self.assertEqual(floor['plan']['floor_plan_id'], floor['floor_plan_id'])
+        # Upstairs ends at the shelf; downstairs at the stairs.
+        self.assertEqual(floors[1]['points'][-1]['x'], 500)
+        self.assertEqual(data['via_stairway']['label'], 'North Stairs')
 
     def test_route_crosses_the_floor_and_reaches_the_shelf(self):
         data = self._route(target_shelf_id=self.shelf.shelf_id,
@@ -7732,6 +7765,165 @@ class InventoryPasswordTests(TestCase):
             'admin_password': 'wrong'}, follow=True)
         self.assertContains(r, 'That password is not right.')
 
+
+class BookPriceTests(TestCase):
+    """A lost book is charged its own price; the rules no longer carry a flat fee or a grace period."""
+
+    def setUp(self):
+        self.admin = _admin(modules='transactions,books,inventory')
+        self.client = _signed_in(self.admin)
+        self.patron = Patron.objects.create(
+            fullname='Price Patron', email='price-patron@example.invalid',
+            password_hash=hash_password('SmokeTest123'), patron_type='Student',
+            account_status='Active')
+        rule = BorrowingRule.current()
+        rule.fine_per_day = 5
+        rule.save()
+        self.book = Book.objects.create(title='Priced Book', author='Tester', status='Borrowed',
+                                        qr_code=str(uuid4()), price=Decimal('350.00'))
+        self.loan = Transaction.objects.create(
+            patron=self.patron, book=self.book, processed_by=self.admin, transaction_type='Borrow',
+            due_date=timezone.localdate() - timedelta(days=2))
+
+    def _lost(self, **extra):
+        data = {'action': 'lost'}
+        data.update(extra)
+        return self.client.post('/admin-portal/transaction/%d/action/' % self.loan.transaction_id,
+                                data, HTTP_X_REQUESTED_WITH='XMLHttpRequest').json()
+
+    def test_fines_start_the_day_after_the_due_date(self):
+        rule = BorrowingRule.current()
+        due = timezone.localdate()
+        self.assertEqual(rule.compute_fine(due, due), 0)
+        self.assertEqual(rule.compute_fine(due, due + timedelta(days=1)), 5)
+
+    def test_the_preview_offers_the_books_own_price(self):
+        data = self.client.get('/admin-portal/transaction/%d/preview/' % self.loan.transaction_id,
+                               {'action': 'lost'}).json()['preview']
+        self.assertEqual(data['lost_fee'], '350.00')
+        self.assertTrue(data['price_set'])
+        self.assertEqual(data['total_fine'], '360.00')
+
+    def test_marking_lost_charges_the_price_and_the_overdue_fine(self):
+        self.assertTrue(self._lost()['success'])
+        self.loan.refresh_from_db()
+        self.assertEqual(self.loan.fine_amount, Decimal('360.00'))
+
+    def test_the_amount_typed_in_the_window_wins(self):
+        self._lost(lost_fee='500')
+        self.loan.refresh_from_db()
+        self.assertEqual(self.loan.fine_amount, Decimal('510.00'))
+
+    def test_a_book_with_no_price_needs_an_amount(self):
+        Book.objects.filter(pk=self.book.pk).update(price=None)
+        r = self._lost()
+        self.assertFalse(r['success'])
+        self.assertIn('no price', r['error'])
+        self.loan.refresh_from_db()
+        self.assertEqual(self.loan.fine_amount, 0)
+        self.assertTrue(self._lost(lost_fee='275.50')['success'])
+        self.loan.refresh_from_db()
+        self.assertEqual(self.loan.fine_amount, Decimal('285.50'))
+
+    def test_a_price_can_be_set_on_the_book(self):
+        r = self.client.post('/admin-portal/edit-book/%d/' % self.book.book_id, {
+            'title': 'Priced Book', 'author': 'Tester', 'price': '\u20b11,250.50'},
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest').json()
+        self.assertTrue(r['success'], r)
+        self.book.refresh_from_db()
+        self.assertEqual(self.book.price, Decimal('1250.50'))
+
+    def test_a_bad_price_is_refused(self):
+        r = self.client.post('/admin-portal/edit-book/%d/' % self.book.book_id, {
+            'title': 'Priced Book', 'author': 'Tester', 'price': 'a lot'},
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest').json()
+        self.assertFalse(r['success'])
+        self.book.refresh_from_db()
+        self.assertEqual(self.book.price, Decimal('350.00'))
+
+    def test_received_copies_carry_the_price(self):
+        self.client.post('/admin-portal/inventory/receive/', {
+            'source': 'Purchase', 'supplier': 'Shop', 'items': json.dumps([
+                {'title': 'Ibong Adarna', 'author': 'Anonymous', 'quantity': 2,
+                 'condition': 'Good', 'price': '180'}])})
+        prices = list(Book.objects.filter(title='Ibong Adarna').values_list('price', flat=True))
+        self.assertEqual(prices, [Decimal('180.00'), Decimal('180.00')])
+
+    def test_the_rules_page_has_no_grace_period_or_flat_fee(self):
+        page = self.client.get('/admin-portal/borrowing-rules/').content.decode()
+        self.assertNotIn('grace_period_days', page)
+        self.assertNotIn('lost_book_fee', page)
+
+class LostBookPaymentTests(TestCase):
+    """A lost book's charge is collected with Record Payment, or on the spot when marking it lost."""
+
+    setUp = BookPriceTests.setUp
+
+    def _act(self, action, **extra):
+        data = {'action': action}
+        data.update(extra)
+        return self.client.post('/admin-portal/transaction/%d/action/' % self.loan.transaction_id,
+                                data, HTTP_X_REQUESTED_WITH='XMLHttpRequest').json()
+
+    def test_marking_lost_blocks_until_paid(self):
+        from .eligibility import check_patron_eligibility
+        self._act('lost')
+        self.loan.refresh_from_db()
+        self.assertTrue(self.loan.marked_lost)
+        self.assertIsNone(self.loan.return_date)
+        self.assertFalse(check_patron_eligibility(self.patron)[0])
+
+        self.assertTrue(self._act('pay')['success'])
+        self.loan.refresh_from_db()
+        self.book.refresh_from_db()
+        self.assertEqual(self.loan.return_date, timezone.localdate())
+        self.assertEqual(self.loan.fine_amount, Decimal('360.00'))
+        self.assertEqual(self.book.status, 'Lost')
+        self.assertTrue(check_patron_eligibility(self.patron)[0])
+        payment = SystemLog.objects.filter(entity_id=str(self.loan.transaction_id), action='Payment').first()
+        self.assertIsNotNone(payment)
+        self.assertIn('360.00', payment.detail)
+        self.assertIn('lost-book', payment.detail)
+
+    def test_an_empty_handed_patron_can_pay_on_the_spot(self):
+        self.assertTrue(self._act('lost', pay_now='1')['success'])
+        self.loan.refresh_from_db()
+        self.assertTrue(self.loan.marked_lost)
+        self.assertEqual(self.loan.return_date, timezone.localdate())
+        self.assertTrue(SystemLog.objects.filter(entity_id=str(self.loan.transaction_id),
+                                                 action='Payment').exists())
+
+    def test_a_lost_loan_cannot_be_returned_or_lost_again(self):
+        self._act('lost')
+        for action in ('return', 'lost'):
+            self.assertFalse(self._act(action)['success'])
+        self.loan.refresh_from_db()
+        self.assertEqual(self.loan.fine_amount, Decimal('360.00'))
+        self.assertIsNone(self.loan.return_date)
+
+    def test_payment_needs_a_lost_loan(self):
+        self.assertFalse(self._act('pay')['success'])
+        self._act('lost', pay_now='1')
+        self.assertFalse(self._act('pay')['success'])
+
+    def test_the_overdue_sweep_leaves_the_lost_charge_alone(self):
+        from django.core.management import call_command
+        self._act('lost')
+        call_command('send_overdue_notifications', stdout=StringIO())
+        self.loan.refresh_from_db()
+        self.book.refresh_from_db()
+        self.assertEqual(self.loan.fine_amount, Decimal('360.00'))
+        self.assertEqual(self.book.status, 'Lost')
+
+    def test_the_list_labels_and_filters_lost_loans(self):
+        self._act('lost')
+        page = self.client.get('/admin-portal/transaction/', {'status': 'lost'}).content.decode()
+        self.assertIn('Lost, unpaid', page)
+        self.assertIn('Record Payment', page)
+        self.assertNotIn('Priced Book', self.client.get(
+            '/admin-portal/transaction/', {'status': 'overdue'}).content.decode())
+
+
 class FloorPlanUndoTests(TestCase):
     """Every change in the floor plan editor can be taken back, one step at a time."""
 
@@ -9139,7 +9331,6 @@ class ReportAccuracyTests(TestCase):
     def test_unreturned_shows_who_has_it_and_what_it_would_cost(self):
         rule = BorrowingRule.current()
         rule.fine_per_day = 5
-        rule.grace_period_days = 0
         rule.save()
         self._loan(due_date=self._day(4))
         report = self._report('unreturned')
@@ -9497,18 +9688,6 @@ class BeaconIdentityClashTests(TestCase):
         self.assertIn('Hallway and Research Room', clash[0])
 
 
-class PositionTestFloorTests(TestCase):
-    """The Position Test opens on a floor that has beacons to test against."""
-
-    def test_defaults_to_the_floor_with_beacons(self):
-        ground = FloorPlan.objects.create(name='Ground Floor', floor_number=1, is_active=True)
-        upper = FloorPlan.objects.create(name='2nd floor', floor_number=2, is_active=True)
-        BLEBeacon.objects.create(floor_plan=upper, beacon_uuid='abc', map_x=1, map_y=1)
-        r = _signed_in(_admin()).get('/admin-portal/position-test/')
-        self.assertEqual(r.context['chosen_floor_id'], upper.floor_plan_id)
-        self.assertNotEqual(r.context['chosen_floor_id'], ground.floor_plan_id)
-
-
 class ReportsSortedByDateTests(TestCase):
     """Every report with a date column lists its rows oldest first."""
 
@@ -9530,7 +9709,6 @@ class ReportsSortedByDateTests(TestCase):
         self.staff = _admin(modules='transactions')
         rule = BorrowingRule.current()
         rule.fine_per_day = Decimal('5')
-        rule.grace_period_days = 0
         rule.save()
 
         # Three patrons registered on different days, each with a visit and a closed loan.

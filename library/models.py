@@ -74,6 +74,8 @@ class FloorPlan(Archivable):
     is_active = models.BooleanField(default=True)
     renovation_notice = models.CharField(max_length=255, blank=True, null=True)
     renovation_message = models.TextField(blank=True, null=True)
+    # Readiness warnings an admin has dismissed, by key; a changed warning gets a new key.
+    dismissed_warnings = models.JSONField(default=list, blank=True)
     uploaded_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -578,6 +580,8 @@ class Book(Archivable):
     title = models.CharField(max_length=255)
     author = models.CharField(max_length=255)
     publication_year = models.IntegerField(blank=True, null=True)
+    # What the library charges if this copy is lost; every book is worth something different.
+    price = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
     ISBN = models.CharField(max_length=255, blank=True, null=True)
     genre = models.CharField(max_length=255, blank=True, null=True)
     material_type = models.CharField(
@@ -1024,6 +1028,8 @@ class Transaction(Archivable):
     return_date = models.DateField(blank=True, null=True)
     overdue_flag = models.BooleanField(default=False)
     fine_amount = models.DecimalField(max_digits=8, decimal_places=2, default=0)
+    # Set by Mark Lost; the loan stays open until the charge is paid.
+    marked_lost = models.BooleanField(default=False)
 
     class Meta:
         db_table = 'Transactions'
@@ -1294,8 +1300,6 @@ class BorrowingRule(models.Model):
     loan_period_days = models.IntegerField(default=14)
     max_books_per_patron = models.IntegerField(default=3)
     fine_per_day = models.DecimalField(max_digits=8, decimal_places=2, default=0)
-    grace_period_days = models.IntegerField(default=0)
-    lost_book_fee = models.DecimalField(max_digits=8, decimal_places=2, default=0)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -1313,13 +1317,10 @@ class BorrowingRule(models.Model):
         return rule
 
     def compute_fine(self, due_date, return_date):
-        """Penalty for returning on return_date against due_date (grace applied)."""
+        """Penalty for returning on return_date against due_date, from the first day late."""
         if not due_date or not return_date or return_date <= due_date:
             return 0
-        days_late = (return_date - due_date).days - self.grace_period_days
-        if days_late <= 0:
-            return 0
-        return days_late * self.fine_per_day
+        return (return_date - due_date).days * self.fine_per_day
 
 
 class LibraryStatus(models.Model):
