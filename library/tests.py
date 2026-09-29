@@ -9838,3 +9838,51 @@ class CardPhotoTests(TestCase):
         s['patron_id'] = other.patron_id
         s.save()
         self.assertEqual(c.get(url).status_code, 404)
+
+
+class PatronNotificationsTests(TestCase):
+    """The Notifications tab lists the patron's own loans, not sample cards."""
+
+    def setUp(self):
+        BorrowingRule.objects.create(loan_period_days=2, fine_per_day=Decimal('5'))
+        self.patron = Patron.objects.create(first_name='Ana', last_name='Reyes',
+                                            email='ana@example.invalid', patron_type='Student')
+        self.client = Client()
+        session = self.client.session
+        session['patron_id'] = self.patron.patron_id
+        session.save()
+        self.today = timezone.localdate()
+
+    def _loan(self, title, **fields):
+        book = Book.objects.create(title=title, author='Rizal', genre='FIC')
+        return Transaction.objects.create(book=book, patron=self.patron,
+                                          transaction_type='Borrow', **fields)
+
+    def test_overdue_due_soon_and_returned_loans_are_listed(self):
+        self._loan('Noli Me Tangere', due_date=self.today - timedelta(days=3))
+        self._loan('El Filibusterismo', due_date=self.today + timedelta(days=1))
+        self._loan('Florante at Laura', due_date=self.today - timedelta(days=5),
+                   return_date=self.today - timedelta(days=4), fine_amount=Decimal('5'))
+        html = self.client.get('/patron/announcements/').content.decode()
+        self.assertIn('Overdue: Noli Me Tangere', html)
+        self.assertIn('3 days overdue', html)
+        self.assertIn('₱15', html)
+        self.assertIn('Due soon: El Filibusterismo', html)
+        self.assertIn('Returned: Florante at Laura', html)
+        self.assertIn('<span class="tab-badge">2</span>', html)
+        self.assertNotIn('Discrete Mathematics', html)
+
+    def test_another_patrons_loans_are_not_shown(self):
+        other = Patron.objects.create(first_name='Ben', last_name='Cruz',
+                                      email='ben@example.invalid', patron_type='Student')
+        book = Book.objects.create(title='Ibong Adarna', author='X', genre='FIC')
+        Transaction.objects.create(book=book, patron=other, transaction_type='Borrow',
+                                   due_date=self.today - timedelta(days=1))
+        html = self.client.get('/patron/announcements/').content.decode()
+        self.assertNotIn('Ibong Adarna', html)
+        self.assertIn('No notifications right now.', html)
+        self.assertNotIn('tab-badge">', html)
+
+    def test_a_guest_is_asked_to_sign_in(self):
+        html = Client().get('/patron/announcements/').content.decode()
+        self.assertIn('Sign in to see reminders about your loans.', html)

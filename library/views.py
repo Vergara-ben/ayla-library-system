@@ -865,10 +865,82 @@ def patron_announcements(request):
         is_active=True
     ).order_by('-created_at')
 
+    patron = None
+    if request.session.get('patron_id'):
+        patron = Patron.objects.filter(patron_id=request.session['patron_id']).first()
+
     context = {
         'announcements': announcements,
+        'notifications': _patron_notifications(patron) if patron else None,
     }
     return render(request, 'patron/patronannouncements.html', context)
+
+
+def _patron_notifications(patron):
+    """The patron's own loan reminders, built from their transactions."""
+    today = timezone.localdate()
+    rule = BorrowingRule.current()
+    urgent, earlier = [], []
+
+    open_loans = (Transaction.objects
+                  .filter(patron=patron, transaction_type='Borrow', return_date__isnull=True)
+                  .select_related('book').order_by('due_date'))
+    for tx in open_loans:
+        title = tx.book.title if tx.book else 'Unknown title'
+        if tx.book and tx.book.status == 'Lost':
+            urgent.append({'kind': 'overdue', 'icon': 'fa-circle-exclamation',
+                           'title': f'Lost book: {title}',
+                           'sub': 'Marked as lost. Please settle it at the desk.',
+                           'when': tx.due_date, 'urgent': True})
+        elif tx.due_date and tx.due_date < today:
+            days = (today - tx.due_date).days
+            fine = rule.compute_fine(tx.due_date, today)
+            sub = f'Due {tx.due_date:%B} {tx.due_date.day} · {days} day{"s" if days != 1 else ""} overdue'
+            if fine:
+                sub += f'. Fine so far: ₱{fine} (₱{rule.fine_per_day}/day)'
+            urgent.append({'kind': 'overdue', 'icon': 'fa-circle-exclamation',
+                           'title': f'Overdue: {title}', 'sub': sub,
+                           'when': tx.due_date, 'urgent': True})
+        elif tx.due_date and (tx.due_date - today).days <= 2:
+            days = (tx.due_date - today).days
+            left = 'Due today' if days == 0 else f'Due in {days} day{"s" if days != 1 else ""}'
+            urgent.append({'kind': 'due-soon', 'icon': 'fa-clock',
+                           'title': f'Due soon: {title}',
+                           'sub': f'{left} · {tx.due_date:%B} {tx.due_date.day}. Please return or request an extension.',
+                           'when': tx.due_date, 'urgent': True})
+
+    since = today - timedelta(days=30)
+    returns = (Transaction.objects
+               .filter(patron=patron, transaction_type='Borrow', return_date__gte=since)
+               .select_related('book').order_by('-return_date')[:10])
+    for tx in returns:
+        title = tx.book.title if tx.book else 'Unknown title'
+        sub = (f'Returned {tx.return_date:%B} {tx.return_date.day}. '
+               + (f'Fine: ₱{tx.fine_amount}.' if tx.fine_amount else 'No fine.'))
+        earlier.append({'kind': 'returned', 'icon': 'fa-circle-check',
+                        'title': f'Returned: {title}', 'sub': sub, 'when': tx.return_date})
+
+    decided = (DueDateExtension.objects
+               .filter(transaction__patron=patron, status__in=['Approved', 'Declined'],
+                       resolved_at__date__gte=since)
+               .select_related('transaction__book'))
+    for ext in decided:
+        book = ext.transaction.book
+        title = book.title if book else 'your loan'
+        if ext.status == 'Approved':
+            due = ext.transaction.due_date or ext.requested_due_date
+            sub = f'New due date: {due:%B} {due.day}.'
+        else:
+            sub = 'Your due date stays the same.'
+        if ext.staff_note:
+            sub += f' Note: {ext.staff_note}'
+        earlier.append({'kind': 'returned' if ext.status == 'Approved' else '',
+                        'icon': 'fa-calendar-check' if ext.status == 'Approved' else 'fa-calendar-xmark',
+                        'title': f'Extension {ext.status.lower()}: {title}', 'sub': sub,
+                        'when': timezone.localtime(ext.resolved_at).date()})
+
+    earlier.sort(key=lambda n: n['when'], reverse=True)
+    return {'urgent': urgent, 'earlier': earlier}
 
 
 def _patron_search_q(term):
