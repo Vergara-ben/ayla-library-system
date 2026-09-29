@@ -129,7 +129,7 @@
 
 <div class="tabs">
   <button class="tab active" onclick="switchTab('ann',this)"><i class="fa-solid fa-bullhorn" aria-hidden="true"></i> Announcements</button>
-  <button class="tab" onclick="switchTab('notif',this)"><i class="fa-solid fa-bell" aria-hidden="true"></i> Notifications <span class="tab-badge">2</span></button>
+  <button class="tab" onclick="switchTab('notif',this)"><i class="fa-solid fa-bell" aria-hidden="true"></i> Notifications{% if notifications.urgent %} <span class="tab-badge">{{ notifications.urgent|length }}</span>{% endif %}</button>
 </div>
 
 <div class="page">
@@ -154,53 +154,48 @@
     {% endfor %}
   </div>
 
-  <!-- NOTIFICATIONS -->
+  <!-- NOTIFICATIONS: the signed-in patron's own loans -->
   <div class="panel" id="notif">
-    <div class="section-date">Today</div>
-
-    <div class="notif-card overdue">
-      <div class="notif-icon"><i class="fa-solid fa-circle-exclamation" aria-hidden="true"></i></div>
+    {% if notifications is None %}
+    <div class="empty">
+      <div class="empty-icon"><i class="fa-solid fa-bell" aria-hidden="true"></i></div>
+      <div>Sign in to see reminders about your loans.</div>
+    </div>
+    {% elif not notifications.urgent and not notifications.earlier %}
+    <div class="empty">
+      <div class="empty-icon"><i class="fa-solid fa-inbox" aria-hidden="true"></i></div>
+      <div>No notifications right now.</div>
+    </div>
+    {% else %}
+    {% if notifications.urgent %}
+    <div class="section-date">Needs attention</div>
+    {% for n in notifications.urgent %}
+    <div class="notif-card {{ n.kind }}">
+      <div class="notif-icon"><i class="fa-solid {{ n.icon }}" aria-hidden="true"></i></div>
       <div class="notif-body">
-        <div class="notif-title">Overdue: Discrete Mathematics</div>
-        <div class="notif-sub">Due date was <strong style="color:var(--danger)">December 8</strong> · 2 days overdue<br>Accumulating fine: <strong style="color:var(--danger)">₱10.00</strong> (₱5/day)</div>
-        <div class="notif-time">2 hours ago</div>
+        <div class="notif-title">{{ n.title }}</div>
+        <div class="notif-sub">{{ n.sub }}</div>
       </div>
       <div class="notif-action">
-        <button class="btn-renew urgent">Renew</button>
+        <a href="{% url 'patron_account' %}" class="btn-renew{% if n.kind == 'overdue' %} urgent{% endif %}" style="text-decoration:none;display:inline-block;">View loan</a>
       </div>
     </div>
-
-    <div class="notif-card due-soon">
-      <div class="notif-icon"><i class="fa-solid fa-clock" aria-hidden="true"></i></div>
+    {% endfor %}
+    {% endif %}
+    {% if notifications.earlier %}
+    <div class="section-date"{% if notifications.urgent %} style="margin-top:24px"{% endif %}>Last 30 days</div>
+    {% for n in notifications.earlier %}
+    <div class="notif-card {{ n.kind }}">
+      <div class="notif-icon"><i class="fa-solid {{ n.icon }}" aria-hidden="true"></i></div>
       <div class="notif-body">
-        <div class="notif-title">Due Soon: Data Structures & Algorithms</div>
-        <div class="notif-sub">Due in <strong style="color:var(--accent2)">2 days</strong> · December 12<br>Please return or renew before the deadline</div>
-        <div class="notif-time">8 hours ago</div>
-      </div>
-      <div class="notif-action">
-        <button class="btn-renew">Renew</button>
+        <div class="notif-title">{{ n.title }}</div>
+        <div class="notif-sub">{{ n.sub }}</div>
+        <div class="notif-time">{{ n.when|date:"M j, Y" }}</div>
       </div>
     </div>
-
-    <div class="section-date" style="margin-top:24px">Earlier</div>
-
-    <div class="notif-card returned">
-      <div class="notif-icon"><i class="fa-solid fa-circle-check" aria-hidden="true"></i></div>
-      <div class="notif-body">
-        <div class="notif-title">Book Returned Successfully</div>
-        <div class="notif-sub">Introduction to Algorithms · Returned Nov 15<br>No overdue fine incurred.</div>
-        <div class="notif-time">Nov 15</div>
-      </div>
-    </div>
-
-    <div class="notif-card">
-      <div class="notif-icon"><i class="fa-solid fa-circle-info" aria-hidden="true"></i></div>
-      <div class="notif-body">
-        <div class="notif-title">Welcome to AYLA!</div>
-        <div class="notif-sub">Your library account has been activated. You can now borrow up to 5 books at a time.</div>
-        <div class="notif-time">Jan 10, 2024</div>
-      </div>
-    </div>
+    {% endfor %}
+    {% endif %}
+    {% endif %}
   </div>
 </div>
 
@@ -236,7 +231,8 @@ function markRead(card) {
 function markAllRead() {
   document.querySelectorAll('.unread-dot').forEach(d=>d.remove());
   document.querySelectorAll('.ann-card.unread').forEach(c=>c.classList.remove('unread'));
-  document.querySelector('.tab-badge').style.display='none';
+  const badge = document.querySelector('.tab-badge');
+  if (badge) badge.style.display='none';
 }
 </script>
 {% if not patron_signed_in %}{% include 'patron/_guestprompt.html' %}{% endif %}
