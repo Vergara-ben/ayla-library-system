@@ -9688,18 +9688,6 @@ class BeaconIdentityClashTests(TestCase):
         self.assertIn('Hallway and Research Room', clash[0])
 
 
-class PositionTestFloorTests(TestCase):
-    """The Position Test opens on a floor that has beacons to test against."""
-
-    def test_defaults_to_the_floor_with_beacons(self):
-        ground = FloorPlan.objects.create(name='Ground Floor', floor_number=1, is_active=True)
-        upper = FloorPlan.objects.create(name='2nd floor', floor_number=2, is_active=True)
-        BLEBeacon.objects.create(floor_plan=upper, beacon_uuid='abc', map_x=1, map_y=1)
-        r = _signed_in(_admin()).get('/admin-portal/position-test/')
-        self.assertEqual(r.context['chosen_floor_id'], upper.floor_plan_id)
-        self.assertNotEqual(r.context['chosen_floor_id'], ground.floor_plan_id)
-
-
 class ReportsSortedByDateTests(TestCase):
     """Every report with a date column lists its rows oldest first."""
 

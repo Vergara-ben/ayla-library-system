@@ -6969,22 +6969,6 @@ def _shelf_page(request, template):
 
 
 @admin_only_required
-def position_test(request):
-    """Check positioning against the real beacons, from the Administrator's side."""
-    floors = list(FloorPlan.objects.filter(is_active=True)
-                  .annotate(beacon_count=Count('blebeacon')))
-    raw = (request.GET.get('floor') or '').strip()
-    chosen = next((f for f in floors if raw.isdigit() and f.floor_plan_id == int(raw)), None)
-    # Default to a floor that has beacons to test against.
-    if chosen is None:
-        chosen = next((f for f in floors if f.beacon_count), floors[0] if floors else None)
-    return render(request, 'admin/positiontest.html', {
-        'floors': floors,
-        'chosen_floor_id': chosen.floor_plan_id if chosen else '',
-    })
-
-
-@admin_only_required
 def shelf_manager(request):
     return _shelf_page(request, 'admin/shelfmanager.html')
 
