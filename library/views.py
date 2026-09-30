@@ -9259,7 +9259,7 @@ def _parse_geometry(raw):
     return points, None
 
 
-@admin_only_required
+@admin_or_any_module_required('shelf', 'indoor_map')
 def get_map_data(request):
     """Return a floor plan with its beacons, waypoints, connections and shelves as JSON."""
     requested_id = request.GET.get('floor_plan_id')
