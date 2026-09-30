@@ -887,10 +887,10 @@ def _patron_notifications(patron):
                   .select_related('book').order_by('due_date'))
     for tx in open_loans:
         title = tx.book.title if tx.book else 'Unknown title'
-        if tx.book and tx.book.status == 'Lost':
+        if tx.marked_lost:
             urgent.append({'kind': 'overdue', 'icon': 'fa-circle-exclamation',
                            'title': f'Lost book: {title}',
-                           'sub': 'Marked as lost. Please settle it at the desk.',
+                           'sub': f'Marked as lost. Charge: ₱{tx.fine_amount}. Please settle it at the desk.',
                            'when': tx.due_date, 'urgent': True})
         elif tx.due_date and tx.due_date < today:
             days = (today - tx.due_date).days
@@ -9259,7 +9259,7 @@ def _parse_geometry(raw):
     return points, None
 
 
-@admin_only_required
+@admin_or_any_module_required('shelf', 'indoor_map')
 def get_map_data(request):
     """Return a floor plan with its beacons, waypoints, connections and shelves as JSON."""
     requested_id = request.GET.get('floor_plan_id')

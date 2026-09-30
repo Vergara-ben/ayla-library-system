@@ -1,6 +1,6 @@
 {% load static %}
 <!DOCTYPE html>
-<html lang="en" data-module="staff">
+<html lang="en" data-module="admin">
 <head>
     <meta charset="UTF-8">
     <meta name="theme-color" content="#ffffff">
@@ -19,6 +19,15 @@
             integrity="sha384-c9d8RFSL+u3exBOJ4Yp3HUJXS4znl9f+z66d1y54ig+ea249SpqR+w1wyvXz/lk+" crossorigin="anonymous"
             referrerpolicy="no-referrer"></script>
     <script src="{% static 'js/qrsource.js' %}"></script>
+    <style>
+        /* Picker row styles. */
+        .tbtn { width: 24px; height: 24px; border-radius: 6px; border: 1px solid var(--border-color); display: flex; align-items: center; justify-content: center; font-size: 12px; cursor: pointer; background: transparent; flex-shrink: 0; }
+        .tbtn.add { color: var(--accent); } .tbtn.add:hover { background: var(--tint-accent); }
+        .tbtn.del { color: var(--danger); } .tbtn.del:hover { background: var(--tint-danger); }
+        .pick-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border-color); background: rgba(2, 6, 23, 0.4); }
+        .pick-row:hover { border-color: var(--accent); }
+        .pick-row.group { border-style: dashed; }
+    </style>
     
     <link rel="stylesheet" href="{% static 'css/theme.css' %}">
     <style>
@@ -188,6 +197,9 @@
                             <i class="fa-solid fa-upload"></i> Import Excel
                         </button>
                         <input type="file" id="excelFileInput" accept=".xlsx" style="display: none;" onchange="uploadExcelFile(this)">
+                        <button onclick="openLabelPicker()" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-amber-500 text-[11px] font-semibold px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors">
+                            <i class="fa-solid fa-print"></i> <span id="toolbarLabelsLabel">Print QR Labels</span>
+                        </button>
                         <button onclick="openAddModal()" class="bg-violet-700/30 text-violet-400 border border-violet-800/80 hover:bg-violet-700/50 text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
                             <i class="fa-solid fa-plus text-[10px]"></i> Add Book
                         </button>
@@ -204,6 +216,7 @@
                         <button onclick="openQRScanner()" class="bg-violet-700/30 text-violet-400 border border-violet-800/80 hover:bg-violet-700/50 text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
                             <i class="fa-solid fa-qrcode text-[10px]"></i> Scan QR
                         </button>
+
                         <div class="flex items-center gap-2 self-end lg:self-auto">
                             <div class="relative">
                                 {# Material type filter. #}
@@ -252,10 +265,34 @@
                         </div>
                     </div>
 
+                    {# Selection toolbar, shown while books are ticked. #}
+                    <div id="selectMatchingBar" class="hidden px-5 py-2.5 border-b border-violet-800/40 bg-violet-500/[0.07] flex flex-wrap items-center gap-2 text-[11px]">
+                        <span class="inline-flex items-center gap-2 font-bold text-slate-200 mr-1">
+                            <i class="fa-solid fa-square-check text-violet-400"></i>
+                            <span id="selectMatchingText"></span>
+                        </span>
+                        <button type="button" id="selectMatchingBtn" class="bg-violet-700/30 text-violet-300 border border-violet-800/80 hover:bg-violet-700/50 font-bold px-3 py-1.5 rounded-lg inline-flex items-center gap-1.5 transition-colors disabled:opacity-50"></button>
+                        <button type="button" id="selectClearBtn" onclick="clearBookSelection()" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-slate-300 font-semibold px-3 py-1.5 rounded-lg inline-flex items-center gap-1.5 transition-colors">
+                            <i class="fa-solid fa-xmark text-[10px]"></i> Clear
+                        </button>
+                        <span class="flex-1"></span>
+                        <button type="button" id="selectPrintBtn" onclick="openLabelSheet()" class="bg-amber-700/20 text-amber-300 border border-amber-800/70 hover:bg-amber-700/40 font-bold px-3 py-1.5 rounded-lg inline-flex items-center gap-1.5 transition-colors">
+                            <i class="fa-solid fa-print text-[10px]"></i> <span id="selectPrintLabel">Print QR Labels</span>
+                        </button>
+                        <button type="button" id="toolbarDeleteBtn" onclick="openDeleteBooks()" class="bg-rose-950/30 text-rose-300 border border-rose-900/60 hover:bg-rose-900/40 font-bold px-3 py-1.5 rounded-lg inline-flex items-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+                            <i class="fa-solid fa-trash-can text-[10px]"></i> <span id="toolbarDeleteLabel">Delete</span>
+                        </button>
+                    </div>
+
                     <div class="overflow-x-auto">
                     <table class="w-full text-left border-collapse">
                         <thead>
                             <tr class="border-b border-slate-800/80 text-[10px] font-bold tracking-wider text-slate-500 uppercase bg-slate-900/5">
+                                <th class="py-3 px-4 w-10 text-center">
+                                    <input type="checkbox" id="selectAllBooks" onchange="toggleAllBooks(this)"
+                                           class="accent-violet-600 w-3.5 h-3.5 align-middle cursor-pointer"
+                                           title="Select every book on this page" aria-label="Select every book on this page">
+                                </th>
                                 <th class="py-3 px-6 min-w-[16rem]">Title</th>
                                 <th class="py-3 px-6">Author</th>
                                 <th class="py-3 px-6 w-20">Year</th>
@@ -271,6 +308,11 @@
                         <tbody class="divide-y divide-slate-800/40 text-xs text-slate-300">
                             {% for book in books %}
                             <tr class="hover:bg-slate-800/10 transition-colors">
+                                <td class="py-4 px-4 text-center">
+                                    <input type="checkbox" class="book-tick accent-violet-600 w-3.5 h-3.5 cursor-pointer"
+                                           value="{{ book.book_id }}" onchange="onBookTick()"
+                                           aria-label="Select {{ book.title }}">
+                                </td>
                                 <td class="py-4 px-6 flex items-start gap-3">
                                     <div class="w-8 h-10 rounded bg-violet-950/40 border border-violet-900/30 flex-shrink-0 flex items-center justify-center text-[10px] font-medium text-violet-700 select-none"></div>
                                     <div>
@@ -306,7 +348,8 @@
                                     <div class="flex items-center justify-center gap-1.5">
                                         <button onclick="viewBookDetails({{ book.book_id }})" class="w-7 h-7 rounded border border-slate-800 text-violet-400 hover:text-violet-200 hover:bg-slate-800/40 transition-colors" aria-label="View book details"><i class="fa-solid fa-eye text-[10px]"></i></button>
                                         <a href="{% url 'admin_edit_book' book.book_id %}" class="w-7 h-7 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 transition-colors"><i class="fa-solid fa-pencil text-[10px]"></i></a>
-                                        <form method="post" action="{% url 'admin_delete_book' book.book_id %}" class="inline" data-confirm="Delete &quot;{{ book.title }}&quot;? It is hidden from the catalogue, and its loan history is kept." data-confirm-title="Delete book" data-confirm-label="Delete">
+                                        <form method="post" action="{% url 'admin_delete_book' book.book_id %}" class="inline"
+                                              data-confirm="Delete &quot;{{ book.title }}&quot;? It is hidden from the catalogue, and its loan history is kept." data-confirm-title="Delete book" data-confirm-label="Delete">
                                             {% csrf_token %}
                                             <button type="submit" class="w-7 h-7 rounded border border-slate-800 text-rose-500 hover:text-rose-400 hover:bg-rose-950/20 transition-colors" aria-label="Delete" title="Delete"><i class="fa-solid fa-trash-can text-[10px]"></i></button>
                                         </form>
@@ -315,7 +358,7 @@
                             </tr>
                             {% empty %}
                             <tr>
-                                <td colspan="10" class="py-8 text-center text-slate-500">No books found in the library.</td>
+                                <td colspan="11" class="py-8 text-center text-slate-500">No books found in the library.</td>
                             </tr>
                             {% endfor %}
                         </tbody>
@@ -346,6 +389,7 @@
             </div>
             <form id="addBookForm" method="post" class="space-y-4 text-xs">
                 {% csrf_token %}
+                <p id="addRunNote" class="hidden rounded-lg border border-emerald-900/50 bg-emerald-950/20 px-3 py-2 text-[10px] text-emerald-300 leading-relaxed"></p>
                 {% if error %}
                     <div class="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">{{ error }}</div>
                 {% endif %}
@@ -406,6 +450,9 @@
                 <div class="pt-4 flex items-center justify-end gap-3">
                     <button type="button" onclick="closeAddModal()" class="px-5 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:text-slate-100 hover:bg-slate-800/40 font-semibold tracking-wide transition-colors min-w-[100px]">
                         Cancel
+                    </button>
+                    <button type="button" onclick="submitAndAddAnother()" class="bg-slate-900 border border-slate-700 hover:bg-slate-800/60 text-violet-400 font-bold px-5 py-2.5 rounded-lg flex items-center gap-2 tracking-wide transition-colors">
+                        <i class="fa-solid fa-plus text-xs"></i> Save &amp; add another
                     </button>
                     <button type="submit" class="bg-violet-700 hover:bg-violet-600 text-white font-bold px-5 py-2.5 rounded-lg flex items-center gap-2 tracking-wide transition-colors shadow-md">
                         <i class="fa-solid fa-check text-xs"></i> Add Book
@@ -530,9 +577,68 @@
         </div>
     </div>
 
-    <!-- Import: what the file would do, before it does it -->
+    <!-- Pick books to label (cart-style picker) -->
+    <div id="labelPickerModal" class="hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+        <div class="w-full max-w-3xl rounded-2xl border p-6 flex flex-col gap-4 shadow-2xl my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color); max-height: 90vh;">
+            <div class="flex items-center justify-between">
+                <h3 class="text-base font-bold text-slate-200 tracking-wide">Choose books to label</h3>
+                <button type="button" onclick="closeLabelPicker()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40" aria-label="Close"><i class="fa-solid fa-xmark text-sm"></i></button>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 min-h-0">
+                <!-- LEFT: the print list -->
+                <div class="flex flex-col rounded-xl border border-slate-800 overflow-hidden" style="background-color: var(--bg-card);">
+                    <div class="px-4 py-2.5 border-b border-slate-800 flex items-center justify-between gap-2 text-xs font-bold text-slate-300">
+                        <span class="flex items-center gap-2"><i class="fa-solid fa-print text-amber-500 text-[11px]"></i> To print <span id="pickCartCount" class="text-amber-400">(0)</span></span>
+                        <button type="button" onclick="clearLabelCart()" class="text-[10px] font-semibold text-slate-500 hover:text-rose-400">Clear all</button>
+                    </div>
+                    <div id="pickCart" class="p-2 space-y-1.5 overflow-y-auto" style="max-height: 46vh; min-height: 200px;"></div>
+                </div>
+                <!-- RIGHT: everything available -->
+                <div class="flex flex-col rounded-xl border border-slate-800 overflow-hidden" style="background-color: var(--bg-card);">
+                    <div class="px-3 py-2.5 border-b border-slate-800">
+                        <div class="relative">
+                            <i class="fa-solid fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-xs"></i>
+                            <input type="text" id="pickSearch" oninput="renderLabelPicker()" placeholder="Search title, author or ISBN..." class="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-3 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-amber-800 placeholder-slate-600">
+                        </div>
+                    </div>
+                    <!-- Label picker modes. -->
+                    <div class="px-3 pb-2 flex items-center gap-1">
+                        <button type="button" id="pickModeBook" onclick="setPickMode('book')" class="pick-mode on">One by one</button>
+                        <button type="button" id="pickModeLevel" onclick="setPickMode('level')" class="pick-mode">By level</button>
+                        <button type="button" id="pickModeShelf" onclick="setPickMode('shelf')" class="pick-mode">By shelf</button>
+                    </div>
+                    <div id="pickList" class="p-2 space-y-1.5 overflow-y-auto" style="max-height: 46vh; min-height: 200px;"></div>
+                </div>
+            </div>
+
+            <div id="pickNote" class="text-[10px] text-slate-500"></div>
+            <div class="flex items-center justify-end gap-3">
+                <button type="button" onclick="closeLabelPicker()" class="px-5 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:bg-slate-800/40 font-semibold text-xs min-w-[100px]">Cancel</button>
+                <button type="button" id="pickConfirm" onclick="confirmLabelPicker()" class="bg-amber-700 hover:bg-amber-600 text-white font-bold px-5 py-2.5 rounded-lg flex items-center gap-2 text-xs"><i class="fa-solid fa-arrow-right text-xs"></i> Continue <span id="pickConfirmCount"></span></button>
+            </div>
+        </div>
+    </div>
+
+    <style>
+        .pick-mode {
+            font-size: 12px; font-weight: 700; letter-spacing: .02em;
+            padding: 4px 9px; border-radius: 7px;
+            border: 1px solid var(--border-color);
+            background: var(--bg-card); color: var(--text-muted);
+            transition: all .15s;
+        }
+        .pick-mode:hover { color: var(--text-primary); }
+        .pick-mode.on {
+            color: var(--text-primary); border-color: var(--warning);
+            background: rgba(245, 158, 11, .12);
+        }
+    </style>
+
+    <!-- Import result -->
     <div id="importResultModal" class="hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-        <div class="w-full max-w-lg rounded-2xl border p-6 flex flex-col gap-5 shadow-2xl my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color); max-height: 88vh;">
+        {# Wider modal for the import preview. #}
+        <div class="w-full max-w-xl rounded-2xl border p-6 flex flex-col gap-5 shadow-2xl my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color); max-height: 88vh;">
             <div class="flex items-center gap-3">
                 <div id="importIcon" class="w-9 h-9 rounded-xl flex items-center justify-center text-base flex-shrink-0"></div>
                 <h3 id="importTitle" class="text-base font-bold text-slate-200 tracking-wide">Import finished</h3>
@@ -540,9 +646,126 @@
 
             <div id="importSummary" class="space-y-2 text-xs overflow-y-auto" style="max-height: 46vh;"></div>
 
+            {# One row, one button height, one label length that fits. #}
+            <div class="pt-1 flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2.5">
+                <button type="button" id="importCloseBtn" onclick="closeImportResult()" class="w-full sm:w-auto justify-center px-4 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:text-slate-100 hover:bg-slate-800/40 font-semibold text-[11px] min-w-[92px]">Done</button>
+                <button type="button" id="importConfirmBtn" onclick="confirmImport(false)" class="hidden w-full sm:w-auto justify-center bg-emerald-700 hover:bg-emerald-600 text-white font-bold px-4 py-2.5 rounded-lg items-center gap-2 text-[11px]"><i class="fa-solid fa-check text-xs"></i> Confirm import</button>
+                <button type="button" id="importConfirmLabelsBtn" onclick="confirmImport(true)" class="hidden w-full sm:w-auto justify-center bg-amber-700 hover:bg-amber-600 text-white font-bold px-4 py-2.5 rounded-lg items-center gap-2 text-[11px]"><i class="fa-solid fa-print text-xs"></i> Confirm and print labels</button>
+            </div>
+        </div>
+    </div>
+
+
+
+    <!-- Delete selected books -->
+    <div id="deleteBooksModal" class="hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+        <div class="w-full max-w-lg rounded-2xl border p-6 flex flex-col gap-5 shadow-2xl my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color); max-height: 88vh;">
+            <div class="flex items-center gap-3">
+                <div class="w-9 h-9 rounded-xl flex items-center justify-center text-base flex-shrink-0 bg-rose-500/10 text-rose-400 border border-rose-500/25">
+                    <i class="fa-solid fa-triangle-exclamation"></i>
+                </div>
+                <h3 class="text-base font-bold text-slate-200 tracking-wide">Delete books</h3>
+            </div>
+
+            <div id="deleteSummary" class="space-y-2 text-xs overflow-y-auto" style="max-height: 46vh;"></div>
+
             <div class="flex items-center justify-end gap-2.5 pt-1 flex-wrap">
-                <button type="button" id="importCloseBtn" onclick="closeImportResult()" class="px-4 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:text-slate-100 hover:bg-slate-800/40 font-semibold text-[11px] min-w-[84px]">Done</button>
-                <button type="button" id="importConfirmBtn" onclick="confirmImport()" class="hidden bg-emerald-700 hover:bg-emerald-600 text-white font-bold px-4 py-2.5 rounded-lg items-center gap-2 text-[11px]"><i class="fa-solid fa-check text-xs"></i> Confirm import</button>
+                <button type="button" id="deleteCancelBtn" onclick="closeDeleteBooks()" class="px-4 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:text-slate-100 hover:bg-slate-800/40 font-semibold text-[11px] min-w-[84px]">Cancel</button>
+                <button type="button" id="deleteConfirmBtn" onclick="confirmDeleteBooks()" class="hidden bg-rose-700 hover:bg-rose-600 text-white font-bold px-4 py-2.5 rounded-lg items-center gap-2 text-[11px]"><i class="fa-solid fa-trash-can text-xs"></i> <span id="deleteConfirmLabel">Delete them</span></button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Move selected books -->
+    <!-- QR Label Sheet Modal -->
+    <div id="labelSheetModal" class="hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 overflow-y-auto">
+        <div class="w-full max-w-lg rounded-2xl border p-6 flex flex-col gap-5 shadow-2xl relative my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color);">
+            <div class="flex items-center justify-between">
+                <h3 class="text-base font-bold text-slate-200 tracking-wide">Print QR Labels</h3>
+                <button type="button" onclick="closeLabelSheet()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40 transition-colors" aria-label="Close"><i class="fa-solid fa-xmark text-sm"></i></button>
+            </div>
+
+            <p class="text-xs text-slate-400 leading-relaxed">
+                <span id="labelCountNote" class="text-violet-400 font-bold"></span>
+                Each label carries that copy's own QR code, so two copies of the same title
+                never get the same sticker.
+            </p>
+            <p id="labelSheetError" class="hidden rounded-lg border border-rose-500/25 bg-rose-500/10 px-3 py-2 text-[11px] text-rose-300"></p>
+
+            <div class="space-y-4 text-xs">
+                <div class="grid grid-cols-2 gap-3">
+                    <div class="space-y-1.5">
+                        <label for="labelPaper" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Paper</label>
+                        <select id="labelPaper" onchange="refreshLabelEstimate()" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);">
+                            <option value="A4" selected>A4 (210 &times; 297 mm)</option>
+                            <option value="Letter">Short bond / Letter</option>
+                            <option value="Legal">Long bond / Legal</option>
+                        </select>
+                    </div>
+                    <div class="space-y-1.5">
+                        <label for="labelSize" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">QR size (mm)</label>
+                        <input type="number" id="labelSize" value="25" min="12" max="60" step="1" oninput="refreshLabelEstimate()"
+                               class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);">
+                    </div>
+                </div>
+
+
+                <div class="space-y-1.5">
+                    <label for="labelSort" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Print order</label>
+                    <select id="labelSort" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);">
+                        <option value="location" selected>Shelf order &mdash; walk the room</option>
+                        <option value="title">A to Z by title</option>
+                    </select>
+                    <p class="text-[10px] text-slate-500 leading-relaxed">
+                        Shelf order hands you the pile in the order you walk it:
+                        shelf by shelf, board by board, left to right along each.
+                        A to Z is for checking a title made it onto the sheet.
+                    </p>
+                </div>
+                <div class="rounded-lg border border-slate-800/80 px-3 py-2.5" style="background-color: var(--bg-input);">
+                    <p class="text-[11px] text-slate-300" id="labelEstimate">&nbsp;</p>
+                </div>
+
+                <div class="space-y-2">
+                    <span class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Print under each QR</span>
+                    <div class="grid grid-cols-2 gap-y-2 gap-x-3 text-slate-300">
+                        <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="labelShowTitle" checked class="accent-violet-600 w-3.5 h-3.5"> Title</label>
+                        <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="labelShowCopy" checked class="accent-violet-600 w-3.5 h-3.5"> Copy N of M</label>
+                        <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="labelShowCallNumber" checked class="accent-violet-600 w-3.5 h-3.5"> Code label</label>
+                        <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="labelShowId" class="accent-violet-600 w-3.5 h-3.5"> Internal ID</label>
+                        <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="labelShowAuthor" class="accent-violet-600 w-3.5 h-3.5"> Author</label>
+                        <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="labelShowLocation" checked class="accent-violet-600 w-3.5 h-3.5"> Shelf location</label>
+                        <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="labelCutGuides" checked class="accent-violet-600 w-3.5 h-3.5"> Cutting guides</label>
+                    </div>
+                </div>
+
+                <div class="space-y-1.5">
+                    <label for="labelSkip" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Skip the first N spaces</label>
+                    <input type="number" id="labelSkip" value="0" min="0" step="1"
+                           class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);">
+                    <p class="text-[10px] text-slate-500">For feeding a part-used sheet back through the printer.</p>
+                </div>
+
+                <div class="space-y-1.5">
+                    <label for="labelFileName" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">File name</label>
+                    <input type="text" id="labelFileName" maxlength="100" placeholder="AYLA-QR-labels"
+                           class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);">
+                    <p class="text-[10px] text-slate-500">Leave blank for the default name. .pdf is added for you.</p>
+                </div>
+
+                <div class="rounded-lg border border-amber-900/50 bg-amber-950/20 px-3 py-2.5">
+                    <p class="text-[10px] text-amber-300 leading-relaxed">
+                        <i class="fa-solid fa-triangle-exclamation mr-1"></i>
+                        Print at <strong>100% scale</strong> &mdash; turn off &ldquo;Fit to page&rdquo; or &ldquo;Shrink oversized pages&rdquo;.
+                        Then measure one square before you cut the rest: if it is not the size you asked for,
+                        the printer rescaled the sheet.
+                    </p>
+                </div>
+
+                <div class="pt-1 flex items-center justify-end gap-3">
+                    <button type="button" onclick="closeLabelSheet()" class="px-5 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:text-slate-100 hover:bg-slate-800/40 font-semibold tracking-wide transition-colors min-w-[100px]">Cancel</button>
+                    <button type="button" id="labelDownloadBtn" onclick="downloadLabelSheet()" class="bg-violet-700 hover:bg-violet-600 text-white font-bold px-5 py-2.5 rounded-lg flex items-center gap-2 tracking-wide transition-colors shadow-md"><i class="fa-solid fa-file-pdf text-xs"></i> Download PDF</button>
+                </div>
             </div>
         </div>
     </div>
@@ -666,7 +889,7 @@
                         </div>
                         <a id="detailQrDownload" href="#" download
                            class="mt-3 w-full inline-flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl font-medium text-sm transition-all border border-slate-700 hover:bg-slate-800/50 text-slate-300">
-                            <i class="fa-solid fa-download text-cyan-400"></i> Download QR Code
+                            <i class="fa-solid fa-download text-violet-400"></i> Download QR Code
                         </a>
                     </div>
                 </div>
@@ -676,6 +899,10 @@
 
     <script>
         function openAddModal() {
+            // Reset the added count.
+            addedThisRun = 0;
+            const runNote = document.getElementById('addRunNote');
+            if (runNote) runNote.classList.add('hidden');
             document.getElementById('addBookModal').classList.remove('hidden');
             document.getElementById('addBookForm').reset();
         }
@@ -688,14 +915,14 @@
             window.location.href = '{% url 'staff_manage_books' %}';
         }
 
-        // The book's own loans, newest first.
+        // Shared by the level strip and the loan table below.
         function esc(v) {
             return String(v == null ? '' : v).replace(/[&<>"]/g, function (c) {
                 return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
             });
         }
 
-        // Level strip.
+        // The book's own loans, newest first.
         function renderLevelStrip(data) {
             const strip = document.getElementById('detailStrip');
             const near = document.getElementById('detailNeighbours');
@@ -822,6 +1049,7 @@
                             qrDownload.classList.remove('opacity-50', 'pointer-events-none');
                         } else {
                             qrContainer.innerHTML = '<p class="text-slate-400 text-xs">No QR code available</p>';
+                            // No QR code to download.
                             qrDownload.href = '#';
                             qrDownload.classList.add('opacity-50', 'pointer-events-none');
                         }
@@ -946,9 +1174,23 @@
             });
         }
 
+        // Keep shared fields for the next book.
+        let addAnother = false;
+        let addedThisRun = 0;
+
+        window.submitAndAddAnother = function () {
+            const form = document.getElementById('addBookForm');
+            // Run browser validation first.
+            if (!form.reportValidity()) return;
+            addAnother = true;
+            form.requestSubmit();
+        };
+
         document.getElementById('addBookForm').addEventListener('submit', function(e) {
             e.preventDefault();
             const formData = new FormData(this);
+            const keepOpen = addAnother;
+            addAnother = false;
             
             fetch('/admin-portal/add-book/', {
                 method: 'POST',
@@ -959,7 +1201,23 @@
             })
             .then(response => response.json())
             .then(data => {
-                if (data.success) {
+                if (data.success && keepOpen) {
+                    addedThisRun += 1;
+                    // What never repeats is cleared; what a run shares stays.
+                    ['addTitle', 'addAuthor', 'addIsbn'].forEach(function (id) {
+                        const el = document.getElementById(id);
+                        if (el) el.value = '';
+                    });
+                    const runNote = document.getElementById('addRunNote');
+                    if (runNote) {
+                        runNote.textContent = addedThisRun + ' book'
+                            + (addedThisRun === 1 ? '' : 's') + ' added this run. Genre, '
+                            + 'shelf and year kept \u2014 change them by hand when one differs.';
+                        runNote.classList.remove('hidden');
+                    }
+                    const first = document.getElementById('addTitle');
+                    if (first) first.focus();
+                } else if (data.success) {
                     window.location.href = '{% url 'staff_manage_books' %}';
                 } else {
                     alert(data.error || 'An error occurred');
@@ -1034,10 +1292,12 @@
         // Import: preview first, save on confirm.
         let pendingImportFile = null;
 
-        function postImport(file, preview) {
+        function postImport(file, preview, copyRows) {
             const form = new FormData();
             form.append('excel_file', file);
             if (preview) form.append('preview', '1');
+            // Which of the already-catalogued rows were ticked as real second copies.
+            if (copyRows && copyRows.length) form.append('copy_rows', copyRows.join(','));
             return fetch('{% url 'import_books' %}', {
                 method: 'POST',
                 body: form,
@@ -1066,97 +1326,6 @@
             postImport(pendingImportFile, true).then(showImportResult).catch(importFailed);
         }
 
-        function confirmImport() {
-            const file = pendingImportFile;
-            if (!file) return;
-            pendingImportFile = null;          // one press, one import
-            showImportWorking('Importing ' + file.name + '...');
-            postImport(file, false).then(showImportResult).catch(importFailed);
-        }
-
-        function importLine(icon, colour, text) {
-            return '<div class="flex items-start gap-2.5 rounded-lg border border-slate-800/70 px-3 py-2" style="background-color: var(--bg-input);">'
-                 + '<i class="fa-solid ' + icon + ' ' + colour + ' text-[11px] mt-0.5"></i>'
-                 + '<span class="text-slate-300 leading-relaxed">' + text + '</span></div>';
-        }
-
-        function showImportButtons(showConfirm, closeText) {
-            const confirm = document.getElementById('importConfirmBtn');
-            if (showConfirm) { confirm.classList.remove('hidden'); confirm.classList.add('flex'); }
-            else { confirm.classList.add('hidden'); confirm.classList.remove('flex'); }
-            const close = document.getElementById('importCloseBtn');
-            close.textContent = closeText;
-            close.classList.toggle('hidden', !closeText);
-        }
-
-        // Hide buttons while importing.
-        function showImportWorking(text) {
-            const icon = document.getElementById('importIcon');
-            icon.className = 'w-9 h-9 rounded-xl flex items-center justify-center text-base flex-shrink-0 bg-slate-500/10 text-slate-400 border border-slate-500/25';
-            icon.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
-            document.getElementById('importTitle').textContent = 'Working';
-            document.getElementById('importSummary').innerHTML =
-                importLine('fa-hourglass-half', 'text-slate-400', esc(text));
-            showImportButtons(false, '');
-            document.getElementById('importResultModal').classList.remove('hidden');
-        }
-
-        function showImportResult(data) {
-            const icon = document.getElementById('importIcon');
-            const body = document.getElementById('importSummary');
-
-            if (!data || !data.success) {
-                icon.className = 'w-9 h-9 rounded-xl flex items-center justify-center text-base flex-shrink-0 bg-rose-500/10 text-rose-400 border border-rose-500/25';
-                icon.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i>';
-                document.getElementById('importTitle').textContent = 'Import failed';
-                body.innerHTML = importLine('fa-circle-xmark', 'text-rose-400',
-                    esc((data && data.error) || 'Something went wrong.'));
-                // A file the server could not read does not become importable by pressing the button again.
-                pendingImportFile = null;
-                showImportButtons(false, 'Close');
-                document.getElementById('importResultModal').classList.remove('hidden');
-                return;
-            }
-
-            icon.className = 'w-9 h-9 rounded-xl flex items-center justify-center text-base flex-shrink-0 bg-emerald-500/10 text-emerald-400 border border-emerald-500/25';
-            icon.innerHTML = '<i class="fa-solid fa-check"></i>';
-            document.getElementById('importTitle').textContent =
-                data.preview ? 'Ready to import' : 'Import finished';
-
-            let html = '';
-            if (data.preview) {
-                html += importLine('fa-circle-info', 'text-cyan-400',
-                    '<span class="text-slate-200 font-semibold">Nothing has been saved yet.</span> '
-                    + 'This is what importing this file would do.');
-            }
-            // One row per message part.
-            String(data.message || '').split('. ').forEach(function (part) {
-                const t = part.trim().replace(/\.$/, '');
-                if (!t) return;
-                const bad = /skip|could not|new shelf board/i.test(t);
-                html += importLine(bad ? 'fa-circle-exclamation' : 'fa-circle-check',
-                                   bad ? 'text-amber-400' : 'text-emerald-400', esc(t) + '.');
-            });
-            if (data.matched_columns && data.matched_columns.length) {
-                html += importLine('fa-table-columns', 'text-slate-500',
-                    'Columns matched: <span class="text-slate-400">'
-                    + esc(data.matched_columns.join(', ')) + '</span>');
-            }
-            body.innerHTML = html;
-
-            // Show confirm only if there is something to import.
-            showImportButtons(!!(data.preview && data.imported),
-                              data.preview ? 'Cancel' : 'Done');
-            document.getElementById('importResultModal').classList.remove('hidden');
-        }
-
-        function closeImportResult() {
-            document.getElementById('importResultModal').classList.add('hidden');
-            // Cancelled preview, no reload needed.
-            if (pendingImportFile) { pendingImportFile = null; return; }
-            window.location.href = '{% url 'staff_manage_books' %}';
-        }
-
     </script>
 
     <script>
@@ -1181,6 +1350,791 @@
         }
     </script>
     <script src="{% static 'js/admin-enhance.js' %}" defer></script>
+
+    <script>
+    // QR label selection, kept across pages.
+    (function () {
+        const STORE = 'ayla.labelSelection';
+        const LABELS_URL = "{% url 'book_qr_labels' %}";
+
+        // The selection lives here.
+        let selection = null;
+
+        function chosen() {
+            if (selection === null) {
+                try { selection = new Set(JSON.parse(sessionStorage.getItem(STORE) || '[]')); }
+                catch (e) { selection = new Set(); }
+            }
+            return selection;
+        }
+        function remember(set) {
+            selection = new Set(set);
+            try { sessionStorage.setItem(STORE, JSON.stringify([...selection])); }
+            catch (e) { /* site data refused: the selection still works here, it just will not survive changing page. */ }
+        }
+
+        // Selecting every book that matches the filters, not just this page.
+        const MATCH_COUNT = {{ paginator.count|default:0 }};
+        const MATCH_QS = "{{ querystring|escapejs }}";
+        const MATCH_KEY = 'ayla.labelSelection.matching';
+
+        function matchedAll() {
+            try { return sessionStorage.getItem(MATCH_KEY) === MATCH_QS; } catch (e) { return false; }
+        }
+        function setMatchedAll(on) {
+            try {
+                if (on) sessionStorage.setItem(MATCH_KEY, MATCH_QS);
+                else sessionStorage.removeItem(MATCH_KEY);
+            } catch (e) { /* storage refused */ }
+        }
+
+        // A new search or filter starts with nothing selected; changing page keeps it.
+        const FILTERS_KEY = 'ayla.labelSelection.filters';
+        try {
+            const savedFilters = sessionStorage.getItem(FILTERS_KEY);
+            if (savedFilters !== null && savedFilters !== MATCH_QS) {
+                sessionStorage.removeItem(STORE);
+                sessionStorage.removeItem(MATCH_KEY);
+            }
+            sessionStorage.setItem(FILTERS_KEY, MATCH_QS);
+        } catch (e) { /* storage refused */ }
+
+        window.onBookTick = function () {
+            const set = chosen();
+            let anyOff = false;
+            document.querySelectorAll('.book-tick').forEach(function (cb) {
+                if (cb.checked) set.add(Number(cb.value));
+                else { set.delete(Number(cb.value)); anyOff = true; }
+            });
+            if (anyOff) setMatchedAll(false);
+            remember(set);
+            paintSelection(set);
+        };
+
+        window.toggleAllBooks = function (master) {
+            if (!master.checked && matchedAll()) { window.clearBookSelection(); return; }
+            document.querySelectorAll('.book-tick').forEach(function (cb) { cb.checked = master.checked; });
+            window.onBookTick();
+        };
+
+        window.selectAllMatching = async function () {
+            const btn = document.getElementById('selectMatchingBtn');
+            if (btn) { btn.disabled = true; btn.textContent = 'Selecting...'; }
+            try {
+                const p = new URLSearchParams(MATCH_QS);
+                p.set('ids', 'all');
+                const res = await fetch(location.pathname + '?' + p.toString(),
+                                        { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                const data = await res.json();
+                const set = chosen();
+                (data.ids || []).forEach(function (id) { set.add(Number(id)); });
+                remember(set);
+                setMatchedAll(true);
+                document.querySelectorAll('.book-tick').forEach(function (cb) { cb.checked = true; });
+                paintSelection(set);
+            } catch (e) {
+                paintSelection(chosen());
+                if (window.AylaDialog) AylaDialog.toast('Could not select all matching books. Please try again.', 'error');
+                else alert('Could not select all matching books. Please try again.');
+            }
+        };
+
+        window.clearBookSelection = function () {
+            remember(new Set());
+            setMatchedAll(false);
+            document.querySelectorAll('.book-tick').forEach(function (cb) { cb.checked = false; });
+            paintSelection(chosen());
+        };
+
+        function paintSelection(set) {
+            const n = set.size;
+            // Counts sit on the selection toolbar's own buttons.
+            const printLab = document.getElementById('selectPrintLabel');
+            if (printLab) printLab.textContent = 'Print QR Labels (' + n + ')';
+
+            const del = document.getElementById('toolbarDeleteBtn');
+            const delLab = document.getElementById('toolbarDeleteLabel');
+            if (del) del.disabled = n === 0;
+            if (delLab) delLab.textContent = 'Delete (' + n + ')';
+
+            const ticks = [...document.querySelectorAll('.book-tick')];
+            const on = ticks.filter(function (cb) { return cb.checked; }).length;
+            const allOnPage = ticks.length > 0 && on === ticks.length;
+            const master = document.getElementById('selectAllBooks');
+            if (master) {
+                master.checked = allOnPage;
+                master.indeterminate = on > 0 && on < ticks.length;
+            }
+
+            // The selection toolbar appears whenever anything is selected.
+            const bar = document.getElementById('selectMatchingBar');
+            const text = document.getElementById('selectMatchingText');
+            const btn = document.getElementById('selectMatchingBtn');
+            if (bar && text && btn) {
+                const everything = matchedAll() && n >= MATCH_COUNT;
+                const offer = n > 0 && !everything && MATCH_COUNT > n;
+                const elsewhere = Math.max(0, n - on);
+                bar.classList.toggle('hidden', n === 0);
+                text.textContent = everything
+                    ? 'All ' + MATCH_COUNT + ' matching books selected'
+                    : n + ' selected' + (elsewhere ? ' · ' + elsewhere + ' not on this page' : '');
+                btn.hidden = !offer;
+                btn.disabled = false;
+                if (offer) {
+                    btn.innerHTML = '<i class="fa-solid fa-check-double text-[10px]"></i> Select all '
+                        + MATCH_COUNT + ' matching';
+                    btn.onclick = window.selectAllMatching;
+                }
+            }
+        }
+
+        // Restore on load, so paging back and forth keeps the ticks visible.
+        document.addEventListener('DOMContentLoaded', function () {
+            const set = chosen();
+            document.querySelectorAll('.book-tick').forEach(function (cb) {
+                if (set.has(Number(cb.value))) cb.checked = true;
+            });
+            paintSelection(set);
+        });
+
+        // Labels per page, same as the PDF.
+        const PAGE_MM = { A4: [210, 297], Letter: [215.9, 279.4], Legal: [215.9, 355.6] };
+        const MARGIN_MM = 10, PAD_MM = 2, LEADING = 1.18, PT_MM = 25.4 / 72;
+
+        function linesWanted() {
+            return ['labelShowTitle', 'labelShowAuthor', 'labelShowCopy',
+                    'labelShowLocation', 'labelShowId', 'labelShowCallNumber']
+                .filter(function (id) { return document.getElementById(id).checked; }).length;
+        }
+
+        window.refreshLabelEstimate = function () {
+            const paper = document.getElementById('labelPaper').value;
+            let qr = parseFloat(document.getElementById('labelSize').value) || 25;
+            qr = Math.max(12, Math.min(60, qr));
+            const [pw, ph] = PAGE_MM[paper] || PAGE_MM.A4;
+            const fs = Math.max(3.6, Math.min(7.0, qr * 0.235));
+            const textH = linesWanted() * fs * LEADING * PT_MM;
+            const cellW = qr + PAD_MM, cellH = qr + textH + PAD_MM;
+            const cols = Math.max(1, Math.floor((pw - 2 * MARGIN_MM) / cellW));
+            const rows = Math.max(1, Math.floor((ph - 2 * MARGIN_MM) / cellH));
+            const perPage = cols * rows;
+            const count = chosen().size;
+            const skip = Math.max(0, parseInt(document.getElementById('labelSkip').value, 10) || 0);
+            const pages = Math.max(1, Math.ceil((count + skip) / perPage));
+            document.getElementById('labelEstimate').innerHTML =
+                '<strong class="text-violet-400">' + cols + ' \u00d7 ' + rows + ' = ' + perPage + '</strong> labels per page'
+                + ' \u00b7 ' + count + ' book' + (count === 1 ? '' : 's')
+                + ' \u2192 <strong class="text-violet-400">' + pages + '</strong> page' + (pages === 1 ? '' : 's');
+        };
+
+        window.openLabelSheet = function (ids) {
+            if (Array.isArray(ids) && ids.length) remember(new Set(ids));
+            const n = chosen().size;
+            // Only reachable from the toolbar with nothing ticked.
+            if (!n) { alert('Tick at least one book first.'); return; }
+            document.getElementById('labelCountNote').textContent =
+                n + ' book' + (n === 1 ? '' : 's') + ' selected.';
+            const err = document.getElementById('labelSheetError');
+            if (err) { err.textContent = ''; err.classList.add('hidden'); }
+            const dl = document.getElementById('labelDownloadBtn');
+            if (dl) { dl.disabled = false; dl.innerHTML = '<i class="fa-solid fa-file-pdf text-xs"></i> Download PDF'; }
+            document.getElementById('labelSheetModal').classList.remove('hidden');
+            refreshLabelEstimate();
+        };
+
+
+        // Delete selected books.
+        window.openDeleteBooks = function () {
+            const ids = [...chosen()];
+            if (!ids.length) return;
+            const body = document.getElementById('deleteSummary');
+            body.innerHTML = line('fa-hourglass-half', 'text-slate-400', 'Checking…');
+            document.getElementById('deleteConfirmBtn').classList.add('hidden');
+            document.getElementById('deleteBooksModal').classList.remove('hidden');
+            postDelete(ids, false).then(renderDeleteSummary).catch(deleteFailed);
+        };
+
+        window.closeDeleteBooks = function () {
+            document.getElementById('deleteBooksModal').classList.add('hidden');
+        };
+
+        function postDelete(ids, confirm) {
+            const body = new URLSearchParams({ ids: ids.join(',') });
+            if (confirm) body.append('confirm', '1');
+            return fetch("{% url 'delete_books' %}", {
+                method: 'POST',
+                headers: { 'X-CSRFToken': '{{ csrf_token }}',
+                           'Content-Type': 'application/x-www-form-urlencoded',
+                           'X-Requested-With': 'XMLHttpRequest' },
+                body: body,
+            }).then(r => r.json());
+        }
+
+        function deleteFailed() {
+            document.getElementById('deleteSummary').innerHTML = line(
+                'fa-circle-xmark', 'text-rose-400',
+                'The server did not answer. Nothing was deleted.');
+            document.getElementById('deleteConfirmBtn').classList.add('hidden');
+        }
+
+        function renderDeleteSummary(data) {
+            const body = document.getElementById('deleteSummary');
+            const go = document.getElementById('deleteConfirmBtn');
+            if (!data.success) {
+                body.innerHTML = line('fa-circle-xmark', 'text-rose-400', esc(data.error));
+                go.classList.add('hidden');
+                return;
+            }
+            if (data.preview === false) {          // it is done
+                body.innerHTML = line('fa-circle-check', 'text-emerald-400', esc(data.message));
+                go.classList.add('hidden');
+                document.getElementById('deleteCancelBtn').textContent = 'Done';
+                setTimeout(function () { remember(new Set()); window.location.reload(); }, 700);
+                return;
+            }
+
+            let html = line('fa-circle-exclamation', 'text-rose-400',
+                '<span class="text-slate-200 font-semibold">' + data.deletable
+                + ' book' + (data.deletable === 1 ? '' : 's') + ' will be deleted.</span> '
+                + 'An Administrator can restore them from there.');
+
+            if (data.loan_records) {
+                html += line('fa-clock-rotate-left', 'text-amber-400',
+                    '<span class="text-slate-200 font-semibold">' + data.loan_records
+                    + ' loan record' + (data.loan_records === 1 ? '' : 's')
+                    + '</span> are kept — who borrowed these '
+                    + 'copies, when, and any fine charged.');
+            }
+            if (data.donation_records) {
+                html += line('fa-gift', 'text-amber-400',
+                    data.donation_records + ' donation record(s) are kept too.');
+            }
+            if (data.on_loan_count) {
+                html += line('fa-hand-holding', 'text-violet-400',
+                    '<span class="text-slate-200 font-semibold">' + data.on_loan_count
+                    + ' book' + (data.on_loan_count === 1 ? ' is' : 's are')
+                    + ' out on loan</span> and will be kept: '
+                    + data.on_loan.map(function (b) { return esc(b.title); }).join(', ')
+                    + (data.on_loan_count > data.on_loan.length ? ', …' : '')
+                    + '. Return them before archiving.');
+            }
+            body.innerHTML = html;
+
+            if (data.deletable) {
+                document.getElementById('deleteConfirmLabel').textContent =
+                    'Delete ' + data.deletable + ' book' + (data.deletable === 1 ? '' : 's');
+                go.classList.remove('hidden');
+                go.classList.add('flex');
+            } else {
+                go.classList.add('hidden');
+            }
+        }
+
+        window.confirmDeleteBooks = function () {
+            const ids = [...chosen()];
+            if (!ids.length) return;
+            const go = document.getElementById('deleteConfirmBtn');
+            go.classList.add('hidden');
+            document.getElementById('deleteSummary').innerHTML =
+                line('fa-hourglass-half', 'text-slate-400', 'Deleting…');
+            postDelete(ids, true).then(renderDeleteSummary).catch(deleteFailed);
+        };
+
+        window.closeLabelSheet = function () {
+            document.getElementById('labelSheetModal').classList.add('hidden');
+            // Finish the import after the label sheet closes.
+            if (importSummaryAfterLabels) {
+                const summary = importSummaryAfterLabels;
+                importSummaryAfterLabels = null;
+                finishImport(summary);
+            }
+        };
+
+        window.downloadLabelSheet = async function () {
+            const ids = [...chosen()];
+            if (!ids.length) return;
+            const q = new URLSearchParams({
+                ids: ids.join(','),
+                page: document.getElementById('labelPaper').value,
+                qr_mm: document.getElementById('labelSize').value || '25',
+                sort: (document.getElementById('labelSort') || {}).value || 'location',
+                skip: document.getElementById('labelSkip').value || '0',
+                show_title: document.getElementById('labelShowTitle').checked ? '1' : '0',
+                show_copy: document.getElementById('labelShowCopy').checked ? '1' : '0',
+                show_call_number: document.getElementById('labelShowCallNumber').checked ? '1' : '0',
+                show_id: document.getElementById('labelShowId').checked ? '1' : '0',
+                show_author: document.getElementById('labelShowAuthor').checked ? '1' : '0',
+                show_location: document.getElementById('labelShowLocation').checked ? '1' : '0',
+                cut_guides: document.getElementById('labelCutGuides').checked ? '1' : '0',
+                filename: (document.getElementById('labelFileName') || {}).value || '',
+            });
+            // Fetched, then handed to the browser as a file, not navigated to.
+            const btn = document.getElementById('labelDownloadBtn');
+            const err = document.getElementById('labelSheetError');
+            function fail(message) {
+                if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-file-pdf text-xs"></i> Download PDF'; }
+                if (err) { err.textContent = message; err.classList.remove('hidden'); }
+            }
+            if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin text-xs"></i> Preparing PDF...'; }
+            if (err) err.classList.add('hidden');
+
+            let res;
+            try {
+                res = await fetch(LABELS_URL + '?' + q.toString(),
+                                  { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+            } catch (e) {
+                fail('The server did not answer. No labels were printed.');
+                return;
+            }
+            // Show an error if the response is not a PDF.
+            const type = res.headers.get('Content-Type') || '';
+            if (!res.ok || type.indexOf('application/pdf') !== 0) {
+                let message = 'The label sheet could not be made. Check that you are still signed in, then try again.';
+                try { const data = await res.json(); if (data && data.error) message = data.error; } catch (e) { /* not JSON */ }
+                fail(message);
+                return;
+            }
+
+            const blob = await res.blob();
+            const named = /filename="?([^";]+)"?/.exec(res.headers.get('Content-Disposition') || '');
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = named ? named[1] : 'AYLA-QR-labels.pdf';
+            link.style.display = 'none';
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            // Wait before closing, which reloads the page.
+            setTimeout(function () {
+                URL.revokeObjectURL(url);
+                closeLabelSheet();
+            }, 1000);
+        };
+
+        // Called by the import result modal once it knows what it created.
+        window.printLabelsForBooks = function (ids) {
+            if (!ids || !ids.length) return;
+            openLabelSheet(ids);
+        };
+
+        // Label picker.
+        const PICKER_URL = "{% url 'book_label_picker_data' %}";
+        let pickBooks = [];        // every book, fetched once
+        let pickById = {};
+        let pickMax = 500;
+
+        function esc(t) {
+            return String(t == null ? '' : t).replace(/[&<>"]/g, function (c) {
+                return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+            });
+        }
+
+        // Shelves and levels listed first.
+        function pickGroups(kind) {
+            const buckets = new Map();
+            pickBooks.forEach(function (b) {
+                const byShelf = kind === 'shelf';
+                const id = byShelf ? b.shelf_id : b.level_id;
+                const key = id == null ? 'none' : String(id);
+                if (!buckets.has(key)) {
+                    buckets.set(key, {
+                        key: key,
+                        label: id == null
+                            ? 'Not on a shelf yet'
+                            : (byShelf ? (b.shelf_name || 'Shelf')
+                                       : (b.location || 'Shelf level')),
+                        detail: byShelf ? '' : (b.level_category || ''),
+                        levels: new Set(),
+                        ids: [],
+                    });
+                }
+                const bucket = buckets.get(key);
+                bucket.ids.push(b.book_id);
+                if (b.level_id != null) bucket.levels.add(b.level_id);
+            });
+            // Unshelved last: they are the ones still to be placed.
+            return [...buckets.values()].sort(function (a, b) {
+                if (a.key === 'none') return 1;
+                if (b.key === 'none') return -1;
+                return a.label.localeCompare(b.label, undefined, { numeric: true });
+            });
+        }
+
+        function pickRow(title, sub, action, dashed) {
+            return '<div class="pick-row' + (dashed ? ' group' : '') + '">'
+                 + '<div class="min-w-0"><span class="block text-xs font-medium text-slate-200 truncate">' + title + '</span>'
+                 + '<span class="block text-[10px] text-slate-500 truncate">' + sub + '</span></div>'
+                 + action + '</div>';
+        }
+
+        let pickMode = 'book';
+        window.setPickMode = function (mode) {
+            pickMode = mode;
+            ['book', 'level', 'shelf'].forEach(function (m) {
+                const btn = document.getElementById('pickMode' + m.charAt(0).toUpperCase() + m.slice(1));
+                if (btn) btn.classList.toggle('on', m === mode);
+            });
+            const box = document.getElementById('pickSearch');
+            if (box) {
+                box.placeholder = mode === 'book'
+                    ? 'Search title, author or ISBN...'
+                    : (mode === 'level' ? 'Search shelf levels...' : 'Search shelves...');
+            }
+            renderLabelPicker();
+        };
+
+        window.renderLabelPicker = function () {
+            const q = (document.getElementById('pickSearch').value || '').trim().toLowerCase();
+            // Read from the shared selection.
+            const set = chosen();
+
+            let html = '';
+            if (pickMode === 'book') {
+                const rows = pickBooks.filter(function (b) {
+                    if (set.has(b.book_id)) return false;
+                    if (!q) return true;
+                    return (b.title + ' ' + b.author + ' ' + b.isbn).toLowerCase().indexOf(q) !== -1;
+                });
+                html = rows.slice(0, 400).map(function (b) {
+                    return pickRow(esc(b.title),
+                        esc(b.author) + (b.location ? ' · ' + esc(b.location) : ' · not shelved'),
+                        '<button class="tbtn add" title="Add" onclick="addBookToCart(' + b.book_id + ')"><i class="fa-solid fa-plus"></i></button>',
+                        false);
+                }).join('');
+                if (rows.length > 400) {
+                    html += '<div class="text-[10px] text-slate-500 p-2 text-center">'
+                          + (rows.length - 400) + ' more — keep typing to narrow it down.</div>';
+                }
+            } else {
+                // Keep chosen groups visible, greyed.
+                const groups = pickGroups(pickMode).filter(function (g) {
+                    return !q || g.label.toLowerCase().indexOf(q) !== -1;
+                });
+                html = groups.map(function (g) {
+                    const left = g.ids.filter(function (id) { return !set.has(id); });
+                    const done = g.ids.length - left.length;
+                    const bays = (pickMode === 'shelf' && g.levels.size)
+                        ? ' · ' + g.levels.size + ' level' + (g.levels.size === 1 ? '' : 's') : '';
+                    const sub = left.length
+                        ? (left.length + ' of ' + g.ids.length + ' still to add'
+                           + (done ? ' · ' + done + ' already in the list' : '')
+                           + bays + (g.detail ? ' · ' + esc(g.detail) : ''))
+                        : ('all ' + g.ids.length + ' already in the list' + bays);
+                    const action = left.length
+                        ? '<button class="tbtn add" title="Add all" onclick="addGroupToCart(\'' + pickMode + '\',\'' + g.key + '\')"><i class="fa-solid fa-plus"></i></button>'
+                        : '<button class="tbtn del" title="Remove all" onclick="removeGroupFromCart(\'' + pickMode + '\',\'' + g.key + '\')"><i class="fa-solid fa-minus"></i></button>';
+                    return pickRow(esc(g.label), sub, action, true);
+                }).join('');
+                if (!groups.length) {
+                    html = '<div class="text-slate-500 text-xs p-3 text-center">'
+                         + (q ? 'Nothing matches that.' : 'No shelves yet.') + '</div>';
+                }
+            }
+            document.getElementById('pickList').innerHTML = html
+                || '<div class="text-slate-500 text-xs p-3 text-center">Nothing left to add.</div>';
+
+            // Print list, in shelf order.
+            const inCart = [...set].map(function (id) { return pickById[id]; }).filter(Boolean);
+            inCart.sort(function (a, b) {
+                return (a.location || '\uffff').localeCompare(b.location || '\uffff')
+                    || a.title.localeCompare(b.title);
+            });
+            document.getElementById('pickCart').innerHTML = inCart.length
+                ? inCart.map(function (b) {
+                    return pickRow(esc(b.title),
+                        esc(b.author) + (b.location ? ' · ' + esc(b.location) : ' · not shelved'),
+                        '<button class="tbtn del" title="Remove" onclick="removeBookFromCart(' + b.book_id + ')"><i class="fa-solid fa-minus"></i></button>',
+                        false);
+                  }).join('')
+                : '<div class="text-slate-600 text-xs p-3 text-center">Click + on a book or a shelf level to add it here.</div>';
+
+            document.getElementById('pickCartCount').textContent = '(' + set.size + ')';
+            document.getElementById('pickConfirmCount').textContent = set.size ? '(' + set.size + ')' : '';
+            const btn = document.getElementById('pickConfirm');
+            btn.disabled = set.size === 0;
+            btn.style.opacity = set.size ? '1' : '0.45';
+
+            const note = document.getElementById('pickNote');
+            note.textContent = set.size > pickMax
+                ? 'That is ' + set.size + ' labels — the sheet holds at most ' + pickMax + '. Remove some first.'
+                : (set.size + ' selected. They print in shelf order, packed tight so no space is wasted.');
+            note.className = set.size > pickMax
+                ? 'text-[10px] text-rose-400 font-semibold'
+                : 'text-[10px] text-slate-500';
+        };
+
+        // Picker and table share one selection.
+        function saveCart(set) {
+            remember(set);
+            // Sync the table checkboxes.
+            document.querySelectorAll('.book-tick').forEach(function (cb) {
+                cb.checked = set.has(Number(cb.value));
+            });
+            paintSelection(chosen());
+            renderLabelPicker();
+        }
+        function currentCart() {
+            return new Set(chosen());     // a copy: callers mutate what they get
+        }
+
+        window.addBookToCart = function (id) { const s = currentCart(); s.add(id); saveCart(s); };
+        window.removeBookFromCart = function (id) { const s = currentCart(); s.delete(id); saveCart(s); };
+        window.clearLabelCart = function () { saveCart(new Set()); };
+        window.removeGroupFromCart = function (kind, key) {
+            const g = pickGroups(kind).find(function (x) { return x.key === key; });
+            if (!g) return;
+            const s = currentCart();
+            g.ids.forEach(function (id) { s.delete(id); });
+            saveCart(s);
+        };
+        window.addGroupToCart = function (kind, key) {
+            const g = pickGroups(kind).find(function (x) { return x.key === key; });
+            if (!g) return;
+            const s = currentCart();
+            g.ids.forEach(function (id) { s.add(id); });
+            saveCart(s);
+        };
+
+        window.openLabelPicker = async function () {
+            document.getElementById('pickSearch').value = '';
+            setPickMode('book');
+            document.getElementById('pickList').innerHTML =
+                '<div class="text-slate-500 text-xs p-3">Loading…</div>';
+            document.getElementById('labelPickerModal').classList.remove('hidden');
+            try {
+                const r = await fetch(PICKER_URL, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+                const d = await r.json();
+                pickBooks = d.books || [];
+                pickMax = d.max_per_sheet || 500;
+                pickById = {};
+                pickBooks.forEach(function (b) { pickById[b.book_id] = b; });
+                // Remove deleted books from the selection.
+                const live = currentCart();
+                const pruned = new Set([...live].filter(function (id) { return pickById[id]; }));
+                if (pruned.size !== live.size) saveCart(pruned);
+            } catch (e) {
+                document.getElementById('pickList').innerHTML =
+                    '<div class="text-rose-400 text-xs p-3">Could not load the catalogue. Are you still signed in?</div>';
+                return;
+            }
+            renderLabelPicker();
+        };
+        window.closeLabelPicker = function () {
+            document.getElementById('labelPickerModal').classList.add('hidden');
+        };
+        window.confirmLabelPicker = function () {
+            if (currentCart().size > pickMax) return;
+            closeLabelPicker();
+            openLabelSheet();
+        };
+
+        // Import result modal.
+        let importedIds = [];
+
+        function line(icon, colour, text) {
+            return '<div class="flex items-start gap-2.5 rounded-lg border border-slate-800/70 px-3 py-2" style="background-color: var(--bg-input);">'
+                 + '<i class="fa-solid ' + icon + ' ' + colour + ' text-[11px] mt-0.5"></i>'
+                 + '<span class="text-slate-300 leading-relaxed">' + text + '</span></div>';
+        }
+
+        // Whether the confirmed import should go straight on to the labels.
+        let printAfterImport = false;
+        // Import summary to show after the label sheet.
+        let importSummaryAfterLabels = null;
+
+        function showButtons(ids, closeText) {
+            ['importConfirmBtn', 'importConfirmLabelsBtn'].forEach(
+                function (id) {
+                    const b = document.getElementById(id);
+                    if (ids.indexOf(id) >= 0) {
+                        b.classList.remove('hidden');
+                        b.classList.add('flex');
+                    } else {
+                        b.classList.add('hidden');
+                        b.classList.remove('flex');
+                    }
+                });
+            const close = document.getElementById('importCloseBtn');
+            close.textContent = closeText;
+            close.classList.toggle('hidden', !closeText);
+        }
+
+        // Hide buttons while importing.
+        window.showImportWorking = function (text) {
+            const icon = document.getElementById('importIcon');
+            icon.className = 'w-9 h-9 rounded-xl flex items-center justify-center text-base flex-shrink-0 bg-slate-500/10 text-slate-400 border border-slate-500/25';
+            icon.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+            document.getElementById('importTitle').textContent = 'Working';
+            document.getElementById('importSummary').innerHTML =
+                line('fa-hourglass-half', 'text-slate-400', esc(text));
+            showButtons([], '');
+            document.getElementById('importResultModal').classList.remove('hidden');
+        };
+
+        // Run the real import.
+        window.confirmImport = function (thenPrint) {
+            const file = pendingImportFile;
+            if (!file) return;
+            // Read ticked rows before clearing the modal.
+            const copyRows = tickedCopyRows();
+            pendingImportFile = null;          // one press, one import
+            printAfterImport = !!thenPrint;
+            showImportWorking('Importing ' + file.name + '...');
+            postImport(file, false, copyRows).then(showImportResult).catch(importFailed);
+        };
+
+        // Rows ticked as extra copies.
+        function tickedCopyRows() {
+            return Array.prototype.slice
+                .call(document.querySelectorAll('.clash-tick:checked'))
+                .map(function (b) { return b.value; });
+        }
+
+        // Tick or untick all.
+        window.setAllClashes = function (on) {
+            document.querySelectorAll('.clash-tick').forEach(function (b) { b.checked = on; });
+            updateClashCount();
+        };
+
+        window.updateClashCount = function () {
+            const el = document.getElementById('clashChosen');
+            if (el) el.textContent = tickedCopyRows().length;
+        };
+
+        // List of rows already in the catalogue.
+        function clashList(clashes, truncated) {
+            let rows = '';
+            clashes.forEach(function (c) {
+                const held = c.have + (c.have === 1 ? ' copy' : ' copies') + ' on file'
+                           + (c.where ? ' · ' + esc(c.where) : ' · not shelved');
+                rows +=
+                  '<label class="flex items-start gap-2.5 px-2.5 py-2 rounded-lg cursor-pointer hover:bg-slate-800/40">'
+                + '<input type="checkbox" class="clash-tick mt-0.5 flex-shrink-0" value="' + c.row + '"'
+                + ' onchange="updateClashCount()">'
+                + '<span class="min-w-0">'
+                + '<span class="block text-[11px] font-semibold text-slate-200 truncate">' + esc(c.title) + '</span>'
+                + '<span class="block text-[10px] text-slate-500 truncate">row ' + c.row + ' · '
+                + esc(c.author) + ' · ' + held
+                + (c.reason === 'isbn' ? ' · same ISBN' : '') + '</span>'
+                + '</span></label>';
+            });
+            return ''
+              + '<div class="rounded-xl border border-amber-500/25 bg-amber-500/[0.06] p-3 mt-1">'
+              +   '<div class="flex items-center justify-between gap-2 mb-1.5 flex-wrap">'
+              +     '<p class="text-[11px] font-bold text-amber-300">'
+              +       '<i class="fa-solid fa-clone mr-1.5"></i>Already in the catalogue ('
+              +       clashes.length + ')</p>'
+              +     '<div class="flex items-center gap-1.5">'
+              +       '<button type="button" onclick="setAllClashes(true)" class="px-2 py-1 rounded-md border border-slate-700 text-[10px] font-semibold text-slate-300 hover:bg-slate-800/60">All are copies</button>'
+              +       '<button type="button" onclick="setAllClashes(false)" class="px-2 py-1 rounded-md border border-slate-700 text-[10px] font-semibold text-slate-300 hover:bg-slate-800/60">None</button>'
+              +     '</div>'
+              +   '</div>'
+              +   '<p class="text-[10px] text-slate-400 mb-2 leading-relaxed">'
+              +     'Tick a row only if the sheet is listing a genuine extra copy of that book. '
+              +     'Rows left unticked are not imported. '
+              +     '<span class="text-slate-300 font-semibold"><span id="clashChosen">0</span> ticked.</span></p>'
+              +   '<div class="space-y-0.5 overflow-y-auto rounded-lg" style="max-height: 30vh;">' + rows + '</div>'
+              +   (truncated
+                    ? '<p class="text-[10px] text-amber-400 mt-2">Only the first ' + clashes.length
+                      + ' are listed. A sheet with more repeats than this is usually the same sheet '
+                      + 'being imported again.</p>'
+                    : '')
+              + '</div>';
+        }
+
+        window.showImportResult = function (data) {
+            const icon = document.getElementById('importIcon');
+            const body = document.getElementById('importSummary');
+            importedIds = (data && data.created_ids) || [];
+
+            if (!data || !data.success) {
+                icon.className = 'w-9 h-9 rounded-xl flex items-center justify-center text-base flex-shrink-0 bg-rose-500/10 text-rose-400 border border-rose-500/25';
+                icon.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i>';
+                document.getElementById('importTitle').textContent = 'Import failed';
+                body.innerHTML = line('fa-circle-xmark', 'text-rose-400',
+                    esc((data && data.error) || 'Something went wrong.'));
+                // Nothing to confirm after an error.
+                pendingImportFile = null;
+                printAfterImport = false;
+                showButtons([], 'Close');
+                document.getElementById('importResultModal').classList.remove('hidden');
+                return;
+            }
+
+            icon.className = 'w-9 h-9 rounded-xl flex items-center justify-center text-base flex-shrink-0 bg-emerald-500/10 text-emerald-400 border border-emerald-500/25';
+            icon.innerHTML = '<i class="fa-solid fa-check"></i>';
+            document.getElementById('importTitle').textContent =
+                data.preview ? 'Ready to import' : 'Import finished';
+
+            // One row per message part.
+            let html = '';
+            if (data.preview) {
+                html += line('fa-circle-info', 'text-violet-400',
+                    '<span class="text-slate-200 font-semibold">Nothing has been saved yet.</span> '
+                    + 'This is what importing this file would do.');
+            }
+            String(data.message || '').split('. ').forEach(function (part) {
+                const t = part.trim().replace(/\.$/, '');
+                if (!t) return;
+                const bad = /skip|could not|new shelf board/i.test(t);
+                html += line(bad ? 'fa-circle-exclamation' : 'fa-circle-check',
+                             bad ? 'text-amber-400' : 'text-emerald-400', esc(t) + '.');
+            });
+            if (data.matched_columns && data.matched_columns.length) {
+                html += line('fa-table-columns', 'text-slate-500',
+                    'Columns matched: <span class="text-slate-400">'
+                    + esc(data.matched_columns.join(', ')) + '</span>');
+            }
+            if (data.created_truncated) {
+                html += line('fa-scissors', 'text-amber-400',
+                    'Only the first ' + importedIds.length + ' can go on one label sheet.');
+            }
+            const clashes = (data.preview && data.clashes) || [];
+            if (clashes.length) html += clashList(clashes, data.clashes_truncated);
+            body.innerHTML = html;
+
+            if (data.preview) {
+                // Show confirm buttons only if there is something to import.
+                showButtons(data.imported || clashes.length
+                    ? ['importConfirmBtn', 'importConfirmLabelsBtn'] : [], 'Cancel');
+                document.getElementById('importResultModal').classList.remove('hidden');
+                return;
+            }
+
+            showButtons([], 'Done');
+
+            // Go straight to the label sheet.
+            if (printAfterImport && importedIds.length) {
+                printAfterImport = false;
+                importSummaryAfterLabels = data;
+                document.getElementById('importResultModal').classList.add('hidden');
+                window.printLabelsForBooks(importedIds);
+                return;
+            }
+            // Close the modal and say what happened.
+            printAfterImport = false;
+            finishImport(data);
+        };
+
+        // Say what the import did, then get out of the way.
+        function finishImport(data) {
+            document.getElementById('importResultModal').classList.add('hidden');
+            const msg = String((data && data.message) || 'Import finished.');
+            if (window.AylaDialog) AylaDialog.toast(msg, 'success');
+            window.location.reload();
+        }
+
+        window.closeImportResult = function () {
+            document.getElementById('importResultModal').classList.add('hidden');
+            // Cancelled preview, no reload needed.
+            if (pendingImportFile) { pendingImportFile = null; return; }
+            // Only now, so the summary is not swept away before it is read.
+            window.location.reload();
+        };
+    })();
+    </script>
 
     <script>
     // Limit the level list to the chosen shelf.
