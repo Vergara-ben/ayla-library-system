@@ -57,15 +57,12 @@ PORTAL_ALLOWED_IPS = [v.strip() for v in os.environ.get('PORTAL_ALLOWED_IPS', ''
 # Application definition
 
 INSTALLED_APPS = [
-    # First, so runserver serves WebSockets too.
-    'daphne',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    'channels',
     'library',
 ]
 
@@ -108,26 +105,20 @@ TEMPLATES = [
                 'django.contrib.messages.context_processors.messages',
                 'library.context_processors.staff_modules',
                 'library.context_processors.patron_session',
+                'library.context_processors.live_updates',
             ],
         },
     },
 ]
 
 WSGI_APPLICATION = 'ayla_library_system.wsgi.application'
-ASGI_APPLICATION = 'ayla_library_system.asgi.application'
 
-# Live updates. One server process can use the in-memory layer; set REDIS_URL
-# when running more than one.
-REDIS_URL = os.environ.get('REDIS_URL', '').strip()
-if REDIS_URL:
-    CHANNEL_LAYERS = {
-        'default': {
-            'BACKEND': 'channels_redis.core.RedisChannelLayer',
-            'CONFIG': {'hosts': [REDIS_URL]},
-        },
-    }
-else:
-    CHANNEL_LAYERS = {'default': {'BACKEND': 'channels.layers.InMemoryChannelLayer'}}
+# Live updates through Pusher Channels. Without these, pages check every 20 seconds instead.
+PUSHER_APP_ID = os.environ.get('PUSHER_APP_ID', '').strip()
+PUSHER_KEY = os.environ.get('PUSHER_KEY', '').strip()
+PUSHER_SECRET = os.environ.get('PUSHER_SECRET', '').strip()
+PUSHER_CLUSTER = os.environ.get('PUSHER_CLUSTER', 'ap1').strip()
+PUSHER_ENABLED = bool(PUSHER_APP_ID and PUSHER_KEY and PUSHER_SECRET)
 
 
 # Database https://docs.djangoproject.com/en/6.0/ref/settings/#databases.
@@ -156,24 +147,17 @@ DATABASES = {
         'PASSWORD': os.environ.get('DATABASE_PASSWORD'),
         'HOST': os.environ.get('DATABASE_HOST'),
         'PORT': os.environ.get('DATABASE_PORT'),
-        # Under ASGI each request runs on its own thread, so connections are
-        # reused through the pool below rather than kept per thread.
-        'CONN_MAX_AGE': 0,
+        # Reuse database connections.
+        'CONN_MAX_AGE': int(os.environ.get('DB_CONN_MAX_AGE', '60')),
+        # Reopen a connection the pooler has already closed.
+        'CONN_HEALTH_CHECKS': True,
     }
 }
 
-if DATABASE_ENGINE == 'postgresql':
-    _db_options = {
-        'pool': {
-            'min_size': int(os.environ.get('DB_POOL_MIN', '1')),
-            'max_size': int(os.environ.get('DB_POOL_MAX', '8')),
-        },
-    }
-    # Supabase and most hosted PostgreSQL need an encrypted connection (require).
-    DATABASE_SSLMODE = os.environ.get('DATABASE_SSLMODE', '').strip()
-    if DATABASE_SSLMODE:
-        _db_options['sslmode'] = DATABASE_SSLMODE
-    DATABASES['default']['OPTIONS'] = _db_options
+# Supabase and most hosted PostgreSQL need an encrypted connection (require).
+DATABASE_SSLMODE = os.environ.get('DATABASE_SSLMODE', '').strip()
+if DATABASE_SSLMODE and DATABASE_ENGINE == 'postgresql':
+    DATABASES['default']['OPTIONS'] = {'sslmode': DATABASE_SSLMODE}
 
 
 # Password validation.
@@ -349,7 +333,8 @@ CSP_DIRECTIVES = [
     "font-src 'self' data: https://fonts.gstatic.com https://cdnjs.cloudflare.com",
     # CDN hosts used by Leaflet.
     "img-src 'self' data: blob: https://cdnjs.cloudflare.com https://unpkg.com",
-    "connect-src 'self'",
+    # Pusher's live-update socket, and its fallback transport.
+    f"connect-src 'self' wss://ws-{PUSHER_CLUSTER}.pusher.com https://sockjs-{PUSHER_CLUSTER}.pusher.com",
     "media-src 'self' blob:",
     "worker-src 'self' blob:",
     "object-src 'none'",
