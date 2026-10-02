@@ -728,6 +728,14 @@
             showTargetShelf();
         });
 
+        // The floor plan was edited elsewhere: this view is drawn from the page itself, so reload it.
+        document.addEventListener('ayla:live', function (e) {
+            if (e.detail.topics.indexOf('map') === -1) return;
+            const typing = document.activeElement && /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName);
+            if (!typing) { location.reload(); return; }
+            if (window.AylaDialog) AylaDialog.toast('The floor plan was just changed. Reload to see the new layout.', 'info');
+        });
+
         // Find a book.
         (function () {
             const FIND_URL = "{% url 'patron_catalog_search' %}";
@@ -1337,5 +1345,6 @@
     {% endif %}
 
     <script src="{% static 'js/admin-enhance.js' %}" defer></script>
+    {% include '_live.html' with topics='map books transactions chat' %}
 </body>
 </html>

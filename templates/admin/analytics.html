@@ -100,7 +100,7 @@
         <main id="main-content" tabindex="-1" class="flex-1 overflow-y-auto p-8 space-y-6">
 
             {# The answer before the evidence. #}
-            <div class="headline">
+            <div data-live="headline" class="headline">
                 {% for f in headline %}
                 <div class="figure-tile">
                     <div class="flex flex-wrap items-start justify-between gap-x-2 gap-y-1">
@@ -165,7 +165,7 @@
             </form>
 
             {# Visits #}
-            <section class="panel space-y-6" id="panel-visits" role="tabpanel" aria-labelledby="tab-visits">
+            <section data-live="p-visits" class="panel space-y-6" id="panel-visits" role="tabpanel" aria-labelledby="tab-visits">
 
                 {# Arrivals chart. #}
                 {% include 'admin/_chart.html' with chart=arrivals.chart %}
@@ -207,7 +207,7 @@
             </section>
 
             {# The collection #}
-            <section class="panel space-y-6" id="panel-collection" role="tabpanel" aria-labelledby="tab-collection">
+            <section data-live="p-collection" class="panel space-y-6" id="panel-collection" role="tabpanel" aria-labelledby="tab-collection">
 
                 {# Shelf occupancy chart. #}
                 {% include 'admin/_chart.html' with chart=shelves.chart %}
@@ -269,7 +269,7 @@
             </section>
 
             {# Borrowing and fines #}
-            <section class="panel space-y-6" id="panel-borrowing" role="tabpanel" aria-labelledby="tab-borrowing">
+            <section data-live="p-borrowing" class="panel space-y-6" id="panel-borrowing" role="tabpanel" aria-labelledby="tab-borrowing">
 
                 {% if not borrowed_books.total %}
                 <div class="rounded-xl border border-amber-800/50 px-4 py-3" style="background-color: var(--bg-card);">
@@ -372,5 +372,6 @@
     })();
     </script>
     <script src="{% static 'js/admin-enhance.js' %}" defer></script>
+    {% include '_live.html' with topics='books transactions patrons visits chat' %}
 </body>
 </html>

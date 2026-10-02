@@ -86,7 +86,7 @@
                         <i class="fa-solid fa-file-invoice w-5 text-sm"></i>
                         <span class="text-sm {% if active != 'transactions' %}font-medium{% endif %}">Transactions</span>
                     </div>
-                    {% if pending_transactions_count %}<span class="bg-rose-500/20 text-rose-400 text-xs px-2 py-0.5 rounded-full font-semibold">{{ pending_transactions_count }}</span>{% endif %}
+                    <span data-live="sb-tx">{% if pending_transactions_count %}<span class="bg-rose-500/20 text-rose-400 text-xs px-2 py-0.5 rounded-full font-semibold">{{ pending_transactions_count }}</span>{% endif %}</span>
                 </a>
                 {% endif %}
                 {% if 'books' in allowed_modules %}
@@ -95,7 +95,7 @@
                         <i class="fa-solid fa-arrow-rotate-left w-5 text-sm"></i>
                         <span class="text-sm {% if active != 'reshelving' %}font-medium{% endif %}">Reshelving</span>
                     </div>
-                    {% if reshelving_count %}<span class="bg-amber-500/20 text-amber-400 text-xs px-2 py-0.5 rounded-full font-semibold">{{ reshelving_count }}</span>{% endif %}
+                    <span data-live="sb-reshelve">{% if reshelving_count %}<span class="bg-amber-500/20 text-amber-400 text-xs px-2 py-0.5 rounded-full font-semibold">{{ reshelving_count }}</span>{% endif %}</span>
                 </a>
                 {% endif %}
                 {% if 'logs' in allowed_modules %}
@@ -128,7 +128,7 @@
                         <i class="fa-solid fa-comments w-5 text-sm"></i>
                         <span class="text-sm {% if active != 'chat' %}font-medium{% endif %}">Messages</span>
                     </div>
-                    {% if unanswered_messages %}<span class="bg-rose-500/20 text-rose-400 text-xs px-2 py-0.5 rounded-full font-semibold">{{ unanswered_messages }}</span>{% endif %}
+                    <span data-live="sb-chat">{% if unanswered_messages %}<span class="bg-rose-500/20 text-rose-400 text-xs px-2 py-0.5 rounded-full font-semibold">{{ unanswered_messages }}</span>{% endif %}</span>
                 </a>
                 {% endif %}
             </div>

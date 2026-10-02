@@ -129,7 +129,7 @@
                 </div>
             </div>
 
-            <div class="grid grid-cols-2 lg:grid-cols-5 gap-4">
+            <div data-live="act-stats" class="grid grid-cols-2 lg:grid-cols-5 gap-4">
                 <div class="rounded-xl border border-slate-800/80 p-4" style="background-color: var(--bg-card);">
                     <p class="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1">Total entries</p>
                     <p class="text-2xl font-bold text-slate-100">{{ total_logs }}</p>
@@ -209,7 +209,7 @@
                                 <th>Patron</th>
                             </tr>
                         </thead>
-                        <tbody>
+                        <tbody data-live="act-rows">
                             {% for log in page_obj %}
                             <tr>
                                 <td class="mono text-slate-400 whitespace-nowrap">{{ log.timestamp|date:"M j, Y" }}<br><span class="text-slate-500">{{ log.timestamp|date:"H:i:s" }}</span></td>
@@ -238,7 +238,7 @@
                     </table>
                 </div>
 
-                <div class="flex items-center justify-between px-5 py-4 border-t border-slate-800 text-xs text-slate-500 flex-wrap gap-3">
+                <div data-live="act-foot" class="flex items-center justify-between px-5 py-4 border-t border-slate-800 text-xs text-slate-500 flex-wrap gap-3">
                     <span class="font-medium">
                         Showing <span class="text-slate-400">{{ page_obj|length }}</span>
                         of <span class="text-slate-400">{{ filtered_count }}</span>
@@ -257,5 +257,6 @@
             document.querySelector('aside').classList.toggle('open');
         }
     </script>
+    {% include '_live.html' with topics='activity books transactions chat' %}
 </body>
 </html>

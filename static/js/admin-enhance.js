@@ -23,6 +23,12 @@
         safe(initModals);
     });
 
+    // Content swapped in by live.js gets the same touch-ups.
+    document.addEventListener('ayla:live-swapped', function () {
+        safe(hideDecorativeIcons);
+        safe(labelIconButtons);
+    });
+
     function safe(fn) { try { fn(); } catch (e) { /* keep going */ } }
 
     /* ── Skip to main content ── */

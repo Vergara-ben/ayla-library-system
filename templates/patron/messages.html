@@ -8,7 +8,6 @@
 <title>AYLA Library — Ask a Librarian</title>
 <script src="{% static 'js/theme.js' %}"></script>
 <script src="{% static 'js/session.js' %}"></script>
-<script src="{% static 'js/poll-scheduler.js' %}"></script>
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="{% static 'css/theme.css' %}">
 <style>
@@ -71,7 +70,7 @@
 <div class="page">
 
   {# The library is one person at a desk, not a call centre. #}
-  <div class="intro">
+  <div class="intro" data-live="chat-intro">
     <h2>Ask the library a question</h2>
     <p>Send your question here and a librarian will answer it. We are not always at the
        computer, so you will get an <strong>email</strong> as soon as someone replies —
@@ -182,8 +181,6 @@ async function sendMessage() {
     renderThread(data.messages);
     // Poll faster after sending.
     threadCount = data.messages ? data.messages.length : threadCount;
-    hasConversation = true;
-    poller.bump();
     document.getElementById('hint').textContent =
       'Sent. A librarian will reply, and we will email you when they do.';
     if (topic) topic.closest('.field').remove();
@@ -193,33 +190,27 @@ async function sendMessage() {
   }
 }
 
-// Polling, see poll-scheduler.js.
-let threadCount = 0;
-let hasConversation = false;
+let threadCount = {{ messages|length }};
 
-async function poll() {
-  const r = await fetch(URLS.poll, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+async function poll(live) {
+  const headers = { 'X-Requested-With': 'XMLHttpRequest' };
+  if (live) headers['X-Ayla-Live'] = '1';
+  const r = await fetch(URLS.poll, { headers: headers });
   const data = await r.json();
-  if (!data.success) return false;
-  hasConversation = Boolean(data.conversation_id);
-  if (!data.messages) return false;
+  if (!data.success) return;
+  if (!data.messages || data.messages.length === threadCount) return;
   renderThread(data.messages);
-  // A new reply counts as activity.
-  const changed = data.messages.length !== threadCount;
   threadCount = data.messages.length;
-  return changed;
 }
 
-// Poll every 8s, then 20s, then stop after ten minutes.
-const poller = AylaPoll({
-  poll: poll,
-  tiers: [[0, 8000], [2 * 60 * 1000, 20000]],
-  stopAfter: 10 * 60 * 1000,
-  enabled: () => hasConversation,
-});
+// Check once on load, which also tells the library the reply was seen.
+poll(false).catch(function () {});
 
-// Check once on load.
-poller.now().then(() => { if (hasConversation) poller.start(); });
+// A reply shows up the moment the librarian sends it (live.js).
+document.addEventListener('ayla:live', function (e) {
+  if (e.detail.topics.indexOf('chat') !== -1) poll(true).catch(function () {});
+});
 </script>
+{% include '_live.html' with topics='chat' %}
 </body>
 </html>

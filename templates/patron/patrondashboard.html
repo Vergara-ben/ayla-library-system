@@ -205,7 +205,7 @@
   <div class="nav-right">
     {% include 'patron/_guide.html' %}
     <button type="button" class="theme-toggle" data-theme-toggle></button>
-    <a href="{% url 'patron_announcements' %}" class="nav-btn"><i class="fa-solid fa-bell" aria-hidden="true"></i>{% if recent_announcements %}<span class="badge">{{ recent_announcements|length }}</span>{% endif %}</a>
+    <a href="{% url 'patron_announcements' %}" class="nav-btn" data-live="bell"><i class="fa-solid fa-bell" aria-hidden="true"></i>{% if recent_announcements %}<span class="badge">{{ recent_announcements|length }}</span>{% endif %}</a>
     <a href="{% url 'patron_account' %}" class="avatar">{{ patron.fullname|first|upper }}</a>
   </div>
 </nav>
@@ -213,6 +213,7 @@
 <div class="main">
 
   <!-- ANNOUNCEMENT -->
+  <div data-live="ann-banner">
   {% if recent_announcements %}
   <div class="announcement" id="annBanner">
     <div class="ann-icon"><i class="fa-solid fa-bullhorn" aria-hidden="true"></i></div>
@@ -223,10 +224,12 @@
     <div class="ann-close" onclick="document.getElementById('annBanner').style.display='none'"><i class="fa-solid fa-xmark" aria-hidden="true"></i></div>
   </div>
   {% endif %}
+  </div>
 
   <!-- GREETING -->
   <div class="greeting">
     <h1>Hello, {{ patron.fullname }}</h1>
+    <div data-live="greet">
     {% if overdue_count %}
     <p>You have <span>{{ overdue_count }} overdue book{{ overdue_count|pluralize }}</span>. Please return them soon!</p>
     {% elif borrowed_count %}
@@ -234,13 +237,14 @@
     {% else %}
     <p>You have no active borrows right now.</p>
     {% endif %}
-    <div class="lib-badge{% if library_status.is_open %} is-open{% endif %}">{% if library_status.is_open %}Library open now · closes at {{ library_status.closing_label }}{% else %}Library closed right now{% endif %}</div>
+    </div>
+    <div data-live="lib-badge" data-live-attrs class="lib-badge{% if library_status.is_open %} is-open{% endif %}">{% if library_status.is_open %}Library open now · closes at {{ library_status.closing_label }}{% else %}Library closed right now{% endif %}</div>
     <button type="button" class="hero-rules-btn" onclick="document.getElementById('rulesDialog').showModal()"><i class="fa-solid fa-scale-balanced" aria-hidden="true"></i> Library Rules</button>
     <div class="hero-walkers" data-decor-walkers aria-hidden="true"></div>
   </div>
 
   <!-- STATS -->
-  <div class="stats">
+  <div class="stats" data-live="stats">
     <div class="stat-card green" onclick="window.location.href='{% url 'patron_account' %}'">
       <div class="stat-icon"><i class="fa-solid fa-book" aria-hidden="true"></i></div>
       <div class="stat-num" data-count-up>{{ borrowed_count }}</div>
@@ -272,7 +276,7 @@
     <!-- LEFT -->
     <div>
       <!-- Active Loans -->
-      <div class="card" style="margin-bottom:16px;">
+      <div data-live="loans" class="card" style="margin-bottom:16px;">
         <div class="card-header">
           <div class="card-title"><i class="fa-solid fa-book-open" aria-hidden="true"></i> Active Borrows</div>
           <a href="{% url 'patron_account' %}" class="view-all">View all →</a>
@@ -297,7 +301,7 @@
       </div>
 
       <!-- History -->
-      <div class="card">
+      <div data-live="history" class="card">
         <div class="card-header">
           <div class="card-title"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i> Recent History</div>
           <a href="{% url 'patron_account' %}" class="view-all">View all →</a>
@@ -330,7 +334,7 @@
       </div>
 
       <!-- Overdue -->
-      <div class="card">
+      <div data-live="overdue" class="card">
         <div class="card-title" style="margin-bottom:14px;"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> Overdue Notice</div>
         {% if overdue_loans %}
         <div class="overdue-card">
@@ -370,5 +374,6 @@
     <div class="nav-icon"><i class="fa-solid fa-user" aria-hidden="true"></i></div><div class="nav-label">Account</div>
   </a>
 </nav>
+    {% include '_live.html' with topics='transactions books announcements library patrons' %}
 </body>
 </html>

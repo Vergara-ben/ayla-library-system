@@ -141,7 +141,7 @@
             </form>
 
             {% if report %}
-            <div id="report-output" class="space-y-6">
+            <div data-live="report" id="report-output" class="space-y-6">
 
             <!-- Report header + summary -->
             <div>
@@ -272,5 +272,6 @@
     </script>
 
     <script src="{% static 'js/admin-enhance.js' %}" defer></script>
+    {% include '_live.html' with topics='books transactions patrons visits donations chat' %}
 </body>
 </html>

@@ -360,6 +360,7 @@
     {% endfor %}
   {% endif %}
 
+  <div data-live="photo-notice">
   {% if pending_photo %}
     <div class="notice is-wait">
       <img class="notice-thumb" src="{% url 'card_photo' pending_photo.photo_id %}" alt="Photo awaiting approval">
@@ -401,6 +402,7 @@
   {% elif not printed_by_staff and not photo %}
     <p class="photo-tip"><i class="fa-solid fa-camera" aria-hidden="true"></i> Click the <strong>1 × 1 photo</strong> square to add your picture. The library approves it before it appears on your card.</p>
   {% endif %}
+  </div>
 
   <div class="idcard front">
     <div class="details">
@@ -412,7 +414,7 @@
         </div>
       </div>
 
-      <div class="identity">
+      <div data-live="identity" class="identity">
         {# Only an approved photo is shown; a patron's upload waits for staff approval. #}
         <div class="photo-wrap">
           <form method="post" enctype="multipart/form-data" id="photoForm"
@@ -446,7 +448,7 @@
         </div>
       </div>
 
-      <dl class="fields">
+      <dl data-live="fields" class="fields">
         {# The issued card number, not the database key. #}
         <dt>Card No.</dt><dd>AYLA-{{ patron.card_display|default:"—" }}</dd>
         <dt>Email</dt><dd>{{ patron.email }}</dd>
@@ -457,7 +459,7 @@
       {# Account status is not printed. #}
     </div>
 
-    <div class="qr-panel">
+    <div data-live="qr" class="qr-panel">
       {% if qr_data_uri %}
         <div class="qr-box"><img id="qrImage" src="{{ qr_data_uri }}" alt="Patron QR code"></div>
         <div class="qr-caption">Present this at the library desk</div>
@@ -485,7 +487,7 @@
     </div>
 
     <div class="back-body">
-      <div class="rules">
+      <div data-live="rules" class="rules">
         <p class="rules-head">Please remember</p>
         <ol>
           <li>This card belongs to {{ library_name }} and may be used only by the person named on the front.</li>
@@ -554,12 +556,16 @@
       return true;
     }
 
-    // Download link uses the same QR image.
-    (function () {
+    // Download link uses the same QR image, including one issued while the card is open.
+    function syncQrLink() {
       const img = document.getElementById('qrImage');
       const link = document.getElementById('downloadQr');
-      if (img && link) { link.href = img.src; } else if (link) { link.style.display = 'none'; }
-    })();
+      if (!link) return;
+      if (img) { link.href = img.src; link.style.display = ''; } else { link.style.display = 'none'; }
+    }
+    syncQrLink();
+    document.addEventListener('ayla:live-swapped', syncQrLink);
   </script>
+    {% include '_live.html' with topics='patrons library' %}
 </body>
 </html>

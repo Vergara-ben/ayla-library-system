@@ -160,7 +160,7 @@
                 </div>
 
                 {% endif %}
-            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div data-live="log-stats" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
                     <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Today's Entries</p>
                     <p class="text-3xl font-bold text-cyan-400 mt-2">{{ todays_entries }}</p>
@@ -186,9 +186,11 @@
             </div>
 
             {# Peak hours, beside the log the figures come from. #}
+            <div data-live="log-chart">
             {% if not desk_mode and hours_chart %}
             {% include 'admin/_chart.html' with chart=hours_chart %}
             {% endif %}
+            </div>
 
             {# The scanner is a keyboard. #}
                 <div id="deskScanBar" class="hidden rounded-xl border border-cyan-800/60 bg-cyan-500/[0.06] px-5 py-4">
@@ -342,6 +344,9 @@
                                     <div id="deskMsg" class="text-xs font-bold"></div>
                                 </td>
                             </tr>
+                        </tbody>
+                        {# The visits themselves, refreshed live; the sign-in row above keeps what is typed. #}
+                        <tbody class="divide-y divide-slate-800/40 text-xs text-slate-300" data-live="log-rows">
                             {% for log in logs %}
                                 <tr class="hover:bg-slate-800/10 transition-colors">
                                     <td class="py-4 px-6 font-mono text-slate-500">#LOG-{{ log.log_id }}</td>
@@ -407,7 +412,7 @@
                     </table>
                 </div>
 
-                <div class="px-5 py-4 border-t border-slate-800/60 flex items-center justify-between text-xs text-slate-500 bg-slate-900/5">
+                <div data-live="log-foot" class="px-5 py-4 border-t border-slate-800/60 flex items-center justify-between text-xs text-slate-500 bg-slate-900/5">
                     <span class="font-medium">Showing <span class="text-slate-400">{{ logs|length }}</span> of <span class="text-slate-400">{{ log_count }}</span> logs for {{ sel_date|date:"M j, Y" }}</span>
 
                     {% include 'admin/_pagination.html' with page=logs accent='cyan' qs=querystring %}
@@ -1181,5 +1186,6 @@
     <datalist id="knownSchools">
         {% for s in known_schools %}<option value="{{ s }}"></option>{% endfor %}
     </datalist>
+    {% include '_live.html' with topics='visits patrons transactions chat' %}
 </body>
 </html>

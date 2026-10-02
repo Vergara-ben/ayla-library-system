@@ -129,12 +129,12 @@
 
 <div class="tabs">
   <button class="tab active" onclick="switchTab('ann',this)"><i class="fa-solid fa-bullhorn" aria-hidden="true"></i> Announcements</button>
-  <button class="tab" onclick="switchTab('notif',this)"><i class="fa-solid fa-bell" aria-hidden="true"></i> Notifications{% if notifications.urgent %} <span class="tab-badge">{{ notifications.urgent|length }}</span>{% endif %}</button>
+  <button data-live="notif-tab" class="tab" onclick="switchTab('notif',this)"><i class="fa-solid fa-bell" aria-hidden="true"></i> Notifications{% if notifications.urgent %} <span class="tab-badge">{{ notifications.urgent|length }}</span>{% endif %}</button>
 </div>
 
 <div class="page">
   <!-- ANNOUNCEMENTS -->
-  <div class="panel active" id="ann">
+  <div data-live="ann" class="panel active" id="ann">
     {% for ann in announcements %}
     <div class="ann-card" onclick="markRead(this)">
       <div class="ann-header">
@@ -155,7 +155,7 @@
   </div>
 
   <!-- NOTIFICATIONS: the signed-in patron's own loans -->
-  <div class="panel" id="notif">
+  <div data-live="notif" class="panel" id="notif">
     {% if notifications is None %}
     <div class="empty">
       <div class="empty-icon"><i class="fa-solid fa-bell" aria-hidden="true"></i></div>
@@ -236,5 +236,6 @@ function markAllRead() {
 }
 </script>
 {% if not patron_signed_in %}{% include 'patron/_guestprompt.html' %}{% endif %}
+    {% include '_live.html' with topics='announcements transactions' %}
 </body>
 </html>

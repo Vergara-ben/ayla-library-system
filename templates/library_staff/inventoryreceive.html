@@ -231,7 +231,7 @@
                                style="background-color: var(--bg-input); max-width: 190px;">
                     </div>
                     <p class="px-5 pt-3 text-[10px] text-slate-500">Emptiest first. Counts rank the levels &mdash; they do not mean a level is full.</p>
-                    <div class="max-h-72 overflow-y-auto mt-2" id="shelfList">
+                    <div data-live="shelves" class="max-h-72 overflow-y-auto mt-2" id="shelfList">
                         {% for lv in shelf_levels_available %}
                         <div class="shelf-avail px-5 py-2.5 flex items-center justify-between gap-3 border-t border-slate-800/40"
                              data-search="{{ lv.shelf|lower }} {{ lv.category|lower }} {{ lv.room|lower }}">
@@ -258,7 +258,7 @@
                     <div class="px-5 py-3 border-b border-slate-800/60">
                         <h4 class="text-sm font-bold text-slate-200 tracking-wide">Your recent receipts</h4>
                     </div>
-                    <div class="divide-y divide-slate-800/40">
+                    <div data-live="recent" class="divide-y divide-slate-800/40">
                         {% for r in recent %}
                         <div class="px-5 py-3 flex items-center justify-between gap-3">
                             <div class="min-w-0">
@@ -449,6 +449,11 @@
             row.style.display = (!t || row.dataset.search.indexOf(t) > -1) ? '' : 'none';
         });
     }
+    // Refreshed shelf counts keep the filter that was typed.
+    document.addEventListener('ayla:live-swapped', function () {
+        filterShelves(document.getElementById('shelfFilter').value);
+    });
 </script>
+    {% include '_live.html' with topics='books transactions chat' %}
 </body>
 </html>
