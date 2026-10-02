@@ -6029,6 +6029,27 @@
 <script>
   /* Reload on theme change so map colours update. */
   document.addEventListener('ayla:themechange', function () { location.reload(); });
+
+  /* Another account edited the floor plan. An editor is never redrawn under the
+     person using it, so it says so and lets them reload when ready. */
+  document.addEventListener('ayla:live', function (e) {
+    if (e.detail.self || e.detail.topics.indexOf('map') === -1) return;
+    if (document.getElementById('fpChangedBar')) return;
+    var bar = document.createElement('div');
+    bar.id = 'fpChangedBar';
+    bar.setAttribute('role', 'status');
+    bar.style.cssText = 'position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:80;'
+      + 'display:flex;align-items:center;gap:12px;padding:10px 14px;border-radius:10px;font-size:12.5px;'
+      + 'background:var(--bg-modal);color:var(--text-main);border:1px solid var(--warning);box-shadow:0 8px 24px rgba(0,0,0,.35);';
+    bar.innerHTML = '<span>Someone else just changed this floor plan.</span>'
+      + '<button type="button" style="font-weight:700;padding:5px 10px;border-radius:7px;border:1px solid var(--warning);color:var(--warning);background:transparent;cursor:pointer">Reload</button>'
+      + '<button type="button" aria-label="Dismiss" style="background:transparent;border:0;color:var(--text-muted);cursor:pointer;font-size:14px">&times;</button>';
+    var buttons = bar.querySelectorAll('button');
+    buttons[0].onclick = function () { location.reload(); };
+    buttons[1].onclick = function () { bar.remove(); };
+    document.body.appendChild(bar);
+  });
 </script>
+{% include '_live.html' with topics='map books transactions chat' %}
 </body>
 </html>

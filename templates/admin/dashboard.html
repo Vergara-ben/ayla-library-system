@@ -623,7 +623,7 @@
                 <div>
                     <span class="hero-welcome-tag">Admin Dashboard</span>
                     <h1 class="hero-title">{{ greeting }}, {{ admin.fullname|default:"Admin" }}</h1>
-                    <p class="hero-subtitle">{{ today|date:"l, F j, Y" }} • <span>{{ visitors_today }} visit{{ visitors_today|pluralize }} logged today</span> • <span>{{ patrons_inside }} still inside</span></p>
+                    <p class="hero-subtitle" data-live="hero-sub">{{ today|date:"l, F j, Y" }} • <span>{{ visitors_today }} visit{{ visitors_today|pluralize }} logged today</span> • <span>{{ patrons_inside }} still inside</span></p>
                     {% include 'admin/_librarystatus.html' %}
                 </div>
                 <div class="hero-actions">
@@ -633,7 +633,7 @@
                 </div>
             </section>
 
-            <section class="stats-grid">
+            <section class="stats-grid" data-live="stats-1">
                 <div class="stat-card">
                     <h4 class="stat-label">Books Available</h4>
                     <div class="stat-value">{{ books_available }}</div>
@@ -656,7 +656,7 @@
                 </div>
             </section>
 
-            <section class="stats-grid">
+            <section class="stats-grid" data-live="stats-2">
                 <div class="stat-card">
                     <h4 class="stat-label">Books Lost</h4>
                     <div class="stat-value">{{ books_lost }}</div>
@@ -687,7 +687,7 @@
                         {% if 'transactions' in allowed_modules %}<a href="{% url 'admin_transaction' %}" class="btn-view-all">View all &rarr;</a>{% endif %}
                     </div>
 
-                    <div class="transaction-list">
+                    <div class="transaction-list" data-live="recent-tx">
                         {% for tx in recent_transactions %}
                             <div class="transaction-row">
                                 <div class="book-info-block">
@@ -775,7 +775,7 @@
                             <h3 class="panel-title"><i class="fa-solid fa-door-open" aria-hidden="true"></i> Today's Entry Log</h3>
                             {% if 'logs' in allowed_modules %}<a href="{% url 'admin_log_management' %}" class="btn-view-all">View &rarr;</a>{% endif %}
                         </div>
-                        <div class="log-stats-list">
+                        <div class="log-stats-list" data-live="log-stats">
                             <div class="log-stat-row">
                                 <span class="log-stat-label">Total entries</span>
                                 <span class="log-stat-val">{{ visitors_today }}</span>
@@ -798,5 +798,6 @@
     </div>
 
     <script src="{% static 'js/admin-enhance.js' %}" defer></script>
+    {% include '_live.html' with topics='books transactions patrons visits chat library' %}
 </body>
 </html>

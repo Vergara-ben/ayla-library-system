@@ -81,7 +81,7 @@
                         <h4 class="text-sm font-bold text-slate-200 tracking-wide">Library Borrowing Policy</h4>
                     </div>
 
-                    <form method="post" class="p-6 space-y-5">
+                    <form data-live="rules" method="post" class="p-6 space-y-5">
                         {% csrf_token %}
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
                             <div class="space-y-1.5">
@@ -117,5 +117,6 @@
         function toggleSidebar() { document.querySelector('aside').classList.toggle('open'); }
     </script>
     <script src="{% static 'js/admin-enhance.js' %}" defer></script>
+    {% include '_live.html' with topics='library books transactions chat' %}
 </body>
 </html>

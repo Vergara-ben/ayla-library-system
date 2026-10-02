@@ -146,6 +146,10 @@
     document.addEventListener('visibilitychange', function () {
         if (!document.hidden) refresh();
     });
+    // Another account opened or closed the library.
+    document.addEventListener('ayla:live', function (e) {
+        if (e.detail.topics.indexOf('library') !== -1) refresh();
+    });
 
     schedule(Number(box.getAttribute('data-seconds')) || 0);
 })();

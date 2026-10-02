@@ -157,7 +157,7 @@
 
         <main id="main-content" tabindex="-1" class="flex-1 overflow-y-auto p-8 space-y-6">
             
-            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div data-live="bk-stats" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
                     <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Total Titles</p>
                     <p class="text-3xl font-bold text-slate-300 mt-2">{{ total_books }}</p>
@@ -305,11 +305,11 @@
                                 <th class="py-3 px-6 text-center w-28">Actions</th>
                             </tr>
                         </thead>
-                        <tbody class="divide-y divide-slate-800/40 text-xs text-slate-300">
+                        <tbody data-live="bk-rows" class="divide-y divide-slate-800/40 text-xs text-slate-300">
                             {% for book in books %}
                             <tr class="hover:bg-slate-800/10 transition-colors">
                                 <td class="py-4 px-4 text-center">
-                                    <input type="checkbox" class="book-tick accent-cyan-600 w-3.5 h-3.5 cursor-pointer"
+                                    <input type="checkbox" data-live-ignore class="book-tick accent-cyan-600 w-3.5 h-3.5 cursor-pointer"
                                            value="{{ book.book_id }}" onchange="onBookTick()"
                                            aria-label="Select {{ book.title }}">
                                 </td>
@@ -365,7 +365,7 @@
                     </table>
                 </div>
 
-                <div class="px-5 py-4 border-t border-slate-800/60 flex items-center justify-between text-xs text-slate-500 bg-slate-900/5">
+                <div data-live="bk-foot" class="px-5 py-4 border-t border-slate-800/60 flex items-center justify-between text-xs text-slate-500 bg-slate-900/5">
                     <span class="font-medium">Showing <span class="text-slate-400">{{ books|length }}</span> of <span class="text-slate-400">{{ paginator.count }}</span> books</span>
 
                     {% include 'admin/_pagination.html' with page=books accent='cyan' qs=querystring %}
@@ -992,8 +992,18 @@
             }
         }
 
+        // The open details window follows live changes to its book.
+        let openDetailBookId = null;
+        document.addEventListener('ayla:live', function (e) {
+            const t = e.detail.topics;
+            if (t.indexOf('books') === -1 && t.indexOf('transactions') === -1) return;
+            const modal = document.getElementById('bookDetailsModal');
+            if (openDetailBookId && !modal.classList.contains('hidden')) viewBookDetails(openDetailBookId);
+        });
+
         function viewBookDetails(bookId) {
-            fetch(`/admin-portal/book-details/${bookId}/`)
+            openDetailBookId = bookId;
+            fetch(`/admin-portal/book-details/${bookId}/`, { headers: { 'X-Ayla-Live': '1' } })
                 .then(response => response.json())
                 .then(data => {
                     if (data.success) {
@@ -1490,13 +1500,16 @@
         }
 
         // Restore on load, so paging back and forth keeps the ticks visible.
-        document.addEventListener('DOMContentLoaded', function () {
+        function restoreTicks() {
             const set = chosen();
             document.querySelectorAll('.book-tick').forEach(function (cb) {
                 if (set.has(Number(cb.value))) cb.checked = true;
             });
             paintSelection(set);
-        });
+        }
+        document.addEventListener('DOMContentLoaded', restoreTicks);
+        // Rows refreshed by a live update keep what was ticked.
+        document.addEventListener('ayla:live-swapped', restoreTicks);
 
         // Labels per page, same as the PDF.
         const PAGE_MM = { A4: [210, 297], Letter: [215.9, 279.4], Legal: [215.9, 355.6] };
@@ -2172,5 +2185,6 @@
         narrowBoards();
     }());
     </script>
+    {% include '_live.html' with topics='books transactions chat' %}
 </body>
 </html>

@@ -87,7 +87,7 @@
             {% endif %}
 
             <!-- Stat cards -->
-            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div data-live="usr-stats" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
                     <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Total Accounts</p>
                     <p class="text-3xl font-bold text-slate-300 mt-2">{{ total_users }}</p>
@@ -163,7 +163,7 @@
                             <th class="py-3 px-6 text-center w-40">Actions</th>
                         </tr>
                     </thead>
-                    <tbody class="divide-y divide-slate-800/40 text-xs text-slate-300">
+                    <tbody data-live="usr-rows" class="divide-y divide-slate-800/40 text-xs text-slate-300">
                         {% for u in users %}
                         <tr class="hover:bg-slate-800/10 transition-colors">
                             <td class="py-4 px-6 font-mono text-slate-500">{{ u.admin_id }}</td>
@@ -460,5 +460,6 @@
             m.addEventListener('click', function (e) { if (e.target === m) closeModal(m.id); });
         });
     </script>
+    {% include '_live.html' with topics='staff books transactions chat' %}
 </body>
 </html>

@@ -374,8 +374,9 @@ let mapData = null;
 let planBounds = null;           // what is drawn on the floor shown, for fitting the view
 
 // Fit the view to what is drawn, not the empty canvas around it.
+let holdView = false;              // a live redraw keeps the patron's zoom and pan
 function fitPlan() {
-  if (!planBounds) return;
+  if (!planBounds || holdView) return;
   map.invalidateSize();
   map.fitBounds(planBounds, { padding: [16, 16] });
 }
@@ -2208,11 +2209,42 @@ function startTrilateration() {
 }
 
 initMap();
+
+// The librarian moved a shelf, closed a floor, or a book changed hands: redraw in place.
+let liveRedraw = null;
+async function refreshMapLive() {
+  if (shownFloorId == null) return;
+  const center = map.getCenter();
+  const zoom = map.getZoom();
+  Object.keys(floorCache).forEach(function (k) { delete floorCache[k]; });
+  const data = await ensureFloorData(shownFloorId);
+  if (!data) return;
+  holdView = true;
+  drawFloor(data);
+  map.setView(center, zoom, { animate: false });
+  setTimeout(function () { holdView = false; }, 500);
+  if (patronPos && shownFloorId === patronFloorId) { displayedPos = null; animateTo(patronPos); }
+  lastRoutedFrom = null;
+  computeRoute();
+  renderViewState();
+}
+document.addEventListener('ayla:live', function (e) {
+  const t = e.detail.topics;
+  if (t.indexOf('map') === -1 && t.indexOf('books') === -1) return;
+  // One redraw at a time; a change during it is picked up by the next.
+  liveRedraw = (liveRedraw || Promise.resolve()).then(refreshMapLive).catch(function () {});
+  // An open search shows availability, so it is refreshed too.
+  const sheet = document.getElementById('findSheet');
+  if (sheet.classList.contains('show') && findPage === 1 && document.activeElement !== document.getElementById('findInput')) {
+    runFind(true);
+  }
+});
 </script>
 
 <script>
   /* Reload on theme change so map colours update. */
   document.addEventListener('ayla:themechange', function () { location.reload(); });
 </script>
+{% include '_live.html' with topics='map books' %}
 </body>
 </html>

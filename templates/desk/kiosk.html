@@ -601,6 +601,14 @@
     kioskTick();
     setInterval(kioskTick, 10000);
 
+    // A book borrowed or returned at the desk changes what the search shows.
+    document.addEventListener('ayla:live', function (e) {
+        if (e.detail.topics.indexOf('books') === -1 || kioskScreen !== 'find' || findPage !== 1) return;
+        const a = document.activeElement;
+        if (a && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) return;
+        kioskFindBook(false, true);
+    });
+
     // Screen switching
     const SCREENS = { choose: 'screenChoose', member: 'screenMember',
                       way: 'screenWay', visitor: 'screenVisitor', find: 'screenFind',
@@ -710,9 +718,10 @@
     }
 
     // Every book at first; the search box and the filters narrow it.
-    async function kioskFindBook(more) {
+    async function kioskFindBook(more, quiet) {
         clearTimeout(findTimer);
-        kioskTouch();
+        // A live refresh is not someone at the screen, so it leaves the idle timer alone.
+        if (!quiet) kioskTouch();
         findPage = more ? findPage + 1 : 1;
         const q = new URLSearchParams({ search: document.getElementById('findValue').value.trim(),
                                         page: String(findPage) });
@@ -1591,5 +1600,6 @@
 
     kioskVisitorWay('entry');
 </script>
+{% include '_live.html' with topics='books' %}
 </body>
 </html>

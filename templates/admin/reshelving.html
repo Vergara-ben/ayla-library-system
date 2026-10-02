@@ -69,7 +69,7 @@
             <div class="grid grid-cols-2 sm:grid-cols-3 gap-4">
                 <div class="rounded-xl border border-slate-800/80 p-5" style="background-color: var(--bg-card);">
                     <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Waiting</p>
-                    <p id="waitingCount" class="text-3xl font-bold text-cyan-400 mt-2">{{ total_waiting }}</p>
+                    <p data-live="rs-count" id="waitingCount" class="text-3xl font-bold text-cyan-400 mt-2">{{ total_waiting }}</p>
                 </div>
             </div>
 
@@ -101,7 +101,7 @@
                                 <th class="py-3 px-6 text-center w-32">Action</th>
                             </tr>
                         </thead>
-                        <tbody id="queueBody" class="divide-y divide-slate-800/40 text-xs text-slate-300">
+                        <tbody data-live="rs-rows" id="queueBody" class="divide-y divide-slate-800/40 text-xs text-slate-300">
                             {% for book in books %}
                             <tr class="shelf-row hover:bg-slate-800/10" data-book-id="{{ book.book_id }}">
                                 <td class="py-3.5 px-4 text-center">
@@ -230,6 +230,9 @@
             }
         };
 
+        // Another desk shelved or returned books: keep the button in step with the new rows.
+        document.addEventListener('ayla:live-swapped', function () { onShelveTick(); });
+
         window.shelveSelected = function () {
             const ids = [].slice.call(document.querySelectorAll('.shelve-tick:checked'))
                           .map(function (cb) { return Number(cb.value); });
@@ -237,5 +240,6 @@
             shelve(ids, [document.getElementById('shelveSelectedBtn')]);
         };
     </script>
+    {% include '_live.html' with topics='books transactions chat' %}
 </body>
 </html>

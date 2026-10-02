@@ -1964,7 +1964,42 @@
             await loadMiniMap();
         })();
         loadFlat();
+
+        // Another desk shelved, moved or borrowed books: redraw, keeping what was opened.
+        let liveTreeBusy = null;
+        async function refreshShelvesLive(topics) {
+            const state = {};
+            document.querySelectorAll('#treeRoot .trow').forEach(function (row) {
+                const kids = row.parentNode.querySelector(':scope > .tkids');
+                if (kids) state[row.dataset.type + ':' + row.dataset.id] = kids.style.display !== 'none';
+            });
+            const main = document.querySelector('main');
+            const scroll = main ? main.scrollTop : 0;
+            await loadTree();
+            document.querySelectorAll('#treeRoot .trow').forEach(function (row) {
+                const key = row.dataset.type + ':' + row.dataset.id;
+                const kids = row.parentNode.querySelector(':scope > .tkids');
+                if (!kids || !(key in state)) return;
+                kids.style.display = state[key] ? 'block' : 'none';
+                const chev = row.querySelector('.chev');
+                if (chev) chev.classList.toggle('open', state[key]);
+            });
+            if (main) main.scrollTop = scroll;
+            await loadFlat();
+            if (elevationShelfId && !document.getElementById('elevationPanel').classList.contains('hidden')) {
+                showElevationForShelf(elevationShelfId);
+            }
+            if (topics.indexOf('map') !== -1) await loadMiniMap();
+        }
+        document.addEventListener('ayla:live', function (e) {
+            const topics = e.detail.topics;
+            if (topics.indexOf('books') === -1 && topics.indexOf('map') === -1) return;
+            liveTreeBusy = (liveTreeBusy || Promise.resolve())
+                .then(function () { return refreshShelvesLive(topics); })
+                .catch(function () {});
+        });
     </script>
     <script src="{% static 'js/admin-enhance.js' %}" defer></script>
+    {% include '_live.html' with topics='books map transactions chat' %}
 </body>
 </html>

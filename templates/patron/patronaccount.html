@@ -132,7 +132,7 @@
 
 <div class="page">
   <!-- PROFILE -->
-  <div class="profile-hero">
+  <div data-live="profile" class="profile-hero">
     <div class="avatar">{{ patron.fullname|first|upper }}</div>
     <div class="profile-info">
       <div class="profile-name">{{ patron.fullname }}</div>
@@ -162,7 +162,7 @@
   {% endif %}
 
   <!-- ACTIVE LOANS -->
-  <div class="section" style="animation-delay:0.1s">
+  <div data-live="loans" class="section" style="animation-delay:0.1s">
     <div class="section-header">
       <div class="section-title"><i class="fa-solid fa-book" aria-hidden="true"></i> Active Loans</div>
       <div class="see-all">View all</div>
@@ -201,7 +201,7 @@
   </div>
 
   <!-- HISTORY -->
-  <div class="section" style="animation-delay:0.15s">
+  <div data-live="history" class="section" style="animation-delay:0.15s">
     <div class="section-header">
       <div class="section-title"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i> Borrowing History</div>
       <div class="see-all">{{ history|length }} total</div>
@@ -470,5 +470,6 @@ function confirmDeactivate(btn){
     .catch(()=>{ btn.disabled=false; btn.textContent='Confirm Deactivation'; toast('Could not verify the code.', false); });
 }
 </script>
+    {% include '_live.html' with topics='transactions patrons' %}
 </body>
 </html>

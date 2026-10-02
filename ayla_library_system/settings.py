@@ -57,12 +57,15 @@ PORTAL_ALLOWED_IPS = [v.strip() for v in os.environ.get('PORTAL_ALLOWED_IPS', ''
 # Application definition
 
 INSTALLED_APPS = [
+    # First, so runserver serves WebSockets too.
+    'daphne',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'channels',
     'library',
 ]
 
@@ -79,6 +82,8 @@ MIDDLEWARE = [
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
+    # Nudges open pages after a request that changed data.
+    'library.live.LiveUpdatesMiddleware',
     # Admin, staff and desk pages answer only on the library's internet connection.
     'library.middleware.LibraryNetworkOnlyMiddleware',
     # Signs out an account deactivated, suspended or archived mid-session.
@@ -109,6 +114,20 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'ayla_library_system.wsgi.application'
+ASGI_APPLICATION = 'ayla_library_system.asgi.application'
+
+# Live updates. One server process can use the in-memory layer; set REDIS_URL
+# when running more than one.
+REDIS_URL = os.environ.get('REDIS_URL', '').strip()
+if REDIS_URL:
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels_redis.core.RedisChannelLayer',
+            'CONFIG': {'hosts': [REDIS_URL]},
+        },
+    }
+else:
+    CHANNEL_LAYERS = {'default': {'BACKEND': 'channels.layers.InMemoryChannelLayer'}}
 
 
 # Database https://docs.djangoproject.com/en/6.0/ref/settings/#databases.
@@ -137,17 +156,24 @@ DATABASES = {
         'PASSWORD': os.environ.get('DATABASE_PASSWORD'),
         'HOST': os.environ.get('DATABASE_HOST'),
         'PORT': os.environ.get('DATABASE_PORT'),
-        # Reuse database connections.
-        'CONN_MAX_AGE': int(os.environ.get('DB_CONN_MAX_AGE', '60')),
-        # Reopen a connection the pooler has already closed.
-        'CONN_HEALTH_CHECKS': True,
+        # Under ASGI each request runs on its own thread, so connections are
+        # reused through the pool below rather than kept per thread.
+        'CONN_MAX_AGE': 0,
     }
 }
 
-# Supabase and most hosted PostgreSQL need an encrypted connection (require).
-DATABASE_SSLMODE = os.environ.get('DATABASE_SSLMODE', '').strip()
-if DATABASE_SSLMODE and DATABASE_ENGINE == 'postgresql':
-    DATABASES['default']['OPTIONS'] = {'sslmode': DATABASE_SSLMODE}
+if DATABASE_ENGINE == 'postgresql':
+    _db_options = {
+        'pool': {
+            'min_size': int(os.environ.get('DB_POOL_MIN', '1')),
+            'max_size': int(os.environ.get('DB_POOL_MAX', '8')),
+        },
+    }
+    # Supabase and most hosted PostgreSQL need an encrypted connection (require).
+    DATABASE_SSLMODE = os.environ.get('DATABASE_SSLMODE', '').strip()
+    if DATABASE_SSLMODE:
+        _db_options['sslmode'] = DATABASE_SSLMODE
+    DATABASES['default']['OPTIONS'] = _db_options
 
 
 # Password validation.
