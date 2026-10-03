@@ -593,6 +593,8 @@ class Book(Archivable):
     )
     cover_img_url = models.CharField(max_length=255, blank=True, null=True)
     qr_code = models.CharField(max_length=255, blank=True, null=True)
+    # When its QR label was last printed; empty means it still needs one.
+    label_printed_at = models.DateTimeField(blank=True, null=True)
 
     # Stock count results for this copy.
     audit_misses = models.IntegerField(default=0)

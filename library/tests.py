@@ -44,6 +44,14 @@ def _admin(email='smoke-admin@example.invalid', modules=''):
     )
 
 
+def _board():
+    """A shelf level to stand books on, since labels print only for shelved books."""
+    plan = FloorPlan.objects.create(name='Labels', floor_number=9, is_active=False)
+    room = Room.objects.create(floor_plan=plan, name='Store', map_x=0, map_y=0)
+    shelf = Shelf.objects.create(room=room, name='Shelf L', map_x=0, map_y=0)
+    return ShelfLevel.objects.create(shelf=shelf, level_number=1)
+
+
 def _signed_in(user):
     c = Client()
     s = c.session
@@ -1829,14 +1837,15 @@ class QRLabelSheetTests(TestCase):
     def setUp(self):
         self.user = _admin(modules='books')
         self.client = _signed_in(self.user)
+        board = _board()
         self.copies = [
             Book.objects.create(title='Noli Me Tangere', author='Jose Rizal',
-                                qr_code=str(uuid4()), status='Available')
+                                qr_code=str(uuid4()), status='Available', shelf_level=board)
             for _ in range(3)
         ]
         self.single = Book.objects.create(title='Florante at Laura',
                                           author='Francisco Balagtas',
-                                          qr_code=str(uuid4()), status='Available')
+                                          qr_code=str(uuid4()), status='Available', shelf_level=board)
 
     def _sheet(self, ids, **params):
         params['ids'] = ','.join(str(i) for i in ids)
@@ -1881,7 +1890,8 @@ class QRLabelSheetTests(TestCase):
     def test_a_book_with_no_qr_gets_one_minted(self):
         """Otherwise it is silently left off the sheet and nobody notices."""
         bare = Book.objects.create(title='Ibong Adarna', author='Anonymous',
-                                   qr_code=None, status='Available')
+                                   qr_code=None, status='Available',
+                                   shelf_level=self.single.shelf_level)
         r = self._sheet([bare.book_id])
         self.assertEqual(r.status_code, 200)
         bare.refresh_from_db()
@@ -1946,6 +1956,7 @@ class QRLabelSheetTests(TestCase):
         self.assertEqual(len(data['created_ids']), 2)
         self.assertFalse(data['created_truncated'])
 
+        Book.objects.filter(book_id__in=data['created_ids']).update(shelf_level=_board())
         sheet = self._sheet(data['created_ids'])
         self.assertTrue(sheet.content.startswith(b'%PDF'))
 
@@ -5369,7 +5380,7 @@ class CatalogueImportTests(TestCase):
         import io as _io
         from pypdf import PdfReader
         book = Book.objects.create(title='Emma', author='Austen, Jane',
-                                   genre='Fiction', publication_year=1815)
+                                   genre='Fiction', publication_year=1815, shelf_level=_board())
         r = self.client.get('/admin-portal/book-qr-labels/', {'ids': str(book.book_id)})
         self.assertEqual(r['Content-Type'], 'application/pdf')
         text = PdfReader(_io.BytesIO(r.content)).pages[0].extract_text()

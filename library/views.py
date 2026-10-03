@@ -1744,6 +1744,7 @@ def _books_page(request, template):
     # Where the book is.
     shelf = (request.GET.get('shelf') or '').strip()
     level = (request.GET.get('level') or '').strip()
+    label = (request.GET.get('label') or '').strip()
 
     books_queryset = (
         Book.objects.select_related('shelf_level', 'shelf_level__shelf')
@@ -1771,6 +1772,11 @@ def _books_page(request, template):
         shelf = ''
     if not level.isdigit():
         level = ''
+
+    if label == 'missing':
+        books_queryset = books_queryset.filter(label_printed_at__isnull=True, shelf_level__isnull=False)
+    else:
+        label = ''
 
     copies_filter = parse_copies_filter(copies)
     if copies_filter:
@@ -1803,7 +1809,7 @@ def _books_page(request, template):
     params = {}
     for key, value in (('q', q), ('status', status), ('genre', genre),
                        ('material', material), ('copies', copies),
-                       ('shelf', shelf), ('level', level)):
+                       ('shelf', shelf), ('level', level), ('label', label)):
         if value:
             params[key] = value
 
@@ -1827,6 +1833,10 @@ def _books_page(request, template):
         'level': level,
         'shelf_choices': _shelf_filter_choices(),
         'unshelved_count': Book.objects.filter(shelf_level__isnull=True).count(),
+        # Shelved but never labelled: these can be printed now.
+        'unlabelled_count': Book.objects.filter(label_printed_at__isnull=True,
+                                                shelf_level__isnull=False).count(),
+        'label': label,
         'querystring': urlencode(params),
         'paginator': paginator,
     }
@@ -4189,6 +4199,14 @@ def book_qr_labels(request):
     if not books:
         return JsonResponse({'success': False, 'error': 'None of those books exist.'})
 
+    # The label says where the book goes, so a book with no shelf waits for one.
+    unshelved = [b for b in books if b.shelf_level_id is None]
+    books = [b for b in books if b.shelf_level_id is not None]
+    if not books:
+        return JsonResponse({'success': False, 'error': (
+            'None of these books has a shelf yet. Put them on a shelf in Shelf Manager first, '
+            'so the label shows where each one goes.')})
+
     # A book with no QR cannot be labelled, and the label sheet is exactly when anyone notices.
     missing = [b for b in books if not b.qr_code]
     if missing:
@@ -4232,11 +4250,14 @@ def book_qr_labels(request):
         skip=skip,
     )
 
+    Book.objects.filter(book_id__in=[b.book_id for b in books]).update(label_printed_at=timezone.now())
     log_admin_action(request, 'Download', 'Book', None,
                      f'Printed {len(books)} QR label(s) at {layout["qr_mm"]:.0f}mm '
                      f'({layout["pages"]} page(s))')
 
     response = HttpResponse(pdf, content_type='application/pdf')
+    # Read by the page, which says how many were left out for having no shelf.
+    response['X-Labels-Skipped'] = str(len(unshelved))
     response['Content-Disposition'] = 'attachment; filename="%s"' % download_name(
         request, 'AYLA-QR-labels-%d-books' % len(books), '.pdf')
     return response

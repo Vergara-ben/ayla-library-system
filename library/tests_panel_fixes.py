@@ -205,3 +205,43 @@ class BeaconMinorTests(TestCase):
         result = self._place(minor=5, label='Other')
         self.assertFalse(result['success'])
         self.assertIn('already uses these identifiers', result['error'])
+
+
+class LabelTests(TestCase):
+
+    def setUp(self):
+        from .models import FloorPlan, Room, Shelf, ShelfLevel
+        plan = FloorPlan.objects.create(name='Ground', floor_number=1, is_active=True)
+        room = Room.objects.create(floor_plan=plan, name='Main', map_x=0, map_y=0)
+        shelf = Shelf.objects.create(room=room, name='Shelf A', map_x=0, map_y=0)
+        self.level = ShelfLevel.objects.create(shelf=shelf, level_number=1)
+        self.shelved = Book.objects.create(title='Shelved', author='A', shelf_level=self.level, qr_code='q1')
+        self.loose = Book.objects.create(title='Loose', author='B', qr_code='q2')
+        self.client = _client(admin_id=_staff(modules='books').admin_id, admin_role='Staff')
+
+    def _print(self, *books):
+        return self.client.get('/admin-portal/book-qr-labels/',
+                               {'ids': ','.join(str(b.book_id) for b in books)})
+
+    def test_only_shelved_books_are_printed_and_marked(self):
+        response = self._print(self.shelved, self.loose)
+        self.assertEqual(response['Content-Type'], 'application/pdf')
+        self.assertEqual(response['X-Labels-Skipped'], '1')
+        self.shelved.refresh_from_db()
+        self.loose.refresh_from_db()
+        self.assertIsNotNone(self.shelved.label_printed_at)
+        self.assertIsNone(self.loose.label_printed_at)
+
+    def test_a_sheet_of_only_unshelved_books_is_refused(self):
+        result = self._print(self.loose).json()
+        self.assertFalse(result['success'])
+        self.assertIn('Shelf Manager', result['error'])
+
+    def test_books_needing_a_label_are_counted_and_listed(self):
+        page = self.client.get('/library-staff/books/')
+        self.assertEqual(page.context['unlabelled_count'], 1)
+        self.assertEqual(page.context['unshelved_count'], 1)
+        ids = self.client.get('/library-staff/books/', {'label': 'missing', 'ids': 'all'}).json()['ids']
+        self.assertEqual(ids, [self.shelved.book_id])
+        self._print(self.shelved)
+        self.assertEqual(self.client.get('/library-staff/books/').context['unlabelled_count'], 0)
