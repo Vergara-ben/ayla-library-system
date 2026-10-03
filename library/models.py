@@ -1451,10 +1451,13 @@ class InventoryRecord(models.Model):
 
     CONDITION_CHOICES = [
         ('Good', 'Good'),
+        ('Worn', 'Worn'),
         ('Damaged', 'Damaged'),
         ('Lost', 'Lost'),
         ('Withdrawn', 'Withdrawn'),
     ]
+    # Still in the building and expected on a shelf; also the choices on arrival.
+    HELD_CONDITIONS = ('Good', 'Worn', 'Damaged')
 
     # Accessioning stage for donations only.
     STAGE_CHOICES = [
@@ -1540,7 +1543,7 @@ class InventoryRecord(models.Model):
     @property
     def counts_as_held(self):
         """Whether this copy should be found on the shelves during an audit."""
-        return self.status == 'In Stock' and self.condition in ('Good', 'Damaged')
+        return self.status == 'In Stock' and self.condition in self.HELD_CONDITIONS
 
     @property
     def source_detail(self):

@@ -8764,8 +8764,8 @@ class SpreadsheetImportTests(TestCase):
 
     def test_donated_books_can_be_scanned_and_are_not_received_twice(self):
         rows = [
-            ['donor_name', 'date_donated', 'title', 'author', 'material_type', 'quantity'],
-            ['Brgy. Council', '09/01/2026', 'Noli Me Tangere', 'Rizal, Jose', 'magazine', 2],
+            ['donor_name', 'date_donated', 'title', 'author', 'material_type', 'quantity', 'condition'],
+            ['Brgy. Council', '09/01/2026', 'Noli Me Tangere', 'Rizal, Jose', 'magazine', 2, 'Good'],
         ]
         r = self._upload('/admin-portal/import-donations/', rows)
         self.assertTrue(r['success'], r)
@@ -8785,9 +8785,9 @@ class SpreadsheetImportTests(TestCase):
 
     def test_a_bad_date_skips_only_its_row(self):
         r = self._upload('/admin-portal/import-donations/', [
-            ['donor_name', 'date_donated', 'title'],
-            ['Council', self._day(1), 'El Filibusterismo'],
-            ['Council', 'last week', 'Florante at Laura'],
+            ['donor_name', 'date_donated', 'title', 'condition'],
+            ['Council', self._day(1), 'El Filibusterismo', 'Good'],
+            ['Council', 'last week', 'Florante at Laura', 'Good'],
         ])
         self.assertTrue(r['success'], r)
         self.assertIn('Row 3: "last week" is not a date', r['message'])
@@ -8806,9 +8806,9 @@ class SpreadsheetImportTests(TestCase):
 
         with mock.patch.object(views, '_sync_donation_row', side_effect=fail_second):
             r = self._upload('/admin-portal/import-donations/', [
-                ['donor_name', 'title'],
-                ['Council', 'El Filibusterismo'],
-                ['Council', 'Florante at Laura'],
+                ['donor_name', 'title', 'condition'],
+                ['Council', 'El Filibusterismo', 'Good'],
+                ['Council', 'Florante at Laura', 'Good'],
             ])
         self.assertFalse(r['success'])
         self.assertEqual(Book.objects.count(), 0)
@@ -8936,6 +8936,8 @@ class OneCopyPerBookTests(TestCase):
         return Book.objects.filter(title=title).order_by('-book_id').first()
 
     def _receive(self, items, source='Purchase', **extra):
+        # The condition on arrival is required; these tests are about something else.
+        items = [dict({'condition': 'Good'}, **item) for item in items]
         data = {'source': source, 'items': json.dumps(items)}
         data.update(extra)
         return self.client.post('/admin-portal/inventory/receive/', data)

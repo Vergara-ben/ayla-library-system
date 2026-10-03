@@ -180,7 +180,7 @@
                                 <div>
                                     <label for="rcvCondition" class="field-label">Condition on arrival</label>
                                     <select id="rcvCondition" class="field-input">
-                                        {% for value, label in condition_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+                                                                        {% for value in intake_conditions %}<option value="{{ value }}">{{ value }}</option>{% endfor %}
                                     </select>
                                 </div>
                                 <div>
@@ -337,16 +337,34 @@
             box.classList.remove('hidden');
         }
 
+        // Same rule as the server: 10 or 13 digits with a valid check digit.
+        function isbnProblem(raw) {
+            const t = raw.replace(/[\s-]/g, '').toUpperCase();
+            let ok;
+            if (/^\d{9}[\dX]$/.test(t)) {
+                let sum = 0;
+                for (let i = 0; i < 10; i++) sum += (10 - i) * (t[i] === 'X' ? 10 : +t[i]);
+                ok = sum % 11 === 0;
+            } else if (/^\d{13}$/.test(t)) {
+                let sum = 0;
+                for (let i = 0; i < 13; i++) sum += +t[i] * (i % 2 ? 3 : 1);
+                ok = sum % 10 === 0;
+            } else {
+                return 'The ISBN should be 10 or 13 digits.';
+            }
+            return ok ? '' : 'That ISBN has a wrong check digit. Check it for a typo.';
+        }
+
         function addIntakeItem() {
             const sel = document.getElementById('rcvBook');
             const bookId = sel.value;
             const qty = parseInt(document.getElementById('rcvQty').value, 10);
             if (!(qty >= 1 && qty <= 100)) { rcvItemError('Copies must be between 1 and 100.'); return; }
 
+            const condition = document.getElementById('rcvCondition').value || 'Good';
             const priceText = document.getElementById('rcvPrice').value.trim();
             if (priceText && !(parseFloat(priceText) >= 0)) { rcvItemError('The price must be zero or more.'); return; }
-            const item = { quantity: qty, condition: document.getElementById('rcvCondition').value,
-                           price: priceText };
+            const item = { quantity: qty, condition: condition, price: priceText };
             if (bookId) {
                 const opt = sel.options[sel.selectedIndex];
                 item.book_id = bookId;
@@ -356,6 +374,14 @@
             } else {
                 const title = document.getElementById('rcvTitle').value.trim();
                 if (!title) { rcvItemError('Enter the title, or pick one from the catalogue.'); return; }
+                const isbnText = document.getElementById('rcvIsbn').value.trim();
+                const isbnBad = isbnText && isbnProblem(isbnText);
+                if (isbnBad) { rcvItemError(isbnBad); return; }
+                const yearText = document.getElementById('rcvYear').value.trim();
+                const maxYear = new Date().getFullYear() + 1;
+                if (yearText && !(/^\d{4}$/.test(yearText) && +yearText >= 1000 && +yearText <= maxYear)) {
+                    rcvItemError('Publication year must be a four-digit year up to ' + maxYear + '.'); return;
+                }
                 item.title = title;
                 item.author = document.getElementById('rcvAuthor').value.trim();
                 item.isbn = document.getElementById('rcvIsbn').value.trim();
@@ -378,6 +404,8 @@
             });
             document.getElementById('rcvQty').value = 1;
             document.getElementById('rcvPrice').value = '';
+            // Back to Good, so one damaged title does not mark the next one damaged too.
+            document.getElementById('rcvCondition').value = 'Good';
             onPickCatalogued();
         }
 

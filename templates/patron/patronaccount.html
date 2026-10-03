@@ -183,7 +183,9 @@
           <span class="due-date red">₱{{ tx.fine_amount }}</span>
         </div>
         {% endif %}
-        {% if tx.pending_extension %}
+        {% if tx.overdue_flag %}
+        <div class="ext-status" style="font-size:11px;color:var(--danger);margin-top:4px;"><i class="fa-solid fa-circle-exclamation" aria-hidden="true"></i> Overdue — please return it; it can no longer be extended</div>
+        {% elif tx.pending_extension %}
         <div class="ext-status" style="font-size:11px;color:var(--muted);margin-top:4px;"><i class="fa-solid fa-hourglass-half" aria-hidden="true"></i> Extension requested — awaiting the library</div>
         {% else %}
         <button type="button" class="ext-request-btn" data-tx-id="{{ tx.transaction_id }}" onclick="requestExtension(this)" style="margin-top:6px;font-size:11px;font-weight:600;color:var(--accent);background:none;border:none;padding:0;cursor:pointer;text-decoration:underline;">Request Extension</button>

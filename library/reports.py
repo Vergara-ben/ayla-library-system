@@ -644,7 +644,7 @@ def _stock_levels(start, end):
 
     # Group copies by the title and author they belong to.
     groups = {}
-    totals = {'Good': 0, 'Damaged': 0, 'Missing': 0, 'Lost': 0, 'Withdrawn': 0}
+    totals = {'Good': 0, 'Worn': 0, 'Damaged': 0, 'Missing': 0, 'Lost': 0, 'Withdrawn': 0}
     removed = 0
     for r in records:
         if r.status == 'Removed':
@@ -658,7 +658,7 @@ def _stock_levels(start, end):
             'catalogued': r.book is not None,
             'book_ids': set(),
             'copy_ids': set(),
-            'Good': 0, 'Damaged': 0, 'Missing': 0, 'Lost': 0, 'Withdrawn': 0,
+            'Good': 0, 'Worn': 0, 'Damaged': 0, 'Missing': 0, 'Lost': 0, 'Withdrawn': 0,
         })
         if r.book_id:
             g['book_ids'].add(r.book_id)
@@ -674,7 +674,7 @@ def _stock_levels(start, end):
 
     rows = []
     for g in groups.values():
-        on_hand = g['Good'] + g['Damaged']
+        on_hand = g['Good'] + g['Worn'] + g['Damaged']
         rows.append([
             g['title'],
             g['author'],
@@ -683,7 +683,7 @@ def _stock_levels(start, end):
             'Yes' if g['catalogued'] else 'No',
             g['location'],
             len(g['copy_ids']),
-            g['Good'], g['Damaged'], g['Missing'], g['Lost'], g['Withdrawn'], on_hand,
+            g['Good'], g['Worn'], g['Damaged'], g['Missing'], g['Lost'], g['Withdrawn'], on_hand,
         ])
 
     return {
@@ -691,13 +691,14 @@ def _stock_levels(start, end):
         'title': 'Stock Levels Report',
         'subtitle': 'Physical copies held, by title and condition',
         'columns': ['Title', 'Author', 'Book IDs', 'Copy IDs', 'Catalogued', 'Shelf Location',
-                    'Copies', 'Good', 'Damaged', 'Missing', 'Lost', 'Withdrawn', 'On Hand'],
+                    'Copies', 'Good', 'Worn', 'Damaged', 'Missing', 'Lost', 'Withdrawn', 'On Hand'],
         'rows': rows,
         'summary': [
             ('Titles Held', len(rows)),
             ('Copies Recorded', sum(totals.values())),
-            ('Copies On Hand', totals['Good'] + totals['Damaged']),
+            ('Copies On Hand', totals['Good'] + totals['Worn'] + totals['Damaged']),
             ('Good', totals['Good']),
+            ('Worn', totals['Worn']),
             ('Damaged', totals['Damaged']),
             ('Missing', totals['Missing']),
             ('Lost', totals['Lost']),
@@ -706,7 +707,7 @@ def _stock_levels(start, end):
             ('Books Without A Copy Record', uncounted_books),
         ],
         'chart': _chart(
-            [(k, totals[k]) for k in ('Good', 'Damaged', 'Missing', 'Lost', 'Withdrawn')],
+            [(k, totals[k]) for k in ('Good', 'Worn', 'Damaged', 'Missing', 'Lost', 'Withdrawn')],
             kind='bar',
             title='Copies by state',
             note='The state of the physical collection. Largest group marked.',
@@ -716,7 +717,7 @@ def _stock_levels(start, end):
         ),
         'breakdown': {
             'By condition': [(k, str(totals[k]))
-                             for k in ('Good', 'Damaged', 'Missing', 'Lost', 'Withdrawn')],
+                             for k in ('Good', 'Worn', 'Damaged', 'Missing', 'Lost', 'Withdrawn')],
         },
     }
 

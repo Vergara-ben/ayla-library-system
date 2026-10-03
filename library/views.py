@@ -1059,6 +1059,11 @@ def patron_account(request):
     return render(request, 'patron/patronaccount.html', context)
 
 
+def _extended_due_date(due_date):
+    """One more loan period, counted from the current due date."""
+    return due_date + timedelta(days=BorrowingRule.current().loan_period_days)
+
+
 @patron_login_required
 def patron_request_extension(request):
     """Patron asks to push a loan's due date out; staff decide from here."""
@@ -1076,12 +1081,13 @@ def patron_request_extension(request):
         return JsonResponse({'success': False, 'error': 'This loan has no due date to extend.'})
     if DueDateExtension.objects.filter(transaction=tx, status='Pending').exists():
         return JsonResponse({'success': False, 'error': 'You already have a pending request for this book.'})
+    # An overdue book has to come back first; it cannot be extended from the desk at home.
+    if tx.overdue_flag or timezone.localdate() > tx.due_date:
+        return JsonResponse({'success': False, 'error': 'This book is already overdue, so it cannot be '
+                                                         'extended. Please return it to the library.'})
 
     reason = (request.POST.get('reason') or '').strip()[:255]
-    rule = BorrowingRule.current()
-    today = timezone.localdate()
-    # Extend from today, not from the old due date.
-    requested_due = today + timedelta(days=rule.loan_period_days)
+    requested_due = _extended_due_date(tx.due_date)
 
     extension = DueDateExtension.objects.create(
         transaction=tx, requested_by_patron=True,
@@ -2853,6 +2859,10 @@ def respond_to_extension(request):
                 # The book was already returned.
                 if tx.return_date is not None:
                     raise _AlreadyResolved('This book has already been returned.')
+                # A request older than the loan's current due date still adds a full period.
+                if tx.due_date and extension.requested_due_date <= tx.due_date:
+                    extension.requested_due_date = _extended_due_date(tx.due_date)
+                    extension.save(update_fields=['requested_due_date'])
                 tx.due_date = extension.requested_due_date
                 tx.overdue_flag = bool(tx.due_date and timezone.localdate() > tx.due_date)
                 tx.save(update_fields=['due_date', 'overdue_flag'])
@@ -5411,6 +5421,7 @@ def download_donation_template(request):
         ('publication_year', False, 'Four digits.', 1961),
         ('material_type', False, 'One of: %s. Blank means Book.' % materials, 'Book'),
         ('quantity', False, 'How many copies of this title, 1 to 100. Blank means 1.', 2),
+        ('condition', False, 'How the copies arrived: Good, Worn or Damaged. Blank means Good.', 'Good'),
     ], text_columns=('ISBN',))
 
 
@@ -5426,6 +5437,7 @@ DONATION_IMPORT_COLUMNS = {
     'year': 'publication_year',
     'materialtype': 'material_type', 'material': 'material_type', 'format': 'material_type',
     'quantity': 'quantity', 'qty': 'quantity', 'copies': 'quantity',
+    'condition': 'condition', 'conditiononarrival': 'condition', 'state': 'condition',
 }
 
 
@@ -5478,6 +5490,13 @@ def _import_donation_rows(request):
             problems.append('Row %d: quantity must be between 1 and 100' % row_no)
             continue
 
+        raw_condition = _cell_text(values.get('condition'))
+        condition = _sheet_choice(raw_condition, [(c, c) for c in INTAKE_CONDITIONS]) if raw_condition else 'Good'
+        if condition is None:
+            problems.append('Row %d: condition must be Good, Worn or Damaged (got "%s")'
+                            % (row_no, raw_condition[:20]))
+            continue
+
         raw_material = _cell_text(values.get('material_type'))
         material_type = _sheet_choice(raw_material, Book.MATERIAL_TYPE_CHOICES, MATERIAL_TYPE_WORDS)
         if material_type is None:
@@ -5512,7 +5531,7 @@ def _import_donation_rows(request):
         # All copies of a donated title share one donation row.
         donation_row = None
         for copy_no in range(quantity):
-            copy_book = _intake_book_for_copy(book, is_new and copy_no == 0, 'Donation', 'Good')
+            copy_book = _intake_book_for_copy(book, is_new and copy_no == 0, 'Donation', condition)
             record = InventoryRecord.objects.create(
                 book=copy_book,
                 source='Donation',
@@ -5520,14 +5539,14 @@ def _import_donation_rows(request):
                 donated_date=donated,
                 processing_stage='Received',
                 donation=donation_row,
-                condition='Good',
+                condition=condition,
                 status='In Stock',
                 qr_label=_copy_label(copy_book),
                 received_by=admin,
             )
             _record_movement(record, 'Received', request,
-                             reason='Received via donation import',
-                             source='Donation import', after='Good')
+                             reason='Received via donation import, ' + condition.lower(),
+                             source='Donation import', after=condition)
             if donation_row is None:
                 donation_row = _sync_donation_row(record)
         titles += 1
@@ -11134,6 +11153,7 @@ def _inventory_stats():
         'total_copies': qs.count(),
         'in_stock': in_stock.count(),
         'good_count': in_stock.filter(condition='Good').count(),
+        'worn_count': in_stock.filter(condition='Worn').count(),
         'damaged_count': in_stock.filter(condition='Damaged').count(),
         'lost_count': in_stock.filter(condition='Lost').count(),
         'withdrawn_count': in_stock.filter(condition='Withdrawn').count(),
@@ -11234,6 +11254,7 @@ def inventory_management(request):
         'condition_filter': condition,
         'source_filter': source,
         'condition_choices': InventoryRecord.CONDITION_CHOICES,
+        'intake_conditions': INTAKE_CONDITIONS,
         'source_choices': InventoryRecord.SOURCE_CHOICES,
         'stage_choices': InventoryRecord.STAGE_CHOICES,
         'today': timezone.localdate().isoformat(),
@@ -11270,6 +11291,26 @@ def _receiving_redirect(request):
     return redirect('inventory_management')
 
 
+# A copy is received Good, Worn or Damaged; Lost and Withdrawn come later.
+INTAKE_CONDITIONS = InventoryRecord.HELD_CONDITIONS
+
+
+def isbn_error(raw):
+    """Why an ISBN cannot be right, or None. Hyphens and spaces are ignored."""
+    text = re.sub(r'[\s-]', '', str(raw)).upper()
+    if len(text) == 10 and re.fullmatch(r'\d{9}[\dX]', text):
+        total = sum((10 - i) * (10 if c == 'X' else int(c)) for i, c in enumerate(text))
+        ok = total % 11 == 0
+    elif len(text) == 13 and text.isdigit():
+        total = sum(int(c) * (1 if i % 2 == 0 else 3) for i, c in enumerate(text))
+        ok = total % 10 == 0
+    else:
+        return 'ISBN "%s" should be 10 or 13 digits.' % str(raw).strip()[:20]
+    if not ok:
+        return 'ISBN "%s" has a wrong check digit. Check it for a typo.' % str(raw).strip()[:20]
+    return None
+
+
 def _resolve_intake_book(item, source):
     """Return the catalogue record a received line belongs to, creating it if new."""
     book_id = str(item.get('book_id') or '').strip()
@@ -11297,6 +11338,10 @@ def _resolve_intake_book(item, source):
             raise ValueError('Publication year must be a number (got "' + raw_year + '").')
         if year < 1000 or year > timezone.localdate().year + 1:
             raise ValueError('Publication year ' + raw_year + ' is out of range.')
+    if isbn:
+        isbn_problem = isbn_error(isbn)
+        if isbn_problem:
+            raise ValueError(isbn_problem)
 
     existing = None
     if isbn:
@@ -11334,8 +11379,8 @@ def _copy_label(book):
 def _intake_book_for_copy(book, reuse, source, condition):
     """The book record one received copy belongs to: the new title itself, or a record of its own."""
     if reuse:
-        if condition == 'Damaged' and book.condition != 'Damaged':
-            book.condition = 'Damaged'
+        if book.condition != condition:
+            book.condition = condition
             book.save(update_fields=['condition'])
         return book
     return Book.objects.create(
@@ -11346,7 +11391,7 @@ def _intake_book_for_copy(book, reuse, source, condition):
         material_type=book.material_type,
         call_number=book.call_number,
         cover_img_url=book.cover_img_url,
-        condition='Damaged' if condition == 'Damaged' else 'Good',
+        condition=condition,
         status='Donated' if source == 'Donation' else 'Available',
         qr_code=str(uuid4()),
         shelf_level=None,
@@ -11396,7 +11441,7 @@ def _match_book_to_copy(book, before, after, request):
     if before == 'Lost' and book.status == 'Lost' and not still_owed:
         book.status = 'Available'
         fields.append('status')
-    wanted = 'Damaged' if after == 'Damaged' else ('Worn' if book.condition == 'Worn' else 'Good')
+    wanted = after if after in ('Damaged', 'Worn') else ('Worn' if book.condition == 'Worn' else 'Good')
     if book.condition != wanted:
         book.condition = wanted
         fields.append('condition')
@@ -11477,8 +11522,9 @@ def receive_stock(request):
             messages.error(request, 'Line ' + str(index) + ': quantity must be between 1 and 100.')
             return _receiving_redirect(request)
         condition = (item.get('condition') or 'Good').strip()
-        if condition not in dict(InventoryRecord.CONDITION_CHOICES):
-            condition = 'Good'
+        if condition not in INTAKE_CONDITIONS:
+            messages.error(request, 'Line ' + str(index) + ': a copy arrives Good, Worn or Damaged.')
+            return _receiving_redirect(request)
         price, price_error = _parse_price(item.get('price'))
         if price_error:
             messages.error(request, 'Line ' + str(index) + ': ' + price_error)
@@ -11558,6 +11604,7 @@ def staff_inventory_receive(request):
         'shelf_levels_available': _shelf_capacity(),
         'books': Book.objects.order_by('title'),
         'condition_choices': InventoryRecord.CONDITION_CHOICES,
+        'intake_conditions': INTAKE_CONDITIONS,
         'stage_choices': InventoryRecord.STAGE_CHOICES,
         'today': timezone.localdate().isoformat(),
     })
@@ -11645,6 +11692,9 @@ def update_inventory_record(request):
         record.source = source
     if record.source == 'Donation':
         record.donor_name = (request.POST.get('donor_name') or '').strip() or None
+        if not record.donor_name:
+            messages.error(request, 'A donated copy needs the donor name.')
+            return redirect('inventory_management')
         record.supplier = record.po_number = None
         stage = (request.POST.get('processing_stage') or '').strip()
         record.processing_stage = stage if stage in dict(InventoryRecord.STAGE_CHOICES) else record.processing_stage
@@ -11918,7 +11968,7 @@ def _expected_copies_for_shelf(shelf_id):
     return (InventoryRecord.objects
             .select_related('book', 'book__shelf_level', 'book__shelf_level__shelf')
             .filter(status__in=['In Stock', 'Missing'],
-                    condition__in=['Good', 'Damaged'],
+                    condition__in=InventoryRecord.HELD_CONDITIONS,
                     book__shelf_level__shelf__shelf_id=shelf_id))
 
 
@@ -11984,7 +12034,7 @@ def stock_audit_progress(request):
     if shelves:
         for row in (InventoryRecord.objects
                     .filter(status__in=['In Stock', 'Missing'],
-                            condition__in=['Good', 'Damaged'],
+                            condition__in=InventoryRecord.HELD_CONDITIONS,
                             book__shelf_level__shelf__shelf_id__in=list(shelves))
                     .values('book__shelf_level__shelf__shelf_id')
                     .annotate(n=Count('inventory_id'))):
