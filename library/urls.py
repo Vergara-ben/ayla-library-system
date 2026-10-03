@@ -167,6 +167,7 @@ urlpatterns = [
     path('admin-portal/donation-management/', views.donation_management, name='donation_management'),
     path('admin-portal/update-donation-status/', views.update_donation_status, name='update_donation_status'),
     path('admin-portal/delete-donation/', views.delete_donation, name='delete_donation'),
+    path('admin-portal/donors/', views.donors_page, name='donors_page'),
     # Announcement Management
     path('admin-portal/announcement-management/', views.announcement_management, name='announcement_management'),
     # Not under /media/: these are identity documents and need a login check.

@@ -567,7 +567,8 @@
                     <div class="grid grid-cols-2 gap-4">
                         <div>
                             <label for="rcvDonor" class="field-label">Donor name</label>
-                            <input type="text" name="donor_name" id="rcvDonor" class="field-input" placeholder="Who donated it">
+                            <input type="text" name="donor_name" id="rcvDonor" list="donorNames" autocomplete="off" class="field-input" placeholder="Start typing; past donors are suggested">
+                            <datalist id="donorNames">{% for name in donor_names %}<option value="{{ name }}">{% endfor %}</datalist>
                         </div>
                         <div>
                             <label for="f_donated_date" class="field-label">Date donated</label>

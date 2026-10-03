@@ -308,3 +308,48 @@ class AlertTests(TestCase):
 
     def test_signed_out_gets_nothing(self):
         self.assertEqual(Client().get('/portal/alerts/').status_code, 403)
+
+
+class DonorTests(TestCase):
+
+    def setUp(self):
+        self.client = _client(admin_id=_staff(role='Admin').admin_id, admin_role='Admin')
+
+    def _give(self, donor, day, title):
+        return self.client.post('/admin-portal/inventory/receive/', {
+            'source': 'Donation', 'donor_name': donor, 'donated_date': day,
+            'items': json.dumps([{'title': title, 'author': 'Anon', 'quantity': 2}])})
+
+    def test_a_donor_is_saved_once_and_matched_however_it_is_typed(self):
+        from .models import Donor
+        self._give('Brgy. Sala Council', '2026-06-01', 'Noli')
+        self._give('  brgy. sala   council ', '2026-09-01', 'Fili')
+        self.assertEqual(Donor.objects.count(), 1)
+        page = self.client.get('/admin-portal/donors/')
+        donor = page.context['donors'][0]
+        self.assertEqual((donor.gifts, donor.titles, donor.copies), (2, 2, 4))
+        self.assertEqual(donor.every_days, 92)
+
+    def test_donor_details_can_be_saved_and_history_shown(self):
+        from .models import Donor
+        self._give('Rotary Club', '2026-09-01', 'Noli')
+        donor = Donor.objects.get()
+        self.client.post('/admin-portal/donors/', {'donor_id': donor.donor_id, 'name': 'Rotary Club',
+                                                   'donor_type': 'Organization', 'contact_number': '0917'})
+        donor.refresh_from_db()
+        self.assertEqual((donor.donor_type, donor.contact_number), ('Organization', '0917'))
+        page = self.client.get('/admin-portal/donors/', {'d': donor.donor_id})
+        self.assertContains(page, 'Noli')
+
+    def test_the_donors_report(self):
+        from datetime import date
+        from .reports import build_report
+        self._give('Rotary Club', '2026-09-01', 'Noli')
+        report = build_report('donors', date(2026, 1, 1), date(2026, 12, 31))
+        self.assertEqual(report['rows'][0][0], 'Rotary Club')
+        self.assertEqual(report['rows'][0][5], 2)
+
+    def test_receiving_suggests_past_donors(self):
+        self._give('Rotary Club', '2026-09-01', 'Noli')
+        page = self.client.get('/admin-portal/inventory/')
+        self.assertContains(page, '<option value="Rotary Club">')

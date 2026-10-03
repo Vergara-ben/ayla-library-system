@@ -28,6 +28,7 @@ MODEL_TOPICS = {
     'ChatMessage': ('chat',),
     'Announcement': ('announcements',),
     'Donation': ('donations',),
+    'Donor': ('donations',),
     'FloorPlan': ('map',),
     'BLEBeacon': ('map',),
     'Room': ('map',),

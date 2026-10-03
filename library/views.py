@@ -95,7 +95,7 @@ from . import labels
 from . import analytics
 from .reports import (REPORT_TYPES, SNAPSHOT_REPORTS, parse_date_range, build_report,
                       render_report_pdf, render_report_excel)
-from .models import Book, Patron, PatronLog, Transaction, User, ShelfLevel, Donation, Announcement, FloorPlan, Shelf, Room, Door, Waypoint, BLEBeacon, WaypointConnection, SystemLog, BorrowingRule, Obstacle, Stairway, PasswordResetOTP, InventoryRecord, StockMovement, StockAudit, DueDateExtension, ReactivationRequest, PatronPhoto
+from .models import Book, Patron, PatronLog, Transaction, User, ShelfLevel, Donation, Donor, Announcement, FloorPlan, Shelf, Room, Door, Waypoint, BLEBeacon, WaypointConnection, SystemLog, BorrowingRule, Obstacle, Stairway, PasswordResetOTP, InventoryRecord, StockMovement, StockAudit, DueDateExtension, ReactivationRequest, PatronPhoto
 
 # Patron views
 def patron_login(request):
@@ -11394,6 +11394,7 @@ def inventory_management(request):
         'intake_conditions': INTAKE_CONDITIONS,
         'source_choices': InventoryRecord.SOURCE_CHOICES,
         'stage_choices': InventoryRecord.STAGE_CHOICES,
+        'donor_names': list(Donor.objects.values_list('name', flat=True)[:500]),
         'today': timezone.localdate().isoformat(),
         'books': Book.objects.order_by('title'),
         'shelves': shelf_list,
@@ -11410,6 +11411,7 @@ def _sync_donation_row(record):
     if record.donation is None:
         record.donation = Donation.objects.create(
             book=record.book,
+            donor=Donor.for_name(record.donor_name),
             donor_name=record.donor_name or 'Unknown donor',
             date_donated=record.donated_date or timezone.localdate(),
             status=stage,
@@ -11743,6 +11745,7 @@ def staff_inventory_receive(request):
         'condition_choices': InventoryRecord.CONDITION_CHOICES,
         'intake_conditions': INTAKE_CONDITIONS,
         'stage_choices': InventoryRecord.STAGE_CHOICES,
+        'donor_names': list(Donor.objects.values_list('name', flat=True)[:500]),
         'today': timezone.localdate().isoformat(),
     })
 
@@ -12624,3 +12627,80 @@ def serve_card_photo(request, photo_id):
     response = HttpResponse(bytes(photo.data), content_type=photo.content_type)
     response['Cache-Control'] = 'private, no-store'
     return response
+
+
+@admin_or_module_required('donations')
+def donors_page(request):
+    """Everyone who has given books, how often, and what they gave."""
+    if request.method == 'POST':
+        donor = Donor.objects.filter(donor_id=_posted_id(request, 'donor_id')).first()
+        if donor is None:
+            messages.error(request, 'Donor not found.')
+            return redirect('donors_page')
+        name = ' '.join((request.POST.get('name') or '').split())
+        if not name:
+            messages.error(request, 'A donor needs a name.')
+            return redirect(f"{reverse('donors_page')}?d={donor.donor_id}")
+        if Donor.objects.exclude(donor_id=donor.donor_id).filter(name__iexact=name).exists():
+            messages.error(request, f'Another donor is already called "{name}".')
+            return redirect(f"{reverse('donors_page')}?d={donor.donor_id}")
+        donor.name = name
+        kind = (request.POST.get('donor_type') or '').strip()
+        donor.donor_type = kind if kind in dict(Donor.TYPE_CHOICES) else donor.donor_type
+        donor.contact_number = (request.POST.get('contact_number') or '').strip() or None
+        donor.email = (request.POST.get('email') or '').strip() or None
+        donor.address = (request.POST.get('address') or '').strip() or None
+        donor.notes = (request.POST.get('notes') or '').strip() or None
+        donor.save()
+        log_admin_action(request, 'Update', 'Donor', donor.donor_id, f'Updated donor "{donor.name}"')
+        messages.success(request, f'Saved {donor.name}.')
+        return redirect(f"{reverse('donors_page')}?d={donor.donor_id}")
+
+    q = (request.GET.get('q') or '').strip()
+    donors = Donor.objects.annotate(
+        titles=Count('donations', distinct=True),
+        copies=Count('donations__inventory_copies', distinct=True),
+        last_gift=Max('donations__date_donated'),
+        first_gift=Min('donations__date_donated'),
+    ).order_by('-last_gift', 'name')
+    if q:
+        donors = donors.filter(name__icontains=q)
+
+    # Each distinct day a donor gave counts as one gift.
+    gift_days = {}
+    for donor_id, day in (Donation.objects.filter(donor__isnull=False)
+                          .values_list('donor_id', 'date_donated').distinct()):
+        gift_days.setdefault(donor_id, set()).add(day)
+
+    page = Paginator(donors, 20).get_page(request.GET.get('page', 1))
+    rows = list(page)
+    for d in rows:
+        days = sorted(gift_days.get(d.donor_id, ()))
+        d.gifts = len(days)
+        # A regular donor's usual gap, e.g. every 90 days.
+        d.every_days = (round((days[-1] - days[0]).days / (len(days) - 1))
+                        if len(days) > 1 else None)
+
+    selected = None
+    history = []
+    raw = request.GET.get('d') or ''
+    if raw.isdigit():
+        selected = Donor.objects.filter(donor_id=int(raw)).first()
+        if selected is not None:
+            history = (Donation.objects.filter(donor=selected)
+                       .select_related('book').prefetch_related('inventory_copies')
+                       .order_by('-date_donated', 'donation_id'))
+            for line in history:
+                line.copy_count = len(line.inventory_copies.all()) or 1
+
+    return render(request, 'admin/donors.html', {
+        'donors': rows,
+        'page': page,
+        'total_donors': Donor.objects.count(),
+        'regular_donors': sum(1 for days in gift_days.values() if len(days) > 1),
+        'q': q,
+        'selected': selected,
+        'history': history,
+        'type_choices': Donor.TYPE_CHOICES,
+        'is_staff_portal': request.session.get('admin_role') == 'Staff',
+    })

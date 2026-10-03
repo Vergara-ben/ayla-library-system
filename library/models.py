@@ -704,6 +704,41 @@ class Book(Archivable):
 
 
 # Donations
+class Donor(models.Model):
+    """Someone who gives books, recorded once and picked again every time they give."""
+
+    TYPE_CHOICES = [
+        ('Individual', 'Individual'),
+        ('Organization', 'Organization'),
+        ('School', 'School'),
+        ('Government', 'Government office'),
+    ]
+
+    donor_id = models.AutoField(primary_key=True)
+    name = models.CharField(max_length=255)
+    donor_type = models.CharField(max_length=20, choices=TYPE_CHOICES, default='Individual')
+    contact_number = models.CharField(max_length=255, blank=True, null=True)
+    email = models.EmailField(max_length=255, blank=True, null=True)
+    address = models.TextField(blank=True, null=True)
+    notes = models.TextField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'Donors'
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+
+    @classmethod
+    def for_name(cls, name):
+        """The donor with this name, matched however it was typed, created on first use."""
+        clean = ' '.join((name or '').split())
+        if not clean:
+            return None
+        return cls.objects.filter(name__iexact=clean).first() or cls.objects.create(name=clean)
+
+
 class Donation(Archivable):
 
     STATUS_CHOICES = [
@@ -719,6 +754,9 @@ class Donation(Archivable):
         db_column='book_id'
     )
     donor_name = models.CharField(max_length=255)
+    # The saved donor this gift came from; donor_name keeps the name as it was given.
+    donor = models.ForeignKey(Donor, on_delete=models.SET_NULL, blank=True, null=True,
+                              db_column='donor_id', related_name='donations')
     date_donated = models.DateField()
     status = models.CharField(
         max_length=50,

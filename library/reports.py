@@ -18,6 +18,7 @@ REPORT_TYPES = [
     ('books', 'Books Report'),
     ('patrons', 'Patrons Report'),
     ('donations', 'Donations Report'),
+    ('donors', 'Donors Report'),
     ('stock_levels', 'Stock Levels Report'),
     ('stock_movement', 'Stock Movement Report'),
     ('unreturned', 'Unreturned Books Report'),
@@ -1081,6 +1082,54 @@ def _analytics(start, end):
 
 
 # Registered here rather than in the literal above because these three are defined below it.
+def _donors(start, end):
+    """Who gave books in the period, how often, and how much."""
+    from .models import Donor
+    lines = (Donation.objects.filter(date_donated__range=(start, end))
+             .select_related('donor').prefetch_related('inventory_copies'))
+    per = {}
+    for d in lines:
+        key = d.donor_id or ('name', (d.donor_name or '').strip().lower())
+        g = per.setdefault(key, {'donor': d.donor, 'name': d.donor.name if d.donor else d.donor_name,
+                                 'days': set(), 'titles': 0, 'copies': 0})
+        g['days'].add(d.date_donated)
+        g['titles'] += 1
+        g['copies'] += d.inventory_copies.count() or 1
+
+    rows = []
+    for g in sorted(per.values(), key=lambda g: (-g['copies'], g['name'] or '')):
+        donor = g['donor']
+        days = sorted(g['days'])
+        rows.append([
+            _text(g['name']),
+            donor.get_donor_type_display() if donor else DASH,
+            _text(donor.contact_number if donor else None),
+            len(days), g['titles'], g['copies'],
+            _fmt_date(days[0]), _fmt_date(days[-1]),
+        ])
+    return {
+        'key': 'donors',
+        'title': 'Donors Report',
+        'subtitle': 'Everyone who gave books in the period, with how often and how much',
+        'columns': ['Donor', 'Type', 'Contact', 'Gifts', 'Titles', 'Copies', 'First Gift', 'Last Gift'],
+        'rows': rows,
+        'summary': [
+            ('Donors', len(rows)),
+            ('Gave More Than Once', sum(1 for g in per.values() if len(g['days']) > 1)),
+            ('Titles Donated', sum(g['titles'] for g in per.values())),
+            ('Copies Donated', sum(g['copies'] for g in per.values())),
+            ('Saved Donors', Donor.objects.count()),
+        ],
+        'chart': _chart(
+            [(r[0], r[5]) for r in rows[:10]], kind='bar',
+            title='Copies given, top donors',
+            note='The ten donors who gave the most copies in the period.',
+            empty_note='No donations in this period.',
+            axis_note='Donor · vertical axis is number of copies'),
+    }
+
+
+_BUILDERS['donors'] = _donors
 _BUILDERS['unreturned'] = _unreturned
 _BUILDERS['penalties'] = _penalties
 _BUILDERS['analytics'] = _analytics
