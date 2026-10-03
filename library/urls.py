@@ -114,6 +114,7 @@ urlpatterns = [
     path('admin-portal/patron-search/', views.patron_search_json, name='patron_search_json'),
     path('admin-portal/management/', views.admin_management, name='admin_management'),
     path('admin-portal/add-book/', views.admin_add_book, name='admin_add_book'),
+    path('admin-portal/isbn-lookup/', views.isbn_lookup, name='isbn_lookup'),
     path('admin-portal/add-patron/', views.admin_add_patron, name='admin_add_patron'),
     path('admin-portal/manage-patron/', views.admin_manage_patron, name='admin_manage_patron'),
     path('admin-portal/patron/<int:patron_id>/library-card/', views.patron_library_card, name='patron_library_card'),

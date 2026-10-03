@@ -12704,3 +12704,58 @@ def donors_page(request):
         'type_choices': Donor.TYPE_CHOICES,
         'is_staff_portal': request.session.get('admin_role') == 'Staff',
     })
+
+
+OPEN_LIBRARY_URL = 'https://openlibrary.org/api/books?bibkeys=ISBN:%s&format=json&jscmd=data'
+
+
+def _open_library(isbn):
+    """Title, author and year for an ISBN from Open Library, or None."""
+    import urllib.request
+    req = urllib.request.Request(OPEN_LIBRARY_URL % isbn,
+                                 headers={'User-Agent': 'AYLA Library System (catalogue lookup)'})
+    try:
+        # Open Library is slow at times; a few seconds is still quicker than typing.
+        with urllib.request.urlopen(req, timeout=10) as res:
+            data = json.loads(res.read().decode('utf-8'))
+    except Exception:
+        logger.warning('Open Library lookup failed for %s', isbn)
+        return None
+    entry = data.get('ISBN:%s' % isbn)
+    if not entry:
+        return None
+    year = re.search(r'\b(1[0-9]{3}|20[0-9]{2})\b', entry.get('publish_date') or '')
+    return {
+        'title': entry.get('title') or '',
+        'author': ', '.join(a.get('name', '') for a in entry.get('authors') or [] if a.get('name')),
+        'publication_year': year.group(1) if year else '',
+        'cover_img_url': (entry.get('cover') or {}).get('medium', ''),
+    }
+
+
+@admin_or_module_required('books')
+def isbn_lookup(request):
+    """Fill in a book from its ISBN: from our own catalogue first, then Open Library."""
+    raw = (request.GET.get('isbn') or '').strip()
+    problem = isbn_error(raw) if raw else 'Type or scan an ISBN first.'
+    if problem:
+        return JsonResponse({'success': False, 'error': problem})
+    digits = re.sub(r'[\s-]', '', raw).upper()
+    from django.db.models import Value
+    from django.db.models.functions import Replace, Upper
+    known = list(Book.objects.annotate(
+        isbn_digits=Upper(Replace(Replace('ISBN', Value('-'), Value('')), Value(' '), Value(''))))
+        .filter(isbn_digits=digits).order_by('book_id'))
+    if known:
+        book = known[0]
+        return JsonResponse({'success': True, 'source': 'catalogue', 'copies': len(known), 'book': {
+            'title': book.title, 'author': book.author,
+            'publication_year': book.publication_year or '', 'genre': book.genre or '',
+            'material_type': book.material_type, 'price': str(book.price) if book.price is not None else '',
+            'cover_img_url': book.cover_img_url or '',
+            'shelf_level': book.shelf_level_id or '',
+        }})
+    found = _open_library(digits)
+    if found is None:
+        return JsonResponse({'success': False, 'error': 'No record found for that ISBN. Type the details in.'})
+    return JsonResponse({'success': True, 'source': 'openlibrary', 'book': found})

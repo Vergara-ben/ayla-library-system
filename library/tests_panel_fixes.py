@@ -353,3 +353,45 @@ class DonorTests(TestCase):
         self._give('Rotary Club', '2026-09-01', 'Noli')
         page = self.client.get('/admin-portal/inventory/')
         self.assertContains(page, '<option value="Rotary Club">')
+
+
+class IsbnLookupTests(TestCase):
+
+    def setUp(self):
+        self.client = _client(admin_id=_staff(modules='books').admin_id, admin_role='Staff')
+
+    def _lookup(self, isbn):
+        return self.client.get('/admin-portal/isbn-lookup/', {'isbn': isbn}).json()
+
+    def test_a_book_we_hold_is_filled_from_the_catalogue(self):
+        Book.objects.create(title='Noli Me Tangere', author='Rizal, Jose', ISBN='978-0-306-40615-7',
+                            genre='Fiction', publication_year=1887)
+        result = self._lookup('9780306406157')
+        self.assertEqual(result['source'], 'catalogue')
+        self.assertEqual(result['book']['title'], 'Noli Me Tangere')
+        self.assertEqual(result['copies'], 1)
+
+    def test_otherwise_open_library_is_asked(self):
+        from unittest import mock
+        found = {'title': 'Opticks', 'author': 'Isaac Newton', 'publication_year': '1979',
+                 'cover_img_url': ''}
+        with mock.patch('library.views._open_library', return_value=found) as asked:
+            result = self._lookup('0-306-40615-2')
+        asked.assert_called_once_with('0306406152')
+        self.assertEqual(result['source'], 'openlibrary')
+        self.assertEqual(result['book']['author'], 'Isaac Newton')
+
+    def test_a_bad_isbn_is_not_looked_up(self):
+        from unittest import mock
+        with mock.patch('library.views._open_library') as asked:
+            result = self._lookup('12345')
+        asked.assert_not_called()
+        self.assertFalse(result['success'])
+
+    def test_the_add_form_shelves_the_book_and_skips_status(self):
+        page = self.client.get('/library-staff/books/').content.decode()
+        form = page.split('id="addBookForm"')[1].split('</form>')[0]
+        self.assertIn('name="shelf_level"', form)
+        self.assertIn('<input type="hidden" name="status" value="Available">', form)
+        self.assertNotIn('cover_img_url', form)
+        self.assertLess(form.index('id="addIsbn"'), form.index('id="addTitle"'))

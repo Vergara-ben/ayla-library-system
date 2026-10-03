@@ -410,6 +410,15 @@
                 {% if error %}
                     <div class="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">{{ error }}</div>
                 {% endif %}
+                {# The ISBN first: typed or scanned, it fills in the rest. #}
+                <div class="space-y-1.5">
+                    <label for="addIsbn" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">ISBN <span class="normal-case font-normal tracking-normal">(scan or type it first)</span></label>
+                    <div class="flex gap-2">
+                        <input type="text" name="ISBN" id="addIsbn" autocomplete="off" placeholder="978-..." class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);">
+                        <button type="button" onclick="lookupIsbn()" class="px-3 rounded-lg border border-slate-700 text-violet-400 hover:bg-slate-800/40 font-bold whitespace-nowrap"><i class="fa-solid fa-magnifying-glass text-[10px]"></i> Fill in</button>
+                    </div>
+                    <p id="addIsbnNote" class="hidden text-[10px] leading-relaxed"></p>
+                </div>
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div class="space-y-1.5">
                         <label for="addTitle" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Title</label>
@@ -426,44 +435,32 @@
                         <input type="number" name="publication_year" id="addPublicationYear" min="1000" max="2099" placeholder="e.g. 2023" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);">
                     </div>
                     <div class="space-y-1.5">
-                        <label for="addIsbn" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">ISBN</label>
-                        <input type="text" name="ISBN" id="addIsbn" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);">
-                    </div>
-                </div>
-                <div class="space-y-1.5">
-                    <label for="addPrice" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Price (₱)</label>
-                    <input type="number" name="price" id="addPrice" min="0" step="0.01" placeholder="e.g. 350.00" value="" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);">
-                    <p class="text-[10px] text-slate-500">What the library charges if this book is lost. Leave blank if not known yet.</p>
-                </div>
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div class="space-y-1.5">
                         <label for="addGenre" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Genre</label>
                         <input type="text" name="genre" id="addGenre" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);">
                     </div>
-                    <div class="space-y-1.5">
-                        <label for="addMaterial" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Material Type</label>
-                        <select name="material_type" id="addMaterial" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium appearance-none pr-10 cursor-pointer" style="background-color: var(--bg-input);">
-                            {% for value, label in material_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
-                        </select>
-                    </div>
-                    <div class="space-y-1.5">
-                        <label for="addCoverImgUrl" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Cover Image URL</label>
-                        <input type="text" name="cover_img_url" id="addCoverImgUrl" placeholder="https://example.com/image.jpg" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);">
-                    </div>
                 </div>
+                {# Shelving it now means its label can be printed straight away. #}
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div class="space-y-1.5">
-                        <label for="addStatus" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Status</label>
-                        <select name="status" id="addStatus" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium appearance-none pr-10 cursor-pointer" style="background-color: var(--bg-input);">
-                            <option value="Available">Available</option>
-                            <option value="Borrowed">Borrowed</option>
-                            <option value="Overdue">Overdue</option>
-                            <option value="Lost">Lost</option>
-                            <option value="Being Read">Being Read</option>
-                            <option value="Donated">Donated</option>
+                        <label for="addShelfLevel" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Shelf</label>
+                        <select name="shelf_level" id="addShelfLevel" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium appearance-none cursor-pointer" style="background-color: var(--bg-input);">
+                            <option value="">Not shelved yet</option>
+                            {% for shelf_level in shelf_levels %}<option value="{{ shelf_level.shelf_level_id }}">{% if shelf_level.shelf %}{{ shelf_level.shelf.name }} · {% endif %}{{ shelf_level.label }}{% if shelf_level.category %} — {{ shelf_level.category }}{% endif %}</option>{% endfor %}
                         </select>
                     </div>
+                    <div class="space-y-1.5">
+                        <label for="addPrice" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Price (₱)</label>
+                        <input type="number" name="price" id="addPrice" min="0" step="0.01" placeholder="Charged if lost; optional" value="" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);">
+                    </div>
                 </div>
+                <div class="space-y-1.5">
+                    <label for="addMaterial" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Material Type</label>
+                    <select name="material_type" id="addMaterial" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium appearance-none pr-10 cursor-pointer" style="background-color: var(--bg-input);">
+                        {% for value, label in material_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+                    </select>
+                </div>
+                {# A book being catalogued is on hand. #}
+                <input type="hidden" name="status" value="Available">
                 <div class="pt-4 flex items-center justify-end gap-3">
                     <button type="button" onclick="closeAddModal()" class="px-5 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:text-slate-100 hover:bg-slate-800/40 font-semibold tracking-wide transition-colors min-w-[100px]">
                         Cancel
@@ -1205,6 +1202,55 @@
         let addAnother = false;
         let addedThisRun = 0;
 
+        // The ISBN fills in the rest: from the catalogue if we hold it, else Open Library.
+        async function lookupIsbn() {
+            const isbn = document.getElementById('addIsbn').value.trim();
+            const note = document.getElementById('addIsbnNote');
+            if (!isbn) return;
+            note.className = 'text-[10px] leading-relaxed text-slate-500';
+            note.textContent = 'Looking it up\u2026';
+            let data;
+            try {
+                const res = await fetch("{% url 'isbn_lookup' %}?isbn=" + encodeURIComponent(isbn),
+                                        { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+                data = await res.json();
+            } catch (e) {
+                data = { success: false, error: 'Could not reach the lookup. Type the details in.' };
+            }
+            if (!data.success) {
+                note.className = 'text-[10px] leading-relaxed text-amber-500';
+                note.textContent = data.error;
+                return;
+            }
+            const b = data.book;
+            const fill = function (id, value, always) {
+                const el = document.getElementById(id);
+                if (el && value !== '' && value != null && (always || !el.value)) el.value = value;
+            };
+            const same = data.source === 'catalogue';
+            fill('addTitle', b.title, same);
+            fill('addAuthor', b.author, same);
+            fill('addPublicationYear', b.publication_year, same);
+            fill('addGenre', b.genre, same);
+            fill('addMaterial', b.material_type, same);
+            fill('addPrice', b.price, same);
+            fill('addShelfLevel', b.shelf_level, same);
+            note.className = 'text-[10px] leading-relaxed ' + (same ? 'text-emerald-500' : 'text-cyan-500');
+            note.textContent = same
+                ? 'Already in the catalogue (' + data.copies + ' cop' + (data.copies === 1 ? 'y' : 'ies')
+                  + '). Saving adds another copy on the same shelf.'
+                : 'Filled in from Open Library. Check the details, then save.';
+        }
+        (function () {
+            const isbn = document.getElementById('addIsbn');
+            if (!isbn) return;
+            // A scanner types the ISBN then presses Enter.
+            isbn.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter') { e.preventDefault(); lookupIsbn(); }
+            });
+            isbn.addEventListener('change', lookupIsbn);
+        })();
+
         window.submitAndAddAnother = function () {
             const form = document.getElementById('addBookForm');
             // Run browser validation first.
@@ -1235,6 +1281,8 @@
                         const el = document.getElementById(id);
                         if (el) el.value = '';
                     });
+                    const isbnNote = document.getElementById('addIsbnNote');
+                    if (isbnNote) isbnNote.classList.add('hidden');
                     const runNote = document.getElementById('addRunNote');
                     if (runNote) {
                         runNote.textContent = addedThisRun + ' book'
