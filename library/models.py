@@ -878,6 +878,11 @@ class Patron(Archivable):
     # When the terms and conditions were agreed to online, and which version.
     terms_accepted_at = models.DateTimeField(blank=True, null=True)
     terms_version = models.CharField(max_length=20, blank=True, default='')
+    # A pending registration sent back to the applicant to correct, through a private link.
+    fix_token = models.CharField(max_length=64, unique=True, blank=True, null=True)
+    fix_note = models.TextField(blank=True, null=True)
+    fix_requested_at = models.DateTimeField(blank=True, null=True)
+    resubmitted_at = models.DateTimeField(blank=True, null=True)
 
     @property
     def credential_filename(self):

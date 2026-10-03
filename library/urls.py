@@ -36,6 +36,8 @@ urlpatterns = [
     path('patron/change-password/', views.patron_change_password, name='patron_change_password'),
     path('patron/deactivate-account/', views.patron_deactivate_account, name='patron_deactivate_account'),
     path('patron/reactivate/', views.patron_reactivate_request, name='patron_reactivate_request'),
+    # Link emailed to an applicant whose registration was sent back to correct.
+    path('patron/registration/fix/<str:token>/', views.registration_fix, name='registration_fix'),
     path('patron/library-card/', views.my_library_card, name='my_library_card'),
     path('patron/library-card/photo/', views.patron_upload_card_photo, name='patron_upload_card_photo'),
     path('admin-portal/login/', views.admin_login, name='admin_login'),

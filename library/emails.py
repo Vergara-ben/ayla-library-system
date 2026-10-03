@@ -261,6 +261,33 @@ def registration_rejected_email(email, fullname, reason=None):
     return send_email(f"[{lib}] Registration Update", "\n".join(lines), email)
 
 
+# How long a registration fix link stays usable.
+FIX_LINK_DAYS = 14
+
+
+def registration_fix_email(patron, note, link):
+    """Ask an applicant to correct their registration through a private link."""
+    lib = _library_name()
+    body = "\n".join([
+        f"Dear {patron.fullname},",
+        "",
+        f"Thank you for registering with {lib}. Before we can approve your account,",
+        "please correct the following:",
+        "",
+        f"    {note}",
+        "",
+        "Open this link to upload a clearer ID or fix your details. Nothing else needs",
+        "to be filled in again:",
+        "",
+        link,
+        "",
+        f"The link works for {FIX_LINK_DAYS} days.",
+        "",
+        f"Thank you,\n{lib}",
+    ])
+    return send_email(f"[{lib}] Please update your registration", body, patron.email)
+
+
 def announcement_email(patron, announcement, connection=None):
     """Email a patron a single library announcement."""
     lib = _library_name()

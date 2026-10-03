@@ -8,6 +8,7 @@ from django.core.exceptions import SuspiciousFileOperation, ValidationError
 from django.core.validators import validate_email
 from django.http import HttpResponse, JsonResponse, Http404
 from django.conf import settings
+from django.urls import reverse
 from django.core.paginator import Paginator
 from datetime import date, datetime, timedelta
 from io import BytesIO
@@ -2076,7 +2077,9 @@ def approve_patron(request, patron_id):
         patron.qr_code = str(uuid4())
     patron.identity_verified_by = reviewer
     patron.identity_verified_at = timezone.now()
-    patron.save(update_fields=['account_status', 'qr_code',
+    # An unused fix link dies with the approval.
+    patron.fix_token = None
+    patron.save(update_fields=['account_status', 'qr_code', 'fix_token',
                                'identity_verified_by', 'identity_verified_at'])
     how = 'uploaded ID reviewed' if applied_online else 'physical ID checked at the desk'
     log_admin_action(request, 'Update', 'Patron', patron.patron_id,
@@ -2174,7 +2177,14 @@ def reject_patron(request, patron_id):
         messages.error(request, 'Pending patron not found.')
         return _patron_page_redirect(request)
 
-    reason = (request.POST.get('reason') or '').strip() or None
+    reason = (request.POST.get('reason') or '').strip()[:1000]
+    if not reason:
+        messages.error(request, 'Give the reason, so the applicant knows what was wrong.')
+        return _patron_page_redirect(request)
+
+    if request.POST.get('mode') == 'fix':
+        return _ask_applicant_to_fix(request, patron, reason)
+
     fullname, email = patron.fullname, patron.email
     log_admin_action(request, 'Reject', 'Patron', patron.patron_id,
                      f'Rejected registration of "{fullname}"' + (f' — {reason}' if reason else ''))
@@ -2184,6 +2194,75 @@ def reject_patron(request, patron_id):
     registration_rejected_email(email, fullname, reason)
     messages.success(request, f'Registration of {fullname} rejected.')
     return _patron_page_redirect(request)
+
+
+def _ask_applicant_to_fix(request, patron, reason):
+    """Keep the application pending and email the applicant a link to correct it."""
+    from .emails import registration_fix_email
+    patron.fix_token = secrets.token_urlsafe(32)
+    patron.fix_note = reason
+    patron.fix_requested_at = timezone.now()
+    patron.resubmitted_at = None
+    patron.save(update_fields=['fix_token', 'fix_note', 'fix_requested_at', 'resubmitted_at'])
+    link = request.build_absolute_uri(reverse('registration_fix', args=[patron.fix_token]))
+    sent = registration_fix_email(patron, reason, link)
+    log_admin_action(request, 'Update', 'Patron', patron.patron_id,
+                     f'Asked "{patron.fullname}" to fix their registration: {reason}')
+    if sent:
+        messages.success(request, f'{patron.fullname} has been emailed a link to fix their registration.')
+    else:
+        messages.warning(request, f'Saved, but the email to {patron.email} could not be sent. '
+                                  f'Their link is: {link}')
+    return _patron_page_redirect(request)
+
+
+def registration_fix(request, token):
+    """The applicant's page for correcting a registration the library sent back."""
+    from .emails import FIX_LINK_DAYS
+    patron = Patron.objects.filter(fix_token=token, account_status='Pending').first()
+    if (patron is None or patron.fix_requested_at is None
+            or timezone.now() - patron.fix_requested_at > timedelta(days=FIX_LINK_DAYS)):
+        return render(request, 'patron/registrationfix.html', {'stage': 'expired'}, status=404)
+
+    context = {'stage': 'form', 'patron': patron,
+               'patron_types': Patron.PATRON_TYPE_CHOICES}
+    if request.method != 'POST':
+        return render(request, 'patron/registrationfix.html', context)
+
+    first, middle, last, name_error = _name_from_post(request)
+    if name_error:
+        return render(request, 'patron/registrationfix.html', dict(context, error=name_error))
+    patron_type = (request.POST.get('patron_type') or patron.patron_type).strip()
+    if patron_type not in dict(Patron.PATRON_TYPE_CHOICES):
+        patron_type = patron.patron_type
+
+    uploaded = request.FILES.get('credential_document')
+    credential = None
+    if uploaded is not None:
+        try:
+            credential = _read_credential_document(uploaded)
+        except ValueError as exc:
+            return render(request, 'patron/registrationfix.html', dict(context, error=str(exc)))
+
+    from .models import PatronCredential
+    with transaction.atomic():
+        patron.first_name, patron.middle_name, patron.last_name = first, middle, last
+        patron.patron_type = patron_type
+        patron.school = (request.POST.get('school') or '').strip() or None
+        patron.contact_number = (request.POST.get('contact_number') or '').strip() or patron.contact_number
+        patron.address = (request.POST.get('address') or '').strip() or patron.address
+        if credential is not None:
+            name, content_type, data = credential
+            PatronCredential.objects.filter(patron=patron).delete()
+            PatronCredential.objects.create(patron=patron, name=name, content_type=content_type, data=data)
+            patron.credential_document = f'credentials/{name}'
+        patron.fix_token = None
+        patron.resubmitted_at = timezone.now()
+        patron.save()
+    log_patron_action(request, 'Update', 'Patron', patron.patron_id,
+                      'Resubmitted the registration after the library asked for a fix'
+                      + (' with a new ID' if credential is not None else ''), patron=patron)
+    return render(request, 'patron/registrationfix.html', {'stage': 'done', 'patron': patron})
 
 
 @admin_or_module_required('patrons')
@@ -2378,6 +2457,9 @@ def _patrons_page(request, template):
         'patrons_with_borrows': patrons_with_borrows,
         'patrons_overdue': patrons_overdue,
         'pending_patrons': pending_patrons,
+        # One-click reasons for sending a registration back or rejecting it.
+        'rejection_reasons': ['The ID photo is blurry or unreadable', 'The name does not match the ID',
+                              'The ID has expired', 'This is not a valid ID'],
         'pending_reactivations': pending_reactivations,
         'pending_photos': pending_photos,
         'visitor_count': visitor_count,

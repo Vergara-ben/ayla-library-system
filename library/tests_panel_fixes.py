@@ -245,3 +245,41 @@ class LabelTests(TestCase):
         self.assertEqual(ids, [self.shelved.book_id])
         self._print(self.shelved)
         self.assertEqual(self.client.get('/library-staff/books/').context['unlabelled_count'], 0)
+
+
+class RegistrationFixTests(TestCase):
+
+    def setUp(self):
+        from django.core import mail  # noqa: F401
+        self.applicant = Patron.objects.create(
+            first_name='Ana', last_name='Cruz', email='ana@example.invalid', account_status='Pending',
+            registration_channel='Online', credential_document='credentials/x.png', otp_verified=True)
+        self.client = _client(admin_id=_staff(modules='patrons').admin_id, admin_role='Staff')
+
+    def _reject(self, **data):
+        return self.client.post('/admin-portal/reject-patron/%d/' % self.applicant.patron_id, data)
+
+    def test_a_reason_is_required(self):
+        self._reject(mode='reject')
+        self.applicant.refresh_from_db()
+        self.assertIsNone(self.applicant.archived_at)
+
+    def test_ask_to_fix_keeps_it_pending_and_the_link_updates_it(self):
+        self._reject(mode='fix', reason='The ID has expired')
+        self.applicant.refresh_from_db()
+        self.assertEqual(self.applicant.account_status, 'Pending')
+        token = self.applicant.fix_token
+        self.assertTrue(token)
+        page = Client().get('/patron/registration/fix/%s/' % token)
+        self.assertContains(page, 'The ID has expired')
+        Client().post('/patron/registration/fix/%s/' % token,
+                      {'first_name': 'Ana', 'last_name': 'Santos', 'patron_type': 'Student'})
+        self.applicant.refresh_from_db()
+        self.assertEqual(self.applicant.last_name, 'Santos')
+        self.assertIsNone(self.applicant.fix_token)
+        self.assertIsNotNone(self.applicant.resubmitted_at)
+        self.assertEqual(Client().get('/patron/registration/fix/%s/' % token).status_code, 404)
+
+    def test_reject_completely_with_a_reason(self):
+        self._reject(mode='reject', reason='This is not a valid ID')
+        self.assertFalse(Patron.objects.filter(patron_id=self.applicant.patron_id).exists())

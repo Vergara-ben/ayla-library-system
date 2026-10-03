@@ -1,0 +1,183 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en" data-module="patron" data-theme-floating>
+<head>
+<meta charset="UTF-8">
+<meta name="theme-color" content="#ffffff">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AYLA Library — Update Registration</title>
+<script src="{% static 'js/theme.js' %}"></script>
+<script src="{% static 'js/session.js' %}"></script>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{% static 'css/theme.css' %}">
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+
+body{
+  font-family:'Plus Jakarta Sans',sans-serif;
+  min-height:100vh;
+  background:var(--bg-dark);
+  color:var(--text-main);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:24px;
+}
+
+.card{
+  width:100%;
+  max-width:420px;
+  background:var(--bg-card);
+  border:1px solid var(--border);
+  border-radius:20px;
+  padding:34px 30px;
+}
+
+.logo{ margin-bottom:24px; }
+.logo img{ height:42px; }
+
+.eyebrow{
+  font-size:11px;
+  font-weight:700;
+  letter-spacing:.14em;
+  text-transform:uppercase;
+  color:var(--muted);
+  margin-bottom:10px;
+}
+
+h1{
+  font-family:'Syne',sans-serif;
+  font-size:24px;
+  font-weight:700;
+  margin-bottom:8px;
+}
+
+.sub{ font-size:13px; color:var(--muted); line-height:1.6; margin-bottom:26px; }
+
+.form-group{ margin-bottom:18px; }
+.form-group label{
+  display:block;
+  font-size:12px;
+  font-weight:600;
+  color:var(--muted);
+  margin-bottom:7px;
+}
+
+.input input, .input select{
+  width:100%;
+  background:var(--bg);
+  border:1px solid var(--border);
+  border-radius:12px;
+  padding:13px 15px;
+  font-family:inherit;
+  font-size:14px;
+  color:var(--text-main);
+  outline:none;
+  transition:border-color .2s;
+}
+
+.input input:focus, .input select:focus{ border-color:var(--accent-strong); }
+.code input{ letter-spacing:.5em; text-align:center; font-size:18px; font-weight:700; }
+
+.btn{
+  width:100%;
+  padding:14px;
+  border:none;
+  border-radius:12px;
+  background:var(--accent-strong);
+  color:#fff;
+  font-family:inherit;
+  font-size:14px;
+  font-weight:600;
+  cursor:pointer;
+  transition:opacity .2s;
+}
+
+.btn:hover{ opacity:.9; }
+
+.link-btn{
+  background:none;
+  border:none;
+  padding:0;
+  font-family:inherit;
+  font-size:13px;
+  font-weight:600;
+  color:var(--accent-strong);
+  cursor:pointer;
+  text-decoration:none;
+}
+
+.link-btn:hover{ text-decoration:underline; }
+
+.alert{ border-radius:12px; padding:12px 14px; font-size:13px; line-height:1.5; margin-bottom:18px; }
+.alert-error{ background:var(--tint-danger); border:1px solid var(--danger); color:var(--danger); }
+.alert-info{ background:var(--tint-accent); border:1px solid var(--accent-strong); color:var(--text-main); }
+
+.row{ margin-top:22px; display:flex; justify-content:space-between; align-items:center; gap:12px; }
+.hint{ font-size:11px; color:var(--muted); margin-top:7px; }
+.card{ max-width:480px; }
+.note{ border-left:3px solid var(--accent-strong); background:var(--tint-accent); border-radius:10px; padding:12px 14px; font-size:13px; line-height:1.6; margin-bottom:22px; }
+.names{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.names .wide{ grid-column:1 / -1; }
+.input input[type=file]{ padding:10px; }
+</style>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha384-iw3OoTErCYJJB9mCa8LNS2hbsQ7M3C0EpIsO/H5+EGAkPGc6rk+V8i04oW/K5xq0" crossorigin="anonymous" referrerpolicy="no-referrer">
+    <link rel="stylesheet" href="{% static 'css/patron-neu.css' %}?v=20260922h">
+    <script src="{% static 'js/patron-neu.js' %}?v=20260922" defer></script>
+</head>
+<body class="neu-app">
+
+<div class="card">
+  <div class="logo">
+    <img src="{% static 'images/ayla-logo.png' %}" data-logo-light="{% static 'images/ayla-logo.png' %}" data-logo-dark="{% static 'images/ayla-logo-dark.png' %}" alt="AYLA" class="ayla-logo">
+  </div>
+
+  <div class="eyebrow">Registration</div>
+  {% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
+
+  {% if stage == 'done' %}
+    <h1>Sent back for review</h1>
+    <p class="sub">Thank you, {{ patron.first_name|default:patron.fullname }}. The library will look at your registration again and email you once it is approved.</p>
+    <a href="{% url 'patron_login' %}"><button type="button" class="btn">Back to sign in</button></a>
+
+  {% elif stage == 'expired' %}
+    <h1>This link no longer works</h1>
+    <p class="sub">It has already been used, or it is more than two weeks old. Please contact the library, or register again.</p>
+    <a href="{% url 'patron_register' %}"><button type="button" class="btn">Register again</button></a>
+
+  {% else %}
+    <h1>Update your registration</h1>
+    <p class="sub">Your details are filled in already. Change only what the library asked for, then send it back.</p>
+    <div class="note"><strong>What to fix:</strong> {{ patron.fix_note }}</div>
+
+    <form method="POST" enctype="multipart/form-data">
+      {% csrf_token %}
+      <div class="form-group">
+        <label for="credential_document">New photo or scan of your ID <span style="font-weight:400">(only if asked)</span></label>
+        <div class="input"><input type="file" id="credential_document" name="credential_document" accept="image/jpeg,image/png,application/pdf"></div>
+        <p class="hint">JPG, PNG or PDF, up to 5 MB. Leave empty to keep the one you sent.</p>
+      </div>
+
+      <div class="form-group names">
+        <div><label for="first_name">First name</label><div class="input"><input id="first_name" name="first_name" value="{{ patron.first_name }}" required></div></div>
+        <div><label for="last_name">Surname</label><div class="input"><input id="last_name" name="last_name" value="{{ patron.last_name }}" required></div></div>
+        <div class="wide"><label for="middle_name">Middle name</label><div class="input"><input id="middle_name" name="middle_name" value="{{ patron.middle_name }}" placeholder="Optional"></div></div>
+      </div>
+
+      <div class="form-group names">
+        <div><label for="patron_type">I am a</label><div class="input"><select id="patron_type" name="patron_type">
+          {% for value, label in patron_types %}<option value="{{ value }}"{% if value == patron.patron_type %} selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select></div></div>
+        <div><label for="school">School</label><div class="input"><input id="school" name="school" value="{{ patron.school|default:'' }}" placeholder="If any"></div></div>
+      </div>
+
+      <div class="form-group"><label for="contact_number">Contact number</label><div class="input"><input id="contact_number" name="contact_number" value="{{ patron.contact_number|default:'' }}"></div></div>
+      <div class="form-group"><label for="address">Address</label><div class="input"><input id="address" name="address" value="{{ patron.address|default:'' }}"></div></div>
+
+      <button type="submit" class="btn">Send back to the library</button>
+    </form>
+  {% endif %}
+</div>
+
+</body>
+</html>
