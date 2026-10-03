@@ -15,6 +15,7 @@ MODEL_TOPICS = {
     'InventoryRecord': ('books',),
     'StockMovement': ('books',),
     'StockAudit': ('books',),
+    'StockAuditLine': ('books',),
     'ShelfLevel': ('books', 'map'),
     'Shelf': ('books', 'map'),
     'Transaction': ('transactions',),

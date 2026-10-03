@@ -95,6 +95,7 @@ from . import labels
 from . import analytics
 from .reports import (REPORT_TYPES, SNAPSHOT_REPORTS, parse_date_range, build_report,
                       render_report_pdf, render_report_excel)
+from .models import StockAuditLine
 from .models import Book, Patron, PatronLog, Transaction, User, ShelfLevel, Donation, Donor, Announcement, FloorPlan, Shelf, Room, Door, Waypoint, BLEBeacon, WaypointConnection, SystemLog, BorrowingRule, Obstacle, Stairway, PasswordResetOTP, InventoryRecord, StockMovement, StockAudit, DueDateExtension, ReactivationRequest, PatronPhoto
 
 # Patron views
@@ -12021,6 +12022,9 @@ def stock_audit_file(request):
     today = timezone.localdate()
     flagged = recovered = 0
     board = ('%s %s' % (level.shelf.name if level.shelf else '', level.label)).strip()
+    board_books = list(level.book_set.exclude(status__in=WRITTEN_OFF))
+    status_before = {b.book_id: b.status for b in board_books}
+    recovered_ids = set()
 
     with transaction.atomic():
         for book in Book.objects.filter(book_id__in=missing):
@@ -12052,6 +12056,7 @@ def stock_audit_file(request):
             book.last_seen = now
             if book.status == 'Missing':
                 # It turned up.
+                recovered_ids.add(book.book_id)
                 book.status = 'Available'
                 book.missing_since = None
                 book.audit_misses = 0
@@ -12082,6 +12087,8 @@ def stock_audit_file(request):
             unexpected_count=0,
             notes=(request.POST.get('notes') or '').strip() or None,
         )
+        _record_audit_lines(audit, board_books, status_before,
+                            found, bulk, missing, recovered_ids)
 
     log_admin_action(
         request, 'Create', 'Inventory', audit.audit_id,
@@ -12100,6 +12107,67 @@ def stock_audit_file(request):
         'message': '%s filed. %d confirmed, %d flagged missing%s.'
                    % (audit.shelf_name.strip(), len(seen), flagged,
                       ', %d recovered' % recovered if recovered else ''),
+    })
+
+
+# Where a book away from its shelf is, recorded by the count without anyone marking it.
+AWAY_RESULT = {'Borrowed': 'On loan', 'Overdue': 'On loan',
+               'Being Read': 'Being read', 'For Reshelving': 'Reshelving'}
+
+
+def _record_audit_lines(audit, books, status_before, found, bulk, missing, recovered_ids):
+    """One line per book on the board: what the reader marked, or where the system knows it is."""
+    loans = {t.book_id: t for t in Transaction.objects.select_related('patron').filter(
+        book_id__in=[b.book_id for b in books], transaction_type='Borrow', return_date__isnull=True)}
+    lines = []
+    for book in books:
+        then = status_before.get(book.book_id, book.status)
+        detail = ''
+        if then in AWAY_RESULT:
+            result = AWAY_RESULT[then]
+            loan = loans.get(book.book_id)
+            if loan is not None and result == 'On loan':
+                who = loan.patron.fullname if loan.patron else 'a guest'
+                detail = 'with %s, due %s' % (who, loan.due_date.strftime('%b %d, %Y') if loan.due_date else '-')
+        elif book.book_id in recovered_ids:
+            result = 'Recovered'
+        elif book.book_id in found:
+            result = 'Found'
+        elif book.book_id in bulk:
+            result = 'Swept'
+        elif book.book_id in missing:
+            result = 'Missing'
+        else:
+            continue
+        lines.append(StockAuditLine(audit=audit, book=book, title=book.title[:255],
+                                    result=result, status_then=then, detail=detail[:255]))
+    StockAuditLine.objects.bulk_create(lines)
+
+
+@admin_only_required
+def stock_audit_detail(request, audit_id):
+    """One filed count, each book's result then beside its status now."""
+    audit = StockAudit.objects.filter(audit_id=audit_id).select_related('audited_by').first()
+    if audit is None:
+        return JsonResponse({'success': False, 'error': 'That count no longer exists.'})
+    rows = []
+    for line in audit.lines.select_related('book'):
+        now = line.book.status if line.book else 'Removed'
+        rows.append({
+            'title': line.title,
+            'result': line.get_result_display(),
+            'kind': line.result,
+            'status_then': line.status_then,
+            'status_now': now,
+            'changed': now != line.status_then,
+            'detail': line.detail,
+        })
+    return JsonResponse({
+        'success': True,
+        'shelf': audit.shelf_name.strip(),
+        'when': timezone.localtime(audit.audited_at).strftime('%b %d, %Y %I:%M %p'),
+        'by': audit.audited_by.fullname if audit.audited_by else '',
+        'lines': rows,
     })
 
 

@@ -1245,6 +1245,36 @@ class StockAudit(models.Model):
         return round(self.missing_count * 100.0 / self.expected_count, 1)
 
 
+class StockAuditLine(models.Model):
+    """What one shelf count recorded about one book, kept beside what that book is now."""
+
+    RESULT_CHOICES = [
+        ('Found', 'Found'),
+        ('Swept', 'Found (rest-are-here)'),
+        ('Recovered', 'Found again'),
+        ('Missing', 'Not found'),
+        ('On loan', 'On loan'),
+        ('Being read', 'Being read in the library'),
+        ('Reshelving', 'Waiting to be reshelved'),
+    ]
+
+    line_id = models.AutoField(primary_key=True)
+    audit = models.ForeignKey(StockAudit, on_delete=models.CASCADE, related_name='lines',
+                              db_column='audit_id')
+    book = models.ForeignKey('Book', on_delete=models.SET_NULL, blank=True, null=True,
+                             db_column='book_id', related_name='audit_lines')
+    title = models.CharField(max_length=255)
+    result = models.CharField(max_length=20, choices=RESULT_CHOICES)
+    # The book's status the moment the count was filed.
+    status_then = models.CharField(max_length=50, blank=True, default='')
+    # Who had it and until when, for a book out on loan.
+    detail = models.CharField(max_length=255, blank=True, default='')
+
+    class Meta:
+        db_table = 'Stock_Audit_Lines'
+        ordering = ['line_id']
+
+
 class Conversation(models.Model):
     """A patron's Ask a Librarian thread."""
 

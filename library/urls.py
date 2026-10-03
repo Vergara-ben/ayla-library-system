@@ -103,6 +103,7 @@ urlpatterns = [
     path('admin-portal/inventory/audit/progress/', views.stock_audit_progress, name='stock_audit_progress'),
     path('admin-portal/inventory/audit/compare/', views.stock_audit_compare, name='stock_audit_compare'),
     path('admin-portal/inventory/audit/apply/', views.stock_audit_apply, name='stock_audit_apply'),
+    path('admin-portal/inventory/audit/<int:audit_id>/', views.stock_audit_detail, name='stock_audit_detail'),
     path('admin-portal/inventory/write-off-missing/', views.write_off_missing, name='write_off_missing'),
     # User Management (Admin-only: manage Library Staff accounts)
     path('admin-portal/users/', views.user_management, name='user_management'),

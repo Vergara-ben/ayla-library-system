@@ -341,7 +341,7 @@
                             </thead>
                             <tbody data-live="inv-audits" class="divide-y divide-slate-800/40 text-xs text-slate-300">
                                 {% for a in audits %}
-                                <tr class="hover:bg-slate-800/10">
+                                <tr class="hover:bg-slate-800/10 cursor-pointer" onclick="openAuditDetail({{ a.audit_id }})" title="Show every book in this count">
                                     <td class="py-3 px-4 text-slate-300 font-medium">{{ a.audited_at|date:"M j, Y" }}<span class="block text-[10px] text-slate-600">{{ a.audited_at|time:"h:i A" }}</span></td>
                                     <td class="py-3 px-4 font-bold text-slate-200">{{ a.shelf_name|default:"—" }}</td>
                                     <td class="py-3 px-4 text-slate-400">{{ a.audited_by.fullname|default:"—" }}</td>
@@ -804,6 +804,27 @@
     </div>
 
     <!-- QR label -->
+    <!-- One filed count, book by book -->
+    <div id="auditDetailModal" class="fixed inset-0 z-[60] hidden items-center justify-center p-4" style="background: var(--scrim);">
+        <div class="w-full max-w-3xl rounded-2xl border shadow-2xl max-h-[85vh] flex flex-col" style="background-color: var(--bg-modal); border-color: var(--border-modal);">
+            <div class="flex items-center justify-between px-6 py-4 border-b" style="border-color: var(--border-modal);">
+                <div>
+                    <h3 id="adTitle" class="text-sm font-bold text-slate-200 tracking-wide">Shelf count</h3>
+                    <p id="adSub" class="text-[11px] text-slate-500"></p>
+                </div>
+                <button onclick="closeModal('auditDetailModal')" class="text-slate-500 hover:text-slate-300" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="overflow-y-auto">
+                <table class="w-full text-left text-xs">
+                    <thead><tr class="text-[10px] font-bold tracking-wider text-slate-500 uppercase border-b border-slate-800/80">
+                        <th class="py-2.5 px-5">Book</th><th class="py-2.5 px-5">Recorded in the count</th>
+                        <th class="py-2.5 px-5">Status then</th><th class="py-2.5 px-5">Status now</th></tr></thead>
+                    <tbody id="adRows" class="divide-y divide-slate-800/40 text-slate-300"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
     <div id="labelModal" class="fixed inset-0 z-[60] hidden items-center justify-center p-4" style="background: var(--scrim);">
         <div class="w-full max-w-xs rounded-2xl border shadow-2xl" style="background-color: var(--bg-modal); border-color: var(--border-modal);">
             <div class="flex items-center justify-between px-6 py-4 border-b" style="border-color: var(--border-modal);">
@@ -822,6 +843,36 @@
     <script>
         function toggleSidebar() { document.querySelector('aside')?.classList.toggle('open'); }
         function show(id) { const m = document.getElementById(id); m.classList.remove('hidden'); m.classList.add('flex'); }
+
+        // A filed count, each book's result then beside what it is now.
+        async function openAuditDetail(auditId) {
+            const rows = document.getElementById('adRows');
+            rows.innerHTML = '<tr><td colspan="4" class="py-6 text-center text-slate-500">Loading&hellip;</td></tr>';
+            show('auditDetailModal');
+            let d;
+            try {
+                const r = await fetch('{% url "inventory_management" %}audit/' + auditId + '/',
+                                      { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+                d = await r.json();
+            } catch (e) { d = { success: false, error: 'Could not load the count.' }; }
+            if (!d.success) {
+                rows.innerHTML = '<tr><td colspan="4" class="py-6 text-center text-rose-400">' + esc(d.error) + '</td></tr>';
+                return;
+            }
+            document.getElementById('adTitle').textContent = 'Shelf count: ' + d.shelf;
+            document.getElementById('adSub').textContent = d.when + (d.by ? ' by ' + d.by : '')
+                + ' · ' + d.lines.filter(function (l) { return l.changed; }).length + ' changed since';
+            const tone = { 'Missing': 'text-rose-400', 'Found': 'text-emerald-400', 'Swept': 'text-emerald-400',
+                           'Recovered': 'text-emerald-400' };
+            rows.innerHTML = d.lines.length ? d.lines.map(function (l) {
+                return '<tr><td class="py-2.5 px-5 font-semibold text-slate-200">' + esc(l.title) + '</td>'
+                    + '<td class="py-2.5 px-5 ' + (tone[l.kind] || 'text-blue-400') + '">' + esc(l.result)
+                    + (l.detail ? '<span class="block text-[10px] text-slate-500">' + esc(l.detail) + '</span>' : '') + '</td>'
+                    + '<td class="py-2.5 px-5 text-slate-400">' + esc(l.status_then) + '</td>'
+                    + '<td class="py-2.5 px-5 ' + (l.changed ? 'text-amber-400 font-bold' : 'text-slate-400') + '">'
+                    + esc(l.status_now) + '</td></tr>';
+            }).join('') : '<tr><td colspan="4" class="py-6 text-center text-slate-500">This count was filed before book-by-book records were kept.</td></tr>';
+        }
         function closeModal(id) { const m = document.getElementById(id); m.classList.add('hidden'); m.classList.remove('flex'); }
 
         // Switch the receive form between the two intakes.
@@ -1086,7 +1137,7 @@
             }
             if (!b.expected_present) {
                 return '<span class="text-blue-400">' + esc(b.status)
-                     + ' — not expected on the shelf</span>';
+                     + ' — recorded automatically, nothing to check</span>';
             }
             return b.last_seen ? '<span class="text-slate-600">last seen ' + esc(b.last_seen) + '</span>'
                                : '<span class="text-slate-600">never confirmed</span>';
@@ -1129,7 +1180,7 @@
                 '<span class="text-emerald-400 font-semibold">' + here + ' here</span> · '
                 + '<span class="text-rose-400 font-semibold">' + gone + ' not found</span> · '
                 + untouched + ' untouched'
-                + (elsewhere ? ' · ' + elsewhere + ' out on loan' : '');
+                + (elsewhere ? ' · ' + elsewhere + ' recorded automatically (on loan, being read or reshelving)' : '');
             // Filing needs a verdict on something.
             document.getElementById('auditFileBtn').disabled = !(here || gone);
             document.getElementById('auditFileLabel').textContent = untouched

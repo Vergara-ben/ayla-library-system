@@ -395,3 +395,42 @@ class IsbnLookupTests(TestCase):
         self.assertIn('<input type="hidden" name="status" value="Available">', form)
         self.assertNotIn('cover_img_url', form)
         self.assertLess(form.index('id="addIsbn"'), form.index('id="addTitle"'))
+
+
+class AuditTrailTests(TestCase):
+
+    def setUp(self):
+        from .models import FloorPlan, Room, Shelf, ShelfLevel
+        plan = FloorPlan.objects.create(name='Ground', floor_number=1, is_active=True)
+        room = Room.objects.create(floor_plan=plan, name='Main', map_x=0, map_y=0)
+        shelf = Shelf.objects.create(room=room, name='Shelf A', map_x=0, map_y=0)
+        self.level = ShelfLevel.objects.create(shelf=shelf, level_number=1)
+        self.here = Book.objects.create(title='Here', author='A', shelf_level=self.level)
+        self.gone = Book.objects.create(title='Gone', author='B', shelf_level=self.level)
+        self.out = Book.objects.create(title='Out', author='C', shelf_level=self.level, status='Borrowed')
+        self.reading = Book.objects.create(title='Reading', author='D', shelf_level=self.level,
+                                           status='Being Read')
+        reader = Patron.objects.create(first_name='Ana', last_name='Cruz', email='a@example.invalid')
+        Transaction.objects.create(book=self.out, patron=reader, transaction_type='Borrow',
+                                   due_date=timezone.localdate())
+        self.client = _client(admin_id=_staff(role='Admin').admin_id, admin_role='Admin')
+
+    def test_books_away_are_recorded_without_being_marked(self):
+        r = self.client.post('/admin-portal/inventory/audit/file/', {
+            'level': self.level.shelf_level_id,
+            'found_ids': [self.here.book_id], 'missing_ids': [self.gone.book_id]}).json()
+        self.assertTrue(r['success'], r)
+        from .models import StockAuditLine
+        results = {l.title: (l.result, l.status_then, l.detail) for l in StockAuditLine.objects.all()}
+        self.assertEqual(results['Here'][0], 'Found')
+        self.assertEqual(results['Gone'][:2], ('Missing', 'Available'))
+        self.assertEqual(results['Out'][0], 'On loan')
+        self.assertIn('Ana', results['Out'][2])
+        self.assertEqual(results['Reading'][0], 'Being read')
+
+        # Later the borrowed book comes back: the record shows then and now side by side.
+        self.out.status = 'Available'
+        self.out.save()
+        detail = self.client.get('/admin-portal/inventory/audit/%d/' % r['audit_id']).json()
+        out = next(l for l in detail['lines'] if l['title'] == 'Out')
+        self.assertEqual((out['status_then'], out['status_now'], out['changed']), ('Borrowed', 'Available', True))
