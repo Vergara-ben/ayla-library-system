@@ -9659,6 +9659,31 @@ def _beacon_clash(identity, exclude_id=None):
     return None
 
 
+def _next_free_minor(beacon_uuid, major, exclude_id=None):
+    """The lowest minor no other iBeacon with this UUID and major is using."""
+    key = _beacon_identity('iBeacon', beacon_uuid, major, None, None, None, None)[1]
+    used = set()
+    for b in BLEBeacon.objects.exclude(beacon_id=exclude_id).filter(advertisement_type='iBeacon'):
+        if b.major == major and _beacon_identity('iBeacon', b.beacon_uuid, None, None,
+                                                 None, None, None)[1] == key:
+            used.add(b.minor)
+    minor = 1
+    while minor in used:
+        minor += 1
+    return minor
+
+
+@admin_only_required
+def next_beacon_minor(request):
+    """Suggest the minor for a beacon about to be placed."""
+    try:
+        major = int(request.GET.get('major')) if (request.GET.get('major') or '').strip() else None
+    except ValueError:
+        major = None
+    return JsonResponse({'success': True,
+                         'minor': _next_free_minor(request.GET.get('uuid') or '', major)})
+
+
 def _clash_error(other):
     return JsonResponse({
         'success': False,
@@ -9725,6 +9750,15 @@ def add_beacon(request):
         return JsonResponse({'success': False,
                              'error': 'Mounting height is measured in metres above the floor, '
                                       'so it should be between 0 and 10.'})
+
+    # Left blank, an iBeacon gets the next free minor and a label to match.
+    if adv_type == 'iBeacon':
+        if major is None:
+            major = 1
+        if minor is None:
+            minor = _next_free_minor(beacon_uuid, major)
+        if not label:
+            label = 'Beacon %d' % minor
 
     clash = _beacon_clash(_beacon_identity(
         adv_type, beacon_uuid, major, minor, request.POST.get('namespace_id'),

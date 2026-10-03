@@ -171,3 +171,37 @@ class IsbnTests(TestCase):
         self.assertIn('check digit', isbn_error('9780306406158'))
         self.assertIn('10 or 13 digits', isbn_error('12345'))
         self.assertIn('10 or 13 digits', isbn_error('ABCDEFGHIJ'))
+
+
+class BeaconMinorTests(TestCase):
+    UUID = 'FDA50693-A4E2-4FB1-AFCF-C6EB07647825'
+
+    def setUp(self):
+        from .models import FloorPlan
+        self.plan = FloorPlan.objects.create(name='Ground', floor_number=1, is_active=True)
+        self.client = _client(admin_id=_staff(role='Admin').admin_id, admin_role='Admin')
+
+    def _place(self, **extra):
+        data = {'floor_plan_id': self.plan.floor_plan_id, 'beacon_uuid': self.UUID,
+                'map_x': 10, 'map_y': 10}
+        data.update(extra)
+        return self.client.post('/admin-portal/add-beacon/', data).json()
+
+    def test_minor_and_label_are_filled_in(self):
+        first = self._place()
+        second = self._place()
+        self.assertEqual((first['beacon']['minor'], second['beacon']['minor']), (1, 2))
+        self.assertEqual(second['beacon']['label'], 'Beacon 2')
+        self.assertEqual(second['beacon']['major'], 1)
+
+    def test_a_freed_minor_is_offered_again(self):
+        self._place(minor=1)
+        self._place(minor=3)
+        r = self.client.get('/admin-portal/next-beacon-minor/', {'uuid': self.UUID.lower(), 'major': 1})
+        self.assertEqual(r.json()['minor'], 2)
+
+    def test_a_duplicate_minor_is_refused(self):
+        self._place(minor=5)
+        result = self._place(minor=5, label='Other')
+        self.assertFalse(result['success'])
+        self.assertIn('already uses these identifiers', result['error'])
