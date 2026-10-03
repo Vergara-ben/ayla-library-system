@@ -283,3 +283,28 @@ class RegistrationFixTests(TestCase):
     def test_reject_completely_with_a_reason(self):
         self._reject(mode='reject', reason='This is not a valid ID')
         self.assertFalse(Patron.objects.filter(patron_id=self.applicant.patron_id).exists())
+
+
+class AlertTests(TestCase):
+
+    def _alerts(self, user):
+        c = _client(admin_id=user.admin_id, admin_role=user.role)
+        return {i['key']: i for i in c.get('/portal/alerts/').json()['items']}
+
+    def test_staff_get_alerts_for_their_modules_only(self):
+        desk = _staff(modules='transactions')
+        items = self._alerts(desk)
+        self.assertEqual(set(items), {'extensions', 'overdue'})
+
+    def test_a_new_registration_is_reported_but_not_one_waiting_on_the_applicant(self):
+        admin = _staff(role='Admin', modules='')
+        Patron.objects.create(first_name='Ana', last_name='Cruz', email='a@example.invalid',
+                              account_status='Pending', otp_verified=True)
+        Patron.objects.create(first_name='Ben', last_name='Lim', email='b@example.invalid',
+                              account_status='Pending', otp_verified=True, fix_token='t')
+        item = self._alerts(admin)['registrations']
+        self.assertEqual(item['count'], 1)
+        self.assertIn('Ana', item['text'])
+
+    def test_signed_out_gets_nothing(self):
+        self.assertEqual(Client().get('/portal/alerts/').status_code, 403)

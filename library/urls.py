@@ -6,6 +6,7 @@ from . import tasks
 from . import floorplan_bulk
 from .floorplan_undo import floorplan_undo, wrap_editor_views
 from . import openstatus
+from . import alerts
 
 urlpatterns = [
     # Floor plan editor: move, delete, lock and undo several elements at once.
@@ -46,6 +47,8 @@ urlpatterns = [
     path('portal/change-password/', views.portal_change_password, name='portal_change_password'),
     # Open or closed switch on both dashboards.
     path('portal/library-status/', openstatus.library_status, name='library_status'),
+    # What is waiting on the signed-in account, for the pop-up alerts.
+    path('portal/alerts/', alerts.portal_alerts, name='portal_alerts'),
     path('admin-portal/logout/', views.admin_logout, name='admin_logout'),
     path('admin-portal/dashboard/', views.admin_dashboard, name='admin_dashboard'),
     path('admin-portal/signin/', views.admin_signin, name='admin_signin'),

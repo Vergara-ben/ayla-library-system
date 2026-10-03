@@ -164,7 +164,8 @@ class PatronCredentialStorageTests(TestCase):
     def test_rejecting_the_application_keeps_it_with_the_id(self):
         from .models import PatronCredential
         p = self._register()
-        _signed_in(_admin(modules='patrons')).post('/admin-portal/reject-patron/%d/' % p.patron_id)
+        _signed_in(_admin(modules='patrons')).post('/admin-portal/reject-patron/%d/' % p.patron_id,
+                                                   {'reason': 'The ID has expired'})
         self.assertFalse(Patron.objects.filter(email=self.EMAIL).exists())
         self.assertTrue(Patron.all_objects.filter(email=self.EMAIL, archived_at__isnull=False).exists())
         self.assertTrue(PatronCredential.objects.exists())
