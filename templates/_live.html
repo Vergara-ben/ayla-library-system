@@ -1,2 +1,3 @@
 {% load static %}<style>[data-live-collapse]:not(:has(*)){display:none}</style>
-<script src="{% static 'js/live.js' %}" data-topics="{{ topics }}"></script>
+{% if live_key %}<script src="https://cdn.jsdelivr.net/npm/pusher-js@8.6.0/dist/web/pusher.min.js" integrity="sha384-yz6oLe92Sren05O3WPhu8DK05E9PEkh7kTQJ819acmwKwcCMwJXGu9Kta5wYhfaJ" crossorigin="anonymous"></script>{% endif %}
+<script src="{% static 'js/live.js' %}" data-topics="{{ topics }}" data-key="{{ live_key }}" data-cluster="{{ live_cluster }}" data-channels="{{ live_channels }}" data-origin="{{ live_origin }}" data-auth="{% url 'pusher_auth' %}"></script>

@@ -32,3 +32,23 @@ def patron_session(request):
         return {'patron_signed_in': False, 'signed_in_patron': None}
     patron = Patron.objects.filter(patron_id=patron_id).first()
     return {'patron_signed_in': patron is not None, 'signed_in_patron': patron}
+
+
+def live_updates(request):
+    """What a page needs to listen for live updates (read by _live.html)."""
+    from django.conf import settings
+    from .live import PUBLIC_CHANNEL, STAFF_CHANNEL, PATRON_CHANNEL, session_origin
+    if not settings.PUSHER_ENABLED:
+        return {'live_key': ''}
+    session = request.session
+    channels = [PUBLIC_CHANNEL]
+    if session.get('admin_id'):
+        channels.append(STAFF_CHANNEL)
+    if session.get('patron_id'):
+        channels.append(PATRON_CHANNEL)
+    return {
+        'live_key': settings.PUSHER_KEY,
+        'live_cluster': settings.PUSHER_CLUSTER,
+        'live_channels': ' '.join(channels),
+        'live_origin': session_origin(session) or '',
+    }

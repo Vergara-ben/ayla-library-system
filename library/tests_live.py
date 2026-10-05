@@ -2,26 +2,17 @@
 
 from unittest import mock
 
-from asgiref.sync import async_to_sync
-from channels.layers import get_channel_layer
-from channels.routing import URLRouter
-from channels.security.websocket import AllowedHostsOriginValidator
-from channels.sessions import SessionMiddlewareStack
-from channels.testing import WebsocketCommunicator
 from django.contrib import messages
 from django.contrib.messages.middleware import MessageMiddleware
-from django.contrib.sessions.backends.db import SessionStore
 from django.contrib.sessions.middleware import SessionMiddleware
 from django.db import connections
 from django.http import HttpResponse
-from django.test import RequestFactory, TestCase, TransactionTestCase
-from django.urls import path
+from django.test import RequestFactory, TestCase, override_settings
 
-from ayla_library_system.asgi import application
 from .auth_utils import hash_password
-from .consumers import LiveConsumer
+from . import live
 from .live import (
-    LiveUpdatesMiddleware, PATRON_GROUP, PUBLIC_GROUP, STAFF_GROUP, _WriteRecorder,
+    LiveUpdatesMiddleware, PATRON_CHANNEL, PUBLIC_CHANNEL, STAFF_CHANNEL, _WriteRecorder,
     session_origin, topics_for_sql,
 )
 from .models import LibraryStatus, Patron, User
@@ -142,120 +133,80 @@ class FlashMessageTests(TestCase):
         self.assertEqual(self._run(self._request(cookies), show, cookies).content, b'')
 
 
-class SocketTests(TransactionTestCase):
+@override_settings(PUSHER_ENABLED=True, PUSHER_APP_ID='1', PUSHER_KEY='key',
+                   PUSHER_SECRET='secret', PUSHER_CLUSTER='ap1')
+class PusherTests(TestCase):
 
-    def _connect(self, session=None):
-        headers = [(b'origin', b'http://testserver')]
-        if session is not None:
-            headers.append((b'cookie', f'sessionid={session.session_key}'.encode()))
-        return WebsocketCommunicator(application, '/ws/live/', headers=headers)
+    def setUp(self):
+        live._client = None
+        self.addCleanup(setattr, live, '_client', None)
+        # Writes made while setting up must not reach the real Pusher.
+        sender = mock.patch.object(live, '_sender')
+        sender.start()
+        self.addCleanup(sender.stop)
 
-    def _session(self, **values):
-        session = SessionStore()
-        for key, value in values.items():
+    def test_each_channel_hears_only_its_topics(self):
+        client = mock.Mock()
+        with mock.patch.object(live, 'pusher_client', return_value=client):
+            live.publish({'books', 'activity', 'visits'}, origin='abc')
+        sent = {c.args[0]: c.args[2]['topics'] for c in client.trigger.call_args_list}
+        self.assertEqual(sent[STAFF_CHANNEL], ['activity', 'books', 'visits'])
+        self.assertEqual(sent[PATRON_CHANNEL], ['books'])
+        self.assertEqual(sent[PUBLIC_CHANNEL], ['books'])
+        self.assertEqual(client.trigger.call_args_list[0].args[2]['origin'], 'abc')
+
+    def test_a_pusher_outage_never_fails_the_request(self):
+        client = mock.Mock()
+        client.trigger.side_effect = OSError('unreachable')
+        with mock.patch.object(live, 'pusher_client', return_value=client),                 self.assertLogs('library.live', 'ERROR'):
+            live.publish({'books'})  # logged, not raised
+
+    def _auth(self, channel, **session_values):
+        session = self.client.session
+        for key, value in session_values.items():
             session[key] = value
-        session.create()
-        return session
+        session.save()
+        return self.client.post('/live/auth/', {'channel_name': channel, 'socket_id': '123.456'})
 
-    def test_staff_hear_everything_and_their_own_echo_is_marked(self):
+    def test_staff_may_join_the_staff_channel(self):
         user = _user()
-        session = self._session(admin_id=user.admin_id)
+        response = self._auth(STAFF_CHANNEL, admin_id=user.admin_id)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()['auth'].startswith('key:'))
 
-        async def scenario():
-            socket = self._connect(session)
-            connected, _ = await socket.connect()
-            self.assertTrue(connected)
-            hello = await socket.receive_json_from()
-            self.assertIn('activity', hello['hello'])
-
-            layer = get_channel_layer()
-            await layer.group_send(STAFF_GROUP, {'type': 'live.changed', 'topics': ['books'],
-                                                 'origin': session_origin(session)})
-            self.assertEqual(await socket.receive_json_from(), {'topics': ['books'], 'self': True})
-            await layer.group_send(STAFF_GROUP, {'type': 'live.changed', 'topics': ['books'],
-                                                 'origin': 'someone-else'})
-            self.assertEqual(await socket.receive_json_from(), {'topics': ['books']})
-            await socket.disconnect()
-
-        async_to_sync(scenario)()
-
-    def test_visitors_hear_only_public_topics(self):
-        async def scenario():
-            socket = self._connect()
-            connected, _ = await socket.connect()
-            self.assertTrue(connected)
-            hello = await socket.receive_json_from()
-            self.assertEqual(set(hello['hello']), {'books', 'announcements', 'map', 'library'})
-            # Staff-only news does not reach them.
-            await get_channel_layer().group_send(
-                STAFF_GROUP, {'type': 'live.changed', 'topics': ['activity'], 'origin': None})
-            self.assertTrue(await socket.receive_nothing(timeout=0.2))
-            await socket.disconnect()
-
-        async_to_sync(scenario)()
-
-    def test_patrons_hear_their_topics_not_staff_ones(self):
+    def test_patrons_and_guests_may_not(self):
         patron = Patron.objects.create(first_name='Live', last_name='Patron',
-                                       email='live-patron@example.invalid',
-                                       account_status='Active')
-        session = self._session(patron_id=patron.patron_id)
+                                       email='live-patron@example.invalid', account_status='Active')
+        self.assertEqual(self._auth(STAFF_CHANNEL, patron_id=patron.patron_id).status_code, 403)
+        self.assertEqual(self._auth(PATRON_CHANNEL, patron_id=patron.patron_id).status_code, 200)
+        self.client.session.flush()
+        self.client.cookies.clear()
+        self.assertEqual(self._auth(PATRON_CHANNEL).status_code, 403)
 
-        async def scenario():
-            socket = self._connect(session)
-            await socket.connect()
-            hello = await socket.receive_json_from()
-            self.assertIn('transactions', hello['hello'])
-            self.assertNotIn('activity', hello['hello'])
-            self.assertNotIn('visits', hello['hello'])
-            await socket.disconnect()
-
-        async_to_sync(scenario)()
-
-    def test_a_deactivated_account_is_not_staff(self):
+    def test_a_deactivated_account_is_refused(self):
         user = _user()
         user.account_status = 'Inactive'
         user.save()
-        session = self._session(admin_id=user.admin_id)
+        self.assertEqual(self._auth(STAFF_CHANNEL, admin_id=user.admin_id).status_code, 403)
 
-        async def scenario():
-            socket = self._connect(session)
-            await socket.connect()
-            hello = await socket.receive_json_from()
-            self.assertNotIn('activity', hello['hello'])
-            await socket.disconnect()
-
-        async_to_sync(scenario)()
-
-    def test_portal_address_rule_applies_to_the_socket(self):
+    def test_portal_address_rule_applies(self):
         user = _user()
-        session = self._session(admin_id=user.admin_id)
-
-        async def scenario():
-            socket = self._connect(session)
-            await socket.connect()
-            hello = await socket.receive_json_from()
-            self.assertNotIn('activity', hello['hello'])
-            await socket.disconnect()
-
         with self.settings(PORTAL_ALLOWED_IPS=['203.0.113.0/24']):
-            async_to_sync(scenario)()
+            self.assertEqual(self._auth(STAFF_CHANNEL, admin_id=user.admin_id).status_code, 403)
 
-    def test_cross_site_pages_cannot_connect(self):
-        # The validator reads ALLOWED_HOSTS when the app is built, as it is in production.
-        with self.settings(ALLOWED_HOSTS=['ayla.example']):
-            guarded = AllowedHostsOriginValidator(
-                SessionMiddlewareStack(URLRouter([path('ws/live/', LiveConsumer.as_asgi())])))
-
-            async def scenario():
-                for origin, expected in ((b'https://evil.example', False),
-                                         (b'https://ayla.example', True)):
-                    socket = WebsocketCommunicator(guarded, '/ws/live/', headers=[(b'origin', origin)])
-                    connected, _ = await socket.connect()
-                    self.assertEqual(connected, expected, origin)
-                    await socket.disconnect()
-
-            async_to_sync(scenario)()
+    def test_page_is_given_its_channels(self):
+        user = _user()
+        session = self.client.session
+        session['admin_id'] = user.admin_id
+        session.save()
+        page = self.client.get('/admin-portal/dashboard/')
+        self.assertContains(page, 'data-channels="live-public private-live-staff"')
+        self.assertContains(page, 'pusher.min.js')
 
 
-# Groups exist under these names; a rename would silently stop every page updating.
-assert {STAFF_GROUP, PATRON_GROUP, PUBLIC_GROUP} == {'live.staff', 'live.patron', 'live.public'}
+class NoPusherTests(TestCase):
+
+    def test_without_keys_pages_still_load_and_nothing_is_sent(self):
+        with self.settings(PUSHER_ENABLED=False), mock.patch.object(live, '_sender') as sender:
+            live.broadcast({'books'})
+        sender.submit.assert_not_called()

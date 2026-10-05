@@ -4,17 +4,12 @@
 
   var script = document.currentScript;
   var pageTopics = ((script && script.dataset.topics) || '').split(/[\s,]+/).filter(Boolean);
-  if (!pageTopics.length || !('WebSocket' in window)) return;
+  if (!pageTopics.length) return;
 
   var DEBOUNCE_MS = 300;
-  var PING_MS = 25000;
-  var FALLBACK_POLL_MS = 20000;   // only while the socket is down
-  var MAX_BACKOFF_MS = 30000;
+  var FALLBACK_POLL_MS = 20000;   // only while Pusher is not connected
 
-  var socket = null;
-  var backoff = 1000;
-  var everOpened = false;
-  var pingTimer = null;
+  var cfg = script.dataset;
   var pollTimer = null;
   var pending = {};
   var pendingOthers = false;   // something in the batch came from another session
@@ -28,42 +23,32 @@
     return topics.filter(function (t) { return pageTopics.indexOf(t) !== -1; });
   }
 
-  // ---- socket -------------------------------------------------------------
+  // ---- Pusher ---------------------------------------------------------------
 
   function connect() {
-    var url = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/live/';
-    try { socket = new WebSocket(url); } catch (e) { scheduleReconnect(); return; }
-
-    socket.onopen = function () {
-      backoff = 1000;
-      stopFallbackPoll();
-      clearInterval(pingTimer);
-      pingTimer = setInterval(function () {
-        if (socket && socket.readyState === 1) socket.send('{"ping":1}');
-      }, PING_MS);
-      // Anything could have changed while the socket was down.
-      if (everOpened) queue(pageTopics);
-      everOpened = true;
-      api.connected = true;
-    };
-
-    socket.onmessage = function (e) {
-      var msg;
-      try { msg = JSON.parse(e.data); } catch (err) { return; }
-      if (msg && msg.topics) queue(wanted(msg.topics), !!msg.self);
-    };
-
-    socket.onclose = function () {
-      api.connected = false;
-      clearInterval(pingTimer);
-      startFallbackPoll();
-      scheduleReconnect();
-    };
-  }
-
-  function scheduleReconnect() {
-    setTimeout(connect, backoff + Math.random() * 500);
-    backoff = Math.min(backoff * 2, MAX_BACKOFF_MS);
+    if (!cfg.key || !window.Pusher) { startFallbackPoll(); return; }
+    var pusher = new window.Pusher(cfg.key, {
+      cluster: cfg.cluster,
+      forceTLS: true,
+      channelAuthorization: { endpoint: cfg.auth, transport: 'ajax' }
+    });
+    var everConnected = false;
+    pusher.connection.bind('state_change', function (s) {
+      api.connected = s.current === 'connected';
+      if (api.connected) {
+        stopFallbackPoll();
+        // Anything could have changed while the connection was down.
+        if (everConnected) queue(pageTopics);
+        everConnected = true;
+      } else if (s.current !== 'connecting') {
+        startFallbackPoll();
+      }
+    });
+    (cfg.channels || '').split(/\s+/).filter(Boolean).forEach(function (name) {
+      pusher.subscribe(name).bind('changed', function (msg) {
+        if (msg && msg.topics) queue(wanted(msg.topics), !!cfg.origin && msg.origin === cfg.origin);
+      });
+    });
   }
 
   function startFallbackPoll() {

@@ -6,6 +6,7 @@ from . import tasks
 from . import floorplan_bulk
 from .floorplan_undo import floorplan_undo, wrap_editor_views
 from . import openstatus
+from . import live
 from . import alerts
 
 urlpatterns = [
@@ -16,6 +17,8 @@ urlpatterns = [
     path('healthz/', tasks.healthz, name='healthz'),
     path('network/', tasks.network_address, name='network_address'),
     path('tasks/daily/', tasks.run_daily_task, name='run_daily_task'),
+    # Pusher checks here before a page joins a private live-update channel.
+    path('live/auth/', live.pusher_auth, name='pusher_auth'),
 
     path('patron/login/', views.patron_login, name='patron_login'),
     path('patron/logout/', views.patron_logout, name='patron_logout'),

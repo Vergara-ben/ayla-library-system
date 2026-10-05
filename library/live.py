@@ -1,11 +1,16 @@
 """Live updates: tell open pages which kinds of data just changed."""
 
 import hashlib
+import ipaddress
 import logging
 import re
+from concurrent.futures import ThreadPoolExecutor
 
-from asgiref.sync import async_to_sync
+from django.conf import settings
 from django.db import connections
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_POST
 
 logger = logging.getLogger(__name__)
 
@@ -47,13 +52,13 @@ MODEL_TOPICS = {
 ALL_TOPICS = frozenset(t for topics in MODEL_TOPICS.values() for t in topics)
 
 # Who hears what. The message names the topic only, never the data itself.
-STAFF_GROUP = 'live.staff'
-PATRON_GROUP = 'live.patron'
-PUBLIC_GROUP = 'live.public'
-GROUP_TOPICS = {
-    STAFF_GROUP: ALL_TOPICS,
-    PATRON_GROUP: frozenset({'books', 'transactions', 'patrons', 'chat', 'announcements', 'map', 'library'}),
-    PUBLIC_GROUP: frozenset({'books', 'announcements', 'map', 'library'}),
+STAFF_CHANNEL = 'private-live-staff'
+PATRON_CHANNEL = 'private-live-patron'
+PUBLIC_CHANNEL = 'live-public'
+CHANNEL_TOPICS = {
+    STAFF_CHANNEL: ALL_TOPICS,
+    PATRON_CHANNEL: frozenset({'books', 'transactions', 'patrons', 'chat', 'announcements', 'map', 'library'}),
+    PUBLIC_CHANNEL: frozenset({'books', 'announcements', 'map', 'library'}),
 }
 
 # Sent by every fetch a live update triggers; such requests never broadcast,
@@ -94,24 +99,40 @@ def topics_for_sql(sql):
     return table_topics().get(match.group(1).lower(), ())
 
 
-def broadcast(topics, origin=None):
-    """Send the changed topics to every group allowed to hear them; origin tags the acting session."""
-    topics = set(topics) & ALL_TOPICS
-    if not topics:
+_client = None
+# One background thread, so a page never waits on Pusher to answer.
+_sender = ThreadPoolExecutor(max_workers=1, thread_name_prefix='live')
+
+
+def pusher_client():
+    global _client
+    if _client is None and settings.PUSHER_ENABLED:
+        import pusher
+        _client = pusher.Pusher(app_id=settings.PUSHER_APP_ID, key=settings.PUSHER_KEY,
+                                secret=settings.PUSHER_SECRET, cluster=settings.PUSHER_CLUSTER,
+                                ssl=True, timeout=5)
+    return _client
+
+
+def publish(topics, origin=None):
+    """Send the changed topics to every channel allowed to hear them; origin tags the acting session."""
+    client = pusher_client()
+    if client is None:
         return
-    try:
-        from channels.layers import get_channel_layer
-        layer = get_channel_layer()
-        if layer is None:
-            return
-        send = async_to_sync(layer.group_send)
-        for group, allowed in GROUP_TOPICS.items():
-            heard = sorted(topics & allowed)
-            if heard:
-                send(group, {'type': 'live.changed', 'topics': heard, 'origin': origin})
-    except Exception:
-        # A missed nudge only delays a screen; it must never fail the request.
-        logger.exception('Live update broadcast failed for %s', sorted(topics))
+    for channel, allowed in CHANNEL_TOPICS.items():
+        heard = sorted(set(topics) & allowed)
+        if heard:
+            try:
+                client.trigger(channel, 'changed', {'topics': heard, 'origin': origin})
+            except Exception:
+                # A missed nudge only delays a screen; the page's own check catches up.
+                logger.exception('Live update to %s failed for %s', channel, heard)
+
+
+def broadcast(topics, origin=None):
+    topics = set(topics) & ALL_TOPICS
+    if topics and settings.PUSHER_ENABLED:
+        _sender.submit(publish, topics, origin)
 
 
 class _WriteRecorder:
@@ -150,3 +171,53 @@ class LiveUpdatesMiddleware:
         if recorder.topics:
             broadcast(recorder.topics, origin=session_origin(getattr(request, 'session', None)))
         return response
+
+
+def _portal_address_allowed(request):
+    """The PORTAL_ALLOWED_IPS rule, so staff news stays on the library's connection."""
+    from .middleware import client_ip
+    raw = tuple(getattr(settings, 'PORTAL_ALLOWED_IPS', ()) or ())
+    if not raw:
+        return True
+    try:
+        ip = ipaddress.ip_address(client_ip(request))
+    except ValueError:
+        return False
+    if ip.version == 6 and ip.ipv4_mapped:
+        ip = ip.ipv4_mapped
+    for entry in raw:
+        try:
+            if ip in ipaddress.ip_network(entry, strict=False):
+                return True
+        except ValueError:
+            continue
+    return False
+
+
+def channels_for(request):
+    """The channels this visitor may listen on."""
+    from .models import Patron, User
+    channels = [PUBLIC_CHANNEL]
+    session = request.session
+    admin_id = session.get('admin_id')
+    if (admin_id and _portal_address_allowed(request)
+            and User.objects.filter(admin_id=admin_id, account_status='Active').exists()):
+        channels.append(STAFF_CHANNEL)
+    patron_id = session.get('patron_id')
+    if patron_id and Patron.objects.filter(patron_id=patron_id, account_status='Active').exists():
+        channels.append(PATRON_CHANNEL)
+    return channels
+
+
+# No CSRF check: the answer is only readable by this site's own pages, and it
+# grants nothing beyond what this session may already hear.
+@csrf_exempt
+@require_POST
+def pusher_auth(request):
+    """Pusher asks here before letting a page join a private channel."""
+    client = pusher_client()
+    channel = request.POST.get('channel_name', '')
+    socket_id = request.POST.get('socket_id', '')
+    if client is None or channel not in channels_for(request) or channel == PUBLIC_CHANNEL:
+        return JsonResponse({'error': 'Not allowed.'}, status=403)
+    return JsonResponse(client.authenticate(channel=channel, socket_id=socket_id))

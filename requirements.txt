@@ -1,15 +1,13 @@
 Django>=6.0.5
-# PostgreSQL driver with the connection pool Django uses under ASGI.
-psycopg[binary,pool]>=3.2
+psycopg2-binary>=2.9.9
 python-dotenv>=1.0.0
 openpyxl>=3.1.2
 qrcode>=7.4.2
 reportlab>=4.0.0
 whitenoise>=6.6.0
-# Live updates over WebSocket, and the ASGI server that serves them.
-channels>=4.3
-daphne>=4.2
-# Only needed when REDIS_URL is set (more than one server process).
-# channels-redis>=4.2
+# Web server for deployment.
+gunicorn>=23.0.0
+# Live updates: tells open pages what changed.
+pusher>=3.3
 # Only needed when EMAIL_PROVIDER is an HTTP API (brevo/sendgrid/mailgun/resend).
 django-anymail>=10.0
