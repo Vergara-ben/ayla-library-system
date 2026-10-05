@@ -743,7 +743,6 @@ class Donation(Archivable):
 
     STATUS_CHOICES = [
         ('Received', 'Received'),
-        ('Processing', 'Processing'),
         ('Shelved', 'Shelved'),
     ]
 
@@ -1537,7 +1536,6 @@ class InventoryRecord(models.Model):
     # Accessioning stage for donations only.
     STAGE_CHOICES = [
         ('Received', 'Received'),
-        ('Processing', 'Processing'),
         ('Shelved', 'Shelved'),
     ]
 

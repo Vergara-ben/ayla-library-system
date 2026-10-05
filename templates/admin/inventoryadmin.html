@@ -131,56 +131,47 @@
                 {% endfor %}
             {% endif %}
 
-            <!-- Stock levels at a glance -->
-            <div data-live="inv-stats" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
-                <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
-                    <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">In Stock</p>
+            <!-- Stock at a glance: every card opens its list. -->
+            <div data-live="inv-stats" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+                <a href="?tab=stock" class="p-5 rounded-xl border transition-colors hover:border-cyan-700/60 {% if tab == 'stock' and not state_filter %}border-cyan-700/70{% else %}border-slate-800/80{% endif %}" style="background-color: var(--bg-card);">
+                    <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">On hand</p>
                     <p class="text-3xl font-bold text-cyan-400 mt-2">{{ in_stock }}</p>
-                    <p class="text-[10px] text-slate-500 mt-1">of {{ total_copies }} copies</p>
-                </div>
-                <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
-                    <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Good</p>
-                    <p class="text-3xl font-bold text-emerald-400 mt-2">{{ good_count }}</p>
-                    {% if worn_count %}<p class="text-[10px] text-slate-500 mt-1">plus {{ worn_count }} worn</p>{% endif %}
-                </div>
-                <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
-                    <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Damaged</p>
-                    <p class="text-3xl font-bold text-amber-500 mt-2">{{ damaged_count }}</p>
-                </div>
-                <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
-                    <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Lost</p>
-                    <p class="text-3xl font-bold text-rose-400 mt-2">{{ lost_count }}</p>
-                </div>
-                <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
-                    <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Withdrawn</p>
-                    <p class="text-3xl font-bold text-slate-400 mt-2">{{ withdrawn_count }}</p>
-                </div>
-                <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
-                    <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Uncatalogued</p>
-                    <p class="text-3xl font-bold text-purple-400 mt-2">{{ uncatalogued }}</p>
-                    <p class="text-[10px] text-slate-500 mt-1">received, not catalogued</p>
-                </div>
+                    <p class="text-[10px] text-slate-500 mt-1">of {{ total_copies }} copies &middot; {{ good_count }} in good shape</p>
+                </a>
+                <a href="?state=repair" class="p-5 rounded-xl border transition-colors hover:border-amber-700/60 {% if state_filter == 'repair' %}border-amber-700/70{% else %}border-slate-800/80{% endif %}" style="background-color: var(--bg-card);">
+                    <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Needs repair</p>
+                    <p class="text-3xl font-bold text-amber-400 mt-2">{{ repair_count }}</p>
+                    <p class="text-[10px] text-slate-500 mt-1">{{ worn_count }} worn, {{ damaged_count }} damaged</p>
+                </a>
+                <a href="?tab=missing" class="p-5 rounded-xl border transition-colors hover:border-rose-700/60 {% if tab == 'missing' %}border-rose-700/70{% else %}border-slate-800/80{% endif %}" style="background-color: var(--bg-card);">
+                    <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Missing</p>
+                    <p class="text-3xl font-bold text-rose-400 mt-2">{{ missing_count }}</p>
+                    <p class="text-[10px] text-slate-500 mt-1">not found in a shelf count</p>
+                </a>
+                <a href="?state=gone" class="p-5 rounded-xl border transition-colors hover:border-slate-700/60 {% if state_filter == 'gone' %}border-slate-700/70{% else %}border-slate-800/80{% endif %}" style="background-color: var(--bg-card);">
+                    <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Lost or withdrawn</p>
+                    <p class="text-3xl font-bold text-slate-400 mt-2">{{ gone_count }}</p>
+                    <p class="text-[10px] text-slate-500 mt-1">{{ lost_count }} lost, {{ withdrawn_count }} withdrawn</p>
+                </a>
+                <a href="?state=unshelved" class="p-5 rounded-xl border transition-colors hover:border-purple-700/60 {% if state_filter == 'unshelved' %}border-purple-700/70{% else %}border-slate-800/80{% endif %}" style="background-color: var(--bg-card);">
+                    <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Waiting for a shelf</p>
+                    <p class="text-3xl font-bold text-purple-400 mt-2">{{ unshelved_count }}</p>
+                    <p class="text-[10px] text-slate-500 mt-1">place them in Shelf Manager</p>
+                </a>
             </div>
+            {% if uncatalogued %}<p class="text-[11px] text-purple-300">{{ uncatalogued }} cop{{ uncatalogued|pluralize:"y,ies" }} received without a catalogue title &mdash; use <strong>Edit</strong> on the row to link one.</p>{% endif %}
 
             <!-- Tabs -->
             <div class="rounded-xl border border-slate-800/80 overflow-hidden" style="background-color: var(--bg-card);">
                 <div class="px-5 py-3 border-b border-slate-800/60 flex flex-wrap items-center justify-between gap-3">
                     <div class="flex items-center gap-1">
                         <a href="?tab=stock" class="tab-btn {% if tab == 'stock' %}active{% endif %}"><i class="fa-solid fa-boxes-stacked mr-1"></i> Stock</a>
-                        <a href="?tab=audit" class="tab-btn {% if tab == 'audit' %}active{% endif %}"><i class="fa-solid fa-clipboard-check mr-1"></i> Stock Audit</a>
-                        <a data-live="inv-missing-tab" href="?tab=missing" class="tab-btn {% if tab == 'missing' %}active{% endif %}"><i class="fa-solid fa-magnifying-glass mr-1"></i> Missing Stock{% if missing_count %} <span class="ml-1 text-[10px] font-bold text-amber-400">{{ missing_count }}</span>{% endif %}</a>
-                        <a href="?tab=audits" class="tab-btn {% if tab == 'audits' %}active{% endif %}"><i class="fa-solid fa-list-check mr-1"></i> Audit History</a>
-                        <a href="?tab=history" class="tab-btn {% if tab == 'history' %}active{% endif %}"><i class="fa-solid fa-clock-rotate-left mr-1"></i> Movement History</a>
+                        <a href="?tab=audit" class="tab-btn {% if tab == 'audit' %}active{% endif %}"><i class="fa-solid fa-clipboard-check mr-1"></i> Count a shelf</a>
+                        <a data-live="inv-missing-tab" href="?tab=missing" class="tab-btn {% if tab == 'missing' %}active{% endif %}"><i class="fa-solid fa-magnifying-glass mr-1"></i> Missing{% if missing_count %} <span class="ml-1 text-[10px] font-bold text-amber-400">{{ missing_count }}</span>{% endif %}</a>
+                        <a href="?tab=audits" class="tab-btn {% if tab == 'audits' %}active{% endif %}"><i class="fa-solid fa-list-check mr-1"></i> Past counts</a>
+                        <a href="?tab=history" class="tab-btn {% if tab == 'history' %}active{% endif %}"><i class="fa-solid fa-clock-rotate-left mr-1"></i> History</a>
                     </div>
                     <div class="flex items-center gap-2">
-                        {# Bulk donation intake. #}
-                        <a href="{% url 'download_donation_template' %}" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-emerald-500 text-[11px] font-semibold px-3 py-2 rounded-lg flex items-center gap-2 transition-colors" title="Spreadsheet layout for a bulk donation">
-                            <i class="fa-solid fa-file-excel"></i> Donation Template
-                        </a>
-                        <button type="button" onclick="document.getElementById('donationExcelInput').click()" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-cyan-500 text-[11px] font-semibold px-3 py-2 rounded-lg flex items-center gap-2 transition-colors" title="Receive many donated titles at once">
-                            <i class="fa-solid fa-upload"></i> Import Donations
-                        </button>
-                        <input type="file" id="donationExcelInput" accept=".xlsx" style="display:none" onchange="uploadDonationExcel(this)">
                         <button type="button" onclick="show('receiveModal')" class="bg-cyan-600/20 text-cyan-400 border border-cyan-600/30 px-4 py-2 rounded-lg text-xs font-semibold hover:bg-cyan-600/30 transition-colors flex items-center gap-2">
                             <i class="fa-solid fa-truck-ramp-box"></i> Receive Stock
                         </button>
@@ -195,7 +186,7 @@
                         is out of place, then confirm the rest in one go. Borrowed copies are
                         accounted for already. Anything still unfound is marked
                         <strong class="text-slate-300">Missing</strong> &mdash; not lost, because books
-                        turn up. Giving up on one is a separate step on the Missing Stock tab.
+                        turn up. Giving up on one is a separate step on the Missing tab.
                     </p>
 
                     <div class="flex items-end gap-2 flex-wrap">
@@ -439,8 +430,17 @@
                         <option value="">All sources</option>
                         {% for value, label in source_choices %}<option value="{{ value }}" {% if value == source_filter %}selected{% endif %}>{{ label }}</option>{% endfor %}
                     </select>
+                    {% if state_filter %}<input type="hidden" name="state" value="{{ state_filter }}">{% endif %}
                     <button type="submit" class="bg-cyan-600/20 text-cyan-400 border border-cyan-600/30 px-4 py-2 rounded-lg text-xs font-semibold hover:bg-cyan-600/30">Filter</button>
                 </form>
+                <div class="px-5 py-2 border-b border-slate-800/60 flex items-center gap-2 text-[11px] text-slate-500">
+                    <span>{% if state_filter == 'repair' %}Showing copies that need repair.
+                    {% elif state_filter == 'gone' %}Showing copies marked lost or withdrawn.
+                    {% elif state_filter == 'unshelved' %}Showing copies with no shelf yet. Donated ones stay hidden from patrons until shelved. <a href="{% url 'shelf_manager' %}" class="text-cyan-400 hover:underline font-semibold">Open Shelf Manager</a>
+                    {% elif state_filter == 'removed' %}Showing copies removed from the records as data-entry mistakes.
+                    {% else %}Showing every copy on record.{% endif %}</span>
+                    <span class="ml-auto">{% if state_filter %}<a href="?tab=stock" class="text-cyan-400 hover:underline font-semibold">Show all</a>{% elif removed_count %}<a href="?state=removed" class="hover:text-slate-300 hover:underline">Show {{ removed_count }} removed</a>{% endif %}</span>
+                </div>
 
                 <div class="overflow-x-auto">
                     <table class="w-full text-left border-collapse">
@@ -450,10 +450,8 @@
                                 <th class="py-3 px-6 w-32">Source</th>
                                 <th class="py-3 px-6 w-28">Condition</th>
                                 <th class="py-3 px-6 w-40">Shelf location</th>
-                                <th class="py-3 px-6 w-28">Received</th>
-                                <th class="py-3 px-6 w-32">Received By</th>
-                                <th class="py-3 px-6">Notes</th>
-                                <th class="py-3 px-6 text-center w-44">Actions</th>
+                                <th class="py-3 px-6 w-36">Received</th>
+                                <th class="py-3 px-6 text-center w-48">Actions</th>
                             </tr>
                         </thead>
                         <tbody data-live="inv-records" class="divide-y divide-slate-800/40 text-xs text-slate-300">
@@ -463,15 +461,15 @@
                                     <div class="font-bold text-slate-200">{{ r.display_title }}</div>
                                     <div class="text-[10px] text-slate-500">
                                         Copy #{{ r.inventory_id }}
-                                        <span class="block font-mono text-[9px] text-slate-600 truncate" title="{{ r.qr_label }}">{{ r.qr_label }}</span>
                                         {% if not r.book %}<span class="text-purple-400">· not catalogued</span>{% endif %}
                                         {% if r.status == 'Removed' %}<span class="text-rose-400">· removed</span>{% endif %}
                                     </div>
+                                    {% if r.notes %}<div class="text-[10px] text-slate-500 italic mt-0.5 line-clamp-2" title="{{ r.notes }}">{{ r.notes }}</div>{% endif %}
                                 </td>
                                 <td class="py-4 px-6 text-slate-400">
                                     {{ r.get_source_display }}
                                     {% if r.source_detail %}<span class="block text-[10px] text-slate-600">{{ r.source_detail }}</span>{% endif %}
-                                    {% if r.processing_stage %}<span class="block text-[10px] text-purple-400">{{ r.processing_stage }}</span>{% endif %}
+                                    {% if r.book.status == 'Donated' %}<span class="block text-[10px] text-purple-400">Hidden until shelved</span>{% endif %}
                                 </td>
                                 <td class="py-4 px-6">
                                     <span class="text-[10px] font-bold px-2.5 py-1 rounded-full
@@ -481,35 +479,33 @@
                                         {% elif r.condition == 'Lost' %}bg-rose-950/50 text-rose-300 border border-rose-800/50
                                         {% else %}bg-slate-800/60 text-slate-400 border border-slate-700/50{% endif %}">{{ r.condition }}</span>
                                 </td>
-                                <td class="py-4 px-6 text-slate-400">{{ r.shelf_location|default:"Not shelved" }}</td>
-                                <td class="py-4 px-6 text-slate-400">{{ r.received_date|date:"M d, Y" }}</td>
-                                <td class="py-4 px-6 text-slate-400">{{ r.received_by.fullname|default:"&mdash;" }}</td>
-                                <td class="py-4 px-6 text-slate-400">{{ r.notes|default:"&mdash;" }}</td>
+                                <td class="py-4 px-6 {% if r.shelf_location %}text-slate-400{% else %}text-purple-400{% endif %}">{{ r.shelf_location|default:"No shelf yet" }}</td>
+                                <td class="py-4 px-6 text-slate-400">{{ r.received_date|date:"M d, Y" }}{% if r.received_by %}<span class="block text-[10px] text-slate-500">by {{ r.received_by.fullname }}</span>{% endif %}</td>
                                 <td class="py-4 px-6">
-                                    <div class="flex items-center justify-center gap-2">
+                                    <div class="grid grid-cols-2 gap-1.5">
                                         <button title="QR label"
                                             data-id="{{ r.inventory_id }}" data-title="{{ r.display_title }}" data-label="{{ r.qr_label }}"
-                                            onclick="openLabel(this)" class="text-slate-400 hover:text-cyan-400 p-1.5"><i class="fa-solid fa-qrcode"></i></button>
+                                            onclick="openLabel(this)" class="text-[10px] font-semibold px-2 py-1 rounded-md border border-slate-800 text-slate-400 hover:text-cyan-400 hover:border-cyan-800/60 whitespace-nowrap"><i class="fa-solid fa-qrcode mr-1"></i>Label</button>
                                         <button title="Record condition"
                                             data-id="{{ r.inventory_id }}" data-title="{{ r.display_title }}" data-condition="{{ r.condition }}"
-                                            onclick="openCondition(this)" class="text-slate-400 hover:text-amber-400 p-1.5"><i class="fa-solid fa-clipboard-check"></i></button>
+                                            onclick="openCondition(this)" class="text-[10px] font-semibold px-2 py-1 rounded-md border border-slate-800 text-slate-400 hover:text-amber-400 hover:border-amber-800/60 whitespace-nowrap"><i class="fa-solid fa-clipboard-check mr-1"></i>Condition</button>
                                         <button title="Edit details"
                                             data-id="{{ r.inventory_id }}" data-title="{{ r.display_title }}"
                                             data-book="{{ r.book.book_id|default:'' }}" data-hint="{{ r.title_hint|default:'' }}"
                                             data-source="{{ r.source }}" data-supplier="{{ r.supplier|default:'' }}" data-po="{{ r.po_number|default:'' }}"
-                                            data-donor="{{ r.donor_name|default:'' }}" data-stage="{{ r.processing_stage|default:'' }}" data-notes="{{ r.notes|default:'' }}"
-                                            onclick="openEdit(this)" class="text-slate-400 hover:text-cyan-400 p-1.5"><i class="fa-solid fa-pen-to-square"></i></button>
+                                            data-donor="{{ r.donor_name|default:'' }}" data-notes="{{ r.notes|default:'' }}"
+                                            onclick="openEdit(this)" class="text-[10px] font-semibold px-2 py-1 rounded-md border border-slate-800 text-slate-400 hover:text-cyan-400 hover:border-cyan-800/60 whitespace-nowrap"><i class="fa-solid fa-pen-to-square mr-1"></i>Edit</button>
                                         {% if r.status != 'Removed' %}
                                         <button title="Remove this copy from the records (data-entry mistake)"
                                             data-id="{{ r.inventory_id }}" data-title="{{ r.display_title }}"
-                                            onclick="openDeaccession(this)" class="text-slate-400 hover:text-rose-400 p-1.5"><i class="fa-solid fa-eraser"></i></button>
+                                            onclick="openDeaccession(this)" class="text-[10px] font-semibold px-2 py-1 rounded-md border border-slate-800 text-slate-400 hover:text-rose-400 hover:border-rose-800/60 whitespace-nowrap"><i class="fa-solid fa-eraser mr-1"></i>Remove</button>
                                         {% endif %}
                                     </div>
                                 </td>
                             </tr>
                             {% empty %}
-                            <tr><td colspan="8" class="py-10 text-center text-slate-500 text-xs">
-                                No copies in inventory yet. Use <strong class="text-slate-400">Receive Stock</strong> to take delivery of the first one.
+                            <tr><td colspan="6" class="py-10 text-center text-slate-500 text-xs">
+                                {% if state_filter or q or condition_filter or source_filter %}No copies match. <a href="?tab=stock" class="text-cyan-400 hover:underline">Show all</a>{% else %}No copies in inventory yet. Use <strong class="text-slate-400">Receive Stock</strong> to take delivery of the first one.{% endif %}
                             </td></tr>
                             {% endfor %}
                         </tbody>
@@ -576,12 +572,12 @@
                             <input id="f_donated_date" type="date" name="donated_date" class="field-input" value="{{ today }}">
                         </div>
                     </div>
-                    <div>
-                        <label for="f_processing_stage" class="field-label">Accessioning stage</label>
-                        <select id="f_processing_stage" name="processing_stage" class="field-input">
-                            {% for value, label in stage_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
-                        </select>
-                        <p class="text-[10px] text-slate-500 mt-1">Donated copies move Received &rarr; Processing &rarr; Shelved before they are available.</p>
+                    <p class="text-[10px] text-slate-500">Donated books stay hidden from patrons until they are put on a shelf; placing them in Shelf Manager makes them available.</p>
+                    <div class="flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-900/30 px-3 py-2.5">
+                        <p class="text-[11px] text-slate-400 flex-1">Many titles? Fill in the spreadsheet and upload it instead.</p>
+                        <a href="{% url 'download_donation_template' %}" class="text-[10px] font-semibold px-2.5 py-1.5 rounded-md border border-slate-700 text-emerald-400 hover:bg-slate-800/50 whitespace-nowrap"><i class="fa-solid fa-file-excel mr-1"></i>Template</a>
+                        <button type="button" onclick="document.getElementById('donationExcelInput').click()" class="text-[10px] font-semibold px-2.5 py-1.5 rounded-md border border-slate-700 text-cyan-400 hover:bg-slate-800/50 whitespace-nowrap"><i class="fa-solid fa-upload mr-1"></i>Upload</button>
+                        <input type="file" id="donationExcelInput" accept=".xlsx" style="display:none" onchange="uploadDonationExcel(this)">
                     </div>
                 </div>
 
@@ -693,6 +689,15 @@
                 <div>
                     <label for="f_reason" class="field-label">Reason (recorded in the movement history)</label>
                     <input id="f_reason" type="text" name="reason" class="field-input" placeholder="Water damage found during shelving" required>
+                    <div class="flex flex-wrap gap-1.5 mt-2">
+                        <button type="button" onclick="pickReason(this)" class="text-[10px] px-2 py-1 rounded-md border border-slate-700 text-slate-400 hover:text-amber-300 hover:border-amber-800/60">Water damage</button>
+                        <button type="button" onclick="pickReason(this)" class="text-[10px] px-2 py-1 rounded-md border border-slate-700 text-slate-400 hover:text-amber-300 hover:border-amber-800/60">Torn or loose pages</button>
+                        <button type="button" onclick="pickReason(this)" class="text-[10px] px-2 py-1 rounded-md border border-slate-700 text-slate-400 hover:text-amber-300 hover:border-amber-800/60">Cover worn</button>
+                        <button type="button" onclick="pickReason(this)" class="text-[10px] px-2 py-1 rounded-md border border-slate-700 text-slate-400 hover:text-amber-300 hover:border-amber-800/60">Written in</button>
+                        <button type="button" onclick="pickReason(this)" class="text-[10px] px-2 py-1 rounded-md border border-slate-700 text-slate-400 hover:text-amber-300 hover:border-amber-800/60">Not returned</button>
+                        <button type="button" onclick="pickReason(this)" class="text-[10px] px-2 py-1 rounded-md border border-slate-700 text-slate-400 hover:text-amber-300 hover:border-amber-800/60">Pulled from circulation</button>
+                        <button type="button" onclick="pickReason(this)" class="text-[10px] px-2 py-1 rounded-md border border-slate-700 text-slate-400 hover:text-amber-300 hover:border-amber-800/60">Repaired</button>
+                    </div>
                 </div>
                 <div>
                     <label for="f_pw_1" class="field-label">Your password</label>
@@ -710,20 +715,20 @@
     <div id="editModal" class="fixed inset-0 z-[60] hidden items-center justify-center p-4 overflow-y-auto" style="background: var(--scrim);">
         <div class="w-full max-w-lg my-auto rounded-2xl border shadow-2xl" style="background-color: var(--bg-modal); border-color: var(--border-modal);">
             <div class="flex items-center justify-between px-6 py-4 border-b" style="border-color: var(--border-modal);">
-                <h3 class="text-sm font-bold text-slate-200 tracking-wide">Update Inventory Record</h3>
+                <div><h3 class="text-sm font-bold text-slate-200 tracking-wide">Edit Copy</h3><p id="editTitle" class="text-[11px] text-slate-500"></p></div>
                 <button onclick="closeModal('editModal')" class="text-slate-500 hover:text-slate-300" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
             </div>
             <form method="post" action="{% url 'update_inventory_record' %}" class="px-6 py-5 space-y-4">
                 {% csrf_token %}
                 <input type="hidden" name="inventory_id" id="editId">
-                <div>
+                <div id="editBookWrap">
                     <label for="editBook" class="field-label">Catalogued title</label>
                     <select name="book_id" id="editBook" class="field-input">
                         <option value="">— Not catalogued yet —</option>
                         {% for b in books %}<option value="{{ b.book_id }}">{{ b.title }} — {{ b.author }}</option>{% endfor %}
                     </select>
                 </div>
-                <div>
+                <div id="editHintWrap">
                     <label for="editHint" class="field-label">Title (if not catalogued)</label>
                     <input type="text" name="title_hint" id="editHint" class="field-input">
                 </div>
@@ -745,12 +750,6 @@
                     <div id="editDonorWrap" class="hidden">
                         <label for="editDonor" class="field-label">Donor name</label>
                         <input type="text" name="donor_name" id="editDonor" class="field-input">
-                    </div>
-                    <div id="editStageWrap" class="hidden">
-                        <label for="editStage" class="field-label">Accessioning stage</label>
-                        <select name="processing_stage" id="editStage" class="field-input">
-                            {% for value, label in stage_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
-                        </select>
                     </div>
                 </div>
                 <div>
@@ -1030,6 +1029,7 @@
             return true;
         }
 
+        function pickReason(chip) { const f = document.getElementById('f_reason'); f.value = chip.textContent; f.focus(); }
         function openCondition(btn) {
             document.getElementById('condId').value = btn.dataset.id;
             document.getElementById('condTitle').textContent = btn.dataset.title;
@@ -1050,12 +1050,14 @@
             document.getElementById('editSupplier').value = btn.dataset.supplier || '';
             document.getElementById('editPo').value = btn.dataset.po || '';
             document.getElementById('editDonor').value = btn.dataset.donor || '';
-            if (btn.dataset.stage) document.getElementById('editStage').value = btn.dataset.stage;
             // Only the fields belonging to this copy's intake are shown.
             document.getElementById('editShipmentWrap').classList.toggle('hidden', isDonation || isExisting);
             document.getElementById('editPoWrap').classList.toggle('hidden', isDonation || isExisting);
             document.getElementById('editDonorWrap').classList.toggle('hidden', !isDonation);
-            document.getElementById('editStageWrap').classList.toggle('hidden', !isDonation);
+            // A copy already tied to a catalogue title keeps it; only loose copies get the pickers.
+            document.getElementById('editBookWrap').classList.toggle('hidden', !!btn.dataset.book);
+            document.getElementById('editHintWrap').classList.toggle('hidden', !!btn.dataset.book);
+            document.getElementById('editTitle').textContent = btn.dataset.title || '';
             document.getElementById('editNotes').value = btn.dataset.notes || '';
             show('editModal');
         }
@@ -1323,7 +1325,7 @@
               + '<li><span class="text-emerald-400 font-semibold">' + d.confirmed + '</span> confirmed on the shelf'
               + ' <span class="text-slate-600">(' + d.individually + ' one by one, ' + d.in_bulk + ' swept)</span></li>'
               + (d.flagged ? '<li><span class="text-rose-400 font-semibold">' + d.flagged
-                    + '</span> marked Missing — not written off. Review them on the Missing Stock tab.</li>' : '')
+                    + '</span> marked Missing — not written off. Review them on the Missing tab.</li>' : '')
               + (d.recovered ? '<li><span class="text-cyan-400 font-semibold">' + d.recovered
                     + '</span> turned up again and are back in stock.</li>' : '')
               + '</ul>';
