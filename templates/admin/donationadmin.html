@@ -112,33 +112,29 @@
                 {% endfor %}
             {% endif %}
 
-            {# Intake is done in Inventory; this page tracks a donated copy from Received to Shelved. #}
+            {# Intake is done in Inventory; shelving a donated book is what makes it available. #}
             <div class="rounded-lg border border-slate-800 px-4 py-3 text-[11px] text-slate-400 leading-relaxed" style="background-color: var(--bg-card);">
                 Donations are received in <strong class="text-slate-300">Inventory Management</strong>, where each
-                physical copy gets its own QR label. This page tracks them through
-                Received &rarr; Processing &rarr; Shelved; setting a donation to Shelved makes the book Available.
+                physical copy gets its own QR label. A donated book stays hidden from patrons until it is
+                placed on a shelf in <a href="{% url 'shelf_manager' %}" class="text-cyan-400 hover:underline font-semibold">Shelf Manager</a>;
+                it then becomes Available and shows here as On the shelf, with no extra step.
             </div>
             
-            <div data-live="don-stats" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div data-live="don-stats" class="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
                     <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Donations</p>
                     <p class="text-3xl font-bold text-cyan-400 mt-2">{{ total_donations }}</p>
                     <p class="text-[10px] text-slate-500 mt-1">{{ total_titles }} title{{ total_titles|pluralize }} &middot; {{ total_copies }} cop{{ total_copies|pluralize:"y,ies" }}</p>
                 </div>
+                <a href="{% url 'shelf_manager' %}" class="p-5 rounded-xl border border-slate-800/80 hover:border-purple-700/60 transition-colors" style="background-color: var(--bg-card);">
+                    <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Waiting for a shelf</p>
+                    <p class="text-3xl font-bold text-purple-400 mt-2">{{ received_count }}</p>
+                    <p class="text-[10px] text-slate-500 mt-1">Titles hidden until shelved</p>
+                </a>
                 <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
-                    <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Received</p>
-                    <p class="text-3xl font-bold text-blue-400 mt-2">{{ received_count }}</p>
-                    <p class="text-[10px] text-slate-500 mt-1">Titles awaiting processing</p>
-                </div>
-                <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
-                    <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Processing</p>
-                    <p class="text-3xl font-bold text-amber-500 mt-2">{{ processing_count }}</p>
-                    <p class="text-[10px] text-slate-500 mt-1">Titles being processed</p>
-                </div>
-                <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
-                    <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Shelved</p>
+                    <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">On the shelf</p>
                     <p class="text-3xl font-bold text-emerald-400 mt-2">{{ shelved_count }}</p>
-                    <p class="text-[10px] text-slate-500 mt-1">Titles on the shelves</p>
+                    <p class="text-[10px] text-slate-500 mt-1">Titles patrons can borrow</p>
                 </div>
             </div>
 
@@ -168,7 +164,7 @@
                                 <th class="py-3 px-6">Title</th>
                                 <th class="py-3 px-6">Author</th>
                                 <th class="py-3 px-6 w-20">Copies</th>
-                                <th class="py-3 px-6 w-28">Stage</th>
+                                <th class="py-3 px-6 w-36">Status</th>
                                 <th class="py-3 px-6 text-center w-28">Actions</th>
                             </tr>
                         </thead>
@@ -181,10 +177,9 @@
                                 <td class="py-3 px-6 text-slate-500 text-[11px]" colspan="2">{{ gift.title_count }} title{{ gift.title_count|pluralize }}</td>
                                 <td class="py-3 px-6 text-slate-400 font-mono text-[11px]">{{ gift.copies }}</td>
                                 <td class="py-3 px-6">
-                                    {% if gift.stage == 'Received' %}<span class="bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-1 rounded text-[10px] font-bold tracking-wide uppercase">Received</span>
-                                    {% elif gift.stage == 'Processing' %}<span class="bg-amber-500/10 text-amber-500 border border-amber-500/20 px-2 py-1 rounded text-[10px] font-bold tracking-wide uppercase">Processing</span>
-                                    {% elif gift.stage == 'Shelved' %}<span class="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-1 rounded text-[10px] font-bold tracking-wide uppercase">Shelved</span>
-                                    {% else %}<span class="bg-slate-500/10 text-slate-400 border border-slate-500/20 px-2 py-1 rounded text-[10px] font-bold tracking-wide uppercase" title="Its titles are at different stages">Mixed</span>{% endif %}
+                                    {% if gift.stage == 'Received' %}<span class="bg-purple-500/10 text-purple-400 border border-purple-500/20 px-2 py-1 rounded text-[10px] font-bold tracking-wide uppercase whitespace-nowrap" title="Hidden from patrons until it is put on a shelf">Waiting for a shelf</span>
+                                    {% elif gift.stage == 'Shelved' %}<span class="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-1 rounded text-[10px] font-bold tracking-wide uppercase">On the shelf</span>
+                                    {% else %}<span class="bg-slate-500/10 text-slate-400 border border-slate-500/20 px-2 py-1 rounded text-[10px] font-bold tracking-wide uppercase whitespace-nowrap" title="Some titles are shelved, some are not yet">Partly shelved</span>{% endif %}
                                 </td>
                                 <td class="py-3 px-6"></td>
                             </tr>
@@ -196,21 +191,11 @@
                                 <td class="py-3 px-6 text-slate-300">{{ donation.book.author }}</td>
                                 <td class="py-3 px-6 text-slate-400 font-mono text-[11px]">{{ donation.copy_count }}</td>
                                 <td class="py-3 px-6">
-                                    {% if donation.status == 'Received' %}<span class="bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-1 rounded text-[10px] font-bold tracking-wide uppercase">Received</span>
-                                    {% elif donation.status == 'Processing' %}<span class="bg-amber-500/10 text-amber-500 border border-amber-500/20 px-2 py-1 rounded text-[10px] font-bold tracking-wide uppercase">Processing</span>
-                                    {% elif donation.status == 'Shelved' %}<span class="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-1 rounded text-[10px] font-bold tracking-wide uppercase">Shelved</span>{% endif %}
+                                    {% if donation.status == 'Shelved' %}<span class="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-1 rounded text-[10px] font-bold tracking-wide uppercase">On the shelf</span>{% else %}<span class="bg-purple-500/10 text-purple-400 border border-purple-500/20 px-2 py-1 rounded text-[10px] font-bold tracking-wide uppercase whitespace-nowrap" title="Hidden from patrons until it is put on a shelf">Waiting for a shelf</span>{% endif %}
                                 </td>
                                 <td class="py-3 px-6 text-center">
                                     <div class="flex items-center justify-center gap-1.5">
-                                        <form method="post" action="{% url 'update_donation_status' %}" class="inline">
-                                            {% csrf_token %}
-                                            <input type="hidden" name="donation_id" value="{{ donation.donation_id }}">
-                                            <select name="status" onchange="this.form.submit()" class="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-[10px] text-slate-300 focus:outline-none focus:border-cyan-700 cursor-pointer" title="Sets every copy of this title to the same stage">
-                                                <option value="Received" {% if donation.status == 'Received' %}selected{% endif %}>Received</option>
-                                                <option value="Processing" {% if donation.status == 'Processing' %}selected{% endif %}>Processing</option>
-                                                <option value="Shelved" {% if donation.status == 'Shelved' %}selected{% endif %}>Shelved</option>
-                                            </select>
-                                        </form>
+                                        {% if donation.status != 'Shelved' %}<a href="{% url 'shelf_manager' %}" class="text-[10px] font-semibold px-2 py-1 rounded-md border border-purple-800/60 text-purple-400 hover:bg-purple-950/30 whitespace-nowrap" title="Placing it on a shelf makes it available"><i class="fa-solid fa-layer-group mr-1"></i>Shelve</a>{% endif %}
                                         <form method="post" action="{% url 'delete_donation' %}" class="inline" data-confirm="Delete the accessioning record for this title? The catalogue entry and its borrowing history are kept." data-confirm-title="Delete donation" data-confirm-label="Delete">
                                             {% csrf_token %}
                                             <input type="hidden" name="donation_id" value="{{ donation.donation_id }}">

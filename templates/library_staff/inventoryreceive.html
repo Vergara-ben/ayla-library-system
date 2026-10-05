@@ -130,12 +130,7 @@
                                     <input id="f_donated_date" type="date" name="donated_date" class="field-input" value="{{ today }}">
                                 </div>
                             </div>
-                            <div>
-                                <label for="f_processing_stage" class="field-label">Accessioning stage</label>
-                                <select id="f_processing_stage" name="processing_stage" class="field-input">
-                                    {% for value, label in stage_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
-                                </select>
-                            </div>
+                            <p class="text-[10px] text-slate-500">Donated books stay hidden from patrons until they are put on a shelf.</p>
                         </div>
 
                         <!-- Books in this delivery: built up as a list, written in one go. -->
@@ -270,7 +265,7 @@
                                     Copy #{{ r.inventory_id }} ·
                                     {{ r.get_source_display }}
                                     {% if r.source_detail %} · {{ r.source_detail }}{% endif %}
-                                    {% if r.processing_stage %} · {{ r.processing_stage }}{% endif %}
+                                    {% if r.book.status == 'Donated' %} · <span class="text-purple-400">hidden until shelved</span>{% endif %}
                                 </p>
                             </div>
                             <button type="button"

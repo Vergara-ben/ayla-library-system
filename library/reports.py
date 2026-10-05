@@ -616,9 +616,8 @@ def _donations(start, end):
             ('Donation Records', len(rows)),
             ('Copies Received', copies_total),
             ('Donors', len(donors)),
-            ('Received', _held('Received')),
-            ('Processing', _held('Processing')),
-            ('Shelved', _held('Shelved')),
+            ('Waiting for a shelf', _held('Received')),
+            ('On the shelf', _held('Shelved')),
             ('Months With Donations', len(per_month)),
         ],
         'chart': _chart(

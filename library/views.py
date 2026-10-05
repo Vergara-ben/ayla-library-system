@@ -96,6 +96,7 @@ from . import analytics
 from .reports import (REPORT_TYPES, SNAPSHOT_REPORTS, parse_date_range, build_report,
                       render_report_pdf, render_report_excel)
 from .models import StockAuditLine
+from .accession import release_shelved_donations
 from .models import Book, Patron, PatronLog, Transaction, User, ShelfLevel, Donation, Donor, Announcement, FloorPlan, Shelf, Room, Door, Waypoint, BLEBeacon, WaypointConnection, SystemLog, BorrowingRule, Obstacle, Stairway, PasswordResetOTP, InventoryRecord, StockMovement, StockAudit, DueDateExtension, ReactivationRequest, PatronPhoto
 
 # Patron views
@@ -5069,6 +5070,7 @@ def move_books(request):
                     shelf_level=level, shelf_slot=_next_slot(counter, level))
             where = '%s %s' % (level.shelf.name if level.shelf else '', level.label)
 
+        release_shelved_donations([b.book_id for b in books])
         log_admin_action(
             request, 'Moved books', 'Book',
             detail='%d book(s) moved to %s' % (len(books), where.strip()))
@@ -6081,7 +6083,6 @@ def _donations_page(request, template):
         'total_titles': total_titles,           # accessioning lines
         'total_copies': total_copies,           # physical books
         'received_count': stage_counts.get('Received', 0),
-        'processing_count': stage_counts.get('Processing', 0),
         'shelved_count': stage_counts.get('Shelved', 0),
     })
 
@@ -7332,6 +7333,7 @@ def assign_books_to_level(request):
         return JsonResponse({'success': False, 'error': 'No books selected'})
 
     updated = Book.objects.filter(book_id__in=ids).update(shelf_level=level)
+    release_shelved_donations(ids)
     return JsonResponse({'success': True, 'updated': updated})
 
 
@@ -11333,19 +11335,24 @@ def _record_movement(record, action, request, reason='', source='',
 
 
 def _inventory_stats():
+    """The numbers on the Inventory summary cards, in words a library uses."""
     qs = InventoryRecord.objects.all()
+    held = qs.exclude(status='Removed')
     in_stock = qs.filter(status='In Stock')
     return {
-        'total_copies': qs.count(),
+        'total_copies': held.count(),
         'in_stock': in_stock.count(),
         'good_count': in_stock.filter(condition='Good').count(),
         'worn_count': in_stock.filter(condition='Worn').count(),
         'damaged_count': in_stock.filter(condition='Damaged').count(),
-        'lost_count': in_stock.filter(condition='Lost').count(),
-        'withdrawn_count': in_stock.filter(condition='Withdrawn').count(),
+        'repair_count': in_stock.filter(condition__in=['Worn', 'Damaged']).count(),
+        'lost_count': held.filter(condition='Lost').count(),
+        'withdrawn_count': held.filter(condition='Withdrawn').count(),
+        'gone_count': held.filter(condition__in=['Lost', 'Withdrawn']).count(),
         'removed_count': qs.filter(status='Removed').count(),
         'missing_count': qs.filter(status='Missing').count(),
-        'uncatalogued': qs.filter(book__isnull=True, status='In Stock').count(),
+        'unshelved_count': held.filter(book__shelf_level__isnull=True).count(),
+        'uncatalogued': held.filter(book__isnull=True).count(),
     }
 
 
@@ -11357,10 +11364,23 @@ def inventory_management(request):
     q = (request.GET.get('q') or '').strip()
     condition = (request.GET.get('condition') or '').strip()
     source = (request.GET.get('source') or '').strip()
+    state = (request.GET.get('state') or '').strip()
 
     records = InventoryRecord.objects.select_related(
         'book', 'book__shelf_level', 'book__shelf_level__shelf', 'received_by'
     )
+    # Each summary card is a filter; removed copies only show when asked for.
+    if state == 'repair':
+        records = records.filter(status='In Stock', condition__in=['Worn', 'Damaged'])
+    elif state == 'gone':
+        records = records.filter(condition__in=['Lost', 'Withdrawn']).exclude(status='Removed')
+    elif state == 'unshelved':
+        records = records.filter(book__shelf_level__isnull=True).exclude(status='Removed')
+    elif state == 'removed':
+        records = records.filter(status='Removed')
+    else:
+        state = ''
+        records = records.exclude(status='Removed')
     if q:
         records = records.filter(
             Q(book__title__icontains=q) | Q(title_hint__icontains=q)
@@ -11424,7 +11444,7 @@ def inventory_management(request):
 
     # Each table keeps its own page and tab.
     stock_qs = urlencode({k: v for k, v in {
-        'q': q, 'condition': condition, 'source': source}.items() if v})
+        'q': q, 'condition': condition, 'source': source, 'state': state}.items() if v})
 
     context = {
         'tab': tab,
@@ -11439,10 +11459,10 @@ def inventory_management(request):
         'q': q,
         'condition_filter': condition,
         'source_filter': source,
+        'state_filter': state,
         'condition_choices': InventoryRecord.CONDITION_CHOICES,
         'intake_conditions': INTAKE_CONDITIONS,
         'source_choices': InventoryRecord.SOURCE_CHOICES,
-        'stage_choices': InventoryRecord.STAGE_CHOICES,
         'donor_names': list(Donor.objects.values_list('name', flat=True)[:500]),
         'today': timezone.localdate().isoformat(),
         'books': Book.objects.order_by('title'),
@@ -11703,9 +11723,8 @@ def receive_stock(request):
                 return _receiving_redirect(request)
         else:
             donated_date = timezone.localdate()
-        processing_stage = (request.POST.get('processing_stage') or 'Received').strip()
-        if processing_stage not in dict(InventoryRecord.STAGE_CHOICES):
-            processing_stage = 'Received'
+        # Held back from patrons until it is put on a shelf.
+        processing_stage = 'Received'
     else:
         supplier = (request.POST.get('supplier') or '').strip() or None
         po_number = (request.POST.get('po_number') or '').strip() or None
@@ -11810,7 +11829,6 @@ def staff_inventory_receive(request):
         'books': Book.objects.order_by('title'),
         'condition_choices': InventoryRecord.CONDITION_CHOICES,
         'intake_conditions': INTAKE_CONDITIONS,
-        'stage_choices': InventoryRecord.STAGE_CHOICES,
         'donor_names': list(Donor.objects.values_list('name', flat=True)[:500]),
         'today': timezone.localdate().isoformat(),
     })
@@ -11902,8 +11920,6 @@ def update_inventory_record(request):
             messages.error(request, 'A donated copy needs the donor name.')
             return redirect('inventory_management')
         record.supplier = record.po_number = None
-        stage = (request.POST.get('processing_stage') or '').strip()
-        record.processing_stage = stage if stage in dict(InventoryRecord.STAGE_CHOICES) else record.processing_stage
     else:
         record.supplier = (request.POST.get('supplier') or '').strip() or None
         record.po_number = (request.POST.get('po_number') or '').strip() or None

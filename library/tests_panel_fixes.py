@@ -570,3 +570,90 @@ class ReceivingPickerTests(TestCase):
         self.assertIn('id="rcvBookSearch"', page)
         self.assertIn('js/picker.js', page)
         self.assertIn('<script id="donorNamesData" type="application/json">["Rotary Club"]</script>', page)
+
+
+class SimplerInventoryTests(TestCase):
+    """Donations go Received -> Shelved, and shelving the book is the only step."""
+
+    def setUp(self):
+        from .models import FloorPlan, Room, Shelf, ShelfLevel
+        plan = FloorPlan.objects.create(name='Ground', floor_number=1, is_active=True)
+        room = Room.objects.create(floor_plan=plan, name='Main', map_x=0, map_y=0)
+        shelf = Shelf.objects.create(room=room, name='Shelf A', map_x=0, map_y=0)
+        self.level = ShelfLevel.objects.create(shelf=shelf, level_number=1)
+        self.client = _client(admin_id=_staff(role='Admin').admin_id)
+
+    def _donate(self, quantity=1, **extra):
+        data = {'source': 'Donation', 'donor_name': 'Rotary Club',
+                'items': json.dumps([{'title': 'Noli', 'author': 'Rizal', 'quantity': quantity}])}
+        data.update(extra)
+        self.client.post('/admin-portal/inventory/receive/', data)
+        return list(Book.objects.filter(title='Noli').order_by('book_id'))
+
+    def _shelve(self, *books):
+        return self.client.post('/admin-portal/assign-books-to-level/', {
+            'shelf_level_id': self.level.shelf_level_id,
+            'book_ids': ','.join(str(b.book_id) for b in books)}).json()
+
+    def test_a_donation_waits_hidden_and_shelving_it_releases_it(self):
+        from .models import Donation
+        book, = self._donate(processing_stage='Processing')
+        self.assertEqual(book.status, 'Donated')
+        self.assertEqual(InventoryRecord.objects.get().processing_stage, 'Received')
+        self.assertEqual(Donation.objects.get().status, 'Received')
+
+        self.assertTrue(self._shelve(book)['success'])
+        book.refresh_from_db()
+        self.assertEqual(book.status, 'Available')
+        self.assertEqual(InventoryRecord.objects.get().processing_stage, 'Shelved')
+        self.assertEqual(Donation.objects.get().status, 'Shelved')
+
+    def test_a_donation_is_shelved_only_when_every_copy_is(self):
+        from .models import Donation
+        first, second = self._donate(quantity=2)
+        self._shelve(first)
+        self.assertEqual(Donation.objects.get().status, 'Received')
+        second.refresh_from_db()
+        self.assertEqual(second.status, 'Donated')
+        self._shelve(second)
+        self.assertEqual(Donation.objects.get().status, 'Shelved')
+
+    def test_placing_a_book_by_saving_it_also_releases_it(self):
+        book, = self._donate()
+        book.shelf_level = self.level
+        book.save()
+        book.refresh_from_db()
+        self.assertEqual(book.status, 'Available')
+
+    def test_summary_cards_filter_the_list(self):
+        from .views import _inventory_stats
+        self._donate()
+        Book.objects.create(title='Torn', author='A', qr_code='torn')
+        torn = InventoryRecord.objects.create(book=Book.objects.get(title='Torn'), source='Existing',
+                                              condition='Damaged', qr_label='torn-copy')
+        InventoryRecord.objects.filter(pk=torn.pk).update(status='In Stock')
+        gone = InventoryRecord.objects.create(source='Existing', title_hint='Mistake', qr_label='gone')
+        InventoryRecord.objects.filter(pk=gone.pk).update(status='Removed')
+
+        stats = _inventory_stats()
+        self.assertEqual((stats['repair_count'], stats['removed_count']), (1, 1))
+
+        def titles(state=''):
+            page = self.client.get('/admin-portal/inventory/', {'state': state} if state else {})
+            return [r.display_title for r in page.context['records']]
+        self.assertNotIn('Mistake', titles())
+        self.assertEqual(titles('repair'), ['Torn'])
+        self.assertEqual(titles('removed'), ['Mistake'])
+        self.assertIn('Noli', titles('unshelved'))
+
+    def test_no_processing_stage_is_offered_anywhere(self):
+        self._donate()
+        inventory = self.client.get('/admin-portal/inventory/').content.decode()
+        self.assertNotIn('processing_stage', inventory)
+        self.assertNotIn('Accessioning stage', inventory)
+        staff = _client(admin_id=_staff(modules='inventory,donations').admin_id, admin_role='Staff')
+        for url in ('/library-staff/receiving/', '/library-staff/donations/'):
+            page = staff.get(url).content.decode()
+            self.assertNotIn('Processing', page, url)
+            self.assertNotIn('processing_stage', page, url)
+        self.assertIn('Waiting for a shelf', staff.get('/library-staff/donations/').content.decode())
