@@ -111,6 +111,8 @@
 
   @keyframes fadeDown{from{opacity:0;transform:translateY(-12px);}to{opacity:1;transform:translateY(0);}}
   @keyframes fadeUp{from{opacity:0;transform:translateY(12px);}to{opacity:1;transform:translateY(0);}}
+.extend-all-btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;margin:0 0 12px;padding:10px;border-radius:10px;border:1px solid var(--accent);background:var(--tint-accent);color:var(--accent);font-family:inherit;font-size:13px;font-weight:700;cursor:pointer;}
+.extend-all-btn:disabled{opacity:.6;cursor:wait;}
 </style>
     <link rel="stylesheet" href="{% static 'css/patron.css' %}">
     <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
@@ -167,6 +169,12 @@
       <div class="section-title"><i class="fa-solid fa-book" aria-hidden="true"></i> Active Loans</div>
       <div class="see-all">View all</div>
     </div>
+    {% if extendable_count > 1 %}
+    {# Every loan that can still be extended, in one tap. #}
+    <button type="button" id="extendAllBtn" onclick="requestExtensionAll(this)" class="extend-all-btn">
+      <i class="fa-solid fa-calendar-plus" aria-hidden="true"></i> Request extension for all ({{ extendable_count }})
+    </button>
+    {% endif %}
     {% for tx in active_loans %}
     <div class="loan-row">
       <div class="loan-cover">{{ tx.book.title|truncatechars:12 }}</div>
@@ -187,7 +195,11 @@
         <div class="ext-status" style="font-size:11px;color:var(--danger);margin-top:4px;"><i class="fa-solid fa-circle-exclamation" aria-hidden="true"></i> Overdue — please return it; it can no longer be extended</div>
         {% elif tx.pending_extension %}
         <div class="ext-status" style="font-size:11px;color:var(--muted);margin-top:4px;"><i class="fa-solid fa-hourglass-half" aria-hidden="true"></i> Extension requested — awaiting the library</div>
-        {% else %}
+        {% elif tx.patron_extension.status == 'Approved' %}
+        <div class="ext-status" style="font-size:11px;color:var(--success);margin-top:4px;"><i class="fa-solid fa-circle-check" aria-hidden="true"></i> Extended — each loan can be extended once</div>
+        {% elif tx.patron_extension.status == 'Declined' %}
+        <div class="ext-status" style="font-size:11px;color:var(--muted);margin-top:4px;"><i class="fa-solid fa-circle-xmark" aria-hidden="true"></i> Extension declined{% if tx.patron_extension.staff_note %}: {{ tx.patron_extension.staff_note }}{% endif %}</div>
+        {% elif tx.can_extend %}
         <button type="button" class="ext-request-btn" data-tx-id="{{ tx.transaction_id }}" onclick="requestExtension(this)" style="margin-top:6px;font-size:11px;font-weight:600;color:var(--accent);background:none;border:none;padding:0;cursor:pointer;text-decoration:underline;">Request Extension</button>
         {% endif %}
       </div>
@@ -333,6 +345,29 @@ function postForm(url, data){
     headers:{'X-CSRFToken':CSRF,'Content-Type':'application/x-www-form-urlencoded'},
     body
   }).then(r=>r.json());
+}
+
+// One tap for every loan that can still be extended.
+function requestExtensionAll(btn){
+  btn.disabled = true;
+  btn.textContent = 'Sending…';
+  postForm('{% url 'patron_request_extension_all' %}', {})
+    .then(res => {
+      if (!res.success) { toast(res.error || 'Could not send the request.', false); btn.disabled = false; return; }
+      res.requested.forEach(function (r) {
+        const link = document.querySelector('.ext-request-btn[data-tx-id="' + r.transaction_id + '"]');
+        if (!link) return;
+        const status = document.createElement('div');
+        status.className = 'ext-status';
+        status.style.cssText = 'font-size:11px;color:var(--muted);margin-top:4px;';
+        status.textContent = 'Extension requested — awaiting the library';
+        link.replaceWith(status);
+      });
+      btn.remove();
+      toast('Extension requested for ' + res.requested.length + ' book' + (res.requested.length === 1 ? '' : 's') + '.'
+            + (res.skipped.length ? ' ' + res.skipped.length + ' could not be extended.' : ''));
+    })
+    .catch(() => { toast('Could not send the request.', false); btn.disabled = false; });
 }
 
 function requestExtension(btn){

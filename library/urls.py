@@ -34,6 +34,7 @@ urlpatterns = [
     path('patron/account/', views.patron_account, name='patron_account'),
     path('patron/update-profile/', views.patron_update_profile, name='patron_update_profile'),
     path('patron/request-extension/', views.patron_request_extension, name='patron_request_extension'),
+    path('patron/request-extension/all/', views.patron_request_extension_all, name='patron_request_extension_all'),
     path('patron/change-password/', views.patron_change_password, name='patron_change_password'),
     path('patron/deactivate-account/', views.patron_deactivate_account, name='patron_deactivate_account'),
     path('patron/reactivate/', views.patron_reactivate_request, name='patron_reactivate_request'),

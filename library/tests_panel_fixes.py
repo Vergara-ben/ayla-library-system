@@ -352,7 +352,7 @@ class DonorTests(TestCase):
     def test_receiving_suggests_past_donors(self):
         self._give('Rotary Club', '2026-09-01', 'Noli')
         page = self.client.get('/admin-portal/inventory/')
-        self.assertContains(page, '<option value="Rotary Club">')
+        self.assertContains(page, '<script id="donorNamesData" type="application/json">["Rotary Club"]</script>', html=False)
 
 
 class IsbnLookupTests(TestCase):
@@ -496,3 +496,77 @@ class ReviewFollowUpTests(TestCase):
         _sync_donation_row(record)
         record.donation.refresh_from_db()
         self.assertEqual(record.donation.donor.name, 'Rotary Club')
+
+
+class OneExtensionPerLoanTests(TestCase):
+
+    def setUp(self):
+        rule = BorrowingRule.current()
+        rule.loan_period_days = 7
+        rule.save()
+        self.today = timezone.localdate()
+        self.patron = Patron.objects.create(first_name='Ana', last_name='Cruz',
+                                            email='ana@example.invalid', account_status='Active')
+        self.loans = []
+        for title in ('Noli', 'Fili'):
+            book = Book.objects.create(title=title, author='Rizal', status='Borrowed')
+            self.loans.append(Transaction.objects.create(
+                book=book, patron=self.patron, transaction_type='Borrow',
+                due_date=self.today + timedelta(days=7)))
+        self.client = _client(patron_id=self.patron.patron_id)
+        self.staff = _client(admin_id=_staff().admin_id, admin_role='Staff')
+
+    def _ask(self, loan):
+        return self.client.post('/patron/request-extension/', {'transaction_id': loan.transaction_id}).json()
+
+    def test_each_loan_can_be_extended_once(self):
+        self.assertTrue(self._ask(self.loans[0])['success'])
+        ext = DueDateExtension.objects.get()
+        self.staff.post('/admin-portal/respond-to-extension/',
+                        {'extension_id': ext.extension_id, 'action': 'decline'},
+                        HTTP_X_REQUESTED_WITH='XMLHttpRequest')
+        again = self._ask(self.loans[0])
+        self.assertFalse(again['success'])
+        self.assertIn('once', again['error'])
+
+    def test_a_staff_due_date_change_does_not_use_it_up(self):
+        self.staff.post('/admin-portal/adjust-due-date/', {
+            'transaction_id': self.loans[0].transaction_id,
+            'new_due_date': (self.today + timedelta(days=10)).isoformat()})
+        self.assertTrue(self._ask(self.loans[0])['success'])
+
+    def test_returning_one_book_leaves_the_other_extendable(self):
+        self.loans[0].return_date = timezone.now()
+        self.loans[0].save()
+        self.assertFalse(self._ask(self.loans[0])['success'])
+        self.assertTrue(self._ask(self.loans[1])['success'])
+
+    def test_all_loans_in_one_tap(self):
+        page = self.client.get('/patron/account/')
+        self.assertContains(page, 'Request extension for all (2)')
+        result = self.client.post('/patron/request-extension/all/').json()
+        self.assertEqual(len(result['requested']), 2)
+        self.assertEqual(DueDateExtension.objects.count(), 2)
+        again = self.client.post('/patron/request-extension/all/').json()
+        self.assertFalse(again['success'])
+        self.assertEqual(len(again['skipped']), 2)
+
+    def test_extend_all_skips_an_overdue_book(self):
+        self.loans[1].due_date = self.today - timedelta(days=1)
+        self.loans[1].save()
+        result = self.client.post('/patron/request-extension/all/').json()
+        self.assertEqual([r['title'] for r in result['requested']], ['Noli'])
+        self.assertEqual(result['skipped'][0]['title'], 'Fili')
+
+
+class ReceivingPickerTests(TestCase):
+
+    def test_the_receiving_forms_offer_search_instead_of_a_long_dropdown(self):
+        from .models import Donor
+        Donor.for_name('Rotary Club')
+        Book.objects.create(title='Noli', author='Rizal')
+        c = _client(admin_id=_staff(modules='inventory').admin_id, admin_role='Staff')
+        page = c.get('/library-staff/receiving/').content.decode()
+        self.assertIn('id="rcvBookSearch"', page)
+        self.assertIn('js/picker.js', page)
+        self.assertIn('<script id="donorNamesData" type="application/json">["Rotary Club"]</script>', page)

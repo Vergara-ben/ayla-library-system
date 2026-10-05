@@ -1039,18 +1039,23 @@ def patron_account(request):
     ))
     history = transactions.filter(return_date__isnull=False)
 
-    # A loan has at most one open request.
-    pending_by_tx = {
+    # A loan gets one request from the patron, whatever became of it.
+    asked = {
         e.transaction_id: e
         for e in DueDateExtension.objects.filter(
-            transaction__in=active_loans, status='Pending')
+            transaction__in=active_loans, requested_by_patron=True).order_by('extension_id')
     }
+    today = timezone.localdate()
     for tx in active_loans:
-        tx.pending_extension = pending_by_tx.get(tx.transaction_id)
+        tx.patron_extension = asked.get(tx.transaction_id)
+        tx.pending_extension = tx.patron_extension if (
+            tx.patron_extension and tx.patron_extension.status == 'Pending') else None
+        tx.can_extend = _extension_refusal(tx, today) is None
 
     context = {
         # Past its due date counts as overdue here, even before the nightly sweep flags it.
-        'today': timezone.localdate(),
+        'today': today,
+        'extendable_count': sum(1 for tx in active_loans if tx.can_extend),
         'patron': patron,
         'transactions': transactions,
         'has_overdue': has_overdue,
@@ -1068,6 +1073,29 @@ def _extended_due_date(due_date):
     return due_date + timedelta(days=BorrowingRule.current().loan_period_days)
 
 
+def _extension_refusal(tx, today=None):
+    """Why this loan cannot be extended by its patron, or None."""
+    today = today or timezone.localdate()
+    if not tx.due_date:
+        return 'This loan has no due date to extend.'
+    # An overdue book has to come back first; it cannot be extended from home.
+    if tx.overdue_flag or today > tx.due_date:
+        return 'It is already overdue, so it cannot be extended. Please return it to the library.'
+    # One request per loan; a due date changed by staff does not use it up.
+    if DueDateExtension.objects.filter(transaction=tx, requested_by_patron=True).exists():
+        return 'An extension was already requested for it. Each loan can be extended once.'
+    return None
+
+
+def _request_extension(tx, reason=''):
+    requested_due = _extended_due_date(tx.due_date)
+    return DueDateExtension.objects.create(
+        transaction=tx, requested_by_patron=True,
+        previous_due_date=tx.due_date, requested_due_date=requested_due,
+        reason=reason or None,
+    )
+
+
 @patron_login_required
 def patron_request_extension(request):
     """Patron asks to push a loan's due date out; staff decide from here."""
@@ -1081,28 +1109,42 @@ def patron_request_extension(request):
     ).first()
     if tx is None:
         return JsonResponse({'success': False, 'error': 'Loan not found.'})
-    if not tx.due_date:
-        return JsonResponse({'success': False, 'error': 'This loan has no due date to extend.'})
-    if DueDateExtension.objects.filter(transaction=tx, status='Pending').exists():
-        return JsonResponse({'success': False, 'error': 'You already have a pending request for this book.'})
-    # An overdue book has to come back first; it cannot be extended from the desk at home.
-    if tx.overdue_flag or timezone.localdate() > tx.due_date:
-        return JsonResponse({'success': False, 'error': 'This book is already overdue, so it cannot be '
-                                                         'extended. Please return it to the library.'})
+    refusal = _extension_refusal(tx)
+    if refusal:
+        return JsonResponse({'success': False, 'error': refusal})
 
-    reason = (request.POST.get('reason') or '').strip()[:255]
-    requested_due = _extended_due_date(tx.due_date)
-
-    extension = DueDateExtension.objects.create(
-        transaction=tx, requested_by_patron=True,
-        previous_due_date=tx.due_date, requested_due_date=requested_due,
-        reason=reason or None,
-    )
+    extension = _request_extension(tx, (request.POST.get('reason') or '').strip()[:255])
     return JsonResponse({
         'success': True,
         'extension_id': extension.extension_id,
-        'requested_due_date': requested_due.strftime('%b %d, %Y'),
+        'requested_due_date': extension.requested_due_date.strftime('%b %d, %Y'),
     })
+
+
+@patron_login_required
+def patron_request_extension_all(request):
+    """One tap: ask for more time on every loan that can still be extended."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
+    patron = get_object_or_404(Patron, patron_id=request.session.get('patron_id'))
+    loans = (Transaction.objects.select_related('book')
+             .filter(patron=patron, transaction_type='Borrow', return_date__isnull=True)
+             .order_by('due_date'))
+    requested, skipped = [], []
+    today = timezone.localdate()
+    with transaction.atomic():
+        for tx in loans:
+            refusal = _extension_refusal(tx, today)
+            if refusal:
+                skipped.append({'title': tx.book.title, 'why': refusal})
+                continue
+            extension = _request_extension(tx)
+            requested.append({'transaction_id': tx.transaction_id, 'title': tx.book.title,
+                              'requested_due_date': extension.requested_due_date.strftime('%b %d, %Y')})
+    if not requested:
+        return JsonResponse({'success': False, 'error': 'None of your books can be extended right now.',
+                             'skipped': skipped})
+    return JsonResponse({'success': True, 'requested': requested, 'skipped': skipped})
 
 
 @patron_login_required
