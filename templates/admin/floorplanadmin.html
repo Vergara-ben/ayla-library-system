@@ -1107,7 +1107,7 @@
                         <label for="beaconMinor" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Minor</label>
                         <input type="number" id="beaconMinor" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" placeholder="optional">
                     </div>
-                    <p class="col-span-2 text-[10px] text-slate-500">Beacons usually share one UUID and differ only by major/minor — set both to tell them apart.</p>
+                    <p class="col-span-2 text-[10px] text-slate-500">The minor is filled in with the next number no other beacon uses, so beacons sharing a UUID and major stay apart.</p>
                 </div>
                 <div id="beaconEddystoneFields" class="hidden grid grid-cols-2 gap-3">
                     <div class="space-y-1.5">
@@ -1651,6 +1651,7 @@
             unplaceShelf: "{% url 'unplace_shelf' %}",
             addShelf: "{% url 'add_shelf' %}",
             addBeacon: "{% url 'add_beacon' %}",
+            nextBeaconMinor: "{% url 'next_beacon_minor' %}",
             updateBeacon: "{% url 'update_beacon' %}",
             moveBeacon: "{% url 'move_beacon' %}",
             deleteBeacon: "{% url 'delete_beacon' %}",
@@ -2433,20 +2434,53 @@
                 }
                 if (note) {
                     note.innerHTML = 'Carried over from <strong class="text-slate-300">'
-                        + esc(prev.label || ('beacon #' + prev.beacon_id)) + '</strong>'
-                        + ' — change anything that differs. Only the '
-                        + '<strong class="text-cyan-400">minor</strong> and the label are blank.';
+                        + esc(prev.label || ('beacon #' + prev.beacon_id)) + '</strong>,'
+                        + ' with the next free <strong class="text-cyan-400">minor</strong> filled in.'
+                        + ' Set the beacon itself to that minor, or change it here to match.';
                     note.classList.remove('hidden');
                 }
             } else if (note) {
                 note.classList.add('hidden');
             }
+            if (!document.getElementById('beaconMajor').value) document.getElementById('beaconMajor').value = 1;
+            beaconAutoFill = true;
+            suggestBeaconMinor();
 
             document.getElementById('beaconModal').classList.remove('hidden');
-            // Straight to the one field that always has to be typed.
-            const minor = document.getElementById('beaconMinor');
-            if (minor) setTimeout(function () { minor.focus(); }, 50);
+            const uuidField = document.getElementById('beaconUuid');
+            if (uuidField && !uuidField.value) setTimeout(function () { uuidField.focus(); }, 50);
         };
+
+        // The minor and label fill themselves in until someone types over them.
+        let beaconAutoFill = false;
+        let minorSeq = 0;
+        async function suggestBeaconMinor() {
+            if (!beaconAutoFill || editingBeaconId !== null) return;
+            // Only an iBeacon is told apart by its minor; for the others the label may be the identity.
+            if (document.getElementById('beaconAdvType').value !== 'iBeacon') {
+                ['beaconMinor', 'beaconLabel'].forEach(function (id) { document.getElementById(id).value = ''; });
+                return;
+            }
+            const uuid = document.getElementById('beaconUuid').value.trim();
+            const major = document.getElementById('beaconMajor').value.trim();
+            const seq = ++minorSeq;
+            try {
+                const r = await fetch(URLS.nextBeaconMinor + '?' + new URLSearchParams({ uuid: uuid, major: major }),
+                                      { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+                const d = await r.json();
+                if (seq !== minorSeq || !beaconAutoFill || !d.success) return;
+                document.getElementById('beaconMinor').value = d.minor;
+                document.getElementById('beaconLabel').value = 'Beacon ' + d.minor;
+            } catch (e) { /* left blank: the server fills it in on save */ }
+        }
+        ['beaconUuid', 'beaconMajor', 'beaconAdvType'].forEach(function (id) {
+            const el = document.getElementById(id);
+            if (el) el.addEventListener('change', suggestBeaconMinor);
+        });
+        ['beaconMinor', 'beaconLabel'].forEach(function (id) {
+            const el = document.getElementById(id);
+            if (el) el.addEventListener('input', function () { beaconAutoFill = false; });
+        });
         window.closeBeaconModal = function () {
             editingBeaconId = null;
             const title = document.getElementById('beaconModalTitle');

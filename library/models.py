@@ -593,6 +593,8 @@ class Book(Archivable):
     )
     cover_img_url = models.CharField(max_length=255, blank=True, null=True)
     qr_code = models.CharField(max_length=255, blank=True, null=True)
+    # When its QR label was last printed; empty means it still needs one.
+    label_printed_at = models.DateTimeField(blank=True, null=True)
 
     # Stock count results for this copy.
     audit_misses = models.IntegerField(default=0)
@@ -702,6 +704,41 @@ class Book(Archivable):
 
 
 # Donations
+class Donor(models.Model):
+    """Someone who gives books, recorded once and picked again every time they give."""
+
+    TYPE_CHOICES = [
+        ('Individual', 'Individual'),
+        ('Organization', 'Organization'),
+        ('School', 'School'),
+        ('Government', 'Government office'),
+    ]
+
+    donor_id = models.AutoField(primary_key=True)
+    name = models.CharField(max_length=255)
+    donor_type = models.CharField(max_length=20, choices=TYPE_CHOICES, default='Individual')
+    contact_number = models.CharField(max_length=255, blank=True, null=True)
+    email = models.EmailField(max_length=255, blank=True, null=True)
+    address = models.TextField(blank=True, null=True)
+    notes = models.TextField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'Donors'
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+
+    @classmethod
+    def for_name(cls, name):
+        """The donor with this name, matched however it was typed, created on first use."""
+        clean = ' '.join((name or '').split())
+        if not clean:
+            return None
+        return cls.objects.filter(name__iexact=clean).first() or cls.objects.create(name=clean)
+
+
 class Donation(Archivable):
 
     STATUS_CHOICES = [
@@ -717,6 +754,9 @@ class Donation(Archivable):
         db_column='book_id'
     )
     donor_name = models.CharField(max_length=255)
+    # The saved donor this gift came from; donor_name keeps the name as it was given.
+    donor = models.ForeignKey(Donor, on_delete=models.SET_NULL, blank=True, null=True,
+                              db_column='donor_id', related_name='donations')
     date_donated = models.DateField()
     status = models.CharField(
         max_length=50,
@@ -876,6 +916,11 @@ class Patron(Archivable):
     # When the terms and conditions were agreed to online, and which version.
     terms_accepted_at = models.DateTimeField(blank=True, null=True)
     terms_version = models.CharField(max_length=20, blank=True, default='')
+    # A pending registration sent back to the applicant to correct, through a private link.
+    fix_token = models.CharField(max_length=64, unique=True, blank=True, null=True)
+    fix_note = models.TextField(blank=True, null=True)
+    fix_requested_at = models.DateTimeField(blank=True, null=True)
+    resubmitted_at = models.DateTimeField(blank=True, null=True)
 
     @property
     def credential_filename(self):
@@ -1200,6 +1245,36 @@ class StockAudit(models.Model):
         return round(self.missing_count * 100.0 / self.expected_count, 1)
 
 
+class StockAuditLine(models.Model):
+    """What one shelf count recorded about one book, kept beside what that book is now."""
+
+    RESULT_CHOICES = [
+        ('Found', 'Found'),
+        ('Swept', 'Found (rest-are-here)'),
+        ('Recovered', 'Found again'),
+        ('Missing', 'Not found'),
+        ('On loan', 'On loan'),
+        ('Being read', 'Being read in the library'),
+        ('Reshelving', 'Waiting to be reshelved'),
+    ]
+
+    line_id = models.AutoField(primary_key=True)
+    audit = models.ForeignKey(StockAudit, on_delete=models.CASCADE, related_name='lines',
+                              db_column='audit_id')
+    book = models.ForeignKey('Book', on_delete=models.SET_NULL, blank=True, null=True,
+                             db_column='book_id', related_name='audit_lines')
+    title = models.CharField(max_length=255)
+    result = models.CharField(max_length=20, choices=RESULT_CHOICES)
+    # The book's status the moment the count was filed.
+    status_then = models.CharField(max_length=50, blank=True, default='')
+    # Who had it and until when, for a book out on loan.
+    detail = models.CharField(max_length=255, blank=True, default='')
+
+    class Meta:
+        db_table = 'Stock_Audit_Lines'
+        ordering = ['line_id']
+
+
 class Conversation(models.Model):
     """A patron's Ask a Librarian thread."""
 
@@ -1451,10 +1526,13 @@ class InventoryRecord(models.Model):
 
     CONDITION_CHOICES = [
         ('Good', 'Good'),
+        ('Worn', 'Worn'),
         ('Damaged', 'Damaged'),
         ('Lost', 'Lost'),
         ('Withdrawn', 'Withdrawn'),
     ]
+    # Still in the building and expected on a shelf; also the choices on arrival.
+    HELD_CONDITIONS = ('Good', 'Worn', 'Damaged')
 
     # Accessioning stage for donations only.
     STAGE_CHOICES = [
@@ -1540,7 +1618,7 @@ class InventoryRecord(models.Model):
     @property
     def counts_as_held(self):
         """Whether this copy should be found on the shelves during an audit."""
-        return self.status == 'In Stock' and self.condition in ('Good', 'Damaged')
+        return self.status == 'In Stock' and self.condition in self.HELD_CONDITIONS
 
     @property
     def source_detail(self):

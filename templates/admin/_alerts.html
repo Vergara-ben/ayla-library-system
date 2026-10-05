@@ -1,0 +1,22 @@
+{% load static %}{# Pop-up alerts for new work, on every portal page except one handed to the public. #}
+{% if not desk_mode %}
+<style>
+    .ayla-alerts { position: fixed; right: 16px; bottom: 16px; z-index: 90; display: flex; flex-direction: column; gap: 10px; width: min(360px, calc(100vw - 32px)); }
+    .ayla-alert { display: flex; align-items: flex-start; gap: 12px; padding: 12px 12px 12px 14px; border-radius: 12px;
+                  background: var(--bg-modal); color: var(--text-main); border: 1px solid var(--border-modal);
+                  border-left: 4px solid var(--accent); box-shadow: 0 10px 30px rgba(0,0,0,.3); animation: aylaAlertIn .25s ease; }
+    .ayla-alert-overdue { border-left-color: var(--danger); }
+    .ayla-alert-extensions { border-left-color: var(--warning); }
+    .ayla-alert-icon { margin-top: 2px; font-size: 15px; color: var(--accent); }
+    .ayla-alert-overdue .ayla-alert-icon { color: var(--danger); }
+    .ayla-alert-extensions .ayla-alert-icon { color: var(--warning); }
+    .ayla-alert-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; font-size: 12.5px; line-height: 1.45; }
+    .ayla-alert-body strong { font-size: 13px; }
+    .ayla-alert-body span { color: var(--text-muted); }
+    .ayla-alert-body a { align-self: flex-start; margin-top: 4px; font-weight: 700; font-size: 12px; color: var(--accent); }
+    .ayla-alert button { background: none; border: 0; color: var(--text-muted); font-size: 18px; line-height: 1; cursor: pointer; }
+    @keyframes aylaAlertIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+    @media (prefers-reduced-motion: reduce) { .ayla-alert { animation: none; } }
+</style>
+<script src="{% static 'js/alerts.js' %}" data-url="{% url 'portal_alerts' %}" defer></script>
+{% endif %}

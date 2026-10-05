@@ -187,6 +187,8 @@
                             <tr class="hover:bg-slate-800/10 transition-colors">
                                 <td class="py-4 px-6">
                                     <div class="font-bold text-slate-200">{{ p.fullname }}</div>
+                                    {% if p.fix_token %}<div class="text-[9px] font-bold text-amber-400 mt-0.5" title="{{ p.fix_note }}"><i class="fa-solid fa-hourglass-half"></i> Waiting for the applicant to fix it &middot; asked {{ p.fix_requested_at|date:'M j' }}</div>
+                                    {% elif p.resubmitted_at %}<div class="text-[9px] font-bold text-emerald-400 mt-0.5" title="Asked to fix: {{ p.fix_note }}"><i class="fa-solid fa-rotate"></i> Resubmitted {{ p.resubmitted_at|date:'M j' }}</div>{% endif %}
                                     <div class="text-[9px] text-slate-500 mt-0.5">{{ p.contact_number|default:'—' }}</div>
                                 </td>
                                 <td class="py-4 px-6"><span class="bg-blue-950/50 text-blue-400 border border-blue-900/40 px-2 py-0.5 rounded text-[10px] font-bold tracking-wide">{{ p.patron_type }}</span></td>
@@ -565,12 +567,19 @@
                     </div>
 
                     <div class="mt-4 space-y-1.5">
-                        <label for="rvReason" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Reason (only if rejecting)</label>
+                        <label for="rvReason" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Reason (needed to send it back or reject it)</label>
+                        <div class="flex flex-wrap gap-1.5">
+                            {% for why in rejection_reasons %}<button type="button" onclick="pickReason(this)" class="text-[10px] font-semibold px-2 py-1 rounded-md border border-slate-700/60 text-slate-400 hover:text-slate-200 hover:border-slate-500">{{ why }}</button>{% endfor %}
+                        </div>
                         <textarea id="rvReason" rows="2" placeholder="e.g. the ID is unreadable, or the name does not match" class="w-full rounded-lg px-3 py-2 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-rose-800 text-[11px] placeholder-slate-600" style="background-color: var(--bg-input);"></textarea>
+                        <p id="rvReasonError" class="hidden text-[10px] font-semibold text-rose-400">Pick or type the reason first, so the applicant knows what to fix.</p>
                     </div>
 
                     <div class="mt-5 flex items-center justify-end gap-2.5">
                         <button type="button" onclick="closeReview()" class="px-4 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:text-slate-100 hover:bg-slate-800/40 text-xs font-semibold tracking-wide transition-colors">Cancel</button>
+                        <button type="button" id="rvFixBtn" onclick="submitReview('fix')" title="Email the applicant a link to correct it; the request stays pending" class="bg-amber-700/20 text-amber-400 border border-amber-900/60 hover:bg-amber-700/40 text-xs font-bold px-4 py-2.5 rounded-lg transition-colors">
+                            <i class="fa-solid fa-rotate-left text-[10px]"></i> Ask to fix
+                        </button>
                         <button type="button" id="rvRejectBtn" onclick="submitReview('reject')" class="bg-rose-700/20 text-rose-400 border border-rose-900/60 hover:bg-rose-700/40 text-xs font-bold px-4 py-2.5 rounded-lg transition-colors">
                             <i class="fa-solid fa-xmark text-[10px]"></i> Reject
                         </button>
@@ -587,6 +596,7 @@
         {% csrf_token %}
         <input type="hidden" name="id_reviewed" value="1">
         <input type="hidden" name="reason" id="rvReasonField" value="">
+        <input type="hidden" name="mode" id="rvModeField" value="reject">
     </form>
     <div id="modalOverlay" class="modal-overlay fixed inset-0 bg-black/60 z-40 items-center justify-center p-4 overflow-y-auto">
         <div class="w-full max-w-lg rounded-2xl border p-6 flex flex-col gap-5 shadow-2xl relative my-auto"
@@ -792,7 +802,17 @@
             return false;
         }
 
+        // A common reason in one click; it can still be edited.
+        function pickReason(btn) {
+            const box = document.getElementById('rvReason');
+            box.value = btn.textContent.trim();
+            document.getElementById('rvReasonError').classList.add('hidden');
+        }
+
         function openReview(btn) {
+            document.getElementById('rvReason').value = '';
+            document.getElementById('rvReasonError').classList.add('hidden');
+            document.getElementById('rvFixBtn').classList.toggle('hidden', btn.dataset.channel !== 'Online');
             rvPatron = {
                 id: btn.dataset.patronId,
                 doc: btn.dataset.doc || '',
@@ -859,9 +879,19 @@
         async function submitReview(action) {
             if (!rvPatron) return;
             const form = document.getElementById('reviewForm');
-            if (action === 'reject') {
-                if (!await AylaDialog.confirm('Reject the registration of ' + rvPatron.name + '? Their application and uploaded ID are kept on record.')) return;
-                document.getElementById('rvReasonField').value = document.getElementById('rvReason').value.trim();
+            if (action === 'reject' || action === 'fix') {
+                const reason = document.getElementById('rvReason').value.trim();
+                const err = document.getElementById('rvReasonError');
+                if (!reason) {
+                    err.classList.remove('hidden');
+                    document.getElementById('rvReason').focus();
+                    return;
+                }
+                err.classList.add('hidden');
+                // Rejecting for good is the one step that cannot be taken back.
+                if (action === 'reject' && !await AylaDialog.confirm('Reject the registration of ' + rvPatron.name + ' completely? Their application and uploaded ID are kept on record.')) return;
+                document.getElementById('rvReasonField').value = reason;
+                document.getElementById('rvModeField').value = action;
                 form.action = rvPatron.rejectUrl;
             } else {
                 form.action = rvPatron.approveUrl;
