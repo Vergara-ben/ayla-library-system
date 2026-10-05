@@ -8,6 +8,7 @@ from django.core.exceptions import SuspiciousFileOperation, ValidationError
 from django.core.validators import validate_email
 from django.http import HttpResponse, JsonResponse, Http404
 from django.conf import settings
+from django.urls import reverse
 from django.core.paginator import Paginator
 from datetime import date, datetime, timedelta
 from io import BytesIO
@@ -94,7 +95,8 @@ from . import labels
 from . import analytics
 from .reports import (REPORT_TYPES, SNAPSHOT_REPORTS, parse_date_range, build_report,
                       render_report_pdf, render_report_excel)
-from .models import Book, Patron, PatronLog, Transaction, User, ShelfLevel, Donation, Announcement, FloorPlan, Shelf, Room, Door, Waypoint, BLEBeacon, WaypointConnection, SystemLog, BorrowingRule, Obstacle, Stairway, PasswordResetOTP, InventoryRecord, StockMovement, StockAudit, DueDateExtension, ReactivationRequest, PatronPhoto
+from .models import StockAuditLine
+from .models import Book, Patron, PatronLog, Transaction, User, ShelfLevel, Donation, Donor, Announcement, FloorPlan, Shelf, Room, Door, Waypoint, BLEBeacon, WaypointConnection, SystemLog, BorrowingRule, Obstacle, Stairway, PasswordResetOTP, InventoryRecord, StockMovement, StockAudit, DueDateExtension, ReactivationRequest, PatronPhoto
 
 # Patron views
 def patron_login(request):
@@ -1037,16 +1039,23 @@ def patron_account(request):
     ))
     history = transactions.filter(return_date__isnull=False)
 
-    # A loan has at most one open request.
-    pending_by_tx = {
+    # A loan gets one request from the patron, whatever became of it.
+    asked = {
         e.transaction_id: e
         for e in DueDateExtension.objects.filter(
-            transaction__in=active_loans, status='Pending')
+            transaction__in=active_loans, requested_by_patron=True).order_by('extension_id')
     }
+    today = timezone.localdate()
     for tx in active_loans:
-        tx.pending_extension = pending_by_tx.get(tx.transaction_id)
+        tx.patron_extension = asked.get(tx.transaction_id)
+        tx.pending_extension = tx.patron_extension if (
+            tx.patron_extension and tx.patron_extension.status == 'Pending') else None
+        tx.can_extend = _extension_refusal(tx, today) is None
 
     context = {
+        # Past its due date counts as overdue here, even before the nightly sweep flags it.
+        'today': today,
+        'extendable_count': sum(1 for tx in active_loans if tx.can_extend),
         'patron': patron,
         'transactions': transactions,
         'has_overdue': has_overdue,
@@ -1057,6 +1066,34 @@ def patron_account(request):
         'qr_data_uri': _qr_data_uri(patron.qr_code) if patron.qr_code else None,
     }
     return render(request, 'patron/patronaccount.html', context)
+
+
+def _extended_due_date(due_date):
+    """One more loan period, counted from the current due date."""
+    return due_date + timedelta(days=BorrowingRule.current().loan_period_days)
+
+
+def _extension_refusal(tx, today=None):
+    """Why this loan cannot be extended by its patron, or None."""
+    today = today or timezone.localdate()
+    if not tx.due_date:
+        return 'This loan has no due date to extend.'
+    # An overdue book has to come back first; it cannot be extended from home.
+    if tx.overdue_flag or today > tx.due_date:
+        return 'It is already overdue, so it cannot be extended. Please return it to the library.'
+    # One request per loan; a due date changed by staff does not use it up.
+    if DueDateExtension.objects.filter(transaction=tx, requested_by_patron=True).exists():
+        return 'An extension was already requested for it. Each loan can be extended once.'
+    return None
+
+
+def _request_extension(tx, reason=''):
+    requested_due = _extended_due_date(tx.due_date)
+    return DueDateExtension.objects.create(
+        transaction=tx, requested_by_patron=True,
+        previous_due_date=tx.due_date, requested_due_date=requested_due,
+        reason=reason or None,
+    )
 
 
 @patron_login_required
@@ -1072,27 +1109,42 @@ def patron_request_extension(request):
     ).first()
     if tx is None:
         return JsonResponse({'success': False, 'error': 'Loan not found.'})
-    if not tx.due_date:
-        return JsonResponse({'success': False, 'error': 'This loan has no due date to extend.'})
-    if DueDateExtension.objects.filter(transaction=tx, status='Pending').exists():
-        return JsonResponse({'success': False, 'error': 'You already have a pending request for this book.'})
+    refusal = _extension_refusal(tx)
+    if refusal:
+        return JsonResponse({'success': False, 'error': refusal})
 
-    reason = (request.POST.get('reason') or '').strip()[:255]
-    rule = BorrowingRule.current()
-    today = timezone.localdate()
-    # Extend from today, not from the old due date.
-    requested_due = today + timedelta(days=rule.loan_period_days)
-
-    extension = DueDateExtension.objects.create(
-        transaction=tx, requested_by_patron=True,
-        previous_due_date=tx.due_date, requested_due_date=requested_due,
-        reason=reason or None,
-    )
+    extension = _request_extension(tx, (request.POST.get('reason') or '').strip()[:255])
     return JsonResponse({
         'success': True,
         'extension_id': extension.extension_id,
-        'requested_due_date': requested_due.strftime('%b %d, %Y'),
+        'requested_due_date': extension.requested_due_date.strftime('%b %d, %Y'),
     })
+
+
+@patron_login_required
+def patron_request_extension_all(request):
+    """One tap: ask for more time on every loan that can still be extended."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
+    patron = get_object_or_404(Patron, patron_id=request.session.get('patron_id'))
+    loans = (Transaction.objects.select_related('book')
+             .filter(patron=patron, transaction_type='Borrow', return_date__isnull=True)
+             .order_by('due_date'))
+    requested, skipped = [], []
+    today = timezone.localdate()
+    with transaction.atomic():
+        for tx in loans:
+            refusal = _extension_refusal(tx, today)
+            if refusal:
+                skipped.append({'title': tx.book.title, 'why': refusal})
+                continue
+            extension = _request_extension(tx)
+            requested.append({'transaction_id': tx.transaction_id, 'title': tx.book.title,
+                              'requested_due_date': extension.requested_due_date.strftime('%b %d, %Y')})
+    if not requested:
+        return JsonResponse({'success': False, 'error': 'None of your books can be extended right now.',
+                             'skipped': skipped})
+    return JsonResponse({'success': True, 'requested': requested, 'skipped': skipped})
 
 
 @patron_login_required
@@ -1738,6 +1790,7 @@ def _books_page(request, template):
     # Where the book is.
     shelf = (request.GET.get('shelf') or '').strip()
     level = (request.GET.get('level') or '').strip()
+    label = (request.GET.get('label') or '').strip()
 
     books_queryset = (
         Book.objects.select_related('shelf_level', 'shelf_level__shelf')
@@ -1765,6 +1818,11 @@ def _books_page(request, template):
         shelf = ''
     if not level.isdigit():
         level = ''
+
+    if label == 'missing':
+        books_queryset = books_queryset.filter(label_printed_at__isnull=True, shelf_level__isnull=False)
+    else:
+        label = ''
 
     copies_filter = parse_copies_filter(copies)
     if copies_filter:
@@ -1797,7 +1855,7 @@ def _books_page(request, template):
     params = {}
     for key, value in (('q', q), ('status', status), ('genre', genre),
                        ('material', material), ('copies', copies),
-                       ('shelf', shelf), ('level', level)):
+                       ('shelf', shelf), ('level', level), ('label', label)):
         if value:
             params[key] = value
 
@@ -1821,6 +1879,10 @@ def _books_page(request, template):
         'level': level,
         'shelf_choices': _shelf_filter_choices(),
         'unshelved_count': Book.objects.filter(shelf_level__isnull=True).count(),
+        # Shelved but never labelled: these can be printed now.
+        'unlabelled_count': Book.objects.filter(label_printed_at__isnull=True,
+                                                shelf_level__isnull=False).count(),
+        'label': label,
         'querystring': urlencode(params),
         'paginator': paginator,
     }
@@ -2060,7 +2122,9 @@ def approve_patron(request, patron_id):
         patron.qr_code = str(uuid4())
     patron.identity_verified_by = reviewer
     patron.identity_verified_at = timezone.now()
-    patron.save(update_fields=['account_status', 'qr_code',
+    # An unused fix link dies with the approval.
+    patron.fix_token = None
+    patron.save(update_fields=['account_status', 'qr_code', 'fix_token',
                                'identity_verified_by', 'identity_verified_at'])
     how = 'uploaded ID reviewed' if applied_online else 'physical ID checked at the desk'
     log_admin_action(request, 'Update', 'Patron', patron.patron_id,
@@ -2158,7 +2222,14 @@ def reject_patron(request, patron_id):
         messages.error(request, 'Pending patron not found.')
         return _patron_page_redirect(request)
 
-    reason = (request.POST.get('reason') or '').strip() or None
+    reason = (request.POST.get('reason') or '').strip()[:1000]
+    if not reason:
+        messages.error(request, 'Give the reason, so the applicant knows what was wrong.')
+        return _patron_page_redirect(request)
+
+    if request.POST.get('mode') == 'fix':
+        return _ask_applicant_to_fix(request, patron, reason)
+
     fullname, email = patron.fullname, patron.email
     log_admin_action(request, 'Reject', 'Patron', patron.patron_id,
                      f'Rejected registration of "{fullname}"' + (f' — {reason}' if reason else ''))
@@ -2168,6 +2239,79 @@ def reject_patron(request, patron_id):
     registration_rejected_email(email, fullname, reason)
     messages.success(request, f'Registration of {fullname} rejected.')
     return _patron_page_redirect(request)
+
+
+def _ask_applicant_to_fix(request, patron, reason):
+    """Keep the application pending and email the applicant a link to correct it."""
+    from .emails import registration_fix_email
+    if patron.registration_channel != 'Online' or not patron.email:
+        messages.error(request, f'{patron.fullname} signed up at the desk, so there is no link to send. '
+                                f'Correct the details with them, or reject the request.')
+        return _patron_page_redirect(request)
+    patron.fix_token = secrets.token_urlsafe(32)
+    patron.fix_note = reason
+    patron.fix_requested_at = timezone.now()
+    patron.resubmitted_at = None
+    patron.save(update_fields=['fix_token', 'fix_note', 'fix_requested_at', 'resubmitted_at'])
+    link = request.build_absolute_uri(reverse('registration_fix', args=[patron.fix_token]))
+    sent = registration_fix_email(patron, reason, link)
+    log_admin_action(request, 'Update', 'Patron', patron.patron_id,
+                     f'Asked "{patron.fullname}" to fix their registration: {reason}')
+    if sent:
+        messages.success(request, f'{patron.fullname} has been emailed a link to fix their registration.')
+    else:
+        messages.warning(request, f'Saved, but the email to {patron.email} could not be sent. '
+                                  f'Their link is: {link}')
+    return _patron_page_redirect(request)
+
+
+def registration_fix(request, token):
+    """The applicant's page for correcting a registration the library sent back."""
+    from .emails import FIX_LINK_DAYS
+    patron = Patron.objects.filter(fix_token=token, account_status='Pending').first()
+    if (patron is None or patron.fix_requested_at is None
+            or timezone.now() - patron.fix_requested_at > timedelta(days=FIX_LINK_DAYS)):
+        return render(request, 'patron/registrationfix.html', {'stage': 'expired'}, status=404)
+
+    context = {'stage': 'form', 'patron': patron,
+               'patron_types': Patron.PATRON_TYPE_CHOICES}
+    if request.method != 'POST':
+        return render(request, 'patron/registrationfix.html', context)
+
+    first, middle, last, name_error = _name_from_post(request)
+    if name_error:
+        return render(request, 'patron/registrationfix.html', dict(context, error=name_error))
+    patron_type = (request.POST.get('patron_type') or patron.patron_type).strip()
+    if patron_type not in dict(Patron.PATRON_TYPE_CHOICES):
+        patron_type = patron.patron_type
+
+    uploaded = request.FILES.get('credential_document')
+    credential = None
+    if uploaded is not None:
+        try:
+            credential = _read_credential_document(uploaded)
+        except ValueError as exc:
+            return render(request, 'patron/registrationfix.html', dict(context, error=str(exc)))
+
+    from .models import PatronCredential
+    with transaction.atomic():
+        patron.first_name, patron.middle_name, patron.last_name = first, middle, last
+        patron.patron_type = patron_type
+        patron.school = (request.POST.get('school') or '').strip() or None
+        patron.contact_number = (request.POST.get('contact_number') or '').strip() or patron.contact_number
+        patron.address = (request.POST.get('address') or '').strip() or patron.address
+        if credential is not None:
+            name, content_type, data = credential
+            PatronCredential.objects.filter(patron=patron).delete()
+            PatronCredential.objects.create(patron=patron, name=name, content_type=content_type, data=data)
+            patron.credential_document = f'credentials/{name}'
+        patron.fix_token = None
+        patron.resubmitted_at = timezone.now()
+        patron.save()
+    log_patron_action(request, 'Update', 'Patron', patron.patron_id,
+                      'Resubmitted the registration after the library asked for a fix'
+                      + (' with a new ID' if credential is not None else ''), patron=patron)
+    return render(request, 'patron/registrationfix.html', {'stage': 'done', 'patron': patron})
 
 
 @admin_or_module_required('patrons')
@@ -2362,6 +2506,9 @@ def _patrons_page(request, template):
         'patrons_with_borrows': patrons_with_borrows,
         'patrons_overdue': patrons_overdue,
         'pending_patrons': pending_patrons,
+        # One-click reasons for sending a registration back or rejecting it.
+        'rejection_reasons': ['The ID photo is blurry or unreadable', 'The name does not match the ID',
+                              'The ID has expired', 'This is not a valid ID'],
         'pending_reactivations': pending_reactivations,
         'pending_photos': pending_photos,
         'visitor_count': visitor_count,
@@ -2853,6 +3000,10 @@ def respond_to_extension(request):
                 # The book was already returned.
                 if tx.return_date is not None:
                     raise _AlreadyResolved('This book has already been returned.')
+                # A request older than the loan's current due date still adds a full period.
+                if tx.due_date and extension.requested_due_date <= tx.due_date:
+                    extension.requested_due_date = _extended_due_date(tx.due_date)
+                    extension.save(update_fields=['requested_due_date'])
                 tx.due_date = extension.requested_due_date
                 tx.overdue_flag = bool(tx.due_date and timezone.localdate() > tx.due_date)
                 tx.save(update_fields=['due_date', 'overdue_flag'])
@@ -4179,6 +4330,14 @@ def book_qr_labels(request):
     if not books:
         return JsonResponse({'success': False, 'error': 'None of those books exist.'})
 
+    # The label says where the book goes, so a book with no shelf waits for one.
+    unshelved = [b for b in books if b.shelf_level_id is None]
+    books = [b for b in books if b.shelf_level_id is not None]
+    if not books:
+        return JsonResponse({'success': False, 'error': (
+            'None of these books has a shelf yet. Put them on a shelf in Shelf Manager first, '
+            'so the label shows where each one goes.')})
+
     # A book with no QR cannot be labelled, and the label sheet is exactly when anyone notices.
     missing = [b for b in books if not b.qr_code]
     if missing:
@@ -4222,11 +4381,14 @@ def book_qr_labels(request):
         skip=skip,
     )
 
+    Book.objects.filter(book_id__in=[b.book_id for b in books]).update(label_printed_at=timezone.now())
     log_admin_action(request, 'Download', 'Book', None,
                      f'Printed {len(books)} QR label(s) at {layout["qr_mm"]:.0f}mm '
                      f'({layout["pages"]} page(s))')
 
     response = HttpResponse(pdf, content_type='application/pdf')
+    # Read by the page, which says how many were left out for having no shelf.
+    response['X-Labels-Skipped'] = str(len(unshelved))
     response['Content-Disposition'] = 'attachment; filename="%s"' % download_name(
         request, 'AYLA-QR-labels-%d-books' % len(books), '.pdf')
     return response
@@ -5411,6 +5573,7 @@ def download_donation_template(request):
         ('publication_year', False, 'Four digits.', 1961),
         ('material_type', False, 'One of: %s. Blank means Book.' % materials, 'Book'),
         ('quantity', False, 'How many copies of this title, 1 to 100. Blank means 1.', 2),
+        ('condition', False, 'How the copies arrived: Good, Worn or Damaged. Blank means Good.', 'Good'),
     ], text_columns=('ISBN',))
 
 
@@ -5426,6 +5589,7 @@ DONATION_IMPORT_COLUMNS = {
     'year': 'publication_year',
     'materialtype': 'material_type', 'material': 'material_type', 'format': 'material_type',
     'quantity': 'quantity', 'qty': 'quantity', 'copies': 'quantity',
+    'condition': 'condition', 'conditiononarrival': 'condition', 'state': 'condition',
 }
 
 
@@ -5478,6 +5642,13 @@ def _import_donation_rows(request):
             problems.append('Row %d: quantity must be between 1 and 100' % row_no)
             continue
 
+        raw_condition = _cell_text(values.get('condition'))
+        condition = _sheet_choice(raw_condition, [(c, c) for c in INTAKE_CONDITIONS]) if raw_condition else 'Good'
+        if condition is None:
+            problems.append('Row %d: condition must be Good, Worn or Damaged (got "%s")'
+                            % (row_no, raw_condition[:20]))
+            continue
+
         raw_material = _cell_text(values.get('material_type'))
         material_type = _sheet_choice(raw_material, Book.MATERIAL_TYPE_CHOICES, MATERIAL_TYPE_WORDS)
         if material_type is None:
@@ -5512,7 +5683,7 @@ def _import_donation_rows(request):
         # All copies of a donated title share one donation row.
         donation_row = None
         for copy_no in range(quantity):
-            copy_book = _intake_book_for_copy(book, is_new and copy_no == 0, 'Donation', 'Good')
+            copy_book = _intake_book_for_copy(book, is_new and copy_no == 0, 'Donation', condition)
             record = InventoryRecord.objects.create(
                 book=copy_book,
                 source='Donation',
@@ -5520,14 +5691,14 @@ def _import_donation_rows(request):
                 donated_date=donated,
                 processing_stage='Received',
                 donation=donation_row,
-                condition='Good',
+                condition=condition,
                 status='In Stock',
                 qr_label=_copy_label(copy_book),
                 received_by=admin,
             )
             _record_movement(record, 'Received', request,
-                             reason='Received via donation import',
-                             source='Donation import', after='Good')
+                             reason='Received via donation import, ' + condition.lower(),
+                             source='Donation import', after=condition)
             if donation_row is None:
                 donation_row = _sync_donation_row(record)
         titles += 1
@@ -9640,6 +9811,31 @@ def _beacon_clash(identity, exclude_id=None):
     return None
 
 
+def _next_free_minor(beacon_uuid, major, exclude_id=None):
+    """The lowest minor no other iBeacon with this UUID and major is using."""
+    key = _beacon_identity('iBeacon', beacon_uuid, major, None, None, None, None)[1]
+    used = set()
+    for b in BLEBeacon.objects.exclude(beacon_id=exclude_id).filter(advertisement_type='iBeacon'):
+        if b.major == major and _beacon_identity('iBeacon', b.beacon_uuid, None, None,
+                                                 None, None, None)[1] == key:
+            used.add(b.minor)
+    minor = 1
+    while minor in used:
+        minor += 1
+    return minor
+
+
+@admin_only_required
+def next_beacon_minor(request):
+    """Suggest the minor for a beacon about to be placed."""
+    try:
+        major = int(request.GET.get('major')) if (request.GET.get('major') or '').strip() else None
+    except ValueError:
+        major = None
+    return JsonResponse({'success': True,
+                         'minor': _next_free_minor(request.GET.get('uuid') or '', major)})
+
+
 def _clash_error(other):
     return JsonResponse({
         'success': False,
@@ -9706,6 +9902,15 @@ def add_beacon(request):
         return JsonResponse({'success': False,
                              'error': 'Mounting height is measured in metres above the floor, '
                                       'so it should be between 0 and 10.'})
+
+    # Left blank, an iBeacon gets the next free minor and a label to match.
+    if adv_type == 'iBeacon':
+        if major is None:
+            major = 1
+        if minor is None:
+            minor = _next_free_minor(beacon_uuid, major)
+        if not label:
+            label = 'Beacon %d' % minor
 
     clash = _beacon_clash(_beacon_identity(
         adv_type, beacon_uuid, major, minor, request.POST.get('namespace_id'),
@@ -11134,6 +11339,7 @@ def _inventory_stats():
         'total_copies': qs.count(),
         'in_stock': in_stock.count(),
         'good_count': in_stock.filter(condition='Good').count(),
+        'worn_count': in_stock.filter(condition='Worn').count(),
         'damaged_count': in_stock.filter(condition='Damaged').count(),
         'lost_count': in_stock.filter(condition='Lost').count(),
         'withdrawn_count': in_stock.filter(condition='Withdrawn').count(),
@@ -11234,8 +11440,10 @@ def inventory_management(request):
         'condition_filter': condition,
         'source_filter': source,
         'condition_choices': InventoryRecord.CONDITION_CHOICES,
+        'intake_conditions': INTAKE_CONDITIONS,
         'source_choices': InventoryRecord.SOURCE_CHOICES,
         'stage_choices': InventoryRecord.STAGE_CHOICES,
+        'donor_names': list(Donor.objects.values_list('name', flat=True)[:500]),
         'today': timezone.localdate().isoformat(),
         'books': Book.objects.order_by('title'),
         'shelves': shelf_list,
@@ -11252,14 +11460,24 @@ def _sync_donation_row(record):
     if record.donation is None:
         record.donation = Donation.objects.create(
             book=record.book,
+            donor=Donor.for_name(record.donor_name),
             donor_name=record.donor_name or 'Unknown donor',
             date_donated=record.donated_date or timezone.localdate(),
             status=stage,
         )
         record.save(update_fields=['donation'])
-    elif record.donation.status != stage:
-        record.donation.status = stage
-        record.donation.save(update_fields=['status'])
+    else:
+        fields = []
+        if record.donation.status != stage:
+            record.donation.status = stage
+            fields.append('status')
+        name = record.donor_name or 'Unknown donor'
+        if record.donation.donor_name != name:
+            record.donation.donor_name = name
+            record.donation.donor = Donor.for_name(record.donor_name)
+            fields += ['donor_name', 'donor']
+        if fields:
+            record.donation.save(update_fields=fields)
     return record.donation
 
 
@@ -11268,6 +11486,34 @@ def _receiving_redirect(request):
     if request.session.get('admin_role') == 'Staff':
         return redirect('staff_inventory_receive')
     return redirect('inventory_management')
+
+
+# A copy is received Good, Worn or Damaged; Lost and Withdrawn come later.
+INTAKE_CONDITIONS = InventoryRecord.HELD_CONDITIONS
+
+
+def isbn_typo(raw):
+    """A mistyped ISBN, or None. Anything not shaped like an ISBN may be an accession number."""
+    text = re.sub(r'[\s-]', '', str(raw)).upper()
+    if not re.fullmatch(r'\d{9}[\dX]|\d{13}', text):
+        return None
+    return isbn_error(raw)
+
+
+def isbn_error(raw):
+    """Why an ISBN cannot be right, or None. Hyphens and spaces are ignored."""
+    text = re.sub(r'[\s-]', '', str(raw)).upper()
+    if len(text) == 10 and re.fullmatch(r'\d{9}[\dX]', text):
+        total = sum((10 - i) * (10 if c == 'X' else int(c)) for i, c in enumerate(text))
+        ok = total % 11 == 0
+    elif len(text) == 13 and text.isdigit():
+        total = sum(int(c) * (1 if i % 2 == 0 else 3) for i, c in enumerate(text))
+        ok = total % 10 == 0
+    else:
+        return 'ISBN "%s" should be 10 or 13 digits.' % str(raw).strip()[:20]
+    if not ok:
+        return 'ISBN "%s" has a wrong check digit. Check it for a typo.' % str(raw).strip()[:20]
+    return None
 
 
 def _resolve_intake_book(item, source):
@@ -11297,6 +11543,10 @@ def _resolve_intake_book(item, source):
             raise ValueError('Publication year must be a number (got "' + raw_year + '").')
         if year < 1000 or year > timezone.localdate().year + 1:
             raise ValueError('Publication year ' + raw_year + ' is out of range.')
+    if isbn:
+        isbn_problem = isbn_typo(isbn)
+        if isbn_problem:
+            raise ValueError(isbn_problem)
 
     existing = None
     if isbn:
@@ -11334,8 +11584,8 @@ def _copy_label(book):
 def _intake_book_for_copy(book, reuse, source, condition):
     """The book record one received copy belongs to: the new title itself, or a record of its own."""
     if reuse:
-        if condition == 'Damaged' and book.condition != 'Damaged':
-            book.condition = 'Damaged'
+        if book.condition != condition:
+            book.condition = condition
             book.save(update_fields=['condition'])
         return book
     return Book.objects.create(
@@ -11346,7 +11596,7 @@ def _intake_book_for_copy(book, reuse, source, condition):
         material_type=book.material_type,
         call_number=book.call_number,
         cover_img_url=book.cover_img_url,
-        condition='Damaged' if condition == 'Damaged' else 'Good',
+        condition=condition,
         status='Donated' if source == 'Donation' else 'Available',
         qr_code=str(uuid4()),
         shelf_level=None,
@@ -11396,7 +11646,7 @@ def _match_book_to_copy(book, before, after, request):
     if before == 'Lost' and book.status == 'Lost' and not still_owed:
         book.status = 'Available'
         fields.append('status')
-    wanted = 'Damaged' if after == 'Damaged' else ('Worn' if book.condition == 'Worn' else 'Good')
+    wanted = after if after in ('Damaged', 'Worn') else ('Worn' if book.condition == 'Worn' else 'Good')
     if book.condition != wanted:
         book.condition = wanted
         fields.append('condition')
@@ -11477,8 +11727,9 @@ def receive_stock(request):
             messages.error(request, 'Line ' + str(index) + ': quantity must be between 1 and 100.')
             return _receiving_redirect(request)
         condition = (item.get('condition') or 'Good').strip()
-        if condition not in dict(InventoryRecord.CONDITION_CHOICES):
-            condition = 'Good'
+        if condition not in INTAKE_CONDITIONS:
+            messages.error(request, 'Line ' + str(index) + ': a copy arrives Good, Worn or Damaged.')
+            return _receiving_redirect(request)
         price, price_error = _parse_price(item.get('price'))
         if price_error:
             messages.error(request, 'Line ' + str(index) + ': ' + price_error)
@@ -11558,7 +11809,9 @@ def staff_inventory_receive(request):
         'shelf_levels_available': _shelf_capacity(),
         'books': Book.objects.order_by('title'),
         'condition_choices': InventoryRecord.CONDITION_CHOICES,
+        'intake_conditions': INTAKE_CONDITIONS,
         'stage_choices': InventoryRecord.STAGE_CHOICES,
+        'donor_names': list(Donor.objects.values_list('name', flat=True)[:500]),
         'today': timezone.localdate().isoformat(),
     })
 
@@ -11645,6 +11898,9 @@ def update_inventory_record(request):
         record.source = source
     if record.source == 'Donation':
         record.donor_name = (request.POST.get('donor_name') or '').strip() or None
+        if not record.donor_name:
+            messages.error(request, 'A donated copy needs the donor name.')
+            return redirect('inventory_management')
         record.supplier = record.po_number = None
         stage = (request.POST.get('processing_stage') or '').strip()
         record.processing_stage = stage if stage in dict(InventoryRecord.STAGE_CHOICES) else record.processing_stage
@@ -11831,6 +12087,9 @@ def stock_audit_file(request):
     today = timezone.localdate()
     flagged = recovered = 0
     board = ('%s %s' % (level.shelf.name if level.shelf else '', level.label)).strip()
+    board_books = list(level.book_set.exclude(status__in=WRITTEN_OFF))
+    status_before = {b.book_id: b.status for b in board_books}
+    recovered_ids = set()
 
     with transaction.atomic():
         for book in Book.objects.filter(book_id__in=missing):
@@ -11862,6 +12121,7 @@ def stock_audit_file(request):
             book.last_seen = now
             if book.status == 'Missing':
                 # It turned up.
+                recovered_ids.add(book.book_id)
                 book.status = 'Available'
                 book.missing_since = None
                 book.audit_misses = 0
@@ -11892,6 +12152,8 @@ def stock_audit_file(request):
             unexpected_count=0,
             notes=(request.POST.get('notes') or '').strip() or None,
         )
+        _record_audit_lines(audit, board_books, status_before,
+                            found, bulk, missing, recovered_ids)
 
     log_admin_action(
         request, 'Create', 'Inventory', audit.audit_id,
@@ -11913,12 +12175,77 @@ def stock_audit_file(request):
     })
 
 
+# Where a book away from its shelf is, recorded by the count without anyone marking it.
+AWAY_RESULT = {'Borrowed': 'On loan', 'Overdue': 'On loan',
+               'Being Read': 'Being read', 'For Reshelving': 'Reshelving'}
+
+
+def _record_audit_lines(audit, books, status_before, found, bulk, missing, recovered_ids):
+    """One line per book on the board: what the reader marked, or where the system knows it is."""
+    loans = {t.book_id: t for t in Transaction.objects.select_related('patron').filter(
+        book_id__in=[b.book_id for b in books], transaction_type='Borrow', return_date__isnull=True)}
+    # As the count left them, which is what "changed since" is measured against.
+    after = dict(Book.objects.filter(book_id__in=[b.book_id for b in books])
+                 .values_list('book_id', 'status'))
+    lines = []
+    for book in books:
+        before = status_before.get(book.book_id, book.status)
+        then = after.get(book.book_id, before)
+        detail = ''
+        if before in AWAY_RESULT:
+            result = AWAY_RESULT[before]
+            loan = loans.get(book.book_id)
+            if loan is not None and result == 'On loan':
+                who = loan.patron.fullname if loan.patron else 'a guest'
+                detail = 'with %s, due %s' % (who, loan.due_date.strftime('%b %d, %Y') if loan.due_date else '-')
+        elif book.book_id in recovered_ids:
+            result = 'Recovered'
+        elif book.book_id in found:
+            result = 'Found'
+        elif book.book_id in bulk:
+            result = 'Swept'
+        elif book.book_id in missing:
+            result = 'Missing'
+        else:
+            continue
+        lines.append(StockAuditLine(audit=audit, book=book, title=book.title[:255],
+                                    result=result, status_then=then, detail=detail[:255]))
+    StockAuditLine.objects.bulk_create(lines)
+
+
+@admin_only_required
+def stock_audit_detail(request, audit_id):
+    """One filed count, each book's result then beside its status now."""
+    audit = StockAudit.objects.filter(audit_id=audit_id).select_related('audited_by').first()
+    if audit is None:
+        return JsonResponse({'success': False, 'error': 'That count no longer exists.'})
+    rows = []
+    for line in audit.lines.select_related('book'):
+        now = line.book.status if line.book else 'Removed'
+        rows.append({
+            'title': line.title,
+            'result': line.get_result_display(),
+            'kind': line.result,
+            'status_then': line.status_then,
+            'status_now': now,
+            'changed': now != line.status_then,
+            'detail': line.detail,
+        })
+    return JsonResponse({
+        'success': True,
+        'shelf': audit.shelf_name.strip(),
+        'when': timezone.localtime(audit.audited_at).strftime('%b %d, %Y %I:%M %p'),
+        'by': audit.audited_by.fullname if audit.audited_by else '',
+        'lines': rows,
+    })
+
+
 def _expected_copies_for_shelf(shelf_id):
     """Copies the shelf should be able to account for."""
     return (InventoryRecord.objects
             .select_related('book', 'book__shelf_level', 'book__shelf_level__shelf')
             .filter(status__in=['In Stock', 'Missing'],
-                    condition__in=['Good', 'Damaged'],
+                    condition__in=InventoryRecord.HELD_CONDITIONS,
                     book__shelf_level__shelf__shelf_id=shelf_id))
 
 
@@ -11984,7 +12311,7 @@ def stock_audit_progress(request):
     if shelves:
         for row in (InventoryRecord.objects
                     .filter(status__in=['In Stock', 'Missing'],
-                            condition__in=['Good', 'Damaged'],
+                            condition__in=InventoryRecord.HELD_CONDITIONS,
                             book__shelf_level__shelf__shelf_id__in=list(shelves))
                     .values('book__shelf_level__shelf__shelf_id')
                     .annotate(n=Count('inventory_id'))):
@@ -12437,3 +12764,160 @@ def serve_card_photo(request, photo_id):
     response = HttpResponse(bytes(photo.data), content_type=photo.content_type)
     response['Cache-Control'] = 'private, no-store'
     return response
+
+
+@admin_or_module_required('donations')
+def donors_page(request):
+    """Everyone who has given books, how often, and what they gave."""
+    if request.method == 'POST' and request.POST.get('action') == 'add':
+        # A regular donor can be recorded before their first gift; details go on their record.
+        donor = Donor.for_name(request.POST.get('name'))
+        if donor is None:
+            messages.error(request, "Type the donor's name.")
+            return redirect('donors_page')
+        log_admin_action(request, 'Create', 'Donor', donor.donor_id, f'Added donor "{donor.name}"')
+        return redirect(f"{reverse('donors_page')}?d={donor.donor_id}")
+
+    if request.method == 'POST':
+        donor = Donor.objects.filter(donor_id=_posted_id(request, 'donor_id')).first()
+        if donor is None:
+            messages.error(request, 'Donor not found.')
+            return redirect('donors_page')
+        name = ' '.join((request.POST.get('name') or '').split())
+        if not name:
+            messages.error(request, 'A donor needs a name.')
+            return redirect(f"{reverse('donors_page')}?d={donor.donor_id}")
+        if Donor.objects.exclude(donor_id=donor.donor_id).filter(name__iexact=name).exists():
+            messages.error(request, f'Another donor is already called "{name}".')
+            return redirect(f"{reverse('donors_page')}?d={donor.donor_id}")
+        donor.name = name
+        kind = (request.POST.get('donor_type') or '').strip()
+        donor.donor_type = kind if kind in dict(Donor.TYPE_CHOICES) else donor.donor_type
+        donor.contact_number = (request.POST.get('contact_number') or '').strip() or None
+        donor.email = (request.POST.get('email') or '').strip() or None
+        donor.address = (request.POST.get('address') or '').strip() or None
+        donor.notes = (request.POST.get('notes') or '').strip() or None
+        donor.save()
+        log_admin_action(request, 'Update', 'Donor', donor.donor_id, f'Updated donor "{donor.name}"')
+        messages.success(request, f'Saved {donor.name}.')
+        return redirect(f"{reverse('donors_page')}?d={donor.donor_id}")
+
+    from urllib.parse import urlencode
+    q = (request.GET.get('q') or '').strip()
+    donors = Donor.objects.annotate(
+        titles=Count('donations', distinct=True),
+        copies=Count('donations__inventory_copies', distinct=True),
+        last_gift=Max('donations__date_donated'),
+        first_gift=Min('donations__date_donated'),
+    ).order_by('-last_gift', 'name')
+    if q:
+        donors = donors.filter(name__icontains=q)
+
+    # Each distinct day a donor gave counts as one gift.
+    gift_days = {}
+    for donor_id, day in (Donation.objects.filter(donor__isnull=False)
+                          .values_list('donor_id', 'date_donated').distinct()):
+        gift_days.setdefault(donor_id, set()).add(day)
+
+    page = Paginator(donors, 20).get_page(request.GET.get('page', 1))
+    rows = list(page)
+    for d in rows:
+        days = sorted(gift_days.get(d.donor_id, ()))
+        d.gifts = len(days)
+        # A regular donor's usual gap, e.g. every 90 days.
+        d.every_days = (round((days[-1] - days[0]).days / (len(days) - 1))
+                        if len(days) > 1 else None)
+
+    selected = None
+    history = []
+    raw = request.GET.get('d') or ''
+    if raw.isdigit():
+        selected = Donor.objects.filter(donor_id=int(raw)).first()
+        if selected is not None:
+            history = (Donation.objects.filter(donor=selected)
+                       .select_related('book').prefetch_related('inventory_copies')
+                       .order_by('-date_donated', 'donation_id'))
+            for line in history:
+                line.copy_count = len(line.inventory_copies.all()) or 1
+
+    return render(request, 'admin/donors.html', {
+        'donors': rows,
+        'page': page,
+        'page_qs': urlencode({'q': q}) if q else '',
+        'total_donors': Donor.objects.count(),
+        'regular_donors': sum(1 for days in gift_days.values() if len(days) > 1),
+        'q': q,
+        'selected': selected,
+        'history': history,
+        'type_choices': Donor.TYPE_CHOICES,
+        'is_staff_portal': request.session.get('admin_role') == 'Staff',
+    })
+
+
+@admin_or_module_required('books')
+def mark_books_labelled(request):
+    """Record that the selected books already carry a label, without printing one."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST is allowed.'})
+    ids = [int(i) for i in (request.POST.get('ids') or '').split(',') if i.strip().isdigit()]
+    if not ids:
+        return JsonResponse({'success': False, 'error': 'Select at least one book first.'})
+    marked = (Book.objects.filter(book_id__in=ids, label_printed_at__isnull=True)
+              .update(label_printed_at=timezone.now()))
+    log_admin_action(request, 'Update', 'Book', None, f'Marked {marked} book(s) as already labelled')
+    return JsonResponse({'success': True, 'marked': marked})
+
+
+OPEN_LIBRARY_URL = 'https://openlibrary.org/api/books?bibkeys=ISBN:%s&format=json&jscmd=data'
+
+
+def _open_library(isbn):
+    """Title, author and year for an ISBN from Open Library, or None."""
+    import urllib.request
+    req = urllib.request.Request(OPEN_LIBRARY_URL % isbn,
+                                 headers={'User-Agent': 'AYLA Library System (catalogue lookup)'})
+    try:
+        # Open Library is slow at times; a few seconds is still quicker than typing.
+        with urllib.request.urlopen(req, timeout=10) as res:
+            data = json.loads(res.read().decode('utf-8'))
+    except Exception:
+        logger.warning('Open Library lookup failed for %s', isbn)
+        return None
+    entry = data.get('ISBN:%s' % isbn)
+    if not entry:
+        return None
+    year = re.search(r'\b(1[0-9]{3}|20[0-9]{2})\b', entry.get('publish_date') or '')
+    return {
+        'title': entry.get('title') or '',
+        'author': ', '.join(a.get('name', '') for a in entry.get('authors') or [] if a.get('name')),
+        'publication_year': year.group(1) if year else '',
+        'cover_img_url': (entry.get('cover') or {}).get('medium', ''),
+    }
+
+
+@admin_or_module_required('books')
+def isbn_lookup(request):
+    """Fill in a book from its ISBN: from our own catalogue first, then Open Library."""
+    raw = (request.GET.get('isbn') or '').strip()
+    problem = isbn_error(raw) if raw else 'Type or scan an ISBN first.'
+    if problem:
+        return JsonResponse({'success': False, 'error': problem})
+    digits = re.sub(r'[\s-]', '', raw).upper()
+    from django.db.models import Value
+    from django.db.models.functions import Replace, Upper
+    known = list(Book.objects.annotate(
+        isbn_digits=Upper(Replace(Replace('ISBN', Value('-'), Value('')), Value(' '), Value(''))))
+        .filter(isbn_digits=digits).order_by('book_id'))
+    if known:
+        book = known[0]
+        return JsonResponse({'success': True, 'source': 'catalogue', 'copies': len(known), 'book': {
+            'title': book.title, 'author': book.author,
+            'publication_year': book.publication_year or '', 'genre': book.genre or '',
+            'material_type': book.material_type, 'price': str(book.price) if book.price is not None else '',
+            'cover_img_url': book.cover_img_url or '',
+            'shelf_level': book.shelf_level_id or '',
+        }})
+    found = _open_library(digits)
+    if found is None:
+        return JsonResponse({'success': False, 'error': 'No record found for that ISBN. Type the details in.'})
+    return JsonResponse({'success': True, 'source': 'openlibrary', 'book': found})

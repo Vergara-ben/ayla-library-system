@@ -7,6 +7,7 @@ from . import floorplan_bulk
 from .floorplan_undo import floorplan_undo, wrap_editor_views
 from . import openstatus
 from . import live
+from . import alerts
 
 urlpatterns = [
     # Floor plan editor: move, delete, lock and undo several elements at once.
@@ -36,9 +37,12 @@ urlpatterns = [
     path('patron/account/', views.patron_account, name='patron_account'),
     path('patron/update-profile/', views.patron_update_profile, name='patron_update_profile'),
     path('patron/request-extension/', views.patron_request_extension, name='patron_request_extension'),
+    path('patron/request-extension/all/', views.patron_request_extension_all, name='patron_request_extension_all'),
     path('patron/change-password/', views.patron_change_password, name='patron_change_password'),
     path('patron/deactivate-account/', views.patron_deactivate_account, name='patron_deactivate_account'),
     path('patron/reactivate/', views.patron_reactivate_request, name='patron_reactivate_request'),
+    # Link emailed to an applicant whose registration was sent back to correct.
+    path('patron/registration/fix/<str:token>/', views.registration_fix, name='registration_fix'),
     path('patron/library-card/', views.my_library_card, name='my_library_card'),
     path('patron/library-card/photo/', views.patron_upload_card_photo, name='patron_upload_card_photo'),
     path('admin-portal/login/', views.admin_login, name='admin_login'),
@@ -47,6 +51,8 @@ urlpatterns = [
     path('portal/change-password/', views.portal_change_password, name='portal_change_password'),
     # Open or closed switch on both dashboards.
     path('portal/library-status/', openstatus.library_status, name='library_status'),
+    # What is waiting on the signed-in account, for the pop-up alerts.
+    path('portal/alerts/', alerts.portal_alerts, name='portal_alerts'),
     path('admin-portal/logout/', views.admin_logout, name='admin_logout'),
     path('admin-portal/dashboard/', views.admin_dashboard, name='admin_dashboard'),
     path('admin-portal/signin/', views.admin_signin, name='admin_signin'),
@@ -101,6 +107,7 @@ urlpatterns = [
     path('admin-portal/inventory/audit/progress/', views.stock_audit_progress, name='stock_audit_progress'),
     path('admin-portal/inventory/audit/compare/', views.stock_audit_compare, name='stock_audit_compare'),
     path('admin-portal/inventory/audit/apply/', views.stock_audit_apply, name='stock_audit_apply'),
+    path('admin-portal/inventory/audit/<int:audit_id>/', views.stock_audit_detail, name='stock_audit_detail'),
     path('admin-portal/inventory/write-off-missing/', views.write_off_missing, name='write_off_missing'),
     # User Management (Admin-only: manage Library Staff accounts)
     path('admin-portal/users/', views.user_management, name='user_management'),
@@ -112,6 +119,7 @@ urlpatterns = [
     path('admin-portal/patron-search/', views.patron_search_json, name='patron_search_json'),
     path('admin-portal/management/', views.admin_management, name='admin_management'),
     path('admin-portal/add-book/', views.admin_add_book, name='admin_add_book'),
+    path('admin-portal/isbn-lookup/', views.isbn_lookup, name='isbn_lookup'),
     path('admin-portal/add-patron/', views.admin_add_patron, name='admin_add_patron'),
     path('admin-portal/manage-patron/', views.admin_manage_patron, name='admin_manage_patron'),
     path('admin-portal/patron/<int:patron_id>/library-card/', views.patron_library_card, name='patron_library_card'),
@@ -165,6 +173,7 @@ urlpatterns = [
     path('admin-portal/donation-management/', views.donation_management, name='donation_management'),
     path('admin-portal/update-donation-status/', views.update_donation_status, name='update_donation_status'),
     path('admin-portal/delete-donation/', views.delete_donation, name='delete_donation'),
+    path('admin-portal/donors/', views.donors_page, name='donors_page'),
     # Announcement Management
     path('admin-portal/announcement-management/', views.announcement_management, name='announcement_management'),
     # Not under /media/: these are identity documents and need a login check.
@@ -186,6 +195,7 @@ urlpatterns = [
     path('admin-portal/add-room/', views.add_room, name='add_room'),
     path('admin-portal/book-qr-labels/', views.book_qr_labels, name='book_qr_labels'),
     path('admin-portal/book-label-picker/', views.book_label_picker_data, name='book_label_picker_data'),
+    path('admin-portal/mark-labelled/', views.mark_books_labelled, name='mark_books_labelled'),
     path('admin-portal/add-obstacle/', views.add_obstacle, name='add_obstacle'),
     path('admin-portal/add-stairway/', views.add_stairway, name='add_stairway'),
     path('admin-portal/edit-stairway/', views.edit_stairway, name='edit_stairway'),
@@ -251,6 +261,7 @@ urlpatterns = [
     path('admin-portal/delete-door/', views.delete_door, name='delete_door'),
     path('admin-portal/flip-door/', views.flip_door, name='flip_door'),
     path('admin-portal/add-beacon/', views.add_beacon, name='add_beacon'),
+    path('admin-portal/next-beacon-minor/', views.next_beacon_minor, name='next_beacon_minor'),
     path('admin-portal/move-beacon/', views.move_beacon, name='move_beacon'),
     path('admin-portal/delete-beacon/', views.delete_beacon, name='delete_beacon'),
     path('admin-portal/update-beacon/', views.update_beacon, name='update_beacon'),

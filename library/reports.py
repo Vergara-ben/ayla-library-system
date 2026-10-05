@@ -18,6 +18,7 @@ REPORT_TYPES = [
     ('books', 'Books Report'),
     ('patrons', 'Patrons Report'),
     ('donations', 'Donations Report'),
+    ('donors', 'Donors Report'),
     ('stock_levels', 'Stock Levels Report'),
     ('stock_movement', 'Stock Movement Report'),
     ('unreturned', 'Unreturned Books Report'),
@@ -644,7 +645,7 @@ def _stock_levels(start, end):
 
     # Group copies by the title and author they belong to.
     groups = {}
-    totals = {'Good': 0, 'Damaged': 0, 'Missing': 0, 'Lost': 0, 'Withdrawn': 0}
+    totals = {'Good': 0, 'Worn': 0, 'Damaged': 0, 'Missing': 0, 'Lost': 0, 'Withdrawn': 0}
     removed = 0
     for r in records:
         if r.status == 'Removed':
@@ -658,7 +659,7 @@ def _stock_levels(start, end):
             'catalogued': r.book is not None,
             'book_ids': set(),
             'copy_ids': set(),
-            'Good': 0, 'Damaged': 0, 'Missing': 0, 'Lost': 0, 'Withdrawn': 0,
+            'Good': 0, 'Worn': 0, 'Damaged': 0, 'Missing': 0, 'Lost': 0, 'Withdrawn': 0,
         })
         if r.book_id:
             g['book_ids'].add(r.book_id)
@@ -674,7 +675,7 @@ def _stock_levels(start, end):
 
     rows = []
     for g in groups.values():
-        on_hand = g['Good'] + g['Damaged']
+        on_hand = g['Good'] + g['Worn'] + g['Damaged']
         rows.append([
             g['title'],
             g['author'],
@@ -683,7 +684,7 @@ def _stock_levels(start, end):
             'Yes' if g['catalogued'] else 'No',
             g['location'],
             len(g['copy_ids']),
-            g['Good'], g['Damaged'], g['Missing'], g['Lost'], g['Withdrawn'], on_hand,
+            g['Good'], g['Worn'], g['Damaged'], g['Missing'], g['Lost'], g['Withdrawn'], on_hand,
         ])
 
     return {
@@ -691,13 +692,14 @@ def _stock_levels(start, end):
         'title': 'Stock Levels Report',
         'subtitle': 'Physical copies held, by title and condition',
         'columns': ['Title', 'Author', 'Book IDs', 'Copy IDs', 'Catalogued', 'Shelf Location',
-                    'Copies', 'Good', 'Damaged', 'Missing', 'Lost', 'Withdrawn', 'On Hand'],
+                    'Copies', 'Good', 'Worn', 'Damaged', 'Missing', 'Lost', 'Withdrawn', 'On Hand'],
         'rows': rows,
         'summary': [
             ('Titles Held', len(rows)),
             ('Copies Recorded', sum(totals.values())),
-            ('Copies On Hand', totals['Good'] + totals['Damaged']),
+            ('Copies On Hand', totals['Good'] + totals['Worn'] + totals['Damaged']),
             ('Good', totals['Good']),
+            ('Worn', totals['Worn']),
             ('Damaged', totals['Damaged']),
             ('Missing', totals['Missing']),
             ('Lost', totals['Lost']),
@@ -706,7 +708,7 @@ def _stock_levels(start, end):
             ('Books Without A Copy Record', uncounted_books),
         ],
         'chart': _chart(
-            [(k, totals[k]) for k in ('Good', 'Damaged', 'Missing', 'Lost', 'Withdrawn')],
+            [(k, totals[k]) for k in ('Good', 'Worn', 'Damaged', 'Missing', 'Lost', 'Withdrawn')],
             kind='bar',
             title='Copies by state',
             note='The state of the physical collection. Largest group marked.',
@@ -716,7 +718,7 @@ def _stock_levels(start, end):
         ),
         'breakdown': {
             'By condition': [(k, str(totals[k]))
-                             for k in ('Good', 'Damaged', 'Missing', 'Lost', 'Withdrawn')],
+                             for k in ('Good', 'Worn', 'Damaged', 'Missing', 'Lost', 'Withdrawn')],
         },
     }
 
@@ -1080,6 +1082,54 @@ def _analytics(start, end):
 
 
 # Registered here rather than in the literal above because these three are defined below it.
+def _donors(start, end):
+    """Who gave books in the period, how often, and how much."""
+    from .models import Donor
+    lines = (Donation.objects.filter(date_donated__range=(start, end))
+             .select_related('donor').prefetch_related('inventory_copies'))
+    per = {}
+    for d in lines:
+        key = d.donor_id or ('name', (d.donor_name or '').strip().lower())
+        g = per.setdefault(key, {'donor': d.donor, 'name': d.donor.name if d.donor else d.donor_name,
+                                 'days': set(), 'titles': 0, 'copies': 0})
+        g['days'].add(d.date_donated)
+        g['titles'] += 1
+        g['copies'] += d.inventory_copies.count() or 1
+
+    rows = []
+    for g in sorted(per.values(), key=lambda g: (-g['copies'], g['name'] or '')):
+        donor = g['donor']
+        days = sorted(g['days'])
+        rows.append([
+            _text(g['name']),
+            donor.get_donor_type_display() if donor else DASH,
+            _text(donor.contact_number if donor else None),
+            len(days), g['titles'], g['copies'],
+            _fmt_date(days[0]), _fmt_date(days[-1]),
+        ])
+    return {
+        'key': 'donors',
+        'title': 'Donors Report',
+        'subtitle': 'Everyone who gave books in the period, with how often and how much',
+        'columns': ['Donor', 'Type', 'Contact', 'Gifts', 'Titles', 'Copies', 'First Gift', 'Last Gift'],
+        'rows': rows,
+        'summary': [
+            ('Donors', len(rows)),
+            ('Gave More Than Once', sum(1 for g in per.values() if len(g['days']) > 1)),
+            ('Titles Donated', sum(g['titles'] for g in per.values())),
+            ('Copies Donated', sum(g['copies'] for g in per.values())),
+            ('Saved Donors', Donor.objects.count()),
+        ],
+        'chart': _chart(
+            [(r[0], r[5]) for r in rows[:10]], kind='bar',
+            title='Copies given, top donors',
+            note='The ten donors who gave the most copies in the period.',
+            empty_note='No donations in this period.',
+            axis_note='Donor · vertical axis is number of copies'),
+    }
+
+
+_BUILDERS['donors'] = _donors
 _BUILDERS['unreturned'] = _unreturned
 _BUILDERS['penalties'] = _penalties
 _BUILDERS['analytics'] = _analytics

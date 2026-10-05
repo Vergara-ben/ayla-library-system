@@ -49,6 +49,8 @@
     <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
     <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
     <script src="{% static 'js/ayla-dialog.js' %}"></script>
+    <script src="{% static 'js/picker.js' %}"></script>
+    {{ donor_names|json_script:'donorNamesData' }}
 </head>
 <body class="flex h-screen overflow-hidden">
 <a href="#main-content" class="skip-link">Skip to main content</a>
@@ -121,7 +123,7 @@
                             <div class="grid grid-cols-2 gap-4">
                                 <div>
                                     <label for="rcvDonor" class="field-label">Donor name</label>
-                                    <input type="text" name="donor_name" id="rcvDonor" class="field-input" placeholder="Who donated it">
+                                    <input type="text" name="donor_name" id="rcvDonor" class="field-input" placeholder="Past donor or new name">
                                 </div>
                                 <div>
                                     <label for="f_donated_date" class="field-label">Date donated</label>
@@ -141,16 +143,17 @@
                             <p class="text-[11px] uppercase font-bold tracking-wider text-violet-500">Books in this delivery</p>
 
                             <div>
-                                <label for="rcvBook" class="field-label">Already catalogued?</label>
-                                <select id="rcvBook" class="field-input" onchange="onPickCatalogued()">
+                                <label for="rcvBookSearch" class="field-label">Find it in the catalogue</label>
+                                <input type="text" id="rcvBookSearch" class="field-input" placeholder="Type a title, author or ISBN; pick it, or choose New title">
+                                <select id="rcvBook" class="hidden" aria-hidden="true" tabindex="-1" onchange="onPickCatalogued()">
                                     <option value="">&mdash; New title, enter its details below &mdash;</option>
-                                    {% for b in books %}<option value="{{ b.book_id }}" data-title="{{ b.title }}" data-author="{{ b.author }}">{{ b.title }} &mdash; {{ b.author }}</option>{% endfor %}
+                                    {% for b in books %}<option value="{{ b.book_id }}" data-title="{{ b.title }}" data-author="{{ b.author }}" data-isbn="{{ b.ISBN|default:'' }}">{{ b.title }} &mdash; {{ b.author }}</option>{% endfor %}
                                 </select>
                             </div>
 
                             <div id="newTitleFields" class="space-y-3">
                                 <div>
-                                    <label for="rcvTitle" class="field-label">Title</label>
+                                    <label for="rcvTitle" class="field-label">New title</label>
                                     <input type="text" id="rcvTitle" class="field-input" placeholder="As printed on the book">
                                 </div>
                                 <div class="grid grid-cols-2 gap-3">
@@ -180,7 +183,7 @@
                                 <div>
                                     <label for="rcvCondition" class="field-label">Condition on arrival</label>
                                     <select id="rcvCondition" class="field-input">
-                                        {% for value, label in condition_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+                                                                        {% for value in intake_conditions %}<option value="{{ value }}">{{ value }}</option>{% endfor %}
                                     </select>
                                 </div>
                                 <div>
@@ -337,16 +340,34 @@
             box.classList.remove('hidden');
         }
 
+        // Same rule as the server: a 10- or 13-digit ISBN must have a valid check digit.
+        function isbnProblem(raw) {
+            const t = raw.replace(/[\s-]/g, '').toUpperCase();
+            let ok;
+            if (/^\d{9}[\dX]$/.test(t)) {
+                let sum = 0;
+                for (let i = 0; i < 10; i++) sum += (10 - i) * (t[i] === 'X' ? 10 : +t[i]);
+                ok = sum % 11 === 0;
+            } else if (/^\d{13}$/.test(t)) {
+                let sum = 0;
+                for (let i = 0; i < 13; i++) sum += +t[i] * (i % 2 ? 3 : 1);
+                ok = sum % 10 === 0;
+            } else {
+                return '';   // not shaped like an ISBN: kept as an accession number
+            }
+            return ok ? '' : 'That ISBN has a wrong check digit. Check it for a typo.';
+        }
+
         function addIntakeItem() {
             const sel = document.getElementById('rcvBook');
             const bookId = sel.value;
             const qty = parseInt(document.getElementById('rcvQty').value, 10);
             if (!(qty >= 1 && qty <= 100)) { rcvItemError('Copies must be between 1 and 100.'); return; }
 
+            const condition = document.getElementById('rcvCondition').value || 'Good';
             const priceText = document.getElementById('rcvPrice').value.trim();
             if (priceText && !(parseFloat(priceText) >= 0)) { rcvItemError('The price must be zero or more.'); return; }
-            const item = { quantity: qty, condition: document.getElementById('rcvCondition').value,
-                           price: priceText };
+            const item = { quantity: qty, condition: condition, price: priceText };
             if (bookId) {
                 const opt = sel.options[sel.selectedIndex];
                 item.book_id = bookId;
@@ -356,6 +377,14 @@
             } else {
                 const title = document.getElementById('rcvTitle').value.trim();
                 if (!title) { rcvItemError('Enter the title, or pick one from the catalogue.'); return; }
+                const isbnText = document.getElementById('rcvIsbn').value.trim();
+                const isbnBad = isbnText && isbnProblem(isbnText);
+                if (isbnBad) { rcvItemError(isbnBad); return; }
+                const yearText = document.getElementById('rcvYear').value.trim();
+                const maxYear = new Date().getFullYear() + 1;
+                if (yearText && !(/^\d{4}$/.test(yearText) && +yearText >= 1000 && +yearText <= maxYear)) {
+                    rcvItemError('Publication year must be a four-digit year up to ' + maxYear + '.'); return;
+                }
                 item.title = title;
                 item.author = document.getElementById('rcvAuthor').value.trim();
                 item.isbn = document.getElementById('rcvIsbn').value.trim();
@@ -373,11 +402,14 @@
 
         function clearIntakeInputs() {
             document.getElementById('rcvBook').value = '';
+            document.getElementById('rcvBookSearch').value = '';
             ['rcvTitle', 'rcvAuthor', 'rcvIsbn', 'rcvYear', 'rcvGenre'].forEach(function (id) {
                 document.getElementById(id).value = '';
             });
             document.getElementById('rcvQty').value = 1;
             document.getElementById('rcvPrice').value = '';
+            // Back to Good, so one damaged title does not mark the next one damaged too.
+            document.getElementById('rcvCondition').value = 'Good';
             onPickCatalogued();
         }
 
@@ -453,7 +485,55 @@
     document.addEventListener('ayla:live-swapped', function () {
         filterShelves(document.getElementById('shelfFilter').value);
     });
-</script>
+
+        // Titles and donors are picked from a searchable list instead of a long dropdown.
+        (function () {
+            const sel = document.getElementById('rcvBook');
+            const search = document.getElementById('rcvBookSearch');
+            if (window.AylaPicker && sel && search) {
+                // Every copy is its own record; one row per title and author is enough to pick from.
+                const seen = {};
+                const titles = [];
+                Array.prototype.forEach.call(sel.options, function (o) {
+                    if (!o.value) return;
+                    const key = (o.dataset.title + '|' + o.dataset.author).toLowerCase();
+                    if (seen[key]) return;
+                    seen[key] = true;
+                    titles.push({ value: o.value, label: o.dataset.title, sub: o.dataset.author,
+                                  search: o.dataset.isbn || '' });
+                });
+                AylaPicker.attach(search, {
+                    items: titles,
+                    newLabel: function (q) { return q ? '+ New title: \u201c' + q + '\u201d' : '+ New title (not in the catalogue yet)'; },
+                    onPick: function (it) {
+                        sel.value = it.value;
+                        onPickCatalogued();
+                        document.getElementById('rcvQty').focus();
+                    },
+                    onNew: function (q) {
+                        sel.value = '';
+                        search.value = '';
+                        onPickCatalogued();
+                        const title = document.getElementById('rcvTitle');
+                        if (q) title.value = q;
+                        (q ? document.getElementById('rcvAuthor') : title).focus();
+                    },
+                    // Typing again means the earlier pick no longer stands.
+                    onType: function () { if (sel.value) { sel.value = ''; onPickCatalogued(); } },
+                });
+            }
+            const donor = document.getElementById('rcvDonor');
+            if (window.AylaPicker && donor) {
+                const names = JSON.parse(document.getElementById('donorNamesData').textContent || '[]');
+                const donors = names.map(function (n) { return { value: n, label: n }; });
+                AylaPicker.attach(donor, {
+                    items: donors,
+                    newLabel: function (q) { return q ? '+ New donor: \u201c' + q + '\u201d' : '+ New donor \u2014 type their name'; },
+                    onNew: function () { donor.focus(); },
+                });
+            }
+        })();
+    </script>
     {% include '_live.html' with topics='books transactions chat' %}
 </body>
 </html>
