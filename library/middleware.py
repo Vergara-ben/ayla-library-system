@@ -2,7 +2,6 @@
 
 import ipaddress
 import logging
-import os
 import time
 
 from django.conf import settings
@@ -129,14 +128,13 @@ PORTAL_PREFIXES = ('/admin-portal/', '/library-staff/', '/desk/', '/portal/', '/
 
 
 def client_ip(request):
-    """The visitor's internet address.
+    """The visitor's internet address: the proxy's header when CLIENT_IP_HEADER names one.
 
-    On Render every request arrives through Cloudflare, which writes the real address into
-    CF-Connecting-IP and replaces any value a visitor sends. X-Forwarded-For is not used,
-    because a visitor can put any address at the front of it.
+    X-Forwarded-For is not trusted by default, because a visitor can put any address in it.
     """
-    if os.environ.get('RENDER', '').lower() == 'true':
-        return (request.META.get('HTTP_CF_CONNECTING_IP') or '').strip()
+    header = getattr(settings, 'CLIENT_IP_HEADER', '')
+    if header:
+        return (request.META.get('HTTP_' + header.upper().replace('-', '_')) or '').strip()
     return (request.META.get('REMOTE_ADDR') or '').strip()
 
 

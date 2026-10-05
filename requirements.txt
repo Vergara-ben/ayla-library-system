@@ -5,7 +5,7 @@ openpyxl>=3.1.2
 qrcode>=7.4.2
 reportlab>=4.0.0
 whitenoise>=6.6.0
-# Web server used on Render.
+# Web server for deployment.
 gunicorn>=23.0.0
 # Live updates: tells open pages what changed.
 pusher>=3.3
