@@ -2456,6 +2456,11 @@
         let minorSeq = 0;
         async function suggestBeaconMinor() {
             if (!beaconAutoFill || editingBeaconId !== null) return;
+            // Only an iBeacon is told apart by its minor; for the others the label may be the identity.
+            if (document.getElementById('beaconAdvType').value !== 'iBeacon') {
+                ['beaconMinor', 'beaconLabel'].forEach(function (id) { document.getElementById(id).value = ''; });
+                return;
+            }
             const uuid = document.getElementById('beaconUuid').value.trim();
             const major = document.getElementById('beaconMajor').value.trim();
             const seq = ++minorSeq;
@@ -2468,7 +2473,7 @@
                 document.getElementById('beaconLabel').value = 'Beacon ' + d.minor;
             } catch (e) { /* left blank: the server fills it in on save */ }
         }
-        ['beaconUuid', 'beaconMajor'].forEach(function (id) {
+        ['beaconUuid', 'beaconMajor', 'beaconAdvType'].forEach(function (id) {
             const el = document.getElementById(id);
             if (el) el.addEventListener('change', suggestBeaconMinor);
         });

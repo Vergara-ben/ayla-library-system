@@ -423,7 +423,8 @@ class AuditTrailTests(TestCase):
         from .models import StockAuditLine
         results = {l.title: (l.result, l.status_then, l.detail) for l in StockAuditLine.objects.all()}
         self.assertEqual(results['Here'][0], 'Found')
-        self.assertEqual(results['Gone'][:2], ('Missing', 'Available'))
+        # "Then" is how the count left it, so the count's own change is not "changed since".
+        self.assertEqual(results['Gone'][:2], ('Missing', 'Missing'))
         self.assertEqual(results['Out'][0], 'On loan')
         self.assertIn('Ana', results['Out'][2])
         self.assertEqual(results['Reading'][0], 'Being read')
@@ -434,3 +435,64 @@ class AuditTrailTests(TestCase):
         detail = self.client.get('/admin-portal/inventory/audit/%d/' % r['audit_id']).json()
         out = next(l for l in detail['lines'] if l['title'] == 'Out')
         self.assertEqual((out['status_then'], out['status_now'], out['changed']), ('Borrowed', 'Available', True))
+
+
+class ReviewFollowUpTests(TestCase):
+    """Fixes from re-checking the panel work."""
+
+    def test_an_accession_number_is_not_mistaken_for_a_bad_isbn(self):
+        from .views import isbn_typo
+        self.assertIsNone(isbn_typo('ACC-2026-0042'))
+        self.assertIsNone(isbn_typo('12345'))
+        self.assertIn('check digit', isbn_typo('9780306406158'))
+
+    def test_books_can_be_marked_as_already_labelled(self):
+        book = Book.objects.create(title='Old', author='A')
+        c = _client(admin_id=_staff(modules='books').admin_id, admin_role='Staff')
+        result = c.post('/admin-portal/mark-labelled/', {'ids': str(book.book_id)}).json()
+        self.assertEqual(result['marked'], 1)
+        book.refresh_from_db()
+        self.assertIsNotNone(book.label_printed_at)
+
+    def test_a_desk_sign_up_cannot_be_sent_a_fix_link(self):
+        applicant = Patron.objects.create(first_name='Ben', last_name='Lim', account_status='Pending',
+                                          registration_channel='On-site')
+        c = _client(admin_id=_staff(modules='patrons').admin_id, admin_role='Staff')
+        c.post('/admin-portal/reject-patron/%d/' % applicant.patron_id,
+               {'mode': 'fix', 'reason': 'The ID has expired'})
+        applicant.refresh_from_db()
+        self.assertIsNone(applicant.fix_token)
+
+    def test_a_resubmission_raises_an_alert_naming_that_applicant(self):
+        admin = _staff(role='Admin', modules='')
+        Patron.objects.create(first_name='Ana', last_name='Cruz', email='a@example.invalid',
+                              account_status='Pending', otp_verified=True)
+        back = Patron.objects.create(first_name='Ben', last_name='Lim', email='b@example.invalid',
+                                     account_status='Pending', otp_verified=True,
+                                     resubmitted_at=timezone.now())
+        c = _client(admin_id=admin.admin_id, admin_role='Admin')
+        item = {i['key']: i for i in c.get('/portal/alerts/').json()['items']}['registrations']
+        self.assertIn('Ben', item['text'])
+        self.assertIn('resubmitted', item['text'])
+        self.assertEqual(item['stamp'], back.resubmitted_at.isoformat())
+
+    def test_a_donor_can_be_added_before_their_first_gift(self):
+        from .models import Donor
+        c = _client(admin_id=_staff(role='Admin').admin_id, admin_role='Admin')
+        c.post('/admin-portal/donors/', {'action': 'add', 'name': 'Rotary Club'})
+        c.post('/admin-portal/donors/', {'action': 'add', 'name': 'rotary  club'})
+        self.assertEqual(Donor.objects.count(), 1)
+
+    def test_renaming_a_donated_copys_donor_moves_the_donation(self):
+        from .models import Donor
+        c = _client(admin_id=_staff(role='Admin').admin_id, admin_role='Admin')
+        c.post('/admin-portal/inventory/receive/', {
+            'source': 'Donation', 'donor_name': 'Rotary Clubb', 'donated_date': '2026-09-01',
+            'items': json.dumps([{'title': 'Noli', 'author': 'Rizal', 'quantity': 1}])})
+        record = InventoryRecord.objects.get()
+        from .views import _sync_donation_row
+        record.donor_name = 'Rotary Club'
+        record.save()
+        _sync_donation_row(record)
+        record.donation.refresh_from_db()
+        self.assertEqual(record.donation.donor.name, 'Rotary Club')

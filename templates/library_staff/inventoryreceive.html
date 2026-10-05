@@ -338,7 +338,7 @@
             box.classList.remove('hidden');
         }
 
-        // Same rule as the server: 10 or 13 digits with a valid check digit.
+        // Same rule as the server: a 10- or 13-digit ISBN must have a valid check digit.
         function isbnProblem(raw) {
             const t = raw.replace(/[\s-]/g, '').toUpperCase();
             let ok;
@@ -351,7 +351,7 @@
                 for (let i = 0; i < 13; i++) sum += +t[i] * (i % 2 ? 3 : 1);
                 ok = sum % 10 === 0;
             } else {
-                return 'The ISBN should be 10 or 13 digits.';
+                return '';   // not shaped like an ISBN: kept as an accession number
             }
             return ok ? '' : 'That ISBN has a wrong check digit. Check it for a typo.';
         }

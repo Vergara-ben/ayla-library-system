@@ -183,7 +183,7 @@
           <span class="due-date red">₱{{ tx.fine_amount }}</span>
         </div>
         {% endif %}
-        {% if tx.overdue_flag %}
+        {% if tx.overdue_flag or tx.due_date and tx.due_date < today %}
         <div class="ext-status" style="font-size:11px;color:var(--danger);margin-top:4px;"><i class="fa-solid fa-circle-exclamation" aria-hidden="true"></i> Overdue — please return it; it can no longer be extended</div>
         {% elif tx.pending_extension %}
         <div class="ext-status" style="font-size:11px;color:var(--muted);margin-top:4px;"><i class="fa-solid fa-hourglass-half" aria-hidden="true"></i> Extension requested — awaiting the library</div>

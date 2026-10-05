@@ -296,6 +296,9 @@
                         <button type="button" id="selectPrintBtn" onclick="openLabelSheet()" class="bg-amber-700/20 text-amber-300 border border-amber-800/70 hover:bg-amber-700/40 font-bold px-3 py-1.5 rounded-lg inline-flex items-center gap-1.5 transition-colors">
                             <i class="fa-solid fa-print text-[10px]"></i> <span id="selectPrintLabel">Print QR Labels</span>
                         </button>
+                        <button type="button" id="selectLabelledBtn" onclick="markLabelled()" title="These books already have a label on them; stop counting them as needing one" class="bg-slate-900 border border-slate-700 hover:bg-slate-800/60 text-slate-300 font-bold px-3 py-1.5 rounded-lg inline-flex items-center gap-1.5 transition-colors">
+                            <i class="fa-solid fa-tag text-[10px]"></i> Already labelled
+                        </button>
                         <button type="button" id="toolbarDeleteBtn" onclick="openDeleteBooks()" class="bg-rose-950/30 text-rose-300 border border-rose-900/60 hover:bg-rose-900/40 font-bold px-3 py-1.5 rounded-lg inline-flex items-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
                             <i class="fa-solid fa-trash-can text-[10px]"></i> <span id="toolbarDeleteLabel">Delete</span>
                         </button>
@@ -415,7 +418,7 @@
                     <label for="addIsbn" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">ISBN <span class="normal-case font-normal tracking-normal">(scan or type it first)</span></label>
                     <div class="flex gap-2">
                         <input type="text" name="ISBN" id="addIsbn" autocomplete="off" placeholder="978-..." class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
-                        <button type="button" onclick="lookupIsbn()" class="px-3 rounded-lg border border-slate-700 text-cyan-400 hover:bg-slate-800/40 font-bold whitespace-nowrap"><i class="fa-solid fa-magnifying-glass text-[10px]"></i> Fill in</button>
+                        <button type="button" onclick="lookupIsbn(true)" class="px-3 rounded-lg border border-slate-700 text-cyan-400 hover:bg-slate-800/40 font-bold whitespace-nowrap"><i class="fa-solid fa-magnifying-glass text-[10px]"></i> Fill in</button>
                     </div>
                     <p id="addIsbnNote" class="hidden text-[10px] leading-relaxed"></p>
                 </div>
@@ -1203,10 +1206,12 @@
         let addedThisRun = 0;
 
         // The ISBN fills in the rest: from the catalogue if we hold it, else Open Library.
-        async function lookupIsbn() {
+        let lastLookup = '';
+        async function lookupIsbn(force) {
             const isbn = document.getElementById('addIsbn').value.trim();
             const note = document.getElementById('addIsbnNote');
-            if (!isbn) return;
+            if (!isbn || (isbn === lastLookup && force !== true)) return;
+            lastLookup = isbn;
             note.className = 'text-[10px] leading-relaxed text-slate-500';
             note.textContent = 'Looking it up\u2026';
             let data;
@@ -1228,9 +1233,9 @@
                 if (el && value !== '' && value != null && (always || !el.value)) el.value = value;
             };
             const same = data.source === 'catalogue';
-            fill('addTitle', b.title, same);
-            fill('addAuthor', b.author, same);
-            fill('addPublicationYear', b.publication_year, same);
+            fill('addTitle', b.title, true);
+            fill('addAuthor', b.author, true);
+            fill('addPublicationYear', b.publication_year, true);
             fill('addGenre', b.genre, same);
             fill('addMaterial', b.material_type, same);
             fill('addPrice', b.price, same);
@@ -1277,17 +1282,18 @@
                 if (data.success && keepOpen) {
                     addedThisRun += 1;
                     // What never repeats is cleared; what a run shares stays.
-                    ['addTitle', 'addAuthor', 'addIsbn'].forEach(function (id) {
+                    ['addTitle', 'addAuthor', 'addIsbn', 'addPublicationYear', 'addPrice'].forEach(function (id) {
                         const el = document.getElementById(id);
                         if (el) el.value = '';
                     });
                     const isbnNote = document.getElementById('addIsbnNote');
                     if (isbnNote) isbnNote.classList.add('hidden');
+                    lastLookup = '';
                     const runNote = document.getElementById('addRunNote');
                     if (runNote) {
                         runNote.textContent = addedThisRun + ' book'
                             + (addedThisRun === 1 ? '' : 's') + ' added this run. Genre, '
-                            + 'shelf and year kept \u2014 change them by hand when one differs.';
+                            + 'shelf and material kept \u2014 change them by hand when one differs.';
                         runNote.classList.remove('hidden');
                     }
                     const first = document.getElementById('addTitle');
@@ -1614,10 +1620,36 @@
                 const res = await fetch(location.pathname + '?label=missing&ids=all',
                                         { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
                 const data = await res.json();
-                if (data.ids && data.ids.length) window.openLabelSheet(data.ids.map(Number));
+                const ids = (data.ids || []).map(Number);
+                if (!ids.length) return;
+                if (ids.length > 500 && window.AylaDialog) {
+                    AylaDialog.toast('Printing the first 500 of ' + ids.length + '. Press Print them again for the next batch.', 'info');
+                }
+                window.openLabelSheet(ids.slice(0, 500));
             } catch (e) {
                 if (window.AylaDialog) AylaDialog.toast('Could not load the books. Please try again.', 'error');
             }
+        };
+
+        // The selected books already have labels on them.
+        window.markLabelled = async function () {
+            const ids = [...chosen()];
+            if (!ids.length) return;
+            const body = new URLSearchParams({ ids: ids.join(',') });
+            const res = await fetch("{% url 'mark_books_labelled' %}", {
+                method: 'POST', body: body,
+                headers: { 'X-CSRFToken': '{{ csrf_token }}',
+                           'X-Requested-With': 'XMLHttpRequest' },
+            });
+            const data = await res.json().catch(function () { return {}; });
+            if (!data.success) {
+                if (window.AylaDialog) AylaDialog.toast(data.error || 'Could not save that.', 'error');
+                return;
+            }
+            window.clearBookSelection();
+            if (window.AylaDialog) AylaDialog.toast(data.marked + ' book' + (data.marked === 1 ? '' : 's')
+                + ' marked as already labelled.', 'success');
+            if (window.AylaLive) AylaLive.refresh(); else location.reload();
         };
 
         window.openLabelSheet = function (ids) {

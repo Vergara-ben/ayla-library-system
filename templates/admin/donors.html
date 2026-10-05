@@ -123,10 +123,18 @@
 
             <div class="grid grid-cols-1 xl:grid-cols-[1fr_380px] gap-6 items-start">
                 <div class="rounded-xl border border-slate-800/80 overflow-hidden" style="background-color: var(--bg-card);">
-                    <form method="get" class="p-4 border-b border-slate-800 flex gap-2">
-                        <input type="text" name="q" value="{{ q }}" placeholder="Search donors by name..." class="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-300 focus:outline-none">
-                        <button type="submit" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-slate-300 text-[11px] font-semibold px-3 py-2 rounded-lg">Search</button>
-                    </form>
+                    <div class="p-4 border-b border-slate-800 flex flex-col sm:flex-row gap-2">
+                        <form method="get" class="flex-1 flex gap-2">
+                            <input type="text" name="q" value="{{ q }}" placeholder="Search donors by name..." class="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-300 focus:outline-none">
+                            <button type="submit" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-slate-300 text-[11px] font-semibold px-3 py-2 rounded-lg">Search</button>
+                        </form>
+                        <form method="post" class="flex gap-2">
+                            {% csrf_token %}
+                            <input type="hidden" name="action" value="add">
+                            <input type="text" name="name" required placeholder="New donor's name" class="flex-1 sm:w-48 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-300 focus:outline-none">
+                            <button type="submit" class="bg-cyan-700/30 text-cyan-400 border border-cyan-800/80 hover:bg-cyan-700/50 text-[11px] font-bold px-3 py-2 rounded-lg whitespace-nowrap"><i class="fa-solid fa-plus text-[10px]"></i> Add donor</button>
+                        </form>
+                    </div>
                     <div class="overflow-x-auto">
                         <table class="w-full text-left border-collapse">
                             <thead>
@@ -140,7 +148,7 @@
                             </thead>
                             <tbody data-live="donor-rows" class="divide-y divide-slate-800/40 text-xs text-slate-300">
                                 {% for d in donors %}
-                                <tr class="hover:bg-slate-800/10 {% if selected and selected.donor_id == d.donor_id %}bg-slate-800/30{% endif %}">
+                                <tr class="hover:bg-slate-800/10 cursor-pointer {% if selected and selected.donor_id == d.donor_id %}bg-slate-800/30{% endif %}" onclick="location.href='?d={{ d.donor_id }}{% if q %}&q={{ q|urlencode }}{% endif %}'">
                                     <td class="py-3 px-5"><a href="?d={{ d.donor_id }}{% if q %}&q={{ q|urlencode }}{% endif %}" class="font-bold text-slate-200 hover:text-cyan-300">{{ d.name }}</a>
                                         <div class="text-[10px] text-slate-500">{{ d.get_donor_type_display }}{% if d.contact_number %} &middot; {{ d.contact_number }}{% endif %}</div></td>
                                     <td class="py-3 px-5 font-mono">{{ d.gifts }}</td>
@@ -155,7 +163,7 @@
                         </table>
                     </div>
                     <div class="px-5 py-3 border-t border-slate-800/60 text-xs text-slate-500">
-                        {% include 'admin/_pagination.html' with page=page accent='cyan' %}
+                        {% include 'admin/_pagination.html' with page=page accent='cyan' qs=page_qs %}
                     </div>
                 </div>
 

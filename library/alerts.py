@@ -1,5 +1,6 @@
 """What is waiting on the library's people, for the pop-up alerts on every portal page."""
 
+from django.db.models import Q
 from django.http import JsonResponse
 from django.urls import reverse
 
@@ -27,14 +28,20 @@ def portal_alerts(request):
     items = []
 
     if _may(user, role, 'patrons'):
-        waiting = (Patron.objects.filter(account_status='Pending', otp_verified=True,
-                                         fix_token__isnull=True)
-                   .order_by('-resubmitted_at', '-patron_id'))
-        newest = waiting.first()
+        # Desk sign-ups, and online ones whose email is confirmed; not those sent back to fix.
+        waiting = (Patron.objects.filter(account_status='Pending', fix_token__isnull=True)
+                   .filter(Q(otp_verified=True) | Q(registration_channel='On-site')))
+        newest_new = waiting.order_by('-patron_id').first()
+        newest_back = waiting.filter(resubmitted_at__isnull=False).order_by('-resubmitted_at').first()
+        # A resubmission is news even though the applicant's id is old; name whichever came last.
+        newest = newest_new
+        if newest_back and (newest_new is None
+                            or newest_back.resubmitted_at.date() >= newest_new.registration_date):
+            newest = newest_back
         items.append({
             'key': 'registrations', 'count': waiting.count(),
-            'latest': newest.patron_id if newest else 0,
-            'stamp': newest.resubmitted_at.isoformat() if newest and newest.resubmitted_at else '',
+            'latest': newest_new.patron_id if newest_new else 0,
+            'stamp': newest_back.resubmitted_at.isoformat() if newest_back else '',
             'text': (('%s resubmitted their registration' if newest.resubmitted_at
                       else '%s registered online and is waiting for approval') % newest.fullname)
                     if newest else '',

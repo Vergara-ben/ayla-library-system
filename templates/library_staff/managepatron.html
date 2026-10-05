@@ -812,6 +812,7 @@
         function openReview(btn) {
             document.getElementById('rvReason').value = '';
             document.getElementById('rvReasonError').classList.add('hidden');
+            document.getElementById('rvFixBtn').classList.toggle('hidden', btn.dataset.channel !== 'Online');
             rvPatron = {
                 id: btn.dataset.patronId,
                 doc: btn.dataset.doc || '',

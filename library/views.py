@@ -1049,6 +1049,8 @@ def patron_account(request):
         tx.pending_extension = pending_by_tx.get(tx.transaction_id)
 
     context = {
+        # Past its due date counts as overdue here, even before the nightly sweep flags it.
+        'today': timezone.localdate(),
         'patron': patron,
         'transactions': transactions,
         'has_overdue': has_overdue,
@@ -2200,6 +2202,10 @@ def reject_patron(request, patron_id):
 def _ask_applicant_to_fix(request, patron, reason):
     """Keep the application pending and email the applicant a link to correct it."""
     from .emails import registration_fix_email
+    if patron.registration_channel != 'Online' or not patron.email:
+        messages.error(request, f'{patron.fullname} signed up at the desk, so there is no link to send. '
+                                f'Correct the details with them, or reject the request.')
+        return _patron_page_redirect(request)
     patron.fix_token = secrets.token_urlsafe(32)
     patron.fix_note = reason
     patron.fix_requested_at = timezone.now()
@@ -11418,9 +11424,18 @@ def _sync_donation_row(record):
             status=stage,
         )
         record.save(update_fields=['donation'])
-    elif record.donation.status != stage:
-        record.donation.status = stage
-        record.donation.save(update_fields=['status'])
+    else:
+        fields = []
+        if record.donation.status != stage:
+            record.donation.status = stage
+            fields.append('status')
+        name = record.donor_name or 'Unknown donor'
+        if record.donation.donor_name != name:
+            record.donation.donor_name = name
+            record.donation.donor = Donor.for_name(record.donor_name)
+            fields += ['donor_name', 'donor']
+        if fields:
+            record.donation.save(update_fields=fields)
     return record.donation
 
 
@@ -11433,6 +11448,14 @@ def _receiving_redirect(request):
 
 # A copy is received Good, Worn or Damaged; Lost and Withdrawn come later.
 INTAKE_CONDITIONS = InventoryRecord.HELD_CONDITIONS
+
+
+def isbn_typo(raw):
+    """A mistyped ISBN, or None. Anything not shaped like an ISBN may be an accession number."""
+    text = re.sub(r'[\s-]', '', str(raw)).upper()
+    if not re.fullmatch(r'\d{9}[\dX]|\d{13}', text):
+        return None
+    return isbn_error(raw)
 
 
 def isbn_error(raw):
@@ -11479,7 +11502,7 @@ def _resolve_intake_book(item, source):
         if year < 1000 or year > timezone.localdate().year + 1:
             raise ValueError('Publication year ' + raw_year + ' is out of range.')
     if isbn:
-        isbn_problem = isbn_error(isbn)
+        isbn_problem = isbn_typo(isbn)
         if isbn_problem:
             raise ValueError(isbn_problem)
 
@@ -12119,12 +12142,16 @@ def _record_audit_lines(audit, books, status_before, found, bulk, missing, recov
     """One line per book on the board: what the reader marked, or where the system knows it is."""
     loans = {t.book_id: t for t in Transaction.objects.select_related('patron').filter(
         book_id__in=[b.book_id for b in books], transaction_type='Borrow', return_date__isnull=True)}
+    # As the count left them, which is what "changed since" is measured against.
+    after = dict(Book.objects.filter(book_id__in=[b.book_id for b in books])
+                 .values_list('book_id', 'status'))
     lines = []
     for book in books:
-        then = status_before.get(book.book_id, book.status)
+        before = status_before.get(book.book_id, book.status)
+        then = after.get(book.book_id, before)
         detail = ''
-        if then in AWAY_RESULT:
-            result = AWAY_RESULT[then]
+        if before in AWAY_RESULT:
+            result = AWAY_RESULT[before]
             loan = loans.get(book.book_id)
             if loan is not None and result == 'On loan':
                 who = loan.patron.fullname if loan.patron else 'a guest'
@@ -12700,6 +12727,15 @@ def serve_card_photo(request, photo_id):
 @admin_or_module_required('donations')
 def donors_page(request):
     """Everyone who has given books, how often, and what they gave."""
+    if request.method == 'POST' and request.POST.get('action') == 'add':
+        # A regular donor can be recorded before their first gift; details go on their record.
+        donor = Donor.for_name(request.POST.get('name'))
+        if donor is None:
+            messages.error(request, "Type the donor's name.")
+            return redirect('donors_page')
+        log_admin_action(request, 'Create', 'Donor', donor.donor_id, f'Added donor "{donor.name}"')
+        return redirect(f"{reverse('donors_page')}?d={donor.donor_id}")
+
     if request.method == 'POST':
         donor = Donor.objects.filter(donor_id=_posted_id(request, 'donor_id')).first()
         if donor is None:
@@ -12724,6 +12760,7 @@ def donors_page(request):
         messages.success(request, f'Saved {donor.name}.')
         return redirect(f"{reverse('donors_page')}?d={donor.donor_id}")
 
+    from urllib.parse import urlencode
     q = (request.GET.get('q') or '').strip()
     donors = Donor.objects.annotate(
         titles=Count('donations', distinct=True),
@@ -12764,6 +12801,7 @@ def donors_page(request):
     return render(request, 'admin/donors.html', {
         'donors': rows,
         'page': page,
+        'page_qs': urlencode({'q': q}) if q else '',
         'total_donors': Donor.objects.count(),
         'regular_donors': sum(1 for days in gift_days.values() if len(days) > 1),
         'q': q,
@@ -12772,6 +12810,20 @@ def donors_page(request):
         'type_choices': Donor.TYPE_CHOICES,
         'is_staff_portal': request.session.get('admin_role') == 'Staff',
     })
+
+
+@admin_or_module_required('books')
+def mark_books_labelled(request):
+    """Record that the selected books already carry a label, without printing one."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST is allowed.'})
+    ids = [int(i) for i in (request.POST.get('ids') or '').split(',') if i.strip().isdigit()]
+    if not ids:
+        return JsonResponse({'success': False, 'error': 'Select at least one book first.'})
+    marked = (Book.objects.filter(book_id__in=ids, label_printed_at__isnull=True)
+              .update(label_printed_at=timezone.now()))
+    log_admin_action(request, 'Update', 'Book', None, f'Marked {marked} book(s) as already labelled')
+    return JsonResponse({'success': True, 'marked': marked})
 
 
 OPEN_LIBRARY_URL = 'https://openlibrary.org/api/books?bibkeys=ISBN:%s&format=json&jscmd=data'

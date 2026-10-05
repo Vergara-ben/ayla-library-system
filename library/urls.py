@@ -191,6 +191,7 @@ urlpatterns = [
     path('admin-portal/add-room/', views.add_room, name='add_room'),
     path('admin-portal/book-qr-labels/', views.book_qr_labels, name='book_qr_labels'),
     path('admin-portal/book-label-picker/', views.book_label_picker_data, name='book_label_picker_data'),
+    path('admin-portal/mark-labelled/', views.mark_books_labelled, name='mark_books_labelled'),
     path('admin-portal/add-obstacle/', views.add_obstacle, name='add_obstacle'),
     path('admin-portal/add-stairway/', views.add_stairway, name='add_stairway'),
     path('admin-portal/edit-stairway/', views.edit_stairway, name='edit_stairway'),
