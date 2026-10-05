@@ -6,7 +6,7 @@ openpyxl>=3.1.2
 qrcode>=7.4.2
 reportlab>=4.0.0
 whitenoise>=6.6.0
-# Live updates over WebSocket, and the ASGI server used on Render.
+# Live updates over WebSocket, and the ASGI server that serves them.
 channels>=4.3
 daphne>=4.2
 # Only needed when REDIS_URL is set (more than one server process).

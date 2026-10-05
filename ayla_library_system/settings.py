@@ -32,12 +32,9 @@ if not ALLOWED_HOSTS:
 # HTTPS origins trusted for CSRF (needed once served over a real domain), e.g.
 CSRF_TRUSTED_ORIGINS = [o.strip() for o in os.environ.get('CSRF_TRUSTED_ORIGINS', '').split(',') if o.strip()]
 
-# Render sets this to the service's own address (e.g. ayla-library.onrender.com).
-RENDER_HOST = os.environ.get('RENDER_EXTERNAL_HOSTNAME', '').strip()
-if RENDER_HOST:
-    if RENDER_HOST not in ALLOWED_HOSTS:
-        ALLOWED_HOSTS.append(RENDER_HOST)
-    CSRF_TRUSTED_ORIGINS.append(f'https://{RENDER_HOST}')
+# Behind a proxy, the header carrying the visitor's real address (e.g. CF-Connecting-IP).
+# Only set it when the proxy always writes that header itself. Blank uses the connection's address.
+CLIENT_IP_HEADER = os.environ.get('CLIENT_IP_HEADER', '').strip()
 
 # Trust tunnel origins for phone testing (DEBUG only).
 if DEBUG:
@@ -365,7 +362,7 @@ X_FRAME_OPTIONS = 'DENY'
 
 # HTTPS-only settings for production.
 if not DEBUG:
-    # Render (and most hosts) handle HTTPS at a proxy in front of the app.
+    # Most hosts handle HTTPS at a proxy in front of the app.
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
     SECURE_SSL_REDIRECT = os.environ.get('SECURE_SSL_REDIRECT', 'True').lower() in ('1', 'true', 'yes')
     # The host's internal health check calls over plain HTTP.

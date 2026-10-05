@@ -1,7 +1,6 @@
 """The live-updates socket each open page connects to."""
 
 import ipaddress
-import os
 
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
@@ -13,8 +12,9 @@ from .live import GROUP_TOPICS, PATRON_GROUP, PUBLIC_GROUP, STAFF_GROUP, session
 def _socket_address(scope):
     """Same rule as middleware.client_ip, read from the socket's scope."""
     headers = dict(scope.get('headers') or [])
-    if os.environ.get('RENDER', '').lower() == 'true':
-        return headers.get(b'cf-connecting-ip', b'').decode('latin-1').strip()
+    header = getattr(settings, 'CLIENT_IP_HEADER', '')
+    if header:
+        return headers.get(header.lower().encode('latin-1'), b'').decode('latin-1').strip()
     client = scope.get('client') or ('',)
     return (client[0] or '').strip()
 
@@ -73,7 +73,7 @@ class LiveConsumer(AsyncJsonWebsocketConsumer):
             await self.channel_layer.group_discard(group, self.channel_name)
 
     async def receive_json(self, content, **kwargs):
-        # Keep-alive from the page; Render drops sockets that stay silent.
+        # Keep-alive from the page; hosts drop sockets that stay silent.
         if content.get('ping'):
             await self.send_json({'pong': True})
 

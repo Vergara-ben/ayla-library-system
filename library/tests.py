@@ -413,15 +413,15 @@ class LibraryNetworkOnlyTests(TestCase):
         with self.settings(PORTAL_ALLOWED_IPS=['not-an-address']):
             self.assertEqual(self._get('/admin-portal/login/', REMOTE_ADDR=self.LIBRARY).status_code, 404)
 
-    def test_on_render_only_the_cloudflare_address_counts(self):
-        with self.settings(PORTAL_ALLOWED_IPS=[self.LIBRARY]), mock.patch.dict(os.environ, {'RENDER': 'true'}):
+    def test_behind_a_proxy_only_its_address_header_counts(self):
+        with self.settings(PORTAL_ALLOWED_IPS=[self.LIBRARY], CLIENT_IP_HEADER='CF-Connecting-IP'):
             # A visitor pretending to be the library through X-Forwarded-For.
             spoofed = self._get('/admin-portal/login/', REMOTE_ADDR='10.0.0.1',
                                 HTTP_X_FORWARDED_FOR=self.LIBRARY, HTTP_CF_CONNECTING_IP=self.OUTSIDE)
             self.assertEqual(spoofed.status_code, 404)
             real = self._get('/admin-portal/login/', REMOTE_ADDR='10.0.0.1', HTTP_CF_CONNECTING_IP=self.LIBRARY)
             self.assertEqual(real.status_code, 200)
-            # Without Cloudflare's header nothing is trusted.
+            # Without the proxy's header nothing is trusted.
             missing = self._get('/admin-portal/login/', REMOTE_ADDR=self.LIBRARY)
             self.assertEqual(missing.status_code, 404)
 
@@ -435,13 +435,13 @@ class LibraryNetworkOnlyTests(TestCase):
 
     def test_the_network_page_shows_the_visitor_address(self):
         self.assertContains(self._get('/network/', REMOTE_ADDR=self.OUTSIDE), self.OUTSIDE)
-        with mock.patch.dict(os.environ, {'RENDER': 'true'}):
+        with self.settings(CLIENT_IP_HEADER='CF-Connecting-IP'):
             r = self._get('/network/', REMOTE_ADDR='10.0.0.1', HTTP_CF_CONNECTING_IP=self.LIBRARY)
             self.assertContains(r, self.LIBRARY)
 
 
 class HostingEndpointTests(TestCase):
-    """The health check and the daily task link used on Render."""
+    """The health check and the daily task link, for whatever hosts the site."""
 
     def test_health_check(self):
         r = Client().get('/healthz/')
