@@ -601,13 +601,41 @@
     kioskTick();
     setInterval(kioskTick, 10000);
 
-    // A book borrowed or returned at the desk changes what the search shows.
+    // A book borrowed or returned, or the map changed: the search and an open route are redrawn.
     document.addEventListener('ayla:live', function (e) {
-        if (e.detail.topics.indexOf('books') === -1 || kioskScreen !== 'find' || findPage !== 1) return;
+        const t = e.detail.topics;
+        const books = t.indexOf('books') !== -1, mapChanged = t.indexOf('map') !== -1;
+        if (mapChanged && kioskScreen === 'route' && wayBook) { kioskRefreshRoute(); return; }
+        if ((!books && !mapChanged) || kioskScreen !== 'find' || findPage !== 1) return;
         const a = document.activeElement;
         if (a && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) return;
         kioskFindBook(false, true);
     });
+
+    // Redraw the open route in place, on the same floor tab, without logging a new request.
+    let kioskRouteRefreshing = null;
+    function kioskRefreshRoute() {
+        kioskRouteRefreshing = (kioskRouteRefreshing || Promise.resolve()).then(async function () {
+            const book = wayBook, keepFloor = wayFloor;
+            if (!book || kioskScreen !== 'route') return;
+            let d;
+            try {
+                const r = await fetch(DESK_URLS.wayToBook + '?shelf_id=' + encodeURIComponent(book.shelf_id)
+                                      + '&book_id=' + encodeURIComponent(book.book_id || '') + '&refresh=1',
+                                      { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+                d = await r.json();
+            } catch (e) { return; }
+            if (wayBook !== book || kioskScreen !== 'route') return;
+            document.getElementById('routeProblem').classList.add('hidden');
+            ['routeTabs', 'routeSteps', 'routeNextFloor'].forEach(function (id) {
+                document.getElementById(id).classList.add('hidden');
+            });
+            if (routeLayer) routeLayer.clearLayers();
+            kioskDrawWay(d, book);
+            const floors = (wayData && wayData.floors) || [];
+            if (wayData.success && floors.length > 1 && keepFloor > 0 && keepFloor < floors.length) kioskShowFloor(keepFloor);
+        }).catch(function () {});
+    }
 
     // Screen switching
     const SCREENS = { choose: 'screenChoose', member: 'screenMember',
@@ -1600,6 +1628,6 @@
 
     kioskVisitorWay('entry');
 </script>
-{% include '_live.html' with topics='books' %}
+{% include '_live.html' with topics='books map' %}
 </body>
 </html>

@@ -262,6 +262,7 @@ urlpatterns = [
     path('admin-portal/flip-door/', views.flip_door, name='flip_door'),
     path('admin-portal/add-beacon/', views.add_beacon, name='add_beacon'),
     path('admin-portal/next-beacon-minor/', views.next_beacon_minor, name='next_beacon_minor'),
+    path('admin-portal/check-beacon/', views.check_beacon, name='check_beacon'),
     path('admin-portal/move-beacon/', views.move_beacon, name='move_beacon'),
     path('admin-portal/delete-beacon/', views.delete_beacon, name='delete_beacon'),
     path('admin-portal/update-beacon/', views.update_beacon, name='update_beacon'),

@@ -1017,6 +1017,7 @@ def _floor_payload(plans, current):
             'label': p.floor_label,
             'short': _floor_short_label(p),
             'is_current': (current is not None and p.floor_plan_id == current.floor_plan_id),
+            'renovation': (p.renovation_notice or '').strip(),
         }
         for p in plans
     ]
@@ -9838,6 +9839,80 @@ def next_beacon_minor(request):
                          'minor': _next_free_minor(request.GET.get('uuid') or '', major)})
 
 
+def _beacon_number_error(major, minor):
+    """An iBeacon's major and minor are 16-bit numbers; anything else is never heard."""
+    for name, value in (('Major', major), ('Minor', minor)):
+        if value is not None and not (0 <= value <= 65535):
+            return '%s must be between 0 and 65535; a beacon cannot broadcast %s.' % (name, value)
+    return ''
+
+
+@admin_only_required
+def check_beacon(request):
+    """Whether the beacon form as typed could be saved, asked while it is filled in."""
+    g = request.GET
+
+    def num(key):
+        raw = (g.get(key) or '').strip()
+        if raw == '':
+            return None
+        try:
+            return int(raw)
+        except ValueError:
+            raise ValueError(key)
+
+    try:
+        major, minor = num('major'), num('minor')
+    except ValueError as bad:
+        return JsonResponse({'ok': False, 'field': str(bad), 'error': '%s must be a whole number.' % str(bad).title()})
+    bad_number = _beacon_number_error(major, minor)
+    if bad_number:
+        return JsonResponse({'ok': False, 'field': 'minor' if 'Minor' in bad_number else 'major', 'error': bad_number})
+    uuid_value = (g.get('beacon_uuid') or '').strip()
+    if not uuid_value:
+        return JsonResponse({'ok': False, 'field': 'uuid', 'error': 'Enter the beacon UUID.'})
+    adv_type = (g.get('advertisement_type') or 'iBeacon').strip()
+    if adv_type not in dict(BLEBeacon.ADVERTISEMENT_TYPE_CHOICES):
+        adv_type = 'iBeacon'
+
+    beacon_id = _query_id(request, 'beacon_id')
+    beacon = BLEBeacon.objects.filter(beacon_id=beacon_id).first() if beacon_id else None
+    if beacon is None and adv_type == 'iBeacon':
+        # Placing: the same defaults add_beacon fills in.
+        major = 1 if major is None else major
+        if minor is None:
+            return JsonResponse({'ok': True})
+    identity = _beacon_identity(adv_type, uuid_value, major, minor, g.get('namespace_id'),
+                                g.get('instance_id'), (g.get('label') or '').strip())
+    if beacon is not None and identity == _beacon_identity(
+            beacon.advertisement_type, beacon.beacon_uuid, beacon.major, beacon.minor,
+            beacon.namespace_id, beacon.instance_id, beacon.label):
+        return JsonResponse({'ok': True})
+    clash = _beacon_clash(identity, exclude_id=beacon.beacon_id if beacon else None)
+    if clash is not None:
+        return JsonResponse({
+            'ok': False, 'field': 'minor' if adv_type == 'iBeacon' else 'identity',
+            'error': '"%s" on the %s already uses these values. Use another %s.' % (
+                clash.label or 'Beacon #%d' % clash.beacon_id, clash.floor_plan.floor_label,
+                'minor' if adv_type == 'iBeacon' else ('instance' if adv_type == 'Eddystone' else 'value')),
+        })
+    return JsonResponse({'ok': True})
+
+
+def _target_floor_state(shelf):
+    """Whether the floor of the shelf a patron is heading for is closed or under renovation now."""
+    if shelf is None:
+        return {}
+    plan = FloorPlan.objects.filter(room__shelf=shelf).first()
+    if plan is None:
+        return {}
+    return {
+        'target_floor_label': plan.floor_label,
+        'target_floor_closed': not plan.is_active or plan.archived_at is not None,
+        'target_renovation': (plan.renovation_notice or '').strip(),
+    }
+
+
 def _clash_error(other):
     return JsonResponse({
         'success': False,
@@ -9904,6 +9979,10 @@ def add_beacon(request):
         return JsonResponse({'success': False,
                              'error': 'Mounting height is measured in metres above the floor, '
                                       'so it should be between 0 and 10.'})
+
+    bad_number = _beacon_number_error(major, minor)
+    if bad_number:
+        return JsonResponse({'success': False, 'error': bad_number})
 
     # Left blank, an iBeacon gets the next free minor and a label to match.
     if adv_type == 'iBeacon':
@@ -10016,6 +10095,9 @@ def update_beacon(request):
         except ValueError:
             return None
 
+    bad_number = _beacon_number_error(_int('major'), _int('minor'))
+    if bad_number:
+        return JsonResponse({'success': False, 'error': bad_number})
     path_loss = _float('path_loss_n')
     if path_loss is not None and not (1.0 <= path_loss <= 6.0):
         return JsonResponse({'success': False,
@@ -10560,6 +10642,8 @@ def get_patron_map_data(request):
             if target_shelf is not None else None
         ),
         'renovation_notice': floor_plan.renovation_notice or '',
+        'renovation_message': floor_plan.renovation_message or '',
+        **_target_floor_state(target_shelf),
         # Beacons on every floor in service, so the map can tell which floor the patron is on.
         'all_beacons': [
             dict(_beacon_payload(b), x=b.map_x, y=b.map_y, floor_plan_id=b.floor_plan_id)

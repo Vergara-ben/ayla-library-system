@@ -657,3 +657,80 @@ class SimplerInventoryTests(TestCase):
             self.assertNotIn('Processing', page, url)
             self.assertNotIn('processing_stage', page, url)
         self.assertIn('Waiting for a shelf', staff.get('/library-staff/donations/').content.decode())
+
+
+class BeaconCheckTests(BeaconMinorTests):
+    """Duplicate or impossible beacon values are caught while typing and refused on save."""
+
+    def _check(self, **params):
+        data = {'beacon_uuid': self.UUID, 'advertisement_type': 'iBeacon', 'major': 1}
+        data.update(params)
+        return self.client.get('/admin-portal/check-beacon/', data).json()
+
+    def test_a_taken_minor_is_flagged_before_saving(self):
+        self._place(minor=5, label='Door')
+        result = self._check(minor=5)
+        self.assertFalse(result['ok'])
+        self.assertEqual(result['field'], 'minor')
+        self.assertIn('"Door"', result['error'])
+        self.assertTrue(self._check(minor=6)['ok'])
+
+    def test_editing_a_beacon_does_not_clash_with_itself(self):
+        mine = self._place(minor=5)['beacon']
+        self._place(minor=6)
+        self.assertTrue(self._check(minor=5, beacon_id=mine['beacon_id'])['ok'])
+        self.assertFalse(self._check(minor=6, beacon_id=mine['beacon_id'])['ok'])
+
+    def test_numbers_a_beacon_cannot_broadcast_are_refused(self):
+        self.assertFalse(self._check(minor=70000)['ok'])
+        self.assertFalse(self._check(major=-1, minor=2)['ok'])
+        self.assertFalse(self._place(minor=70000)['success'])
+        mine = self._place(minor=3)['beacon']
+        r = self.client.post('/admin-portal/update-beacon/', {
+            'beacon_id': mine['beacon_id'], 'beacon_uuid': self.UUID, 'major': 1, 'minor': -4}).json()
+        self.assertFalse(r['success'])
+
+    def test_the_form_has_a_live_check(self):
+        page = self.client.get('/admin-portal/floorplan-management/').content.decode()
+        self.assertIn('id="beaconCheckMsg"', page)
+        self.assertIn('/admin-portal/check-beacon/', page)
+
+
+class RenovationLiveTests(TestCase):
+    """The patron map learns of a renovation, and of its end, from the data it refetches."""
+
+    def setUp(self):
+        from .models import FloorPlan, Room, Shelf
+        self.ground = FloorPlan.objects.create(name='Ground', floor_number=1, is_active=True)
+        self.upper = FloorPlan.objects.create(name='Upper', floor_number=2, is_active=True,
+                                              renovation_notice='Ceiling repairs',
+                                              renovation_message='Closed until Friday.')
+        room = Room.objects.create(floor_plan=self.upper, name='Main', map_x=0, map_y=0)
+        self.shelf = Shelf.objects.create(room=room, name='Shelf B', map_x=5, map_y=5)
+        patron = Patron.objects.create(first_name='Ana', last_name='Cruz',
+                                       email='ana@example.invalid', account_status='Active')
+        self.client = _client(patron_id=patron.patron_id)
+
+    def _data(self, **params):
+        return self.client.get('/patron/map-data/', params).json()
+
+    def test_the_floor_and_its_message_are_sent(self):
+        d = self._data(floor=self.upper.floor_plan_id)
+        self.assertEqual((d['renovation_notice'], d['renovation_message']), ('Ceiling repairs', 'Closed until Friday.'))
+        tags = {f['floor_plan_id']: f['renovation'] for f in d['floors']}
+        self.assertEqual(tags, {self.ground.floor_plan_id: '', self.upper.floor_plan_id: 'Ceiling repairs'})
+
+    def test_the_target_floor_state_follows_the_toggle(self):
+        d = self._data(floor=self.ground.floor_plan_id, shelf=self.shelf.shelf_id)
+        self.assertEqual(d['target_renovation'], 'Ceiling repairs')
+        self.upper.renovation_notice = None
+        self.upper.save()
+        d = self._data(floor=self.ground.floor_plan_id, shelf=self.shelf.shelf_id)
+        self.assertEqual(d['target_renovation'], '')
+        self.assertFalse(d['target_floor_closed'])
+
+    def test_the_map_and_kiosk_listen_for_map_changes(self):
+        page = self.client.get('/patron/map/').content.decode()
+        self.assertIn('id="renoBanner"', page)
+        kiosk = open('templates/desk/kiosk.html', encoding='utf-8').read()
+        self.assertIn("topics='books map'", kiosk)
