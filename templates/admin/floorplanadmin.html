@@ -1101,11 +1101,11 @@
                 <div id="beaconIBeaconFields" class="grid grid-cols-2 gap-3">
                     <div class="space-y-1.5">
                         <label for="beaconMajor" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Major</label>
-                        <input type="number" id="beaconMajor" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" placeholder="optional">
+                        <input type="number" id="beaconMajor" min="0" max="65535" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" placeholder="optional">
                     </div>
                     <div class="space-y-1.5">
                         <label for="beaconMinor" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Minor</label>
-                        <input type="number" id="beaconMinor" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" placeholder="optional">
+                        <input type="number" id="beaconMinor" min="0" max="65535" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" placeholder="optional">
                     </div>
                     <p class="col-span-2 text-[10px] text-slate-500">The minor is filled in with the next number no other beacon uses, so beacons sharing a UUID and major stay apart.</p>
                 </div>
@@ -1146,11 +1146,12 @@
                     <label for="beaconLabel" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Label (optional)</label>
                     <input type="text" id="beaconLabel" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" placeholder="e.g., North-East Corner">
                 </div>
+                <p id="beaconCheckMsg" role="alert" class="hidden rounded-lg border border-rose-800/60 bg-rose-950/30 px-3 py-2 text-[11px] text-rose-300 font-semibold leading-relaxed"></p>
                 <div class="pt-4 flex items-center justify-end gap-3">
                     <button type="button" onclick="closeBeaconModal()" class="px-5 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:text-slate-100 hover:bg-slate-800/40 font-semibold tracking-wide transition-colors min-w-[100px]">
                         Cancel
                     </button>
-                    <button type="button" onclick="submitBeacon()" class="bg-cyan-700 hover:bg-cyan-600 text-white font-bold px-5 py-2.5 rounded-lg flex items-center gap-2 tracking-wide transition-colors shadow-md">
+                    <button type="button" id="beaconSaveBtn" onclick="submitBeacon()" class="bg-cyan-700 hover:bg-cyan-600 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-cyan-700 text-white font-bold px-5 py-2.5 rounded-lg flex items-center gap-2 tracking-wide transition-colors shadow-md">
                         <i class="fa-solid fa-check text-xs"></i> Save Beacon
                     </button>
                 </div>
@@ -1652,6 +1653,7 @@
             addShelf: "{% url 'add_shelf' %}",
             addBeacon: "{% url 'add_beacon' %}",
             nextBeaconMinor: "{% url 'next_beacon_minor' %}",
+            checkBeacon: "{% url 'check_beacon' %}",
             updateBeacon: "{% url 'update_beacon' %}",
             moveBeacon: "{% url 'move_beacon' %}",
             deleteBeacon: "{% url 'delete_beacon' %}",
@@ -2443,8 +2445,10 @@
                 note.classList.add('hidden');
             }
             if (!document.getElementById('beaconMajor').value) document.getElementById('beaconMajor').value = 1;
+            setBeaconCheck('');
             beaconAutoFill = true;
             suggestBeaconMinor();
+            checkBeaconSoon();
 
             document.getElementById('beaconModal').classList.remove('hidden');
             const uuidField = document.getElementById('beaconUuid');
@@ -2471,6 +2475,7 @@
                 if (seq !== minorSeq || !beaconAutoFill || !d.success) return;
                 document.getElementById('beaconMinor').value = d.minor;
                 document.getElementById('beaconLabel').value = 'Beacon ' + d.minor;
+                checkBeacon();
             } catch (e) { /* left blank: the server fills it in on save */ }
         }
         ['beaconUuid', 'beaconMajor', 'beaconAdvType'].forEach(function (id) {
@@ -2527,31 +2532,82 @@
 
             const title = document.getElementById('beaconModalTitle');
             if (title) title.textContent = 'Edit Beacon';
+            setBeaconCheck('');
             document.getElementById('beaconModal').classList.remove('hidden');
         };
 
-        window.submitBeacon = async function () {
-            const uuid = document.getElementById('beaconUuid').value.trim();
-            const label = document.getElementById('beaconLabel').value.trim();
-            if (!uuid) { alert('Beacon UUID is required'); return; }
+        // A duplicate or impossible value is caught while typing, and Save waits until it is fixed.
+        const BEACON_CHECK_FIELDS = ['beaconUuid', 'beaconAdvType', 'beaconMajor', 'beaconMinor',
+                                     'beaconNamespace', 'beaconInstance', 'beaconLabel'];
+        let beaconCheckSeq = 0, beaconCheckTimer = null;
 
-            const fields = {
-                beacon_uuid: uuid, label: label,
+        function beaconFormFields() {
+            const v = function (id) { return document.getElementById(id).value.trim(); };
+            return {
+                beacon_uuid: v('beaconUuid'), label: v('beaconLabel'),
                 advertisement_type: document.getElementById('beaconAdvType').value,
-                major: document.getElementById('beaconMajor').value.trim(),
-                minor: document.getElementById('beaconMinor').value.trim(),
-                namespace_id: document.getElementById('beaconNamespace').value.trim(),
-                instance_id: document.getElementById('beaconInstance').value.trim(),
-                tx_power: document.getElementById('beaconTxPower').value.trim(),
-                path_loss_n: document.getElementById('beaconPathLoss').value.trim(),
-                height: document.getElementById('beaconHeight').value.trim(),
+                major: v('beaconMajor'), minor: v('beaconMinor'),
+                namespace_id: v('beaconNamespace'), instance_id: v('beaconInstance'),
+                tx_power: v('beaconTxPower'), path_loss_n: v('beaconPathLoss'), height: v('beaconHeight'),
             };
+        }
+
+        function setBeaconCheck(error, field) {
+            const msg = document.getElementById('beaconCheckMsg');
+            msg.textContent = error || '';
+            msg.classList.toggle('hidden', !error);
+            document.getElementById('beaconSaveBtn').disabled = !!error;
+            const type = document.getElementById('beaconAdvType').value;
+            const target = { uuid: 'beaconUuid', major: 'beaconMajor', minor: 'beaconMinor',
+                             identity: type === 'Eddystone' ? 'beaconInstance'
+                                     : (type === 'DeviceName' ? 'beaconLabel' : 'beaconUuid') }[field];
+            BEACON_CHECK_FIELDS.forEach(function (id) {
+                const el = document.getElementById(id);
+                if (el) el.style.borderColor = (error && id === target) ? '#e11d48' : '';
+            });
+        }
+
+        async function checkBeacon() {
+            clearTimeout(beaconCheckTimer);
+            const seq = ++beaconCheckSeq;
+            const f = beaconFormFields();
+            const q = new URLSearchParams({
+                beacon_uuid: f.beacon_uuid, label: f.label, advertisement_type: f.advertisement_type,
+                major: f.major, minor: f.minor, namespace_id: f.namespace_id, instance_id: f.instance_id,
+            });
+            if (editingBeaconId !== null) q.set('beacon_id', editingBeaconId);
+            let d;
+            try {
+                const r = await fetch(URLS.checkBeacon + '?' + q.toString(),
+                                      { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+                d = await r.json();
+            } catch (e) { d = { ok: true }; }   // offline: the save itself still refuses a duplicate
+            if (seq !== beaconCheckSeq) return;
+            setBeaconCheck(d.ok ? '' : d.error, d.field);
+        }
+
+        function checkBeaconSoon() {
+            clearTimeout(beaconCheckTimer);
+            beaconCheckTimer = setTimeout(checkBeacon, 250);
+        }
+        BEACON_CHECK_FIELDS.forEach(function (id) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.addEventListener('input', checkBeaconSoon);
+            el.addEventListener('change', checkBeaconSoon);
+        });
+
+        window.submitBeacon = async function () {
+            const btn = document.getElementById('beaconSaveBtn');
+            await checkBeacon();
+            if (btn.disabled) return;
+            const fields = beaconFormFields();
 
             if (editingBeaconId !== null) {
                 const id = editingBeaconId;
                 const r = await postData(URLS.updateBeacon,
                                          Object.assign({ beacon_id: id }, fields));
-                if (!r.success) { alert(r.error || 'Failed to save beacon'); return; }
+                if (!r.success) { setBeaconCheck(r.error || 'The beacon could not be saved.'); return; }
                 // Redraw from the server response.
                 if (beaconMarkers[id] && beaconMarkers[id].marker) {
                     lmap.removeLayer(beaconMarkers[id].marker);
@@ -2568,7 +2624,7 @@
                 floor_plan_id: floorPlanId, map_x: pending.x, map_y: pending.y,
             }, fields));
             if (r.success) { addBeaconMarker(r.beacon); closeBeaconModal(); }
-            else alert(r.error || 'Failed to save beacon');
+            else setBeaconCheck(r.error || 'The beacon could not be saved.');
         };
 
         window.submitWaypoint = async function () {

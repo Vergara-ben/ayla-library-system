@@ -404,7 +404,8 @@ def desk_way_to_book(request):
         return JsonResponse({'success': False,
                              'error': 'That shelf is not placed on the floor plan.'})
 
-    _log_way(request, shelf)
+    if request.GET.get('refresh') != '1':
+        _log_way(request, shelf)
 
     route = json.loads(get_navigation_route(_sub_request(request, {
         'start_x': start.desk_x,
