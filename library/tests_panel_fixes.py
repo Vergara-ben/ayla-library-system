@@ -734,3 +734,49 @@ class RenovationLiveTests(TestCase):
         self.assertIn('id="renoBanner"', page)
         kiosk = open('templates/desk/kiosk.html', encoding='utf-8').read()
         self.assertIn("topics='books map'", kiosk)
+
+
+class CallNumberGuardTests(TestCase):
+    """A bare number is a sticker number, not a call number: refused when typed, replaced when imported."""
+
+    def setUp(self):
+        self.client = _client(admin_id=_staff(role='Admin', modules='books').admin_id, admin_role='Admin')
+        self.ajax = {'HTTP_X_REQUESTED_WITH': 'XMLHttpRequest'}
+
+    def test_the_check(self):
+        from .views import call_number_error
+        for bad in ('739', ' 14 ', '#22', 'No. 5', '739.0'):
+            self.assertTrue(call_number_error(bad), bad)
+        for good in ('', None, 'FIC D12a 1992', '813.54 B19h 2010', 'LB 1050 L34 1985', 'VAL C33e'):
+            self.assertIsNone(call_number_error(good), good)
+
+    def test_add_book_refuses_a_plain_number(self):
+        r = self.client.post('/admin-portal/add-book/', {'title': 'Noli', 'author': 'Rizal, Jose',
+                                                         'call_number': '739'}, **self.ajax).json()
+        self.assertFalse(r['success'])
+        self.assertIn('just a number', r['error'])
+        self.assertFalse(Book.objects.filter(title='Noli').exists())
+
+    def test_editing_refuses_a_plain_number_and_keeps_the_old_one(self):
+        book = Book.objects.create(title='Noli', author='Rizal, Jose', genre='Fiction', call_number='FIC R49n')
+        r = self.client.post('/admin-portal/edit-book/%d/' % book.book_id, {
+            'title': 'Noli', 'author': 'Rizal, Jose', 'call_number': '14'}, **self.ajax).json()
+        self.assertFalse(r['success'])
+        book.refresh_from_db()
+        self.assertEqual(book.call_number, 'FIC R49n')
+
+    def test_import_replaces_a_plain_number_and_says_so(self):
+        import openpyxl
+        wb = openpyxl.Workbook()
+        wb.active.append(['Title', 'Author', 'Genre', 'Publication Year', 'Code Label'])
+        wb.active.append(['Noli Me Tangere', 'Rizal, Jose', 'Fiction', 1887, 739])
+        wb.active.append(['El Filibusterismo', 'Rizal, Jose', 'Fiction', 1891, 'FIC R49e 1891'])
+        buf = io.BytesIO()
+        wb.save(buf)
+        upload = SimpleUploadedFile('books.xlsx', buf.getvalue())
+        r = self.client.post('/admin-portal/import-books/', {'excel_file': upload}).json()
+        self.assertIn('code label "739"', r['message'])
+        noli = Book.objects.get(title='Noli Me Tangere')
+        self.assertNotEqual(noli.call_number, '739')
+        self.assertTrue(noli.call_number.startswith('FIC R'))
+        self.assertEqual(Book.objects.get(title='El Filibusterismo').call_number, 'FIC R49e 1891')

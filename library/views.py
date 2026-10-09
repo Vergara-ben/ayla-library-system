@@ -1924,9 +1924,10 @@ def admin_add_book(request):
         publication_year = request.POST.get('publication_year', '').strip()
         cover_img_url = request.POST.get('cover_img_url', '').strip()
         price, price_error = _parse_price(request.POST.get('price'))
+        call_error = call_number_error(call_number)
 
-        if not title or not author or price_error:
-            error = price_error or 'Title and author are required.'
+        if not title or not author or price_error or call_error:
+            error = price_error or call_error or 'Title and author are required.'
             if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
                 from django.http import JsonResponse
                 return JsonResponse({'success': False, 'error': error})
@@ -2680,9 +2681,10 @@ def admin_edit_book(request, book_id):
         status = request.POST.get('status', '').strip()
         shelf_level_id = request.POST.get('shelf_level', '').strip()
         price, price_error = _parse_price(request.POST.get('price'))
+        call_error = call_number_error(request.POST.get('call_number'))
 
-        if not title or not author or price_error:
-            error = price_error or 'Title and author are required.'
+        if not title or not author or price_error or call_error:
+            error = price_error or call_error or 'Title and author are required.'
             if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
                 from django.http import JsonResponse
                 return JsonResponse({'success': False, 'error': error})
@@ -5188,6 +5190,7 @@ def _import_books_body(request):
         created_ids = []
         unmatched_areas = set()
         unreadable_conditions = set()
+        refused_call_numbers = set()
         unreadable_prices = set()
         unreadable_materials = set()
         # Boards named by the sheet that did not exist, in the order first met.
@@ -5321,6 +5324,12 @@ def _import_books_body(request):
             # An explicit Slot column wins; otherwise the row's turn on its board.
             written_slot = parse_shelf_slot(field(row, 'shelf_slot'))
 
+            # A bare number in the code label column is a sticker number; Book.save() makes a real one.
+            call_number = field(row, 'call_number') or None
+            if call_number_error(call_number):
+                refused_call_numbers.add(call_number[:20])
+                call_number = None
+
             for copy_no in range(quantity):
                 slot = None
                 if shelf_level is not None:
@@ -5340,7 +5349,7 @@ def _import_books_body(request):
                     material_type=material_type,
                     condition=condition,
                     # Blank is the normal case: Book.save() derives it.
-                    call_number=field(row, 'call_number') or None,
+                    call_number=call_number,
                     shelf_level=shelf_level,
                     status='Available',
                     price=price,
@@ -5375,6 +5384,11 @@ def _import_books_body(request):
             parts.append('could not read the condition "'
                          + '", "'.join(sorted(unreadable_conditions)[:5])
                          + '" — filed as Good')
+        if refused_call_numbers:
+            parts.append('code label "'
+                         + '", "'.join(sorted(refused_call_numbers)[:5])
+                         + ('" and %d more' % (len(refused_call_numbers) - 5) if len(refused_call_numbers) > 5 else '"')
+                         + ' was just a number, not a call number — one was made from the genre, author and year')
         if unreadable_prices:
             parts.append('could not read the price "'
                          + '", "'.join(sorted(unreadable_prices)[:5])
@@ -11602,6 +11616,18 @@ def isbn_typo(raw):
     if not re.fullmatch(r'\d{9}[\dX]|\d{13}', text):
         return None
     return isbn_error(raw)
+
+
+PLAIN_CALL_NUMBER = re.compile(r'^\s*(?:no\.?\s*|#)?\d+(?:\.0+)?\s*$', re.I)
+
+
+def call_number_error(raw):
+    """Why a typed code label is not a call number, or None. A bare number is a sticker or accession number."""
+    if raw and PLAIN_CALL_NUMBER.match(str(raw)):
+        return ('Code label "%s" is just a number, like a sticker or accession number. Type the spine '
+                'call number (e.g. FIC D12a 1992), or leave it blank and one is made from the genre, '
+                'author and year.' % str(raw).strip()[:20])
+    return None
 
 
 def isbn_error(raw):
