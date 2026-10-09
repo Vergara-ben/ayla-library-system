@@ -571,7 +571,7 @@
                     </div>
                     <div class="space-y-1.5">
                         <label for="editCallNumber" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Code label</label>
-                        <input type="text" name="call_number" id="editCallNumber" placeholder="e.g. FIC A31p 1963" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);">
+                        <input type="text" name="call_number" id="editCallNumber" placeholder="e.g. FIC A31p 1963" pattern="(?!\s*(?:[Nn][Oo]\.?\s*|#)?\d+\s*$).*" title="Type the spine call number, e.g. FIC D12a 1992. A plain number is a sticker number; leave it blank and one is made for you." class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);">
                         <p class="text-[10px] text-slate-500">Leave blank and it is worked out from the genre, author, title and year. Clear it to renumber.</p>
                     </div>
                     <div class="space-y-1.5">
