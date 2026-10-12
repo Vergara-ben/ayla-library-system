@@ -1,3 +1,4 @@
+from collections import Counter
 from django.shortcuts import redirect, render, get_object_or_404
 from django.contrib import messages
 from django.db.models import (Count, F, IntegerField, Max, Min, OuterRef, Q,
@@ -9840,6 +9841,85 @@ def _next_free_minor(beacon_uuid, major, exclude_id=None):
     while minor in used:
         minor += 1
     return minor
+
+
+def _most_common(values, default=None):
+    values = [v for v in values if v not in (None, '')]
+    return Counter(values).most_common(1)[0][0] if values else default
+
+
+def _beacon_label_for(floor_plan, x, y, minor):
+    """A room-named label for a beacon placed at (x, y), numbered if the room already has one."""
+    room = None
+    if x is not None and y is not None:
+        for r in Room.objects.filter(floor_plan=floor_plan, is_active=True):
+            if r.geometry and len(r.geometry) >= 3 and _point_in_polygon(x, y, r.geometry):
+                room = r.name.strip()
+                break
+    if not room:
+        return None, ('Beacon %d' % minor if minor is not None else '')
+    taken = {(b or '').strip().lower() for b in
+             BLEBeacon.objects.filter(floor_plan=floor_plan).values_list('label', flat=True)}
+    if room.lower() not in taken:
+        return room, room
+    n = 2
+    while ('%s %d' % (room, n)).lower() in taken:
+        n += 1
+    return room, '%s %d' % (room, n)
+
+
+@admin_only_required
+def beacon_defaults(request):
+    """Everything a new beacon can be given without typing, from the library's own beacons."""
+    floor_plan = FloorPlan.objects.filter(floor_plan_id=_query_id(request, 'floor_plan_id')).first()
+    beacons = list(BLEBeacon.objects.all())
+    ibeacons = [b for b in beacons if (b.advertisement_type or 'iBeacon') == 'iBeacon']
+
+    # The UUIDs already in use, most used first, each in the form it was saved.
+    by_hex = {}
+    for b in ibeacons:
+        key = _beacon_identity('iBeacon', b.beacon_uuid, None, None, None, None, None)[1]
+        if key:
+            entry = by_hex.setdefault(key, {'value': b.beacon_uuid.strip(), 'count': 0})
+            entry['count'] += 1
+    uuids = sorted(by_hex.values(), key=lambda u: -u['count'])
+
+    asked = (request.GET.get('uuid') or '').strip()
+    uuid_value = asked or (uuids[0]['value'] if uuids else '')
+    key = _beacon_identity('iBeacon', uuid_value, None, None, None, None, None)[1]
+    same_uuid = [b for b in ibeacons
+                 if _beacon_identity('iBeacon', b.beacon_uuid, None, None, None, None, None)[1] == key]
+    try:
+        major = int(request.GET.get('major')) if (request.GET.get('major') or '').strip() else None
+    except ValueError:
+        major = None
+    if major is None:
+        on_floor = [b.major for b in same_uuid if floor_plan and b.floor_plan_id == floor_plan.floor_plan_id]
+        major = _most_common(on_floor) or _most_common([b.major for b in same_uuid]) or 1
+    minor = _next_free_minor(uuid_value, major)
+
+    def num(key):
+        try:
+            return float(request.GET.get(key))
+        except (TypeError, ValueError):
+            return None
+    room, label = (_beacon_label_for(floor_plan, num('x'), num('y'), minor)
+                   if floor_plan else (None, 'Beacon %d' % minor))
+    floor_beacons = [b for b in beacons if floor_plan and b.floor_plan_id == floor_plan.floor_plan_id]
+    return JsonResponse({
+        'success': True,
+        'uuids': uuids,
+        'uuid': uuid_value,
+        'advertisement_type': _most_common([b.advertisement_type for b in beacons], 'iBeacon'),
+        'major': major,
+        'minor': minor,
+        'room': room,
+        'label': label,
+        # Calibration as the library's beacons are already set up.
+        'tx_power': _most_common([b.tx_power for b in beacons]),
+        'path_loss_n': _most_common([b.path_loss_n for b in beacons]),
+        'height': _most_common([b.height for b in floor_beacons]) or _most_common([b.height for b in beacons]),
+    })
 
 
 @admin_only_required
