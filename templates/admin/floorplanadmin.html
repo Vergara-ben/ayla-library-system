@@ -1083,8 +1083,16 @@
                 <p id="beaconInheritNote" class="hidden rounded-lg border border-cyan-900/50 bg-cyan-950/20 px-3 py-2 text-[10px] text-slate-400 leading-relaxed">
                 </p>
                 <div class="space-y-1.5">
-                    <label for="beaconUuid" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Beacon UUID</label>
-                    <input type="text" id="beaconUuid" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" placeholder="e.g., 550e8400-e29b-41d4-a716-446655440000">
+                    <div class="flex items-center justify-between gap-2">
+                        <label for="beaconUuidPick" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Beacon UUID</label>
+                        <button type="button" id="beaconScanBtn" onclick="scanNearbyBeacon()" class="hidden text-[10px] font-bold px-2.5 py-1 rounded-md border border-cyan-800/60 text-cyan-400 hover:bg-cyan-950/30 disabled:opacity-50 disabled:cursor-wait" title="Stand next to the physical beacon: its UUID, major and minor are read over Bluetooth">
+                            <i class="fa-brands fa-bluetooth-b mr-1"></i> Scan nearby beacon
+                        </button>
+                    </div>
+                    <select id="beaconUuidPick" onchange="pickBeaconUuid(this.value)" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium font-mono text-[11px]" style="background-color: var(--bg-input);"></select>
+                    <input type="text" id="beaconUuid" class="hidden w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium font-mono text-[11px]" style="background-color: var(--bg-input);" placeholder="e.g., 550e8400-e29b-41d4-a716-446655440000">
+                    <p id="beaconUuidHint" class="hidden text-[10px] text-amber-400 leading-relaxed"></p>
+                    <p id="beaconScanStatus" class="hidden text-[10px] leading-relaxed"></p>
                 </div>
                 <div class="space-y-1.5">
                     <label for="beaconAdvType" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">How it advertises</label>
@@ -1654,6 +1662,7 @@
             addBeacon: "{% url 'add_beacon' %}",
             nextBeaconMinor: "{% url 'next_beacon_minor' %}",
             checkBeacon: "{% url 'check_beacon' %}",
+            beaconDefaults: "{% url 'beacon_defaults' %}",
             updateBeacon: "{% url 'update_beacon' %}",
             moveBeacon: "{% url 'move_beacon' %}",
             deleteBeacon: "{% url 'delete_beacon' %}",
@@ -2383,109 +2392,219 @@
             connections[c.connection_id] = { from: c.waypoint_from_id, to: c.waypoint_to_id, polyline: pl };
         }
 
-        // Modals. New beacons start from the last beacon added on this floor.
-        function lastBeaconPlaced() {
-            let newest = null;
-            Object.keys(beaconMarkers).forEach(function (id) {
-                const b = beaconMarkers[id] && beaconMarkers[id].data;
-                if (!b) return;
-                if (!newest || Number(b.beacon_id) > Number(newest.beacon_id)) newest = b;
-            });
-            return newest;
+        // Modals. A new beacon is filled in from the library's own beacons, so placing one needs no typing.
+        let beaconUuids = [];                       // [{value, count}] already in use, most used first
+        let minorAuto = false, labelAuto = false, roomLabel = null;
+
+        function hexUuid(v) { return String(v == null ? '' : v).toLowerCase().replace(/[^0-9a-f]/g, ''); }
+        function uuidText(v) {
+            const h = hexUuid(v);
+            return h.length === 32
+                ? (h.slice(0, 8) + '-' + h.slice(8, 12) + '-' + h.slice(12, 16) + '-' + h.slice(16, 20) + '-' + h.slice(20)).toUpperCase()
+                : String(v || '');
+        }
+        function newUuid() {
+            if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+            const b = crypto.getRandomValues(new Uint8Array(16));
+            b[6] = (b[6] & 0x0f) | 0x40; b[8] = (b[8] & 0x3f) | 0x80;
+            const h = Array.from(b, function (x) { return x.toString(16).padStart(2, '0'); }).join('');
+            return h.slice(0, 8) + '-' + h.slice(8, 12) + '-' + h.slice(12, 16) + '-' + h.slice(16, 20) + '-' + h.slice(20);
         }
 
-        window.openBeaconModal = function () {
+        // The UUID picker: the ones in use, a fresh one, or one typed in.
+        function buildUuidPick(selected) {
+            const pick = document.getElementById('beaconUuidPick');
+            const list = beaconUuids.slice();
+            if (selected && !list.some(function (u) { return hexUuid(u.value) === hexUuid(selected); })) {
+                list.unshift({ value: selected, count: 0 });
+            }
+            pick.innerHTML = list.map(function (u) {
+                return '<option value="' + esc(u.value) + '">' + esc(uuidText(u.value)) + ' \u2014 '
+                    + (u.count ? u.count + ' beacon' + (u.count === 1 ? '' : 's') : 'not on the map yet') + '</option>';
+            }).join('') + '<option value="__new">Generate a new UUID</option>'
+                + '<option value="__type">Type a different UUID\u2026</option>';
+            const match = list.find(function (u) { return selected && hexUuid(u.value) === hexUuid(selected); });
+            pick.value = match ? match.value : '__new';
+            return pick.value;
+        }
+        function setUuidField(value, mode) {
+            const input = document.getElementById('beaconUuid');
+            input.value = value || '';
+            input.classList.toggle('hidden', mode === 'pick');
+            input.readOnly = mode === 'new';
+            const hint = document.getElementById('beaconUuidHint');
+            hint.textContent = mode === 'new'
+                ? 'A new UUID for a new set of beacons. Set each physical beacon to it with the beacon maker\'s app.' : '';
+            hint.classList.toggle('hidden', mode !== 'new');
+        }
+        function applyUuidPick(v) {
+            if (v === '__new') setUuidField(newUuid(), 'new');
+            else if (v === '__type') setUuidField('', 'type');
+            else setUuidField(v, 'pick');
+        }
+        window.pickBeaconUuid = function (v) {
+            applyUuidPick(v);
+            if (v === '__type') setTimeout(function () { document.getElementById('beaconUuid').focus(); }, 30);
+            document.getElementById('beaconUuid').dispatchEvent(new Event('change'));
+        };
+
+        function setScanStatus(text, tone) {
+            const el = document.getElementById('beaconScanStatus');
+            el.textContent = text || '';
+            el.className = 'text-[10px] leading-relaxed ' + (text ? '' : 'hidden ')
+                + ({ good: 'text-emerald-400', bad: 'text-rose-400' }[tone] || 'text-slate-400');
+        }
+        const canScanBeacons = !!(navigator.bluetooth && navigator.bluetooth.requestLEScan);
+        if (canScanBeacons) document.getElementById('beaconScanBtn').classList.remove('hidden');
+
+        window.openBeaconModal = async function () {
             editingBeaconId = null;
             const title = document.getElementById('beaconModalTitle');
             if (title) title.textContent = 'Place Beacon';
-            // Clear every field.
             ['beaconUuid', 'beaconLabel', 'beaconMajor', 'beaconMinor',
-             'beaconNamespace', 'beaconInstance', 'beaconTxPower', 'beaconPathLoss',
-             'beaconHeight']
-                .forEach(function (id) {
-                    const el = document.getElementById(id);
-                    if (el) el.value = '';
-                });
-            // Collapse the optional section again.
+             'beaconNamespace', 'beaconInstance', 'beaconTxPower', 'beaconPathLoss', 'beaconHeight']
+                .forEach(function (id) { const el = document.getElementById(id); if (el) el.value = ''; });
             const advFold = document.getElementById('beaconAdvanced');
             if (advFold) advFold.open = false;
             const type = document.getElementById('beaconAdvType');
-            if (type) { type.value = 'iBeacon'; syncBeaconFields(); }
-
-            // Keep settings from the previous beacon.
-            const prev = lastBeaconPlaced();
+            type.value = 'iBeacon'; syncBeaconFields();
+            setBeaconCheck(''); setScanStatus('');
             const note = document.getElementById('beaconInheritNote');
-            if (prev) {
-                const carry = {
-                    beaconUuid: prev.beacon_uuid,
-                    beaconMajor: prev.major,
-                    beaconNamespace: prev.namespace_id,
-                    beaconInstance: prev.instance_id,
-                    beaconTxPower: prev.tx_power,
-                    beaconPathLoss: prev.path_loss_n,
-                    beaconHeight: prev.height,
-                };
-                Object.keys(carry).forEach(function (id) {
-                    const el = document.getElementById(id);
-                    const v = carry[id];
-                    if (el && v !== null && v !== undefined && String(v).length) el.value = v;
-                });
-                if (prev.advertisement_type && type) {
-                    type.value = prev.advertisement_type;
-                    syncBeaconFields();
-                }
-                if (note) {
-                    note.innerHTML = 'Carried over from <strong class="text-slate-300">'
-                        + esc(prev.label || ('beacon #' + prev.beacon_id)) + '</strong>,'
-                        + ' with the next free <strong class="text-cyan-400">minor</strong> filled in.'
-                        + ' Set the beacon itself to that minor, or change it here to match.';
-                    note.classList.remove('hidden');
-                }
-            } else if (note) {
-                note.classList.add('hidden');
-            }
-            if (!document.getElementById('beaconMajor').value) document.getElementById('beaconMajor').value = 1;
-            setBeaconCheck('');
-            beaconAutoFill = true;
-            suggestBeaconMinor();
-            checkBeaconSoon();
-
+            note.textContent = 'Filling in from your beacons\u2026';
+            note.classList.remove('hidden');
             document.getElementById('beaconModal').classList.remove('hidden');
-            const uuidField = document.getElementById('beaconUuid');
-            if (uuidField && !uuidField.value) setTimeout(function () { uuidField.focus(); }, 50);
+
+            let d = null;
+            try {
+                const r = await fetch(URLS.beaconDefaults + '?' + new URLSearchParams({
+                    floor_plan_id: floorPlanId, x: pending ? pending.x : '', y: pending ? pending.y : '' }),
+                    { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+                d = await r.json();
+            } catch (e) { d = null; }
+            if (editingBeaconId !== null) return;          // switched to editing while this loaded
+            d = d && d.success ? d : {};
+            beaconUuids = d.uuids || [];
+            applyUuidPick(buildUuidPick(d.uuid));
+            if (d.advertisement_type) { type.value = d.advertisement_type; syncBeaconFields(); }
+            const set = function (id, v) { document.getElementById(id).value = (v === null || v === undefined) ? '' : v; };
+            set('beaconMajor', d.major); set('beaconMinor', d.minor); set('beaconLabel', d.label);
+            set('beaconTxPower', d.tx_power); set('beaconPathLoss', d.path_loss_n); set('beaconHeight', d.height);
+            minorAuto = true; labelAuto = true; roomLabel = d.room ? d.label : null;
+
+            if (!beaconUuids.length) {
+                note.innerHTML = 'No beacons yet, so a <strong class="text-cyan-400">new UUID</strong> was made for your library.'
+                    + ' Set each physical beacon to it, with major ' + esc(d.major || 1) + ' and the minor shown here.';
+            } else {
+                note.innerHTML = 'Filled in from your library\'s beacons'
+                    + (d.room ? ', named after <strong class="text-slate-300">' + esc(d.room) + '</strong>' : '')
+                    + '. Next free minor is <strong class="text-cyan-400">' + esc(d.minor) + '</strong>: set the beacon to it'
+                    + (canScanBeacons ? ', or stand next to the beacon and press <strong class="text-slate-300">Scan nearby beacon</strong>.' : '.');
+            }
+            checkBeacon();
+            setTimeout(function () { document.getElementById('beaconSaveBtn').focus(); }, 50);
         };
 
-        // The minor and label fill themselves in until someone types over them.
-        let beaconAutoFill = false;
+        // The minor and label keep up with each other until someone types over them.
         let minorSeq = 0;
         async function suggestBeaconMinor() {
-            if (!beaconAutoFill || editingBeaconId !== null) return;
-            // Only an iBeacon is told apart by its minor; for the others the label may be the identity.
+            if (editingBeaconId !== null || !minorAuto) return;
+            const minorEl = document.getElementById('beaconMinor');
+            const labelEl = document.getElementById('beaconLabel');
             if (document.getElementById('beaconAdvType').value !== 'iBeacon') {
-                ['beaconMinor', 'beaconLabel'].forEach(function (id) { document.getElementById(id).value = ''; });
+                minorEl.value = '';
+                if (labelAuto && !roomLabel) labelEl.value = '';
                 return;
             }
-            const uuid = document.getElementById('beaconUuid').value.trim();
-            const major = document.getElementById('beaconMajor').value.trim();
             const seq = ++minorSeq;
             try {
-                const r = await fetch(URLS.nextBeaconMinor + '?' + new URLSearchParams({ uuid: uuid, major: major }),
-                                      { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+                const r = await fetch(URLS.nextBeaconMinor + '?' + new URLSearchParams({
+                    uuid: document.getElementById('beaconUuid').value.trim(),
+                    major: document.getElementById('beaconMajor').value.trim() }),
+                    { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
                 const d = await r.json();
-                if (seq !== minorSeq || !beaconAutoFill || !d.success) return;
-                document.getElementById('beaconMinor').value = d.minor;
-                document.getElementById('beaconLabel').value = 'Beacon ' + d.minor;
+                if (seq !== minorSeq || !minorAuto || !d.success) return;
+                minorEl.value = d.minor;
+                if (labelAuto && !roomLabel) labelEl.value = 'Beacon ' + d.minor;
                 checkBeacon();
-            } catch (e) { /* left blank: the server fills it in on save */ }
+            } catch (e) { /* left as is: the server fills a blank minor in on save */ }
         }
         ['beaconUuid', 'beaconMajor', 'beaconAdvType'].forEach(function (id) {
             const el = document.getElementById(id);
             if (el) el.addEventListener('change', suggestBeaconMinor);
         });
-        ['beaconMinor', 'beaconLabel'].forEach(function (id) {
-            const el = document.getElementById(id);
-            if (el) el.addEventListener('input', function () { beaconAutoFill = false; });
+        document.getElementById('beaconMinor').addEventListener('input', function () {
+            minorAuto = false;
+            if (labelAuto && !roomLabel) {
+                const v = this.value.trim();
+                document.getElementById('beaconLabel').value = v ? 'Beacon ' + v : '';
+            }
         });
+        document.getElementById('beaconLabel').addEventListener('input', function () { labelAuto = false; });
+
+        // Read the real beacon over Bluetooth, so the map holds what it actually broadcasts.
+        function parseIBeaconAdv(e) {
+            const md = e.manufacturerData;
+            if (!md || typeof md.forEach !== 'function') return null;
+            let found = null;
+            md.forEach(function (v) {
+                if (found || !v || v.byteLength < 23) return;
+                if (v.getUint8(0) !== 0x02 || v.getUint8(1) !== 0x15) return;   // not a proximity beacon
+                let h = '';
+                for (let k = 2; k < 18; k++) h += v.getUint8(k).toString(16).padStart(2, '0');
+                found = { uuid: h.slice(0, 8) + '-' + h.slice(8, 12) + '-' + h.slice(12, 16) + '-' + h.slice(16, 20) + '-' + h.slice(20),
+                          major: v.getUint16(18, false), minor: v.getUint16(20, false) };
+            });
+            return found;
+        }
+        window.scanNearbyBeacon = async function () {
+            const btn = document.getElementById('beaconScanBtn');
+            if (btn.disabled) return;
+            btn.disabled = true;
+            setScanStatus('Listening for 6 seconds\u2026 hold the laptop next to the beacon.');
+            const heard = {};
+            const onAdv = function (e) {
+                const ib = parseIBeaconAdv(e);
+                if (!ib || e.rssi == null) return;
+                const k = ib.uuid + '/' + ib.major + '/' + ib.minor;
+                (heard[k] = heard[k] || { ib: ib, rssi: [] }).rssi.push(e.rssi);
+            };
+            navigator.bluetooth.addEventListener('advertisementreceived', onAdv);
+            let scan = null;
+            try {
+                scan = await navigator.bluetooth.requestLEScan({ acceptAllAdvertisements: true });
+            } catch (err) {
+                navigator.bluetooth.removeEventListener('advertisementreceived', onAdv);
+                btn.disabled = false;
+                setScanStatus('Bluetooth scanning did not start (' + ((err && err.message) || err)
+                    + '). Allow Bluetooth for this site, or fill the beacon in by hand.', 'bad');
+                return;
+            }
+            await new Promise(function (r) { setTimeout(r, 6000); });
+            try { if (scan) scan.stop(); } catch (e) { /* already stopped */ }
+            navigator.bluetooth.removeEventListener('advertisementreceived', onAdv);
+            btn.disabled = false;
+            if (document.getElementById('beaconModal').classList.contains('hidden')) return;
+
+            const found = Object.keys(heard).map(function (k) {
+                const r = heard[k].rssi.slice().sort(function (a, b) { return a - b; });
+                return Object.assign({ rssi: r[Math.floor(r.length / 2)] }, heard[k].ib);
+            }).sort(function (a, b) { return b.rssi - a.rssi; });
+            if (!found.length) {
+                setScanStatus('No beacon heard. Check it is switched on and within a metre, then scan again.', 'bad');
+                return;
+            }
+            const best = found[0];
+            document.getElementById('beaconAdvType').value = 'iBeacon';
+            syncBeaconFields();
+            applyUuidPick(buildUuidPick(best.uuid));
+            document.getElementById('beaconMajor').value = best.major;
+            document.getElementById('beaconMinor').value = best.minor;
+            minorAuto = false;
+            if (labelAuto && !roomLabel) document.getElementById('beaconLabel').value = 'Beacon ' + best.minor;
+            setScanStatus('Read from the beacon: major ' + best.major + ', minor ' + best.minor + ' (signal ' + best.rssi + ' dBm'
+                + (found.length > 1 ? ', the strongest of ' + found.length + ' heard' : '') + ').', 'good');
+            checkBeacon();
+        };
         window.closeBeaconModal = function () {
             editingBeaconId = null;
             const title = document.getElementById('beaconModalTitle');
@@ -2518,7 +2637,9 @@
             const d = b.data;
             editingBeaconId = id;
 
-            document.getElementById('beaconUuid').value = d.beacon_uuid || '';
+            applyUuidPick(buildUuidPick(d.beacon_uuid || ''));
+            minorAuto = false; labelAuto = false; roomLabel = null;
+            setScanStatus('');
             document.getElementById('beaconLabel').value = d.label || '';
             document.getElementById('beaconAdvType').value = d.advertisement_type || 'iBeacon';
             document.getElementById('beaconMajor').value = (d.major != null) ? d.major : '';
@@ -2532,12 +2653,13 @@
 
             const title = document.getElementById('beaconModalTitle');
             if (title) title.textContent = 'Edit Beacon';
+            document.getElementById('beaconInheritNote').classList.add('hidden');
             setBeaconCheck('');
             document.getElementById('beaconModal').classList.remove('hidden');
         };
 
         // A duplicate or impossible value is caught while typing, and Save waits until it is fixed.
-        const BEACON_CHECK_FIELDS = ['beaconUuid', 'beaconAdvType', 'beaconMajor', 'beaconMinor',
+        const BEACON_CHECK_FIELDS = ['beaconUuid', 'beaconUuidPick', 'beaconAdvType', 'beaconMajor', 'beaconMinor',
                                      'beaconNamespace', 'beaconInstance', 'beaconLabel'];
         let beaconCheckSeq = 0, beaconCheckTimer = null;
 
@@ -2558,9 +2680,10 @@
             msg.classList.toggle('hidden', !error);
             document.getElementById('beaconSaveBtn').disabled = !!error;
             const type = document.getElementById('beaconAdvType').value;
-            const target = { uuid: 'beaconUuid', major: 'beaconMajor', minor: 'beaconMinor',
+            const uuidShown = document.getElementById('beaconUuid').classList.contains('hidden') ? 'beaconUuidPick' : 'beaconUuid';
+            const target = { uuid: uuidShown, major: 'beaconMajor', minor: 'beaconMinor',
                              identity: type === 'Eddystone' ? 'beaconInstance'
-                                     : (type === 'DeviceName' ? 'beaconLabel' : 'beaconUuid') }[field];
+                                     : (type === 'DeviceName' ? 'beaconLabel' : uuidShown) }[field];
             BEACON_CHECK_FIELDS.forEach(function (id) {
                 const el = document.getElementById(id);
                 if (el) el.style.borderColor = (error && id === target) ? '#e11d48' : '';

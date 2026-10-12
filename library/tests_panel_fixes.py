@@ -780,3 +780,51 @@ class CallNumberGuardTests(TestCase):
         self.assertNotEqual(noli.call_number, '739')
         self.assertTrue(noli.call_number.startswith('FIC R'))
         self.assertEqual(Book.objects.get(title='El Filibusterismo').call_number, 'FIC R49e 1891')
+
+
+class BeaconDefaultsTests(TestCase):
+    """Placing a beacon needs no typing: everything comes from the library's own beacons."""
+    UUID = 'fda50693a4e24fb1afcfc6eb07647825'
+
+    def setUp(self):
+        from .models import BLEBeacon, FloorPlan, Room
+        self.upper = FloorPlan.objects.create(name='Upper', floor_number=2, is_active=True)
+        self.ground = FloorPlan.objects.create(name='Ground', floor_number=1, is_active=True)
+        Room.objects.create(floor_plan=self.ground, name="Children's Room", map_x=0, map_y=0,
+                            geometry=[[0, 0], [100, 0], [100, 100], [0, 100]])
+        for minor in (1, 2):
+            BLEBeacon.objects.create(floor_plan=self.upper, beacon_uuid=self.UUID, major=10011, minor=minor,
+                                     map_x=5, map_y=5, tx_power=-59, path_loss_n=2.5, label='Hall %d' % minor)
+        self.client = _client(admin_id=_staff(role='Admin').admin_id, admin_role='Admin')
+
+    def _defaults(self, **q):
+        return self.client.get('/admin-portal/beacon-defaults/', q).json()
+
+    def test_a_floor_without_beacons_still_gets_the_library_uuid(self):
+        d = self._defaults(floor_plan_id=self.ground.floor_plan_id, x=50, y=50)
+        self.assertEqual(d['uuid'], self.UUID)
+        self.assertEqual(d['uuids'], [{'value': self.UUID, 'count': 2}])
+        self.assertEqual((d['major'], d['minor']), (10011, 3))
+        self.assertEqual((d['tx_power'], d['path_loss_n']), (-59, 2.5))
+
+    def test_the_label_is_the_room_clicked_in_and_numbered(self):
+        from .models import BLEBeacon
+        d = self._defaults(floor_plan_id=self.ground.floor_plan_id, x=50, y=50)
+        self.assertEqual((d['room'], d['label']), ("Children's Room", "Children's Room"))
+        BLEBeacon.objects.create(floor_plan=self.ground, beacon_uuid=self.UUID, major=10011, minor=3,
+                                 map_x=50, map_y=50, label="Children's Room")
+        self.assertEqual(self._defaults(floor_plan_id=self.ground.floor_plan_id, x=60, y=60)['label'],
+                         "Children's Room 2")
+        outside = self._defaults(floor_plan_id=self.ground.floor_plan_id, x=500, y=500)
+        self.assertEqual((outside['room'], outside['label']), (None, 'Beacon 4'))
+
+    def test_with_no_beacons_at_all_nothing_is_invented_on_the_server(self):
+        from .models import BLEBeacon
+        BLEBeacon.objects.all().delete()
+        d = self._defaults(floor_plan_id=self.ground.floor_plan_id)
+        self.assertEqual((d['uuids'], d['uuid'], d['major'], d['minor']), ([], '', 1, 1))
+
+    def test_the_form_offers_a_picker_and_a_scan(self):
+        page = self.client.get('/admin-portal/floorplan-management/').content.decode()
+        for marker in ('id="beaconUuidPick"', 'id="beaconScanBtn"', '/admin-portal/beacon-defaults/', 'requestLEScan'):
+            self.assertIn(marker, page)
