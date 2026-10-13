@@ -2,7 +2,7 @@ import math
 
 from django.db import models
 from django.utils import timezone
-from datetime import time
+from datetime import time, timedelta
 
 from .modules import MODULE_LABELS, clean_module_keys
 from .names import compose_name, parse_name
@@ -920,6 +920,21 @@ class Patron(Archivable):
     fix_note = models.TextField(blank=True, null=True)
     fix_requested_at = models.DateTimeField(blank=True, null=True)
     resubmitted_at = models.DateTimeField(blank=True, null=True)
+    # The fix asked for is the ID itself, so the link will not send without a new one.
+    fix_needs_id = models.BooleanField(default=False)
+
+    @property
+    def fix_link_expires_at(self):
+        """When the private fix link stops working, or None if none is out."""
+        from .emails import FIX_LINK_DAYS
+        if not self.fix_token or self.fix_requested_at is None:
+            return None
+        return self.fix_requested_at + timedelta(days=FIX_LINK_DAYS)
+
+    @property
+    def fix_link_expired(self):
+        expires = self.fix_link_expires_at
+        return expires is not None and timezone.now() > expires
 
     @property
     def credential_filename(self):

@@ -894,3 +894,74 @@ class RejectionReasonTests(TestCase):
         self.staff.post(url, {'action': 'reject', 'staff_note': 'The photo is blurry or too dark'})
         photo.refresh_from_db()
         self.assertEqual((photo.status, photo.staff_note), ('Rejected', 'The photo is blurry or too dark'))
+
+
+class FixLinkTests(TestCase):
+    """The link to fix a registration works once, for two weeks, and can be renewed."""
+
+    def setUp(self):
+        self.applicant = Patron.objects.create(
+            first_name='Ana', last_name='Cruz', email='ana@example.invalid', account_status='Pending',
+            registration_channel='Online', credential_document='credentials/x.png', otp_verified=True,
+            patron_type='Student')
+        self.staff = _client(admin_id=_staff(modules='patrons').admin_id, admin_role='Staff')
+
+    def _ask(self, needs_id):
+        self.staff.post('/admin-portal/reject-patron/%d/' % self.applicant.patron_id, {
+            'mode': 'fix', 'reason': 'The ID photo is blurry or unreadable', 'needs_id': '1' if needs_id else '0'})
+        self.applicant.refresh_from_db()
+        return '/patron/registration/fix/%s/' % self.applicant.fix_token
+
+    def _details(self, **extra):
+        data = {'first_name': 'Ana', 'last_name': 'Cruz', 'patron_type': 'Student'}
+        data.update(extra)
+        return data
+
+    def test_a_new_id_is_required_when_the_id_was_the_problem(self):
+        from django.core import mail
+        url = self._ask(needs_id=True)
+        self.assertIn('upload a new photo or scan of your ID', mail.outbox[-1].body)
+        page = Client().post(url, self._details())
+        self.assertContains(page, 'Please attach a new photo or scan of your ID')
+        self.applicant.refresh_from_db()
+        self.assertIsNone(self.applicant.resubmitted_at)
+        png = SimpleUploadedFile('id.png', b'\x89PNG\r\n\x1a\n' + b'0' * 64, content_type='image/png')
+        Client().post(url, self._details(credential_document=png))
+        self.applicant.refresh_from_db()
+        self.assertIsNotNone(self.applicant.resubmitted_at)
+
+    def test_the_link_works_once(self):
+        url = self._ask(needs_id=False)
+        Client().post(url, self._details())
+        self.assertContains(Client().get(url), 'already been used', status_code=404)
+
+    def test_an_expired_link_can_be_renewed_by_the_applicant_and_by_staff(self):
+        from django.core import mail
+        url = self._ask(needs_id=True)
+        Patron.objects.filter(pk=self.applicant.pk).update(fix_requested_at=timezone.now() - timedelta(days=15))
+        self.applicant.refresh_from_db()
+        self.assertTrue(self.applicant.fix_link_expired)
+        self.assertContains(Client().get(url), 'Email me a new link', status_code=410)
+        self.assertContains(self.staff.get('/library-staff/patrons/'), 'Fix link expired')
+
+        sent = len(mail.outbox)
+        page = Client().post(url, {'action': 'resend'})
+        self.assertContains(page, 'New link sent')
+        self.assertEqual(len(mail.outbox), sent + 1)
+        self.assertEqual(mail.outbox[-1].to, ['ana@example.invalid'])
+        self.applicant.refresh_from_db()
+        self.assertFalse(self.applicant.fix_link_expired)
+        self.assertTrue(self.applicant.fix_needs_id)
+        self.assertContains(Client().get(url), 'already been used', status_code=404)
+
+        Patron.objects.filter(pk=self.applicant.pk).update(fix_requested_at=timezone.now() - timedelta(days=15))
+        self.staff.post('/admin-portal/resend-fix-link/%d/' % self.applicant.patron_id)
+        self.applicant.refresh_from_db()
+        self.assertFalse(self.applicant.fix_link_expired)
+
+    def test_registering_again_while_pending_explains_itself(self):
+        page = Client().post('/patron/register/', {
+            'first_name': 'Ana', 'last_name': 'Cruz', 'email': 'ana@example.invalid',
+            'password': 'Secret12345!', 'confirm_password': 'Secret12345!', 'patron_type': 'Student',
+            'contact_number': '09170000000', 'address': 'Somewhere', 'accept_terms': 'yes'})
+        self.assertContains(page, 'still reviewing it')

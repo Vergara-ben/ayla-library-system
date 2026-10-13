@@ -490,6 +490,10 @@ def patron_register(request):
         # A stale unverified application may be replaced; anything else is a duplicate.
         elif existing.account_status == 'Pending' and not existing.otp_verified:
             existing.delete()
+        elif existing.account_status == 'Pending':
+            return _form_error('You already applied with this email, and the library is still reviewing it. '
+                               'Check your email: if the library asked you to fix something, the link in that '
+                               'message lets you do it (and can send you a new one). You can also ask at the desk.')
         else:
             return _form_error('Email already exists')
 
@@ -2263,7 +2267,7 @@ def reject_patron(request, patron_id):
         return _patron_page_redirect(request)
 
     if request.POST.get('mode') == 'fix':
-        return _ask_applicant_to_fix(request, patron, reason)
+        return _ask_applicant_to_fix(request, patron, reason, needs_id=request.POST.get('needs_id') == '1')
 
     fullname, email = patron.fullname, patron.email
     log_admin_action(request, 'Reject', 'Patron', patron.patron_id,
@@ -2276,37 +2280,77 @@ def reject_patron(request, patron_id):
     return _patron_page_redirect(request)
 
 
-def _ask_applicant_to_fix(request, patron, reason):
-    """Keep the application pending and email the applicant a link to correct it."""
+def _ask_applicant_to_fix(request, patron, reason, needs_id=False, resend=False):
+    """Keep the application pending and email the applicant a one-time link to correct it."""
     from .emails import registration_fix_email
     if patron.registration_channel != 'Online' or not patron.email:
         messages.error(request, f'{patron.fullname} signed up at the desk, so there is no link to send. '
                                 f'Correct the details with them, or reject the request.')
         return _patron_page_redirect(request)
-    patron.fix_token = secrets.token_urlsafe(32)
-    patron.fix_note = reason
-    patron.fix_requested_at = timezone.now()
-    patron.resubmitted_at = None
-    patron.save(update_fields=['fix_token', 'fix_note', 'fix_requested_at', 'resubmitted_at'])
+    _issue_fix_link(patron, reason, needs_id)
     link = request.build_absolute_uri(reverse('registration_fix', args=[patron.fix_token]))
-    sent = registration_fix_email(patron, reason, link)
+    sent = registration_fix_email(patron, reason, link, needs_id=needs_id)
     log_admin_action(request, 'Update', 'Patron', patron.patron_id,
-                     f'Asked "{patron.fullname}" to fix their registration: {reason}')
+                     (f'Sent "{patron.fullname}" a new link to fix their registration' if resend
+                      else f'Asked "{patron.fullname}" to fix their registration')
+                     + (' (new ID required)' if needs_id else '') + f': {reason}')
     if sent:
-        messages.success(request, f'{patron.fullname} has been emailed a link to fix their registration.')
+        messages.success(request, f'{patron.fullname} has been emailed a link to fix their registration'
+                                  f'{" and upload a new ID" if needs_id else ""}. It works once, for 14 days.')
     else:
         messages.warning(request, f'Saved, but the email to {patron.email} could not be sent. '
                                   f'Their link is: {link}')
     return _patron_page_redirect(request)
 
 
+def _issue_fix_link(patron, reason, needs_id):
+    """A fresh one-time link; any earlier one stops working."""
+    patron.fix_token = secrets.token_urlsafe(32)
+    patron.fix_note = reason
+    patron.fix_needs_id = bool(needs_id)
+    patron.fix_requested_at = timezone.now()
+    patron.resubmitted_at = None
+    patron.save(update_fields=['fix_token', 'fix_note', 'fix_needs_id', 'fix_requested_at', 'resubmitted_at'])
+
+
+def _masked_email(email):
+    name, _, domain = (email or '').partition('@')
+    return (name[:2] + '\u2022' * min(6, max(1, len(name) - 2)) + '@' + domain) if domain else ''
+
+
+@admin_or_module_required('patrons')
+def resend_fix_link(request, patron_id):
+    """Send an applicant whose fix link ran out a new one, for the same reason."""
+    if request.method != 'POST':
+        return _patron_page_redirect(request)
+    patron = Patron.objects.filter(patron_id=patron_id, account_status='Pending').first()
+    if patron is None or not patron.fix_note:
+        messages.error(request, 'That application is no longer waiting for a fix.')
+        return _patron_page_redirect(request)
+    return _ask_applicant_to_fix(request, patron, patron.fix_note, needs_id=patron.fix_needs_id, resend=True)
+
+
 def registration_fix(request, token):
-    """The applicant's page for correcting a registration the library sent back."""
-    from .emails import FIX_LINK_DAYS
+    """The applicant's one-time page for correcting a registration the library sent back."""
+    from .emails import registration_fix_email
     patron = Patron.objects.filter(fix_token=token, account_status='Pending').first()
-    if (patron is None or patron.fix_requested_at is None
-            or timezone.now() - patron.fix_requested_at > timedelta(days=FIX_LINK_DAYS)):
-        return render(request, 'patron/registrationfix.html', {'stage': 'expired'}, status=404)
+    if patron is None or patron.fix_requested_at is None:
+        # Sent back already, replaced by a newer link, or the application was decided.
+        return render(request, 'patron/registrationfix.html', {'stage': 'used'}, status=404)
+
+    if patron.fix_link_expired:
+        if request.method == 'POST' and request.POST.get('action') == 'resend':
+            # The new link goes only to the address on the application.
+            _issue_fix_link(patron, patron.fix_note, patron.fix_needs_id)
+            link = request.build_absolute_uri(reverse('registration_fix', args=[patron.fix_token]))
+            registration_fix_email(patron, patron.fix_note, link, needs_id=patron.fix_needs_id)
+            log_patron_action(request, 'Update', 'Patron', patron.patron_id,
+                              'Asked for a new registration fix link after the old one expired', patron=patron)
+            return render(request, 'patron/registrationfix.html',
+                          {'stage': 'resent', 'masked_email': _masked_email(patron.email)})
+        return render(request, 'patron/registrationfix.html',
+                      {'stage': 'expired', 'patron': patron, 'masked_email': _masked_email(patron.email)},
+                      status=410)
 
     context = {'stage': 'form', 'patron': patron,
                'patron_types': Patron.PATRON_TYPE_CHOICES}
@@ -2321,6 +2365,9 @@ def registration_fix(request, token):
         patron_type = patron.patron_type
 
     uploaded = request.FILES.get('credential_document')
+    if uploaded is None and patron.fix_needs_id:
+        return render(request, 'patron/registrationfix.html', dict(context, error=(
+            'Please attach a new photo or scan of your ID. That is what the library asked you to fix.')))
     credential = None
     if uploaded is not None:
         try:
