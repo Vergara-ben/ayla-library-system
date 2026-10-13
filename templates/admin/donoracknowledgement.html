@@ -1,0 +1,101 @@
+{% load static %}<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Acknowledgement of Donation · {{ donor.name }}</title>
+<link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
+<style>
+  /* A paper document: printed or saved as PDF, so it stays light in any theme. */
+  :root { --ink: #1f2937; --muted: #6b7280; --rule: #d1d5db; --accent: #1e3a8a; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #eef1f5; color: var(--ink); font: 14px/1.55 Georgia, 'Times New Roman', serif; }
+  .bar { max-width: 210mm; margin: 16px auto 0; display: flex; justify-content: flex-end; gap: 8px; padding: 0 16px; }
+  .bar button { font: 600 13px system-ui, sans-serif; padding: 8px 14px; border-radius: 8px; border: 1px solid #1e3a8a; background: #1e3a8a; color: #fff; cursor: pointer; }
+  .bar button.ghost { background: #fff; color: #1e3a8a; }
+  .sheet { max-width: 210mm; min-height: 270mm; margin: 12px auto 24px; background: #fff; padding: 22mm 20mm; box-shadow: 0 6px 24px rgba(0,0,0,.08); }
+  header { display: flex; align-items: center; gap: 14px; border-bottom: 2px solid var(--accent); padding-bottom: 12px; }
+  header img { height: 54px; }
+  header .lib { font: 700 20px system-ui, sans-serif; color: var(--accent); }
+  header .sub { font: 12px system-ui, sans-serif; color: var(--muted); }
+  h1 { font-size: 22px; text-align: center; letter-spacing: .04em; text-transform: uppercase; margin: 26px 0 4px; }
+  .ref { text-align: center; font: 12px system-ui, sans-serif; color: var(--muted); margin-bottom: 22px; }
+  .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 24px; font-size: 13.5px; margin-bottom: 18px; }
+  .meta b { display: inline-block; min-width: 92px; color: var(--muted); font-weight: normal; }
+  p.body { margin: 0 0 16px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 6px 0 10px; }
+  th, td { border: 1px solid var(--rule); padding: 7px 9px; text-align: left; vertical-align: top; }
+  th { background: #f3f4f6; font: 600 12px system-ui, sans-serif; text-transform: uppercase; letter-spacing: .03em; }
+  td.num, th.num { text-align: center; width: 64px; }
+  tfoot td { font-weight: bold; }
+  .sign { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; margin-top: 54px; }
+  .sign div { border-top: 1px solid var(--ink); padding-top: 6px; text-align: center; font-size: 12.5px; }
+  .sign small { display: block; color: var(--muted); }
+  footer { margin-top: 36px; font: 12px system-ui, sans-serif; color: var(--muted); text-align: center; }
+  @media print {
+    body { background: #fff; }
+    .bar { display: none; }
+    .sheet { box-shadow: none; margin: 0; padding: 14mm 14mm; min-height: auto; }
+    @page { size: A4; margin: 10mm; }
+  }
+  @media (max-width: 640px) {
+    .sheet { padding: 20px 16px; }
+    .meta, .sign { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+  <div class="bar">
+    <button type="button" class="ghost" onclick="window.close()">Close</button>
+    <button type="button" onclick="window.print()">Print or save as PDF</button>
+  </div>
+
+  <main class="sheet">
+    <header>
+      <img src="{% static 'images/ayla-logo.png' %}" alt="">
+      <div>
+        <div class="lib">{{ library_name }}</div>
+        <div class="sub">Library donations</div>
+      </div>
+    </header>
+
+    <h1>Acknowledgement of Donation</h1>
+    <div class="ref">Reference {{ reference }}</div>
+
+    <div class="meta">
+      <div><b>Donor</b> {{ donor.name }}</div>
+      <div><b>Date received</b> {{ when|date:"F j, Y" }}</div>
+      <div><b>Donor type</b> {{ donor.get_donor_type_display }}</div>
+      <div><b>Contact</b> {{ donor.contact_number|default:"—" }}{% if donor.email %} · {{ donor.email }}{% endif %}</div>
+      {% if donor.address %}<div style="grid-column: 1 / -1"><b>Address</b> {{ donor.address }}</div>{% endif %}
+    </div>
+
+    <p class="body">
+      {{ library_name }} gratefully acknowledges receipt of the following material{{ total_titles|pluralize }},
+      donated by <strong>{{ donor.name }}</strong> on {{ when|date:"F j, Y" }}. The donation becomes part of the
+      library's collection for the use of its patrons. Thank you for your generosity.
+    </p>
+
+    <table>
+      <thead>
+        <tr><th class="num">#</th><th>Title</th><th>Author</th><th class="num">Copies</th><th>Condition</th></tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr><td class="num">{{ forloop.counter }}</td><td>{{ r.title }}</td><td>{{ r.author|default:"—" }}</td><td class="num">{{ r.copies }}</td><td>{{ r.condition|default:"—" }}</td></tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr><td></td><td colspan="2">{{ total_titles }} title{{ total_titles|pluralize }}</td><td class="num">{{ total_copies }}</td><td></td></tr>
+      </tfoot>
+    </table>
+
+    <div class="sign">
+      <div>{{ received_by|default:"&nbsp;" }}<small>Received by, for the library</small></div>
+      <div>{{ donor.name }}<small>Donor</small></div>
+    </div>
+
+    <footer>Printed {{ printed_on|date:"F j, Y" }} · {{ library_name }} · Reference {{ reference }}</footer>
+  </main>
+</body>
+</html>

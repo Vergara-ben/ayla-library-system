@@ -105,7 +105,7 @@
             {% endfor %}
 
             <div class="rounded-lg border border-slate-800 px-4 py-3 text-[11px] text-slate-400 leading-relaxed flex flex-wrap items-center justify-between gap-3" style="background-color: var(--bg-card);">
-                <span>A donor is saved the first time their name is entered when receiving a donation. Next time, start typing the name and pick them from the list.</span>
+                <span>Register a donor here, or with their first donation when receiving it. Next time, pick them from the list. Each gift has an acknowledgement to print for the donor.</span>
                 <a href="{% if is_staff_portal %}{% url 'staff_donations' %}{% else %}{% url 'donation_management' %}{% endif %}" class="font-bold text-cyan-400 hover:text-cyan-300 whitespace-nowrap"><i class="fa-solid fa-arrow-left text-[10px]"></i> Donations</a>
             </div>
 
@@ -121,19 +121,14 @@
                 </div>
             </div>
 
-            <div class="grid grid-cols-1 xl:grid-cols-[1fr_380px] gap-6 items-start">
+            <div class="grid grid-cols-1 {% if selected or new_form is not None %}xl:grid-cols-[1fr_380px]{% endif %} gap-6 items-start">
                 <div class="rounded-xl border border-slate-800/80 overflow-hidden" style="background-color: var(--bg-card);">
                     <div class="p-4 border-b border-slate-800 flex flex-col sm:flex-row gap-2">
                         <form method="get" class="flex-1 flex gap-2">
                             <input type="text" name="q" value="{{ q }}" placeholder="Search donors by name..." class="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-300 focus:outline-none">
                             <button type="submit" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-slate-300 text-[11px] font-semibold px-3 py-2 rounded-lg">Search</button>
                         </form>
-                        <form method="post" class="flex gap-2">
-                            {% csrf_token %}
-                            <input type="hidden" name="action" value="add">
-                            <input type="text" name="name" required placeholder="New donor's name" class="flex-1 sm:w-48 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-300 focus:outline-none">
-                            <button type="submit" class="bg-cyan-700/30 text-cyan-400 border border-cyan-800/80 hover:bg-cyan-700/50 text-[11px] font-bold px-3 py-2 rounded-lg whitespace-nowrap"><i class="fa-solid fa-plus text-[10px]"></i> Add donor</button>
-                        </form>
+                        <a href="?new=1" class="bg-cyan-700/30 text-cyan-400 border border-cyan-800/80 hover:bg-cyan-700/50 text-[11px] font-bold px-3 py-2 rounded-lg whitespace-nowrap inline-flex items-center gap-1.5"><i class="fa-solid fa-user-plus text-[10px]"></i> Register donor</a>
                     </div>
                     <div class="overflow-x-auto">
                         <table class="w-full text-left border-collapse">
@@ -167,7 +162,43 @@
                     </div>
                 </div>
 
-                {% if selected %}
+                {% if new_form is not None %}
+                <form method="post" class="rounded-xl border border-cyan-800/60 p-5 space-y-3 text-xs" style="background-color: var(--bg-card);">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="add">
+                    <div class="flex items-center justify-between">
+                        <p class="text-sm font-bold text-slate-200">Register a donor</p>
+                        <a href="?" class="text-slate-500 hover:text-slate-300 text-lg leading-none" aria-label="Close">&times;</a>
+                    </div>
+                    {% if new_error %}<p class="rounded-lg border border-rose-800/60 bg-rose-950/30 px-3 py-2 text-[11px] font-semibold text-rose-300">{{ new_error }}</p>{% endif %}
+                    {% if similar %}
+                    <div class="rounded-lg border border-amber-800/60 bg-amber-950/30 px-3 py-2.5 text-[11px] text-amber-200 space-y-2">
+                        <p class="font-semibold">Is this someone already registered?</p>
+                        <div class="flex flex-wrap gap-1.5">{% for d in similar %}<a href="?d={{ d.donor_id }}" class="px-2 py-1 rounded-md border border-amber-700/60 hover:bg-amber-900/40 font-semibold">Open {{ d.name }}</a>{% endfor %}</div>
+                        <p class="text-amber-300/80">If not, press Register again to save "{{ new_form.name }}" as a new donor.</p>
+                        <input type="hidden" name="confirm_new" value="1">
+                    </div>
+                    {% endif %}
+                    <label class="block"><span class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Name</span>
+                        <input name="name" value="{{ new_form.name|default:'' }}" required autofocus class="mt-1 w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200" placeholder="Person, school or organisation"></label>
+                    <div class="grid grid-cols-2 gap-3">
+                        <label class="block"><span class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Type</span>
+                            <select name="donor_type" class="mt-1 w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200">
+                                {% for value, label in type_choices %}<option value="{{ value }}"{% if value == new_form.donor_type %} selected{% endif %}>{{ label }}</option>{% endfor %}
+                            </select></label>
+                        <label class="block"><span class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Contact number</span>
+                            <input name="contact_number" value="{{ new_form.contact_number|default:'' }}" class="mt-1 w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200" placeholder="09XX XXX XXXX"></label>
+                    </div>
+                    <label class="block"><span class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Email</span>
+                        <input name="email" type="email" value="{{ new_form.email|default:'' }}" class="mt-1 w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200" placeholder="For the acknowledgement and thank-you"></label>
+                    <label class="block"><span class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Address</span>
+                        <input name="address" value="{{ new_form.address|default:'' }}" class="mt-1 w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200"></label>
+                    <label class="block"><span class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Notes</span>
+                        <input name="notes" value="{{ new_form.notes|default:'' }}" placeholder="e.g. gives school books every quarter" class="mt-1 w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200"></label>
+                    <p class="text-[10px] text-slate-500">Only the name is required. Contact details let the library thank them and send the acknowledgement.</p>
+                    <button type="submit" class="w-full bg-cyan-700 hover:bg-cyan-600 text-white font-bold py-2 rounded-lg"><i class="fa-solid fa-user-plus text-[10px]"></i> Register</button>
+                </form>
+                {% elif selected %}
                 <div class="space-y-4">
                     <form method="post" class="rounded-xl border border-slate-800/80 p-5 space-y-3 text-xs" style="background-color: var(--bg-card);">
                         {% csrf_token %}
@@ -194,12 +225,19 @@
 
                     <div class="rounded-xl border border-slate-800/80 overflow-hidden" style="background-color: var(--bg-card);">
                         <p class="px-5 py-3 border-b border-slate-800 text-[10px] uppercase font-bold tracking-wider text-slate-500">What they gave</p>
-                        <div data-live="donor-history" class="divide-y divide-slate-800/40 text-xs max-h-96 overflow-y-auto">
-                            {% for line in history %}
-                            <div class="px-5 py-2.5 flex items-center justify-between gap-3">
-                                <div class="min-w-0"><p class="font-semibold text-slate-200 truncate">{{ line.book.title }}</p>
-                                    <p class="text-[10px] text-slate-500">{{ line.date_donated|date:"M j, Y" }} &middot; {{ line.copy_count }} cop{{ line.copy_count|pluralize:"y,ies" }}</p></div>
-                                <span class="text-[10px] font-bold text-slate-400 whitespace-nowrap">{{ line.status }}</span>
+                        <div data-live="donor-history" class="divide-y divide-slate-800/40 text-xs max-h-[28rem] overflow-y-auto">
+                            {% for gift in gifts %}
+                            <div class="px-5 py-3 space-y-1.5">
+                                <div class="flex items-center justify-between gap-2">
+                                    <p class="font-bold text-slate-200">{{ gift.date|date:"M j, Y" }} <span class="font-normal text-slate-500">&middot; {{ gift.lines|length }} title{{ gift.lines|length|pluralize }}, {{ gift.copies }} cop{{ gift.copies|pluralize:"y,ies" }}</span></p>
+                                    <a href="{{ gift.ack_url }}" target="_blank" rel="noopener" class="text-[10px] font-semibold px-2 py-1 rounded-md border border-slate-700 text-slate-300 hover:bg-slate-800/50 whitespace-nowrap"><i class="fa-solid fa-file-signature text-[9px]"></i> Acknowledgement</a>
+                                </div>
+                                {% for line in gift.lines %}
+                                <div class="flex items-center justify-between gap-3 pl-2 border-l border-slate-800">
+                                    <p class="text-slate-300 truncate">{{ line.book.title }}</p>
+                                    <span class="text-[10px] text-slate-500 whitespace-nowrap">{{ line.copy_count }} cop{{ line.copy_count|pluralize:"y,ies" }} &middot; {{ line.status }}</span>
+                                </div>
+                                {% endfor %}
                             </div>
                             {% empty %}
                             <p class="px-5 py-6 text-center text-slate-500">Nothing recorded yet.</p>

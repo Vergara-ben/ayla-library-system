@@ -6160,6 +6160,8 @@ def _donations_page(request, template):
             groups.append({
                 'key': key,
                 'donor_name': line.donor_name,
+                'ack_url': (reverse('donor_acknowledgement', args=[line.donor_id, line.date_donated.isoformat()])
+                            if line.donor_id else ''),
                 'date_donated': line.date_donated,
                 'lines': [],
                 'copies': 0,
@@ -11736,6 +11738,8 @@ def inventory_management(request):
         'intake_conditions': INTAKE_CONDITIONS,
         'source_choices': InventoryRecord.SOURCE_CHOICES,
         'donor_names': list(Donor.objects.values_list('name', flat=True)[:500]),
+        'ack_offer': _ack_offer(request),
+        'donor_types': Donor.TYPE_CHOICES,
         'today': timezone.localdate().isoformat(),
         'books': Book.objects.order_by('title'),
         'shelves': shelf_list,
@@ -11773,11 +11777,28 @@ def _sync_donation_row(record):
     return record.donation
 
 
-def _receiving_redirect(request):
+def _receiving_redirect(request, ack=None):
     """Staff land back on their receiving page, Administrators on the module."""
-    if request.session.get('admin_role') == 'Staff':
-        return redirect('staff_inventory_receive')
-    return redirect('inventory_management')
+    name = 'staff_inventory_receive' if request.session.get('admin_role') == 'Staff' else 'inventory_management'
+    if ack:
+        # Offers the donor's acknowledgement for the gift just received.
+        return redirect(f'{reverse(name)}?ack={ack[0]}&ackdate={ack[1].isoformat()}')
+    return redirect(name)
+
+
+def _ack_offer(request):
+    """The acknowledgement to offer after a donation was received, if the page was sent one."""
+    raw_id, raw_day = (request.GET.get('ack') or '').strip(), (request.GET.get('ackdate') or '').strip()
+    if not raw_id.isdigit():
+        return None
+    donor = Donor.objects.filter(donor_id=int(raw_id)).first()
+    try:
+        day = datetime.strptime(raw_day, '%Y-%m-%d').date()
+    except ValueError:
+        return None
+    if donor is None or not Donation.objects.filter(donor=donor, date_donated=day).exists():
+        return None
+    return {'name': donor.name, 'url': reverse('donor_acknowledgement', args=[donor.donor_id, raw_day])}
 
 
 # A copy is received Good, Worn or Damaged; Lost and Withdrawn come later.
@@ -11994,9 +12015,19 @@ def receive_stock(request):
     supplier = po_number = donor_name = processing_stage = None
     donated_date = None
     if source == 'Donation':
-        donor_name = (request.POST.get('donor_name') or '').strip()
+        donor_name = ' '.join((request.POST.get('donor_name') or '').split())
         if not donor_name:
             messages.error(request, 'A donation needs the donor name for the record.')
+            return _receiving_redirect(request)
+        donor_details = {
+            'donor_type': request.POST.get('donor_type'),
+            'contact_number': request.POST.get('donor_contact_number'),
+            'email': request.POST.get('donor_email'),
+            'address': request.POST.get('donor_address'),
+        }
+        bad = _donor_detail_error(donor_name, donor_details)
+        if bad:
+            messages.error(request, 'Donor: ' + bad)
             return _receiving_redirect(request)
         raw_date = (request.POST.get('donated_date') or '').strip()
         if raw_date:
@@ -12050,6 +12081,8 @@ def receive_stock(request):
     new_titles = 0
     try:
         with transaction.atomic():
+            if source == 'Donation':
+                Donor.register(donor_name, **donor_details)
             for item, quantity, condition, price in parsed:
                 book, was_created = _resolve_intake_book(item, source)
                 if was_created:
@@ -12097,6 +12130,10 @@ def receive_stock(request):
     if new_titles:
         summary += ' (' + str(new_titles) + ' new to the catalogue)'
     messages.success(request, summary + '. Print the QR labels from the list.')
+    if source == 'Donation':
+        donor = Donor.objects.filter(name__iexact=donor_name).first()
+        if donor is not None:
+            return _receiving_redirect(request, ack=(donor.donor_id, donated_date))
     return _receiving_redirect(request)
 
 
@@ -12114,6 +12151,8 @@ def staff_inventory_receive(request):
         'condition_choices': InventoryRecord.CONDITION_CHOICES,
         'intake_conditions': INTAKE_CONDITIONS,
         'donor_names': list(Donor.objects.values_list('name', flat=True)[:500]),
+        'ack_offer': _ack_offer(request),
+        'donor_types': Donor.TYPE_CHOICES,
         'today': timezone.localdate().isoformat(),
     })
 
@@ -13073,16 +13112,29 @@ def serve_card_photo(request, photo_id):
 @admin_or_module_required('donations')
 def donors_page(request):
     """Everyone who has given books, how often, and what they gave."""
+    new_form = {} if request.GET.get('new') == '1' else None
+    new_error = None
+    similar = []
     if request.method == 'POST' and request.POST.get('action') == 'add':
-        # A regular donor can be recorded before their first gift; details go on their record.
-        donor = Donor.for_name(request.POST.get('name'))
-        if donor is None:
-            messages.error(request, "Type the donor's name.")
-            return redirect('donors_page')
-        log_admin_action(request, 'Create', 'Donor', donor.donor_id, f'Added donor "{donor.name}"')
-        return redirect(f"{reverse('donors_page')}?d={donor.donor_id}")
+        # Registered in one go, before or with their first gift.
+        name = ' '.join((request.POST.get('name') or '').split())
+        details = {f: (request.POST.get(f) or '').strip() for f in Donor.DETAIL_FIELDS}
+        existing = Donor.objects.filter(name__iexact=name).first() if name else None
+        if existing is not None:
+            messages.info(request, f'{existing.name} is already registered, so their record is open below.')
+            return redirect(f"{reverse('donors_page')}?d={existing.donor_id}")
+        new_error = _donor_detail_error(name, details)
+        if not new_error and request.POST.get('confirm_new') != '1':
+            similar = Donor.similar_to(name)
+        if new_error or similar:
+            new_form = dict(details, name=name)
+        else:
+            donor = Donor.register(name, **details)
+            log_admin_action(request, 'Create', 'Donor', donor.donor_id, f'Registered donor "{donor.name}"')
+            messages.success(request, f'{donor.name} is registered as a donor.')
+            return redirect(f"{reverse('donors_page')}?d={donor.donor_id}")
 
-    if request.method == 'POST':
+    elif request.method == 'POST':
         donor = Donor.objects.filter(donor_id=_posted_id(request, 'donor_id')).first()
         if donor is None:
             messages.error(request, 'Donor not found.')
@@ -13093,6 +13145,10 @@ def donors_page(request):
             return redirect(f"{reverse('donors_page')}?d={donor.donor_id}")
         if Donor.objects.exclude(donor_id=donor.donor_id).filter(name__iexact=name).exists():
             messages.error(request, f'Another donor is already called "{name}".')
+            return redirect(f"{reverse('donors_page')}?d={donor.donor_id}")
+        bad = _donor_detail_error(name, {'email': request.POST.get('email')})
+        if bad:
+            messages.error(request, bad)
             return redirect(f"{reverse('donors_page')}?d={donor.donor_id}")
         donor.name = name
         kind = (request.POST.get('donor_type') or '').strip()
@@ -13134,6 +13190,7 @@ def donors_page(request):
 
     selected = None
     history = []
+    gifts = []
     raw = request.GET.get('d') or ''
     if raw.isdigit():
         selected = Donor.objects.filter(donor_id=int(raw)).first()
@@ -13143,6 +13200,14 @@ def donors_page(request):
                        .order_by('-date_donated', 'donation_id'))
             for line in history:
                 line.copy_count = len(line.inventory_copies.all()) or 1
+            # One gift is one day's donation; each gets its own acknowledgement.
+            for line in history:
+                if not gifts or gifts[-1]['date'] != line.date_donated:
+                    gifts.append({'date': line.date_donated, 'lines': [], 'copies': 0,
+                                  'ack_url': reverse('donor_acknowledgement',
+                                                     args=[selected.donor_id, line.date_donated.isoformat()])})
+                gifts[-1]['lines'].append(line)
+                gifts[-1]['copies'] += line.copy_count
 
     return render(request, 'admin/donors.html', {
         'donors': rows,
@@ -13151,10 +13216,64 @@ def donors_page(request):
         'total_donors': Donor.objects.count(),
         'regular_donors': sum(1 for days in gift_days.values() if len(days) > 1),
         'q': q,
-        'selected': selected,
+        'selected': selected if new_form is None else None,
         'history': history,
+        'gifts': gifts,
+        'new_form': new_form,
+        'new_error': new_error,
+        'similar': similar,
         'type_choices': Donor.TYPE_CHOICES,
         'is_staff_portal': request.session.get('admin_role') == 'Staff',
+    })
+
+
+def _donor_detail_error(name, details):
+    """What is wrong with a donor's typed details, or None."""
+    if not name:
+        return "Type the donor's name."
+    email = (details.get('email') or '').strip()
+    if email:
+        try:
+            validate_email(email)
+        except ValidationError:
+            return f'"{email}" is not a valid email address.'
+    return None
+
+
+@admin_or_module_required('donations')
+def donor_acknowledgement(request, donor_id, day):
+    """A printable acknowledgement of one day's donation, to hand or send to the donor."""
+    donor = get_object_or_404(Donor, donor_id=donor_id)
+    try:
+        when = datetime.strptime(day, '%Y-%m-%d').date()
+    except ValueError:
+        raise Http404('Not a date.')
+    lines = list(Donation.objects.filter(donor=donor, date_donated=when)
+                 .select_related('book').prefetch_related('inventory_copies__received_by')
+                 .order_by('donation_id'))
+    if not lines:
+        raise Http404('No donation from this donor on that day.')
+    rows, receivers = [], set()
+    for line in lines:
+        copies = list(line.inventory_copies.all())
+        receivers.update(c.received_by.fullname for c in copies if c.received_by_id)
+        rows.append({
+            'title': line.book.title if line.book_id else '',
+            'author': line.book.author if line.book_id else '',
+            'copies': len(copies) or 1,
+            'condition': ', '.join(sorted({c.condition for c in copies if c.condition})),
+        })
+    me = User.objects.filter(admin_id=request.session.get('admin_id')).first()
+    return render(request, 'admin/donoracknowledgement.html', {
+        'library_name': getattr(settings, 'LIBRARY_NAME', 'Ayla Public Library'),
+        'donor': donor,
+        'when': when,
+        'rows': rows,
+        'total_titles': len(rows),
+        'total_copies': sum(r['copies'] for r in rows),
+        'received_by': ', '.join(sorted(receivers)) or (me.fullname if me else ''),
+        'reference': 'DON-%s-%04d' % (when.strftime('%Y%m%d'), donor.donor_id),
+        'printed_on': timezone.localdate(),
     })
 
 

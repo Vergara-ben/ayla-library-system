@@ -100,6 +100,7 @@
     <script src="{% static 'js/ayla-dialog.js' %}"></script>
     <script src="{% static 'js/password-toggle.js' %}" defer></script>
     <script src="{% static 'js/picker.js' %}"></script>
+    <script src="{% static 'js/donor-intake.js' %}"></script>
     {{ donor_names|json_script:'donorNamesData' }}
 </head>
 <body class="flex h-screen overflow-hidden">
@@ -123,6 +124,12 @@
 
         <main id="main-content" tabindex="-1" class="flex-1 overflow-y-auto p-8 space-y-6">
 
+            {% if ack_offer %}
+            <div class="px-4 py-3 rounded-lg border border-emerald-800/60 bg-emerald-950/30 text-xs text-emerald-200 flex flex-wrap items-center justify-between gap-3">
+                <span><i class="fa-solid fa-file-signature mr-1"></i> Give {{ ack_offer.name }} an acknowledgement of this donation.</span>
+                <a href="{{ ack_offer.url }}" target="_blank" rel="noopener" class="font-bold px-3 py-1.5 rounded-lg border border-emerald-700 hover:bg-emerald-900/40 whitespace-nowrap">Print acknowledgement</a>
+            </div>
+            {% endif %}
             {% if messages %}
                 {% for message in messages %}
                 <div class="px-4 py-3 rounded-lg border text-xs font-semibold {% if message.tags == 'error' %}bg-rose-950/40 border-rose-800/60 text-rose-300{% elif message.tags == 'warning' %}bg-amber-950/40 border-amber-800/60 text-amber-300{% else %}bg-emerald-950/40 border-emerald-800/60 text-emerald-300{% endif %}">
@@ -570,6 +577,30 @@
                         <div>
                             <label for="f_donated_date" class="field-label">Date donated</label>
                             <input id="f_donated_date" type="date" name="donated_date" class="field-input" value="{{ today }}">
+                        </div>
+                    </div>
+                    <p id="donorSuggest" class="hidden text-[11px] text-amber-300"></p>
+                    <div id="newDonorFields" class="hidden rounded-lg border border-cyan-900/50 bg-cyan-950/10 p-3 space-y-3">
+                        <p class="text-[11px] text-slate-300"><strong class="text-cyan-300">New donor.</strong> How to reach them, if they give it (optional). It is saved on their donor record for the acknowledgement and next time.</p>
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label for="rcvDonorType" class="field-label">Donor type</label>
+                                <select id="rcvDonorType" name="donor_type" class="field-input">{% for value, label in donor_types %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select>
+                            </div>
+                            <div>
+                                <label for="rcvDonorContact" class="field-label">Contact number</label>
+                                <input id="rcvDonorContact" type="text" name="donor_contact_number" class="field-input" placeholder="09XX XXX XXXX">
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label for="rcvDonorEmail" class="field-label">Email</label>
+                                <input id="rcvDonorEmail" type="email" name="donor_email" class="field-input" placeholder="Optional">
+                            </div>
+                            <div>
+                                <label for="rcvDonorAddress" class="field-label">Address</label>
+                                <input id="rcvDonorAddress" type="text" name="donor_address" class="field-input" placeholder="Optional">
+                            </div>
                         </div>
                     </div>
                     <p class="text-[10px] text-slate-500">Donated books stay hidden from patrons until they are put on a shelf; placing them in Shelf Manager makes them available.</p>
@@ -1402,10 +1433,12 @@
             if (window.AylaPicker && donor) {
                 const names = JSON.parse(document.getElementById('donorNamesData').textContent || '[]');
                 const donors = names.map(function (n) { return { value: n, label: n }; });
+                const intake = window.AylaDonorIntake ? AylaDonorIntake.attach(donor, names) : null;
                 AylaPicker.attach(donor, {
                     items: donors,
                     newLabel: function (q) { return q ? '+ New donor: \u201c' + q + '\u201d' : '+ New donor \u2014 type their name'; },
-                    onNew: function () { donor.focus(); },
+                    onNew: function () { donor.focus(); if (intake) intake.update(); },
+                    onPick: function () { if (intake) intake.update(); },
                 });
             }
         })();

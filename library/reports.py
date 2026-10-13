@@ -1082,46 +1082,61 @@ def _analytics(start, end):
 
 # Registered here rather than in the literal above because these three are defined below it.
 def _donors(start, end):
-    """Who gave books in the period, how often, and how much."""
+    """Every donor on record, how to reach them, and what they gave in the period and overall."""
     from .models import Donor
-    lines = (Donation.objects.filter(date_donated__range=(start, end))
-             .select_related('donor').prefetch_related('inventory_copies'))
-    per = {}
-    for d in lines:
-        key = d.donor_id or ('name', (d.donor_name or '').strip().lower())
-        g = per.setdefault(key, {'donor': d.donor, 'name': d.donor.name if d.donor else d.donor_name,
-                                 'days': set(), 'titles': 0, 'copies': 0})
-        g['days'].add(d.date_donated)
-        g['titles'] += 1
-        g['copies'] += d.inventory_copies.count() or 1
 
+    def tally(lines):
+        per = {}
+        for d in lines:
+            key = d.donor_id or ('name', (d.donor_name or '').strip().lower())
+            g = per.setdefault(key, {'days': set(), 'titles': 0, 'copies': 0,
+                                     'name': d.donor.name if d.donor_id else d.donor_name})
+            g['days'].add(d.date_donated)
+            g['titles'] += 1
+            g['copies'] += len(d.inventory_copies.all()) or 1
+        return per
+
+    every = Donation.objects.select_related('donor').prefetch_related('inventory_copies')
+    overall = tally(every)
+    in_period = tally(every.filter(date_donated__range=(start, end)))
+
+    # Registered donors, plus any name from before donors were registered.
+    entries = [(d.donor_id, d) for d in Donor.objects.all()]
+    entries += [(key, None) for key in overall if not isinstance(key, int)]
     rows = []
-    for g in sorted(per.values(), key=lambda g: (-g['copies'], g['name'] or '')):
-        donor = g['donor']
-        days = sorted(g['days'])
-        rows.append([
-            _text(g['name']),
-            donor.get_donor_type_display() if donor else DASH,
-            _text(donor.contact_number if donor else None),
-            len(days), g['titles'], g['copies'],
-            _fmt_date(days[0]), _fmt_date(days[-1]),
-        ])
+    for key, donor in entries:
+        p, a = in_period.get(key), overall.get(key)
+        days = sorted(a['days']) if a else []
+        contact = ' · '.join(x for x in ((donor.contact_number, donor.email) if donor else ()) if x)
+        rows.append((
+            -(p['copies'] if p else 0), (donor.name if donor else a['name']).lower(), [
+                _text(donor.name if donor else a['name']),
+                donor.get_donor_type_display() if donor else 'Not registered',
+                _text(contact or None),
+                _text(donor.address if donor else None),
+                len(p['days']) if p else 0, p['copies'] if p else 0,
+                len(days), a['copies'] if a else 0,
+                _fmt_date(days[0]) if days else DASH, _fmt_date(days[-1]) if days else DASH,
+            ]))
+    rows = [r for _, _, r in sorted(rows, key=lambda t: (t[0], t[1]))]
+    gave = [g for g in in_period.values()]
     return {
         'key': 'donors',
         'title': 'Donors Report',
-        'subtitle': 'Everyone who gave books in the period, with how often and how much',
-        'columns': ['Donor', 'Type', 'Contact', 'Gifts', 'Titles', 'Copies', 'First Gift', 'Last Gift'],
+        'subtitle': 'Every donor on record, with contact details and what they gave in the period and overall',
+        'columns': ['Donor', 'Type', 'Contact', 'Address', 'Gifts in Period', 'Copies in Period',
+                    'Gifts (All Time)', 'Copies (All Time)', 'First Gift', 'Last Gift'],
         'rows': rows,
         'summary': [
-            ('Donors', len(rows)),
-            ('Gave More Than Once', sum(1 for g in per.values() if len(g['days']) > 1)),
-            ('Titles Donated', sum(g['titles'] for g in per.values())),
-            ('Copies Donated', sum(g['copies'] for g in per.values())),
-            ('Saved Donors', Donor.objects.count()),
+            ('Donors on Record', len(rows)),
+            ('Gave in the Period', len(gave)),
+            ('Regular Donors', sum(1 for g in overall.values() if len(g['days']) > 1)),
+            ('Copies in the Period', sum(g['copies'] for g in gave)),
+            ('Copies (All Time)', sum(g['copies'] for g in overall.values())),
         ],
         'chart': _chart(
-            [(r[0], r[5]) for r in rows[:10]], kind='bar',
-            title='Copies given, top donors',
+            [(r[0], r[5]) for r in rows[:10] if r[5]], kind='bar',
+            title='Copies given in the period, top donors',
             note='The ten donors who gave the most copies in the period.',
             empty_note='No donations in this period.',
             axis_note='Donor · vertical axis is number of copies'),
