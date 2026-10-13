@@ -433,13 +433,8 @@
                             <label class="kiosk-label" for="visName">Full name</label>
                             <input type="text" id="visName" class="kiosk-field" autocomplete="off" placeholder="Juan A. Dela Cruz">
                         </div>
-                        <div id="visTypeWrap">
-                            <label class="kiosk-label" for="visType">I am a</label>
-                            <select id="visType" class="kiosk-field">
-                                {% for value, label in patron_type_choices %}<option value="{{ value }}"{% if value == 'General Visitor' %} selected{% endif %}>{{ label }}</option>{% endfor %}
-                            </select>
-                        </div>
-                        <div id="visSchoolWrap">
+                        {# A walk-in is always a general visitor; members sign in with their card. #}
+                        <div id="visSchoolWrap" class="sm:col-span-2">
                             <label class="kiosk-label" for="visSchool">School or organisation <span class="normal-case font-medium text-slate-600">(optional)</span></label>
                             <input type="text" id="visSchool" list="knownSchools" class="kiosk-field" autocomplete="off" placeholder="Leave blank if none">
                         </div>
@@ -1309,7 +1304,7 @@
             : 'py-3 rounded-xl border-2 border-blue-600/60 bg-blue-500/15 text-blue-300 text-sm font-bold';
 
         // Leaving asks only what is needed to find the visit that is already open.
-        ['visTypeWrap', 'visSchoolWrap', 'visPurposeWrap'].forEach(function (id) {
+        ['visSchoolWrap', 'visPurposeWrap'].forEach(function (id) {
             document.getElementById(id).classList.toggle('hidden', !arriving);
         });
         document.getElementById('visExitNote').classList.toggle('hidden', arriving);
@@ -1331,7 +1326,6 @@
             direction: visitorWay,
             name: document.getElementById('visName').value.trim(),
             contact: document.getElementById('visContact').value.trim(),
-            patron_type: document.getElementById('visType').value,
             school: document.getElementById('visSchool').value.trim(),
             purpose: document.getElementById('visPurpose').value,
             purpose_other: document.getElementById('visPurposeOther').value.trim(),
@@ -1361,7 +1355,6 @@
         const rows = [['Name', f.name],
                       ['Signing', f.direction === 'entry' ? 'In (arriving)' : 'Out (leaving)']];
         if (f.direction === 'entry') {
-            rows.push(['I am a', f.patron_type]);
             if (f.school) rows.push(['School', f.school]);
             rows.push(['Purpose', f.purpose === 'Other' ? (f.purpose_other || 'Other') : f.purpose]);
         }
