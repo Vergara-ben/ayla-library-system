@@ -3870,11 +3870,16 @@ class ShelfReadAuditTests(TestCase):
 
     def test_the_sweep_writes_a_different_mark_from_a_tap(self):
         """The bug: "the rest are here" wrote the same mark a tap writes."""
+        from django.contrib.staticfiles import finders
         html = self.client.get('/admin-portal/inventory/?tab=audit').content.decode()
-        self.assertIn("sheet.marks[b.book_id] = 'bulk'", html,
+        # The count is shared with the shelf audit, so its script is a file of its own.
+        self.assertIn('js/shelf-count.js', html)
+        with open(finders.find('js/shelf-count.js'), encoding='utf-8') as f:
+            script = f.read()
+        self.assertIn("sheet.marks[b.book_id] = 'bulk'", script,
                       'the sweep must write its own mark')
-        self.assertIn("if (m === 'here') body.append('found_ids'", html)
-        self.assertIn("body.append('bulk_ids'", html)
+        self.assertIn("if (m === 'here') body.append('found_ids'", script)
+        self.assertIn("body.append('bulk_ids'", script)
 
     def test_the_board_picker_reports_the_oldest_confirmation_not_the_newest(self):
         """A board is only as counted as its least-recently-seen book."""

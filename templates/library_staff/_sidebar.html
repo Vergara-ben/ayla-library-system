@@ -56,6 +56,15 @@
                     <span class="text-sm {% if active != 'shelf' %}font-medium{% endif %}">Shelf Manager</span>
                 </a>
                 {% endif %}
+                {% if 'books' in allowed_modules or 'shelf' in allowed_modules %}
+                <a href="{% url 'shelving_page' %}" class="flex items-center justify-between px-3 py-2 rounded-lg {% if active == 'shelving' %}bg-slate-800/50 text-violet-400 font-medium border border-slate-700/50{% else %}text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors{% endif %}">
+                    <div class="flex items-center gap-3">
+                        <i class="fa-solid fa-box-archive w-5 text-sm"></i>
+                        <span class="text-sm {% if active != 'shelving' %}font-medium{% endif %}">Shelving &amp; Labels</span>
+                    </div>
+                    <span data-alert-badge="shelving" class="bg-amber-500/20 text-amber-400 text-xs px-2 py-0.5 rounded-full font-semibold" title="Books waiting for a shelf"{% if not shelving_counts.0 %} hidden{% endif %}>{{ shelving_counts.0 }}</span>
+                </a>
+                {% endif %}
                 {% if 'inventory' in allowed_modules %}
                 <a href="{% url 'staff_inventory_receive' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg {% if active == 'inventory' %}bg-slate-800/50 text-violet-400 font-medium border border-slate-700/50{% else %}text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors{% endif %}">
                     <i class="fa-solid fa-truck-ramp-box w-5 text-sm"></i>

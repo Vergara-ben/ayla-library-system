@@ -1834,7 +1834,9 @@ def _books_page(request, template):
     if level.isdigit():
         books_queryset = books_queryset.filter(shelf_level_id=int(level))
     elif shelf == 'none':
-        books_queryset = books_queryset.filter(shelf_level__isnull=True)
+        # The same books the "waiting for a shelf" count names.
+        from .shelving import need_shelf
+        books_queryset = books_queryset.filter(pk__in=need_shelf().values('pk'))
     elif shelf.isdigit():
         books_queryset = books_queryset.filter(shelf_level__shelf_id=int(shelf))
     else:
@@ -1843,7 +1845,8 @@ def _books_page(request, template):
         level = ''
 
     if label == 'missing':
-        books_queryset = books_queryset.filter(label_printed_at__isnull=True, shelf_level__isnull=False)
+        from .shelving import need_label
+        books_queryset = books_queryset.filter(pk__in=need_label().values('pk'))
     else:
         label = ''
 
@@ -1871,6 +1874,7 @@ def _books_page(request, template):
         .order_by('genre').values_list('genre', flat=True).distinct()
     )
 
+    unshelved_count, unlabelled_count = _shelving_counts()
     paginator = Paginator(books_queryset, 15)  # 15 books per page
     books = paginator.get_page(request.GET.get('page', 1))
 
@@ -1901,10 +1905,9 @@ def _books_page(request, template):
         'shelf': shelf,
         'level': level,
         'shelf_choices': _shelf_filter_choices(),
-        'unshelved_count': Book.objects.filter(shelf_level__isnull=True).count(),
-        # Shelved but never labelled: these can be printed now.
-        'unlabelled_count': Book.objects.filter(label_printed_at__isnull=True,
-                                                shelf_level__isnull=False).count(),
+        # The same two numbers every page shows; see shelving.py.
+        'unshelved_count': unshelved_count,
+        'unlabelled_count': unlabelled_count,
         'label': label,
         'querystring': urlencode(params),
         'paginator': paginator,
@@ -1912,6 +1915,12 @@ def _books_page(request, template):
         'intake_conditions': INTAKE_CONDITION_OPTIONS,
     }
     return render(request, template, context)
+
+
+def _shelving_counts():
+    """(books waiting for a shelf, books on a shelf with no label): one answer for every page."""
+    from .shelving import need_label, need_shelf
+    return need_shelf().count(), need_label().count()
 
 
 def _genre_options():
@@ -2007,6 +2016,7 @@ def admin_add_book(request):
 
             # Each copy is a record of its own, with its own QR label, all on the same shelf.
             first = None
+            created = []
             for n in range(copies):
                 book = Book.objects.create(
                     title=values['title'],
@@ -2026,6 +2036,7 @@ def admin_add_book(request):
                     qr_code=str(uuid4()),
                 )
                 first = first or book
+                created.append(book.book_id)
                 _add_existing_copy(book, request)
             log_admin_action(request, 'Create', 'Book', first.book_id,
                              f'Added "{first.title}"' + (f' ({copies} copies)' if copies > 1 else ''))
@@ -2033,7 +2044,9 @@ def admin_add_book(request):
             if ajax:
                 return JsonResponse({'success': True, 'message': (
                     f'Added {copies} copies of "{first.title}".' if copies > 1
-                    else f'Added "{first.title}".'), 'call_number': first.call_number})
+                    else f'Added "{first.title}".'), 'call_number': first.call_number,
+                    # A shelved book can have its label printed straight away.
+                    'ids': created, 'shelved': shelf_level is not None})
             return portal_redirect(request, 'admin_management')
 
     # Get books list context for managebooks.html
@@ -4476,7 +4489,7 @@ def book_label_picker_data(request):
     })
 
 
-@admin_or_module_required('books')
+@admin_or_any_module_required('books', 'shelf')
 def book_qr_labels(request):
     """A printable sheet of QR labels for the selected books."""
     raw_ids = request.GET.get('ids') or request.POST.get('ids') or ''
@@ -7444,10 +7457,8 @@ def fix_shelf_rooms(request):
 def _shelf_page(request, template):
     """IDE-style hierarchical manager for shelves, sections, levels and books."""
     return render(request, template, {
-        # Books on no board at all.
-        'unshelved_count': (Book.objects
-                            .filter(shelf_level__isnull=True)
-                            .exclude(status__in=WRITTEN_OFF).count()),
+        # Books here that are waiting for a board.
+        'unshelved_count': _shelving_counts()[0],
         # Shelves whose recorded room disagrees with where they are drawn.
         'room_mismatches': _shelf_room_mismatches(),
     })
@@ -7507,9 +7518,8 @@ def get_board_books(request):
 
     # The books on no board at all, as a place the mover can open.
     if raw == 'none':
-        books = (Book.objects.filter(shelf_level__isnull=True)
-                 .exclude(status__in=WRITTEN_OFF)
-                 .order_by('title', 'book_id')[:MAX_BOOKS_PER_MOVE])
+        from .shelving import need_shelf
+        books = need_shelf().order_by('title', 'book_id')[:MAX_BOOKS_PER_MOVE]
         return JsonResponse({
             'success': True,
             'level': 'none',
@@ -7532,6 +7542,7 @@ def get_board_books(request):
         'success': True,
         'level': level.shelf_level_id,
         'shelf': level.shelf.name if level.shelf else '',
+        'shelf_id': level.shelf_id,
         'label': level.label,
         'books': [_board_book(b) for b in books],
     })
@@ -7725,9 +7736,8 @@ def get_shelf_tree(request):
     
     return JsonResponse({
         'tree': tree_data,
-        # Count of unshelved books.
-        'unshelved': (Book.objects.filter(shelf_level__isnull=True)
-                      .exclude(status__in=WRITTEN_OFF).count()),
+        # Books waiting for a shelf, counted as everywhere else.
+        'unshelved': _shelving_counts()[0],
     })
 
 
@@ -11756,8 +11766,7 @@ def _inventory_stats():
         'gone_count': held.filter(condition__in=['Lost', 'Withdrawn']).count(),
         'removed_count': qs.filter(status='Removed').count(),
         'missing_count': qs.filter(status='Missing').count(),
-        'unshelved_count': (held.filter(book__shelf_level__isnull=True)
-                            .exclude(condition__in=['Beyond Repair', 'Lost', 'Withdrawn']).count()),
+        'unshelved_count': _shelving_counts()[0],
         'uncatalogued': held.filter(book__isnull=True).count(),
     }
 
@@ -11783,8 +11792,8 @@ def inventory_management(request):
     elif state == 'gone':
         records = records.filter(condition__in=['Lost', 'Withdrawn']).exclude(status='Removed')
     elif state == 'unshelved':
-        records = (records.filter(book__shelf_level__isnull=True).exclude(status='Removed')
-                   .exclude(condition__in=['Beyond Repair', 'Lost', 'Withdrawn']))
+        from .shelving import need_shelf
+        records = records.filter(book__in=need_shelf()).exclude(status='Removed')
     elif state == 'removed':
         records = records.filter(status='Removed')
     else:
@@ -11838,24 +11847,10 @@ def inventory_management(request):
         shelf.last_audited = last_audited.get(shelf.shelf_id)
 
     # Every board that holds something, for the shelf-read picker.
-    audit_boards = []
-    for level in (ShelfLevel.objects.filter(is_active=True)
-                  .select_related('shelf', 'shelf__room')
-                  .annotate(n=Count('book'))
-                  .order_by('shelf__name', 'column_number', 'level_number')):
-        if not level.n or level.shelf is None:
-            continue
-        seen = level.book_set.exclude(status__in=WRITTEN_OFF).aggregate(
-            oldest=Min('last_seen'), never=Count('book_id', filter=Q(last_seen__isnull=True)))
-        audit_boards.append({
-            'id': level.shelf_level_id,
-            'shelf': level.shelf.name,
-            'room': level.shelf.room.name if level.shelf.room else '',
-            'label': level.label,
-            'books': level.n,
-            # One book never confirmed is enough to make the board unread.
-            'last_read': None if seen['never'] else seen['oldest'],
-        })
+    audit_boards = _audit_board_rows(ShelfLevel.objects.filter(is_active=True)
+                                     .select_related('shelf', 'shelf__room')
+                                     .order_by('shelf__name', 'column_number', 'level_number'))
+    audit_boards = [b for b in audit_boards if b['books']]
 
     # Each table keeps its own page and tab.
     stock_qs = urlencode({k: v for k, v in {
@@ -12531,7 +12526,8 @@ ACCOUNTED_ELSEWHERE = ('Borrowed', 'Overdue', 'Being Read', 'For Reshelving', 'U
 WRITTEN_OFF = ('Lost', 'Donated', 'Beyond Repair')
 
 
-@admin_only_required
+# Staff who shelve books count them too.
+@admin_or_any_module_required('books', 'shelf', 'inventory')
 def stock_audit_sheet(request):
     """The books a board should be holding, in the order they stand there."""
     raw = (request.GET.get('level') or '').strip()
@@ -12579,7 +12575,7 @@ def stock_audit_sheet(request):
     })
 
 
-@admin_only_required
+@admin_or_any_module_required('books', 'shelf', 'inventory')
 def stock_audit_file(request):
     """Save the results of a shelf count."""
     if request.method != 'POST':
@@ -12600,6 +12596,7 @@ def stock_audit_file(request):
     damaged = ids('damaged_ids')      # here, but damaged
     onshelf = ids('onshelf_ids')      # here, though the system has it out on loan
     strays = ids('stray_ids')         # here, though it belongs on another board
+    nolabel = ids('nolabel_ids')      # here, but with no label on it
 
     # A copy cannot be both.
     bulk -= found | damaged
@@ -12615,6 +12612,7 @@ def stock_audit_file(request):
     damaged &= on_board
     onshelf = set(level.book_set.filter(book_id__in=onshelf, status__in=('Borrowed', 'Overdue'))
                   .values_list('book_id', flat=True))
+    nolabel &= found | bulk | damaged | onshelf
     # Strays are read as they were, so the count can say where each belongs.
     stray_books = list(Book.objects.select_related('shelf_level', 'shelf_level__shelf')
                        .filter(book_id__in=strays - on_board).exclude(status__in=WRITTEN_OFF))
@@ -12695,6 +12693,11 @@ def stock_audit_file(request):
         # On the shelf though on loan: seen, but the loan is the desk's to close.
         Book.objects.filter(book_id__in=onshelf).update(last_seen=now)
 
+        # A book seen on its board carries its label, unless the counter marked it as having none.
+        labelled = (Book.objects.filter(book_id__in=(seen | onshelf) - nolabel, label_printed_at__isnull=True)
+                    .update(label_printed_at=now))
+        Book.objects.filter(book_id__in=nolabel).update(label_printed_at=None)
+
         # A stray is seen, comes back if it was missing, and goes to be reshelved where it belongs.
         for book in Book.objects.filter(book_id__in=strays):
             book.last_seen = now
@@ -12739,9 +12742,9 @@ def stock_audit_file(request):
     log_admin_action(
         request, 'Create', 'Inventory', audit.audit_id,
         'Shelf read of %s: %d confirmed (%d one by one, %d in bulk), '
-        '%d flagged missing, %d recovered, %d damaged, %d on loan but here, %d strays'
+        '%d flagged missing, %d recovered, %d damaged, %d on loan but here, %d strays, %d with no label'
         % (audit.shelf_name.strip(), len(seen), len(found), len(bulk), flagged, recovered,
-           len(damaged), len(onshelf), len(strays)))
+           len(damaged), len(onshelf), len(strays), len(nolabel)))
 
     return JsonResponse({
         'success': True,
@@ -12754,6 +12757,9 @@ def stock_audit_file(request):
         'damaged': len(damaged),
         'onshelf': len(onshelf),
         'strays': len(strays),
+        'labelled': labelled,
+        'nolabel': len(nolabel),
+        'nolabel_ids': sorted(nolabel),
         'message': '%s filed. %d confirmed, %d flagged missing%s.'
                    % (audit.shelf_name.strip(), len(seen), flagged,
                       ', %d recovered' % recovered if recovered else ''),
@@ -13535,7 +13541,7 @@ def donor_acknowledgement(request, donor_id, day):
     })
 
 
-@admin_or_module_required('books')
+@admin_or_any_module_required('books', 'shelf')
 def mark_books_labelled(request):
     """Record that the selected books already carry a label, without printing one."""
     if request.method != 'POST':
@@ -13547,6 +13553,117 @@ def mark_books_labelled(request):
               .update(label_printed_at=timezone.now()))
     log_admin_action(request, 'Update', 'Book', None, f'Marked {marked} book(s) as already labelled')
     return JsonResponse({'success': True, 'marked': marked})
+
+
+def _audit_board_rows(levels):
+    """Each board with its book count and when every book on it was last confirmed."""
+    rows = []
+    for level in levels.annotate(n=Count('book')):
+        if level.shelf is None:
+            continue
+        seen = level.book_set.exclude(status__in=WRITTEN_OFF).aggregate(
+            oldest=Min('last_seen'), never=Count('book_id', filter=Q(last_seen__isnull=True)))
+        rows.append({
+            'id': level.shelf_level_id,
+            'shelf': level.shelf.name,
+            'room': level.shelf.room.name if level.shelf.room else '',
+            'label': level.label,
+            'books': level.n,
+            # One book never confirmed is enough to make the board unread.
+            'last_read': None if seen['never'] else seen['oldest'],
+        })
+    return rows
+
+
+@admin_or_any_module_required('books', 'shelf')
+def shelving_page(request):
+    """Books waiting for a shelf, each with a suggested board, and shelved books with no label, board by board."""
+    from collections import defaultdict
+    from .shelving import BoardSuggester, board_name, need_label, need_shelf
+    suggester = BoardSuggester()
+    waiting = []
+    for book in need_shelf().order_by('title', 'book_id'):
+        level, why = suggester.suggest(book.title, book.author, book.genre)
+        waiting.append({'book': book, 'level': level, 'why': why})
+
+    def board_key(level):
+        return (level.shelf.name if level.shelf_id else '', level.column_number or 0, level.level_number or 0)
+
+    boards = [{'id': lv.shelf_level_id, 'name': board_name(lv)}
+              for lv in sorted(suggester.levels.values(), key=board_key)]
+    by_board = defaultdict(list)
+    for book_id, level_id in need_label().order_by('shelf_slot', 'title').values_list('book_id', 'shelf_level'):
+        by_board[level_id].append(book_id)
+    label_boards = [{'id': level_id, 'name': board_name(suggester.levels[level_id]),
+                     'shelf_id': suggester.levels[level_id].shelf_id,
+                     'count': len(ids), 'ids': ','.join(str(i) for i in ids)}
+                    for level_id, ids in sorted(by_board.items(), key=lambda kv: board_key(suggester.levels[kv[0]]))]
+    return render(request, 'admin/shelving.html', {
+        'waiting': waiting,
+        'boards': boards,
+        'label_boards': label_boards,
+        'unlabelled_total': sum(b['count'] for b in label_boards),
+        'is_staff_portal': request.session.get('admin_role') == 'Staff',
+    })
+
+
+@admin_or_any_module_required('books', 'shelf')
+def shelving_place(request):
+    """Put books on the boards chosen for them, each at the end of its board."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
+    wanted = {}
+    for pair in (request.POST.get('placements') or '').split(','):
+        book_id, _sep, level_id = pair.partition(':')
+        if book_id.strip().isdigit() and level_id.strip().isdigit():
+            wanted[int(book_id)] = int(level_id)
+    if not wanted:
+        return JsonResponse({'success': False, 'error': 'Choose a board for at least one book.'})
+    levels = {lv.shelf_level_id: lv for lv in
+              ShelfLevel.objects.select_related('shelf').filter(shelf_level_id__in=set(wanted.values()))}
+    books = list(Book.objects.filter(book_id__in=[b for b, lv in wanted.items() if lv in levels])
+                 .order_by('title', 'book_id'))
+    if not books:
+        return JsonResponse({'success': False, 'error': 'Those books or boards no longer exist.'})
+    with transaction.atomic():
+        counter = {}
+        for book in books:
+            level = levels[wanted[book.book_id]]
+            Book.objects.filter(pk=book.pk).update(shelf_level=level, shelf_slot=_next_slot(counter, level))
+        release_shelved_donations([b.book_id for b in books])
+        log_admin_action(request, 'Moved books', 'Book',
+                         detail='%d book(s) put on their shelves from Shelving & Labels' % len(books))
+    n = len(books)
+    return JsonResponse({'success': True, 'placed': n, 'ids': [b.book_id for b in books],
+                         'message': '%d book%s shelved. %s ready to print.'
+                                    % (n, '' if n == 1 else 's', 'Its label is' if n == 1 else 'Their labels are')})
+
+
+@admin_or_any_module_required('books', 'shelf', 'inventory')
+def shelf_audit(request, shelf_id):
+    """One shelf: what its records get wrong, then a count of every board on it."""
+    from .shelving import GONE_STATUSES, PROBLEM_KINDS, shelf_problems
+    shelf = Shelf.objects.select_related('room').filter(shelf_id=shelf_id).first()
+    if shelf is None:
+        raise Http404('No such shelf')
+    books, problems = shelf_problems(shelf)
+    groups = [{'kind': kind, 'title': title, 'items': [p for p in problems if p['kind'] == kind]}
+              for kind, title in PROBLEM_KINDS]
+    groups = [g for g in groups if g['items']]
+    staff = request.session.get('admin_role') == 'Staff'
+    unlabelled = [b.book_id for b in books if not b.label_printed_at and b.status not in GONE_STATUSES]
+    return render(request, 'admin/shelfaudit.html', {
+        'shelf': shelf,
+        'book_count': len(books),
+        'problem_groups': groups,
+        'problem_count': len(problems),
+        'unlabelled_ids': ','.join(str(i) for i in unlabelled),
+        'unlabelled_count': len(unlabelled),
+        'boards': _audit_board_rows(ShelfLevel.objects.filter(shelf=shelf).select_related('shelf', 'shelf__room')
+                                    .order_by('column_number', 'level_number')),
+        'is_staff_portal': staff,
+        'back_url': reverse('staff_shelf' if staff else 'shelf_manager'),
+    })
 
 
 OPEN_LIBRARY_URL = 'https://openlibrary.org/api/books?bibkeys=ISBN:%s&format=json&jscmd=data'

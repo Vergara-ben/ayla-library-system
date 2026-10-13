@@ -235,8 +235,9 @@ def shelf_occupancy(limit=15):
 
 
 def unshelved_summary():
-    """Books in the catalogue that are on no shelf at all."""
-    unshelved = Book.objects.filter(shelf_level__isnull=True).count()
+    """Books here that are waiting for a shelf, counted as on every other page."""
+    from .shelving import need_shelf
+    unshelved = need_shelf().count()
     total = Book.objects.count()
     return {
         'count': unshelved,

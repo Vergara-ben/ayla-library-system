@@ -1562,3 +1562,113 @@ class GenreTidyTests(TestCase):
         option = next(o for o in _genre_options() if o['label'] == 'Thriller & Suspense')
         self.assertIn('Legal Thriller', option['sub'])
         self.assertIn('Legal Thriller', option['search'])
+
+
+class ShelvingLabelsAuditTests(TestCase):
+    """Books not yet ready for the floor are counted one way everywhere; a shelf can be audited whole."""
+
+    def setUp(self):
+        from .models import FloorPlan, Room, Shelf, ShelfLevel
+        plan = FloorPlan.objects.create(name='Ground', floor_number=1, is_active=True)
+        room = Room.objects.create(floor_plan=plan, name='Main', map_x=0, map_y=0)
+        self.shelf = Shelf.objects.create(room=room, name='Shelf A', map_x=0, map_y=0)
+        self.level = ShelfLevel.objects.create(shelf=self.shelf, level_number=1)
+        self.fiction = Book.objects.create(title='Noli Me Tangere', author='Rizal, Jose', genre='Fiction',
+                                           shelf_level=self.level, shelf_slot=1, call_number='FIC R49n',
+                                           qr_code='q-noli')
+        self.loose = Book.objects.create(title='El Filibusterismo', author='Rizal, Jose', genre='Fiction',
+                                         qr_code='q-fili')
+        self.donated = Book.objects.create(title='Florante at Laura', author='Balagtas', genre='Fiction',
+                                           status='Donated', qr_code='q-flor')
+        # Away or gone: not waiting for anyone to shelve them.
+        Book.objects.create(title='Out', author='Cruz, Ana', genre='Fiction', status='Borrowed', qr_code='q-out')
+        Book.objects.create(title='Gone', author='Cruz, Ana', genre='Fiction', status='Lost', qr_code='q-gone')
+        self.admin = _staff(role='Admin', modules='books,shelf,inventory')
+        self.client = _client(admin_id=self.admin.admin_id, admin_role='Admin')
+
+    def test_one_count_everywhere(self):
+        from .shelving import need_label, need_shelf
+        from .views import _inventory_stats
+        self.assertEqual(set(need_shelf().values_list('title', flat=True)), {'El Filibusterismo', 'Florante at Laura'})
+        self.assertEqual(list(need_label().values_list('title', flat=True)), ['Noli Me Tangere'])
+        self.assertEqual(self.client.get('/admin-portal/management/').context['unshelved_count'], 2)
+        self.assertEqual(self.client.get('/admin-portal/shelf-manager/').context['unshelved_count'], 2)
+        self.assertEqual(_inventory_stats()['unshelved_count'], 2)
+        listed = self.client.get('/admin-portal/board-books/', {'level': 'none'}).json()['books']
+        self.assertEqual(len(listed), 2)
+        shelving = {i['key']: i for i in self.client.get('/portal/alerts/').json()['items']}['shelving']
+        self.assertEqual((shelving['count'], shelving['quiet']), (2, True))
+        page = self.client.get('/admin-portal/dashboard/')
+        self.assertContains(page, 'books waiting for a shelf')
+
+    def test_a_waiting_book_is_shelved_on_its_suggested_board_in_one_click(self):
+        page = self.client.get('/admin-portal/shelving/')
+        rows = {r['book'].title: r for r in page.context['waiting']}
+        self.assertEqual(rows['El Filibusterismo']['level'], self.level)
+        self.assertIn('Fiction', rows['El Filibusterismo']['why'])
+        r = self.client.post('/admin-portal/shelving/place/', {
+            'placements': '%d:%d,%d:%d' % (self.loose.pk, self.level.pk, self.donated.pk, self.level.pk)}).json()
+        self.assertTrue(r['success'], r)
+        self.loose.refresh_from_db()
+        self.donated.refresh_from_db()
+        self.assertEqual(self.loose.shelf_level, self.level)
+        self.assertEqual(sorted([self.loose.shelf_slot, self.donated.shelf_slot]), [2, 3])
+        # A donated book on a shelf is released for borrowing.
+        self.assertEqual(self.donated.status, 'Available')
+        self.assertEqual(sorted(r['ids']), sorted([self.loose.pk, self.donated.pk]))
+
+    def test_add_book_hands_back_what_it_can_label(self):
+        shelved = self.client.post('/admin-portal/add-book/', {
+            'title': 'Ibong Adarna', 'author': 'Unknown', 'genre': 'Fiction',
+            'shelf_level': self.level.pk, 'copies': '2'}, HTTP_X_REQUESTED_WITH='XMLHttpRequest').json()
+        self.assertTrue(shelved['shelved'])
+        self.assertEqual(len(shelved['ids']), 2)
+        loose = self.client.post('/admin-portal/add-book/', {
+            'title': 'Mga Ibong Mandaragit', 'author': 'Hernandez, Amado', 'genre': 'Fiction'},
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest').json()
+        self.assertFalse(loose['shelved'])
+
+    def test_the_shelf_audit_lists_what_the_records_get_wrong(self):
+        Book.objects.create(title='N/A', author='Cruz, Ana', genre='Fiction', shelf_level=self.level,
+                            shelf_slot=1, call_number='739', qr_code='q-na')
+        Book.objects.create(title='Lost One', author='Cruz, Ana', genre='Fiction', shelf_level=self.level,
+                            shelf_slot=4, status='Lost', call_number='FIC C78l', qr_code='q-lost')
+        page = self.client.get('/admin-portal/shelf-audit/%d/' % self.shelf.pk)
+        kinds = {g['kind']: [p['book'].title for p in g['items']] for g in page.context['problem_groups']}
+        self.assertIn('N/A', kinds['rules'])
+        self.assertIn('N/A', kinds['call_number'])
+        self.assertEqual(sorted(kinds['slot']), ['N/A', 'Noli Me Tangere'])
+        self.assertEqual(kinds['gone'], ['Lost One'])
+        self.assertEqual(page.context['boards'][0]['books'], 3)
+
+    def test_counting_a_board_records_its_labels(self):
+        other = Book.objects.create(title='Doctrina Christiana', author='Unknown', genre='Fiction',
+                                    shelf_level=self.level, shelf_slot=2, qr_code='q-doc')
+        r = self.client.post('/admin-portal/inventory/audit/file/', {
+            'level': self.level.pk, 'found_ids': [self.fiction.pk], 'bulk_ids': [other.pk],
+            'nolabel_ids': [other.pk]}).json()
+        self.assertTrue(r['success'], r)
+        self.fiction.refresh_from_db()
+        other.refresh_from_db()
+        self.assertIsNotNone(self.fiction.label_printed_at)
+        self.assertIsNone(other.label_printed_at)
+        self.assertEqual((r['labelled'], r['nolabel'], r['nolabel_ids']), (1, 1, [other.pk]))
+
+    def test_staff_who_shelve_can_audit_but_others_cannot(self):
+        shelver = _staff(modules='shelf')
+        staff = _client(admin_id=shelver.admin_id, admin_role='Staff')
+        self.assertEqual(staff.get('/admin-portal/shelf-audit/%d/' % self.shelf.pk).status_code, 200)
+        self.assertTrue(staff.get('/admin-portal/inventory/audit/sheet/', {'level': self.level.pk}).json()['success'])
+        self.assertEqual(staff.get('/admin-portal/shelving/').status_code, 200)
+        desk = User.objects.create(fullname='Desk Only', email='desk-only@example.invalid', role='Staff',
+                                   account_status='Active', modules='transactions')
+        other = _client(admin_id=desk.admin_id, admin_role='Staff')
+        self.assertEqual(other.get('/admin-portal/shelf-audit/%d/' % self.shelf.pk).status_code, 302)
+
+    def test_the_report_lists_both(self):
+        from .reports import build_report
+        today = timezone.localdate()
+        report = build_report('shelving', today, today)
+        needs = sorted(row[0] for row in report['rows'])
+        self.assertEqual(needs, ['No label', 'Waiting for a shelf', 'Waiting for a shelf'])
+        self.assertIn(('Waiting for a Shelf', 2), report['summary'])

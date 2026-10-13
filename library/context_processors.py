@@ -1,6 +1,6 @@
 """Template context shared across the portal templates."""
 
-from .alerts import may_review, waiting_registrations
+from .alerts import may_review, may_shelve, waiting_registrations
 from .models import Book, Conversation, Patron, Transaction, User
 
 
@@ -28,7 +28,15 @@ def staff_modules(request):
         'newest_registration': (waiting_registrations().order_by('-patron_id').first()
                                 if may_review(user) else None),
         'can_review_registrations': may_review(user),
+        # Badged on Shelving & Labels and shown on the dashboard.
+        'can_shelve': may_shelve(user),
+        'shelving_counts': _shelving_counts() if may_shelve(user) else (0, 0),
     }
+
+
+def _shelving_counts():
+    from .shelving import need_label, need_shelf
+    return need_shelf().count(), need_label().count()
 
 
 def patron_session(request):

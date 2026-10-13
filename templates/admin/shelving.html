@@ -1,0 +1,313 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en" data-module="admin">
+<head>
+    <meta charset="UTF-8">
+    <meta name="theme-color" content="#ffffff">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ayla Admin Panel - Shelving & Labels</title>
+    <script src="{% static 'js/theme.js' %}"></script>
+    <script src="{% static 'js/session.js' %}"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="{% static 'js/tailwind-theme.js' %}"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha384-iw3OoTErCYJJB9mCa8LNS2hbsQ7M3C0EpIsO/H5+EGAkPGc6rk+V8i04oW/K5xq0" crossorigin="anonymous" referrerpolicy="no-referrer">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@400;700&display=swap" rel="stylesheet">
+    
+    <link rel="stylesheet" href="{% static 'css/theme.css' %}">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-main);
+            color: var(--text-primary);
+        }
+
+        .logo-text {
+            font-family: 'Rowdies', sans-serif;
+        }
+
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: var(--bg-main);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: var(--border-color);
+            border-radius: 3px;
+        }
+
+        .mobile-menu-btn {
+            display: none;
+            align-items: center;
+            justify-content: center;
+            width: 2.5rem;
+            height: 2.5rem;
+            border-radius: 0.5rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            cursor: pointer;
+            margin-right: 0.75rem;
+        }
+
+        @media (max-width: 1024px) {
+            aside {
+                position: fixed;
+                left: -100%;
+                top: 0;
+                height: 100vh;
+                z-index: 50;
+                transition: left 0.3s ease;
+            }
+            aside.open {
+                left: 0;
+            }
+            .mobile-menu-btn {
+                display: flex !important;
+            }
+            main {
+                padding: 1rem;
+            }
+        }
+    </style>
+    <link rel="stylesheet" href="{% static 'css/admin-enhance.css' %}">
+    <link rel="stylesheet" href="{% static 'css/admin-theme.css' %}">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'css/admin-neu.css' %}?v=20260922b">
+    <script src="{% static 'js/admin-neu.js' %}?v=20260922" defer></script>
+    <link rel="stylesheet" href="{% static 'css/readability.css' %}">
+    <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
+    <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
+    <script src="{% static 'js/ayla-dialog.js' %}"></script>
+    <script src="{% static 'js/label-print.js' %}"></script>
+    <style>
+        .field-input {
+            width: 100%; background: var(--bg-input); border: 1px solid var(--border-modal);
+            border-radius: 8px; padding: 9px 12px; font-size: 15px; color: var(--text-primary); outline: none;
+        }
+        .field-input:focus { border-color: var(--accent-strong); }
+        .board-select { width: 100%; min-width: 180px; background: var(--bg-input); border: 1px solid var(--border-modal);
+                        border-radius: 8px; padding: 6px 8px; font-size: 13px; color: var(--text-primary); }
+        .flash { background: var(--tint-accent); }
+    </style>
+</head>
+<body class="flex h-screen overflow-hidden">
+<a href="#main-content" class="skip-link">Skip to main content</a>
+{% with accent=is_staff_portal|yesno:"violet,cyan" %}
+
+    {% if is_staff_portal %}{% include 'library_staff/_sidebar.html' with active='shelving' %}{% else %}{% include 'admin/_sidebar.html' with active='shelving' %}{% endif %}
+
+    <div class="flex-1 flex flex-col overflow-hidden">
+        <header class="h-16 flex-shrink-0 flex items-center justify-between px-8" style="background-color: var(--bg-main);">
+            <div class="flex items-center">
+                <button class="mobile-menu-btn" onclick="toggleSidebar()" aria-label="Toggle navigation menu"><i class="fa-solid fa-bars"></i></button>
+                <h2 class="logo-text text-lg tracking-wider text-slate-200 uppercase">Shelving &amp; Labels</h2>
+            </div>
+            <div class="flex items-center gap-3">
+                {% include 'admin/_headeractions.html' with accent=accent %}
+            </div>
+        </header>
+
+        <main id="main-content" tabindex="-1" class="flex-1 overflow-y-auto p-8 space-y-6">
+            <div class="rounded-lg border border-slate-800 px-4 py-3 text-[11px] text-slate-400 leading-relaxed flex flex-wrap items-center justify-between gap-3" style="background-color: var(--bg-card);">
+                <span>A book is ready for the floor once it is on a board and carries its label. These are the books that are not there yet. The same two numbers show on the dashboard, in Manage Books, Shelf Manager and Inventory.</span>
+                {% if not is_staff_portal %}<a href="{% url 'admin_reports' %}?type=shelving&generate=1" class="font-bold text-{{ accent }}-400 hover:text-{{ accent }}-300 whitespace-nowrap"><i class="fa-solid fa-file-lines mr-1"></i> Report</a>{% endif %}
+            </div>
+
+            <div data-live="shelving-stats" class="grid grid-cols-2 gap-4 max-w-2xl">
+                <a href="#shelve" class="p-5 rounded-xl border border-slate-800/80 hover:border-amber-700/60" style="background-color: var(--bg-card);">
+                    <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Waiting for a shelf</p>
+                    <p class="text-3xl font-bold text-amber-400 mt-2">{{ waiting|length }}</p>
+                    <p class="text-[10px] text-slate-500 mt-1">Here, but on no board yet</p>
+                </a>
+                <a href="#labels" class="p-5 rounded-xl border border-slate-800/80 hover:border-violet-700/60" style="background-color: var(--bg-card);">
+                    <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">On a shelf, no label</p>
+                    <p class="text-3xl font-bold text-violet-400 mt-2">{{ unlabelled_total }}</p>
+                    <p class="text-[10px] text-slate-500 mt-1">No label printed or confirmed</p>
+                </a>
+            </div>
+
+            {# Books waiting for a board, each with the board it most likely belongs on. #}
+            <section id="shelve" class="rounded-xl border border-slate-800/80 overflow-hidden" style="background-color: var(--bg-card);">
+                <div class="p-4 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                        <h3 class="text-sm font-bold text-slate-200">Waiting for a shelf ({{ waiting|length }})</h3>
+                        <p class="text-[11px] text-slate-500 mt-0.5">Each has the board its other copies or its genre are on. Change a board if the book belongs elsewhere, then shelve.</p>
+                    </div>
+                    {% if waiting %}
+                    <button type="button" onclick="shelveTicked()" class="bg-{{ accent }}-700 hover:bg-{{ accent }}-600 text-white text-xs font-bold px-4 py-2 rounded-lg inline-flex items-center gap-2"><i class="fa-solid fa-box-archive text-[11px]"></i> Shelve ticked (<span id="tickCount">0</span>)</button>
+                    {% endif %}
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="border-b border-slate-800/80 text-[10px] font-bold tracking-wider text-slate-500 uppercase">
+                                <th class="py-3 px-4 w-10"><input type="checkbox" onclick="tickAll(this.checked)" aria-label="Tick every book"></th>
+                                <th class="py-3 px-4">Book</th>
+                                <th class="py-3 px-4 w-28">Status</th>
+                                <th class="py-3 px-4 min-w-[14rem]">Board</th>
+                                <th class="py-3 px-4 w-24"></th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-800/40 text-xs text-slate-300">
+                            {% for row in waiting %}
+                            <tr id="wait-{{ row.book.book_id }}" data-book="{{ row.book.book_id }}">
+                                <td class="py-3 px-4"><input type="checkbox" class="wait-tick" value="{{ row.book.book_id }}" onchange="paintTicks()" aria-label="Tick {{ row.book.title }}"></td>
+                                <td class="py-3 px-4">
+                                    <div class="font-bold text-slate-200">{{ row.book.title }}</div>
+                                    <div class="text-[10px] text-slate-500">{{ row.book.author }}{% if row.book.call_number %} &middot; {{ row.book.call_number }}{% endif %}{% if row.book.genre %} &middot; {{ row.book.genre }}{% endif %}</div>
+                                </td>
+                                <td class="py-3 px-4">
+                                    {% if row.book.status == 'Donated' %}<span class="text-[10px] font-bold text-violet-400" title="Shelving it makes it available to borrow">Donated</span>{% else %}<span class="text-[10px] text-slate-400">{{ row.book.status }}</span>{% endif %}
+                                </td>
+                                <td class="py-3 px-4">
+                                    <select class="board-select" id="board-{{ row.book.book_id }}" aria-label="Board for {{ row.book.title }}">
+                                        <option value="">Choose a board&hellip;</option>
+                                        {% for b in boards %}<option value="{{ b.id }}"{% if row.level and row.level.shelf_level_id == b.id %} selected{% endif %}>{{ b.name }}</option>{% endfor %}
+                                    </select>
+                                    {% if row.why %}<p class="text-[10px] text-slate-500 mt-1">Suggested: {{ row.why }}</p>{% endif %}
+                                </td>
+                                <td class="py-3 px-4 text-right">
+                                    <button type="button" onclick="shelve([{{ row.book.book_id }}])" class="text-[11px] font-bold px-3 py-1.5 rounded-lg border border-{{ accent }}-800/70 text-{{ accent }}-400 hover:bg-{{ accent }}-950/40">Shelve</button>
+                                </td>
+                            </tr>
+                            {% empty %}
+                            <tr><td colspan="5" class="py-10 text-center text-slate-500"><i class="fa-solid fa-circle-check text-emerald-500 mr-1"></i> Every book here has a shelf.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            {# Shelved books with no label, board by board: print a board's labels, or confirm it already has them. #}
+            <section id="labels" class="rounded-xl border border-slate-800/80 overflow-hidden" style="background-color: var(--bg-card);">
+                <div class="p-4 border-b border-slate-800">
+                    <h3 class="text-sm font-bold text-slate-200">On a shelf, no label ({{ unlabelled_total }})</h3>
+                    <p class="text-[11px] text-slate-500 mt-0.5">Print a board's labels and stick them on, or mark the board as already labelled if its books carry labels from before. Auditing a shelf records labels as it counts, one book at a time.</p>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="border-b border-slate-800/80 text-[10px] font-bold tracking-wider text-slate-500 uppercase">
+                                <th class="py-3 px-4">Board</th>
+                                <th class="py-3 px-4 w-24">Books</th>
+                                <th class="py-3 px-4 text-right">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-800/40 text-xs text-slate-300">
+                            {% for b in label_boards %}
+                            <tr>
+                                <td class="py-3 px-4 font-semibold text-slate-200">{{ b.name }}</td>
+                                <td class="py-3 px-4 font-mono">{{ b.count }}</td>
+                                <td class="py-3 px-4">
+                                    <div class="flex flex-wrap justify-end gap-1.5">
+                                        <button type="button" onclick="printBoard('{{ b.ids }}')" class="text-[11px] font-semibold px-2.5 py-1.5 rounded-md border border-amber-800/60 text-amber-400 hover:bg-amber-950/40"><i class="fa-solid fa-print mr-1"></i>Print labels</button>
+                                        <button type="button" onclick="markBoard('{{ b.ids }}', '{{ b.name|escapejs }}', {{ b.count }})" class="text-[11px] font-semibold px-2.5 py-1.5 rounded-md border border-slate-700 text-slate-300 hover:bg-slate-800/50">Already labelled</button>
+                                        <a href="{% url 'shelf_audit' b.shelf_id %}" class="text-[11px] font-semibold px-2.5 py-1.5 rounded-md border border-{{ accent }}-800/70 text-{{ accent }}-400 hover:bg-{{ accent }}-950/40"><i class="fa-solid fa-clipboard-check mr-1"></i>Audit shelf</a>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% empty %}
+                            <tr><td colspan="3" class="py-10 text-center text-slate-500"><i class="fa-solid fa-circle-check text-emerald-500 mr-1"></i> Every shelved book has its label.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        </main>
+    </div>
+{% endwith %}
+
+    <script>
+        function toggleSidebar() { document.querySelector('aside').classList.toggle('open'); }
+        const PLACE_URL = "{% url 'shelving_place' %}";
+        const LABELS_URL = "{% url 'book_qr_labels' %}";
+        const MARK_URL = "{% url 'mark_books_labelled' %}";
+        const CSRF = '{{ csrf_token }}';
+
+        function ticked() {
+            return Array.prototype.map.call(document.querySelectorAll('.wait-tick:checked'), function (b) { return Number(b.value); });
+        }
+        function paintTicks() {
+            const n = document.getElementById('tickCount');
+            if (n) n.textContent = ticked().length;
+        }
+        function tickAll(on) {
+            document.querySelectorAll('.wait-tick').forEach(function (b) { b.checked = on; });
+            paintTicks();
+        }
+        function shelveTicked() {
+            const ids = ticked();
+            if (!ids.length) { AylaDialog.toast('Tick the books to shelve first.', 'warning'); return; }
+            shelve(ids);
+        }
+
+        // Each book goes to the board chosen beside it.
+        async function shelve(ids) {
+            const pairs = [], unchosen = [];
+            ids.forEach(function (id) {
+                const board = document.getElementById('board-' + id).value;
+                if (board) pairs.push(id + ':' + board); else unchosen.push(id);
+            });
+            if (unchosen.length) {
+                AylaDialog.toast((unchosen.length === 1 ? 'One book has' : unchosen.length + ' books have')
+                    + ' no board chosen yet.', 'warning');
+                document.getElementById('board-' + unchosen[0]).focus();
+                return;
+            }
+            const res = await fetch(PLACE_URL, {
+                method: 'POST', body: new URLSearchParams({ placements: pairs.join(',') }),
+                headers: { 'X-CSRFToken': CSRF, 'X-Requested-With': 'XMLHttpRequest' },
+            });
+            const data = await res.json().catch(function () { return {}; });
+            if (!data.success) { AylaDialog.toast(data.error || 'Those books could not be shelved.', 'error'); return; }
+            const print = await AylaDialog.confirm(data.message, {
+                title: 'Shelved', confirmLabel: 'Print their labels now', cancelLabel: 'Later', danger: false });
+            if (print) await AylaLabels.download(LABELS_URL, data.ids);
+            location.reload();
+        }
+
+        async function printBoard(ids) {
+            if (await AylaLabels.download(LABELS_URL, ids.split(',').map(Number))) {
+                setTimeout(function () { location.reload(); }, 1200);
+            }
+        }
+
+        async function markBoard(ids, name, count) {
+            const yes = await AylaDialog.confirm('Mark the ' + count + ' book' + (count === 1 ? '' : 's') + ' on '
+                + name + ' as already labelled?', {
+                title: 'Already labelled', confirmLabel: 'Mark them', danger: false,
+                detail: 'Only if each one carries a label you can scan. An audit of the shelf checks them one by one instead.' });
+            if (!yes) return;
+            const res = await fetch(MARK_URL, {
+                method: 'POST', body: new URLSearchParams({ ids: ids }),
+                headers: { 'X-CSRFToken': CSRF, 'X-Requested-With': 'XMLHttpRequest' },
+            });
+            const data = await res.json().catch(function () { return {}; });
+            if (!data.success) { AylaDialog.toast(data.error || 'Could not save that.', 'error'); return; }
+            AylaDialog.toast(data.marked + ' marked as labelled.', 'success');
+            location.reload();
+        }
+
+        // Opened from another page for one book: show it.
+        (function () {
+            const id = new URLSearchParams(location.search).get('book');
+            const row = id && document.getElementById('wait-' + id);
+            if (!row) return;
+            row.classList.add('flash');
+            row.querySelector('.wait-tick').checked = true;
+            paintTicks();
+            // After the browser has jumped to the section the link named.
+            window.addEventListener('load', function () {
+                setTimeout(function () { row.scrollIntoView({ block: 'center' }); }, 50);
+            });
+        })();
+    </script>
+
+    <script src="{% static 'js/admin-enhance.js' %}" defer></script>
+    {% include '_live.html' with topics='books' %}
+</body>
+</html>
