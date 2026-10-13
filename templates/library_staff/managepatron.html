@@ -187,7 +187,9 @@
                             <tr class="hover:bg-slate-800/10 transition-colors">
                                 <td class="py-4 px-6">
                                     <div class="font-bold text-slate-200">{{ p.fullname }}</div>
-                                    {% if p.fix_token %}<div class="text-[9px] font-bold text-amber-400 mt-0.5" title="{{ p.fix_note }}"><i class="fa-solid fa-hourglass-half"></i> Waiting for the applicant to fix it &middot; asked {{ p.fix_requested_at|date:'M j' }}</div>
+                                    {% if p.fix_token and p.fix_link_expired %}<div class="text-[9px] font-bold text-rose-400 mt-0.5" title="{{ p.fix_note }}"><i class="fa-solid fa-link-slash"></i> Fix link expired {{ p.fix_link_expires_at|date:'M j' }}</div>
+                                    <form method="post" action="{% url 'resend_fix_link' p.patron_id %}" class="mt-1">{% csrf_token %}<button type="submit" class="text-[10px] font-bold px-2 py-0.5 rounded-md border border-amber-800/70 text-amber-300 hover:bg-amber-700/30"><i class="fa-solid fa-paper-plane text-[9px]"></i> Resend link</button></form>
+                                    {% elif p.fix_token %}<div class="text-[9px] font-bold text-amber-400 mt-0.5" title="{{ p.fix_note }}"><i class="fa-solid fa-hourglass-half"></i> Waiting for the applicant to fix it{% if p.fix_needs_id %} (new ID){% endif %} &middot; link works until {{ p.fix_link_expires_at|date:'M j' }}</div>
                                     {% elif p.resubmitted_at %}<div class="text-[9px] font-bold text-emerald-400 mt-0.5" title="Asked to fix: {{ p.fix_note }}"><i class="fa-solid fa-rotate"></i> Resubmitted {{ p.resubmitted_at|date:'M j' }}</div>{% endif %}
                                     <div class="text-[9px] text-slate-500 mt-0.5">{{ p.contact_number|default:'—' }}</div>
                                 </td>
@@ -616,6 +618,10 @@
                             {% for why in fix_reasons %}<button type="button" onclick="pickReason(this)" class="text-[10px] font-semibold px-2 py-1 rounded-md border border-slate-700/60 text-slate-400 hover:text-slate-200 hover:border-slate-500">{{ why }}</button>{% endfor %}
                             </div>
                         </div>
+                        <label id="rvNeedsIdWrap" class="flex items-center gap-2 text-[11px] text-slate-300 cursor-pointer select-none">
+                            <input type="checkbox" id="rvNeedsId" class="w-3.5 h-3.5 rounded border-slate-600 bg-slate-900 text-amber-600 focus:ring-0">
+                            <span>They must upload a new ID <span class="text-slate-500">(the fix link will not send without one)</span></span>
+                        </label>
                         <div class="space-y-1">
                             <p class="text-[10px] text-slate-500">Not accepted &rarr; <span class="text-rose-400 font-semibold">Reject</span></p>
                             <div class="flex flex-wrap gap-1.5">
@@ -671,6 +677,7 @@
         <input type="hidden" name="id_reviewed" value="1">
         <input type="hidden" name="reason" id="rvReasonField" value="">
         <input type="hidden" name="mode" id="rvModeField" value="reject">
+        <input type="hidden" name="needs_id" id="rvNeedsIdField" value="0">
     </form>
     <div id="modalOverlay" class="modal-overlay fixed inset-0 bg-black/60 z-40 items-center justify-center p-4 overflow-y-auto">
         <div class="w-full max-w-lg rounded-2xl border p-6 flex flex-col gap-5 shadow-2xl relative my-auto"
@@ -898,6 +905,8 @@
             const box = document.getElementById('rvReason');
             box.value = btn.textContent.trim();
             document.getElementById('rvReasonError').classList.add('hidden');
+            // Every fixable reason is about the ID, so it asks for a new one; it can be unticked.
+            if (btn.closest('#rvFixReasons')) document.getElementById('rvNeedsId').checked = true;
         }
 
         function openReview(btn) {
@@ -905,6 +914,8 @@
             document.getElementById('rvReasonError').classList.add('hidden');
             document.getElementById('rvFixBtn').classList.toggle('hidden', btn.dataset.channel !== 'Online');
             document.getElementById('rvFixReasons').classList.toggle('hidden', btn.dataset.channel !== 'Online');
+            document.getElementById('rvNeedsIdWrap').classList.toggle('hidden', btn.dataset.channel !== 'Online');
+            document.getElementById('rvNeedsId').checked = false;
             rvPatron = {
                 id: btn.dataset.patronId,
                 doc: btn.dataset.doc || '',
@@ -984,6 +995,8 @@
                 if (action === 'reject' && !await AylaDialog.confirm('Reject the registration of ' + rvPatron.name + ' completely? Their application and uploaded ID are kept on record.')) return;
                 document.getElementById('rvReasonField').value = reason;
                 document.getElementById('rvModeField').value = action;
+                document.getElementById('rvNeedsIdField').value =
+                    action === 'fix' && document.getElementById('rvNeedsId').checked ? '1' : '0';
                 form.action = rvPatron.rejectUrl;
             } else {
                 form.action = rvPatron.approveUrl;

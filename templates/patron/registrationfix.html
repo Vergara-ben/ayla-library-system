@@ -140,10 +140,25 @@ h1{
     <p class="sub">Thank you, {{ patron.first_name|default:patron.fullname }}. The library will look at your registration again and email you once it is approved.</p>
     <a href="{% url 'patron_login' %}"><button type="button" class="btn">Back to sign in</button></a>
 
+  {% elif stage == 'used' %}
+    <h1>This link has already been used</h1>
+    <p class="sub">Each link works once. Your registration was already sent back, a newer link was emailed to you, or the library has decided on it. Check your email for the latest message from the library, or ask at the desk.</p>
+    <a href="{% url 'patron_login' %}"><button type="button" class="btn">Back to sign in</button></a>
+
   {% elif stage == 'expired' %}
-    <h1>This link no longer works</h1>
-    <p class="sub">It has already been used, or it is more than two weeks old. Please contact the library, or register again.</p>
-    <a href="{% url 'patron_register' %}"><button type="button" class="btn">Register again</button></a>
+    <h1>This link has run out</h1>
+    <p class="sub">Links to fix a registration work for two weeks. Your application is still open, so you can get a new link: it goes only to {{ masked_email }}.</p>
+    <div class="note"><strong>What to fix:</strong> {{ patron.fix_note }}</div>
+    <form method="POST">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="resend">
+      <button type="submit" class="btn">Email me a new link</button>
+    </form>
+
+  {% elif stage == 'resent' %}
+    <h1>New link sent</h1>
+    <p class="sub">We emailed a new link to {{ masked_email }}. It works once, for two weeks. You can close this page.</p>
+    <a href="{% url 'patron_login' %}"><button type="button" class="btn">Back to sign in</button></a>
 
   {% else %}
     <h1>Update your registration</h1>
@@ -153,9 +168,15 @@ h1{
     <form method="POST" enctype="multipart/form-data">
       {% csrf_token %}
       <div class="form-group">
-        <label for="credential_document">New photo or scan of your ID <span style="font-weight:400">(only if asked)</span></label>
+        {% if patron.fix_needs_id %}
+        <label for="credential_document">New photo or scan of your ID <span style="font-weight:400">(required)</span></label>
+        <div class="input"><input type="file" id="credential_document" name="credential_document" accept="image/jpeg,image/png,application/pdf" required></div>
+        <p class="hint">JPG, PNG or PDF, up to 5 MB. Make sure the whole ID is in the picture and the text is sharp.</p>
+        {% else %}
+        <label for="credential_document">New photo or scan of your ID <span style="font-weight:400">(optional)</span></label>
         <div class="input"><input type="file" id="credential_document" name="credential_document" accept="image/jpeg,image/png,application/pdf"></div>
         <p class="hint">JPG, PNG or PDF, up to 5 MB. Leave empty to keep the one you sent.</p>
+        {% endif %}
       </div>
 
       <div class="form-group names">

@@ -265,8 +265,8 @@ def registration_rejected_email(email, fullname, reason=None):
 FIX_LINK_DAYS = 14
 
 
-def registration_fix_email(patron, note, link):
-    """Ask an applicant to correct their registration through a private link."""
+def registration_fix_email(patron, note, link, needs_id=False):
+    """Ask an applicant to correct their registration through a private, one-time link."""
     lib = _library_name()
     body = "\n".join([
         f"Dear {patron.fullname},",
@@ -276,12 +276,15 @@ def registration_fix_email(patron, note, link):
         "",
         f"    {note}",
         "",
-        "Open this link to upload a clearer ID or fix your details. Nothing else needs",
-        "to be filled in again:",
+        ("Open this link and upload a new photo or scan of your ID. Your other details are"
+         if needs_id else
+         "Open this link to fix your details. Everything else you sent is"),
+        "already filled in:",
         "",
         link,
         "",
-        f"The link works for {FIX_LINK_DAYS} days.",
+        f"The link works once, for {FIX_LINK_DAYS} days. If it runs out, open it anyway and",
+        "it will let you ask for a new one.",
         "",
         f"Thank you,\n{lib}",
     ])

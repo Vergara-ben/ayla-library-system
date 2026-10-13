@@ -129,6 +129,7 @@ urlpatterns = [
     path('admin-portal/delete-patron/<int:patron_id>/', views.admin_delete_patron, name='admin_delete_patron'),
     path('admin-portal/approve-patron/<int:patron_id>/', views.approve_patron, name='approve_patron'),
     path('admin-portal/reject-patron/<int:patron_id>/', views.reject_patron, name='reject_patron'),
+    path('admin-portal/resend-fix-link/<int:patron_id>/', views.resend_fix_link, name='resend_fix_link'),
     path('admin-portal/reactivation/<int:request_id>/respond/', views.respond_to_reactivation, name='respond_to_reactivation'),
     path('admin-portal/promote-visitor/<int:patron_id>/', views.promote_visitor, name='promote_visitor'),
     # The ID check: one patron, or every member still without one.
