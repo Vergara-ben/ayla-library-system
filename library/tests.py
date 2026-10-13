@@ -5295,9 +5295,9 @@ class BookConditionTests(TestCase):
     def test_a_new_copy_is_good_until_said_otherwise(self):
         self.assertEqual(Book.objects.create(title='T', author='A').condition, 'Good')
 
-    def test_the_three_values_are_the_whole_list(self):
+    def test_the_four_step_scale_is_the_whole_list(self):
         self.assertEqual([c[0] for c in Book.CONDITION_CHOICES],
-                         ['Good', 'Worn', 'Damaged'])
+                         ['Good', 'Minor Damage', 'Damaged', 'Beyond Repair'])
 
     def test_editing_accepts_a_valid_value_and_ignores_a_bad_one(self):
         book = Book.objects.create(title='T', author='A')
@@ -5353,7 +5353,7 @@ class CatalogueImportTests(TestCase):
         rows = _template_filled_from_guide(self.client, '/admin-portal/download-book-template/')
         r = self._import(rows)
         self.assertTrue(r['success'], r)
-        self.assertEqual(Book.objects.filter(condition='Worn').count(), 1)
+        self.assertEqual(Book.objects.filter(condition='Minor Damage').count(), 1)
         self.assertTrue(Book.objects.filter(call_number='FIC A31p 1963').exists())
 
     def test_the_template_as_downloaded_imports_nothing(self):
@@ -5567,7 +5567,8 @@ class ImportRepeatAndConditionTests(TestCase):
         from library.views import parse_condition
         self.assertEqual(parse_condition('GOOD CONDITION'), 'Good')
         self.assertEqual(parse_condition('BAD CONDITION'), 'Damaged')
-        self.assertEqual(parse_condition('Fair'), 'Worn')
+        self.assertEqual(parse_condition('Fair'), 'Minor Damage')
+        self.assertEqual(parse_condition('Beyond repair'), 'Beyond Repair')
         self.assertIsNone(parse_condition('sparkly'))
 
     def test_a_bad_condition_row_is_not_filed_as_good(self):

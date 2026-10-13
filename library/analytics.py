@@ -191,7 +191,7 @@ def books_by_genre(limit=12):
 
 
 def books_by_condition():
-    """Good, Worn, Damaged. This is the repair and replacement budget."""
+    """Good, Minor Damage, Damaged, Beyond Repair. This is the repair and replacement budget."""
     counts = Counter(Book.objects.values_list('condition', flat=True))
     order = [c for c, _ in Book.CONDITION_CHOICES]
     series = [(c, counts.get(c, 0)) for c in order]

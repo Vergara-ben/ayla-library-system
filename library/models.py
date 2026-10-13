@@ -529,6 +529,17 @@ class ShelfLevel(models.Model):
 
 
 # Books
+# Physical condition of a copy, from best to worst, and what each means.
+CONDITION_NOTES = {
+    'Good': 'No damage; fully functional',
+    'Minor Damage': 'Small defects; still usable',
+    'Damaged': 'Noticeable damage; functionality may be affected',
+    'Beyond Repair': 'Severely damaged and no longer usable',
+}
+# A copy in these conditions is not lent: Damaged waits for repair, Beyond Repair for disposal.
+UNLENDABLE_STATUS = {'Damaged': 'Under Repair', 'Beyond Repair': 'Beyond Repair'}
+
+
 class Book(Archivable):
 
     STATUS_CHOICES = [
@@ -542,6 +553,9 @@ class Book(Archivable):
         ('Missing', 'Missing'),
         ('Lost', 'Lost'),
         ('Donated', 'Donated'),
+        # Taken out of circulation by its condition (see UNLENDABLE_STATUS).
+        ('Under Repair', 'Under repair'),
+        ('Beyond Repair', 'Beyond repair'),
     ]
 
     # What kind of material this is, as distinct from what it is about.
@@ -565,13 +579,9 @@ class Book(Archivable):
     )
     # Position along the level, counted from the left.
     shelf_slot = models.PositiveIntegerField(blank=True, null=True)
-    # How worn the copy is.
-    CONDITION_CHOICES = [
-        ('Good', 'Good'),
-        ('Worn', 'Worn'),
-        ('Damaged', 'Damaged'),
-    ]
-    condition = models.CharField(max_length=10, choices=CONDITION_CHOICES,
+    # Physical condition, on the library's four-step scale (CONDITION_NOTES).
+    CONDITION_CHOICES = [(c, c) for c in CONDITION_NOTES]
+    condition = models.CharField(max_length=20, choices=CONDITION_CHOICES,
                                  default='Good')
 
     # The call number written on the spine, e.g.
@@ -681,10 +691,39 @@ class Book(Archivable):
         year = str(self.publication_year) if self.publication_year else ''
         return ' '.join(p for p in (klass or 'GEN', mark, year) if p)
 
+    # On hand and otherwise lendable; only these are moved by the condition.
+    ON_HAND_STATUSES = ('Available', 'For Reshelving')
+
+    def status_for_condition(self):
+        """The status this book's condition calls for, or None to leave it as it is."""
+        if self.condition == 'Damaged' and self.status in self.ON_HAND_STATUSES + ('Beyond Repair',):
+            return 'Under Repair'
+        if self.condition == 'Beyond Repair' and self.status in self.ON_HAND_STATUSES + ('Under Repair', 'Donated'):
+            return 'Beyond Repair'
+        if self.condition not in UNLENDABLE_STATUS and self.status in ('Under Repair', 'Beyond Repair'):
+            return 'Available'
+        return None
+
+    @classmethod
+    def sync_condition_status(cls, queryset):
+        """The same rule for books changed in bulk, which skip save()."""
+        on_hand = cls.ON_HAND_STATUSES
+        queryset.filter(condition='Damaged', status__in=on_hand + ('Beyond Repair',)).update(status='Under Repair')
+        queryset.filter(condition='Beyond Repair',
+                        status__in=on_hand + ('Under Repair', 'Donated')).update(status='Beyond Repair')
+        (queryset.exclude(condition__in=list(UNLENDABLE_STATUS))
+         .filter(status__in=('Under Repair', 'Beyond Repair')).update(status='Available'))
+
     def save(self, *args, **kwargs):
         # Generate the call number once, on first save.
         if not (self.call_number or '').strip():
             self.call_number = self.derive_call_number()
+        # A copy too damaged to lend leaves circulation, and comes back once repaired.
+        wanted = self.status_for_condition()
+        if wanted:
+            self.status = wanted
+            if kwargs.get('update_fields') is not None:
+                kwargs['update_fields'] = set(kwargs['update_fields']) | {'status'}
         super().save(*args, **kwargs)
 
     objects = ArchiveManager()
@@ -791,6 +830,7 @@ class Donation(Archivable):
     STATUS_CHOICES = [
         ('Received', 'Received'),
         ('Shelved', 'Shelved'),
+        ('Not usable', 'Not usable'),
     ]
 
     donation_id = models.AutoField(primary_key=True)
@@ -1585,15 +1625,14 @@ class InventoryRecord(models.Model):
         ('Existing', 'Existing collection'),
     ]
 
-    CONDITION_CHOICES = [
-        ('Good', 'Good'),
-        ('Worn', 'Worn'),
-        ('Damaged', 'Damaged'),
+    CONDITION_CHOICES = [(c, c) for c in CONDITION_NOTES] + [
         ('Lost', 'Lost'),
         ('Withdrawn', 'Withdrawn'),
     ]
-    # Still in the building and expected on a shelf; also the choices on arrival.
-    HELD_CONDITIONS = ('Good', 'Worn', 'Damaged')
+    # Still in the building and expected on a shelf.
+    HELD_CONDITIONS = ('Good', 'Minor Damage', 'Damaged')
+    # What a copy can arrive as: Beyond Repair is recorded, then never shelved or lent.
+    ARRIVAL_CONDITIONS = tuple(CONDITION_NOTES)
 
     # Accessioning stage for donations only.
     STAGE_CHOICES = [
@@ -1674,6 +1713,11 @@ class InventoryRecord(models.Model):
             return None
         # The catalogue's own wording, so a top or a column is not called Level 1.
         return self.book.location_label() or None
+
+    @property
+    def condition_note(self):
+        """What this copy's condition means, on the library's scale."""
+        return CONDITION_NOTES.get(self.condition, '')
 
     @property
     def counts_as_held(self):

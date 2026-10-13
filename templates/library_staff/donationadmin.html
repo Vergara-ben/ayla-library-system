@@ -179,6 +179,7 @@
                                 <td class="py-3 px-6 text-slate-400 font-mono text-[11px]">{{ gift.copies }}</td>
                                 <td class="py-3 px-6">
                                     {% if gift.stage == 'Received' %}<span class="bg-purple-500/10 text-purple-400 border border-purple-500/20 px-2 py-1 rounded text-[10px] font-bold tracking-wide uppercase whitespace-nowrap" title="Hidden from patrons until it is put on a shelf">Waiting for a shelf</span>
+                                    {% elif gift.stage == 'Not usable' %}<span class="bg-rose-500/10 text-rose-400 border border-rose-500/20 px-2 py-1 rounded text-[10px] font-bold tracking-wide uppercase whitespace-nowrap">Not usable</span>
                                     {% elif gift.stage == 'Shelved' %}<span class="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-1 rounded text-[10px] font-bold tracking-wide uppercase">On the shelf</span>
                                     {% else %}<span class="bg-slate-500/10 text-slate-400 border border-slate-500/20 px-2 py-1 rounded text-[10px] font-bold tracking-wide uppercase whitespace-nowrap" title="Some titles are shelved, some are not yet">Partly shelved</span>{% endif %}
                                 </td>
@@ -192,11 +193,11 @@
                                 <td class="py-3 px-6 text-slate-300">{{ donation.book.author }}</td>
                                 <td class="py-3 px-6 text-slate-400 font-mono text-[11px]">{{ donation.copy_count }}</td>
                                 <td class="py-3 px-6">
-                                    {% if donation.status == 'Shelved' %}<span class="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-1 rounded text-[10px] font-bold tracking-wide uppercase">On the shelf</span>{% else %}<span class="bg-purple-500/10 text-purple-400 border border-purple-500/20 px-2 py-1 rounded text-[10px] font-bold tracking-wide uppercase whitespace-nowrap" title="Hidden from patrons until it is put on a shelf">Waiting for a shelf</span>{% endif %}
+                                    {% if donation.status == 'Not usable' %}<span class="bg-rose-500/10 text-rose-400 border border-rose-500/20 px-2 py-1 rounded text-[10px] font-bold tracking-wide uppercase whitespace-nowrap" title="Arrived beyond repair: recorded, never shelved">Not usable</span>{% elif donation.status == 'Shelved' %}<span class="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-1 rounded text-[10px] font-bold tracking-wide uppercase">On the shelf</span>{% else %}<span class="bg-purple-500/10 text-purple-400 border border-purple-500/20 px-2 py-1 rounded text-[10px] font-bold tracking-wide uppercase whitespace-nowrap" title="Hidden from patrons until it is put on a shelf">Waiting for a shelf</span>{% endif %}
                                 </td>
                                 <td class="py-3 px-6 text-center">
                                     <div class="flex items-center justify-center gap-1.5">
-                                        {% if donation.status != 'Shelved' %}<a href="{% url 'staff_shelf' %}" class="text-[10px] font-semibold px-2 py-1 rounded-md border border-purple-800/60 text-purple-400 hover:bg-purple-950/30 whitespace-nowrap" title="Placing it on a shelf makes it available"><i class="fa-solid fa-layer-group mr-1"></i>Shelve</a>{% endif %}
+                                        {% if donation.status == 'Received' %}<a href="{% url 'staff_shelf' %}" class="text-[10px] font-semibold px-2 py-1 rounded-md border border-purple-800/60 text-purple-400 hover:bg-purple-950/30 whitespace-nowrap" title="Placing it on a shelf makes it available"><i class="fa-solid fa-layer-group mr-1"></i>Shelve</a>{% endif %}
                                         <form method="post" action="{% url 'delete_donation' %}" class="inline" data-confirm="Delete the accessioning record for this title? The catalogue entry and its borrowing history are kept." data-confirm-title="Delete donation" data-confirm-label="Delete">
                                             {% csrf_token %}
                                             <input type="hidden" name="donation_id" value="{{ donation.donation_id }}">
