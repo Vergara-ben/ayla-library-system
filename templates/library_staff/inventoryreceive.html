@@ -50,6 +50,7 @@
     <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
     <script src="{% static 'js/ayla-dialog.js' %}"></script>
     <script src="{% static 'js/picker.js' %}"></script>
+    <script src="{% static 'js/genre-picker.js' %}"></script>
     <script src="{% static 'js/donor-intake.js' %}"></script>
     {{ donor_names|json_script:'donorNamesData' }}
 </head>
@@ -195,11 +196,13 @@
                                 <div class="grid grid-cols-2 gap-3">
                                     <div>
                                         <label for="rcvYear" class="field-label">Publication year</label>
-                                        <input type="number" id="rcvYear" class="field-input" placeholder="2024" min="1000" max="2100">
+                                        <input type="number" id="rcvYear" class="field-input" placeholder="2024" min="1450" max="2100">
                                     </div>
                                     <div>
                                         <label for="rcvGenre" class="field-label">Genre</label>
-                                        <input type="text" id="rcvGenre" class="field-input" placeholder="Fiction, Reference, ...">
+                                        <input type="text" id="rcvGenre" class="field-input" placeholder="Search the library's genres">
+                                        <p id="rcvGenreNote" class="hidden text-[10px] text-emerald-400 mt-1"></p>
+                                        {{ genre_options|json_script:"rcvGenreData" }}
                                     </div>
                                 </div>
                                 <p class="text-[10px] text-slate-500">A title that is not catalogued yet is added to the catalogue when this delivery is received. Every copy gets its own book record and QR label under the matching title, so the catalogue and the stock count agree.</p>
@@ -385,6 +388,13 @@
             return ok ? '' : 'That ISBN has a wrong check digit. Check it for a typo.';
         }
 
+        // A new title's genre comes from the library's list, or is added on purpose.
+        const rcvGenrePicker = (window.AylaGenrePicker && document.getElementById('rcvGenre'))
+            ? AylaGenrePicker.attach(document.getElementById('rcvGenre'), {
+                genres: JSON.parse(document.getElementById('rcvGenreData').textContent || '[]'),
+                note: document.getElementById('rcvGenreNote'),
+            }) : null;
+
         function addIntakeItem() {
             const sel = document.getElementById('rcvBook');
             const bookId = sel.value;
@@ -404,12 +414,17 @@
             } else {
                 const title = document.getElementById('rcvTitle').value.trim();
                 if (!title) { rcvItemError('Enter the title, or pick one from the catalogue.'); return; }
+                if (!document.getElementById('rcvAuthor').value.trim()) {
+                    rcvItemError('Enter the author, or "Unknown" if the book names none.'); return;
+                }
+                const genreBad = rcvGenrePicker ? rcvGenrePicker.problem() : '';
+                if (genreBad) { rcvItemError(genreBad); document.getElementById('rcvGenre').focus(); return; }
                 const isbnText = document.getElementById('rcvIsbn').value.trim();
                 const isbnBad = isbnText && isbnProblem(isbnText);
                 if (isbnBad) { rcvItemError(isbnBad); return; }
                 const yearText = document.getElementById('rcvYear').value.trim();
                 const maxYear = new Date().getFullYear() + 1;
-                if (yearText && !(/^\d{4}$/.test(yearText) && +yearText >= 1000 && +yearText <= maxYear)) {
+                if (yearText && !(/^\d{4}$/.test(yearText) && +yearText >= 1450 && +yearText <= maxYear)) {
                     rcvItemError('Publication year must be a four-digit year up to ' + maxYear + '.'); return;
                 }
                 item.title = title;
@@ -417,6 +432,7 @@
                 item.isbn = document.getElementById('rcvIsbn').value.trim();
                 item.publication_year = document.getElementById('rcvYear').value.trim();
                 item.genre = document.getElementById('rcvGenre').value.trim();
+                item.new_genre = !!(rcvGenrePicker && rcvGenrePicker.isNew());
                 item.label = title;
                 item.sub = [item.author, item.isbn].filter(Boolean).join(' · ') || 'New to the catalogue';
                 item.isNew = true;
@@ -437,6 +453,7 @@
             document.getElementById('rcvPrice').value = '';
             // Back to Good, so one damaged title does not mark the next one damaged too.
             document.getElementById('rcvCondition').value = 'Good';
+            if (rcvGenrePicker) rcvGenrePicker.reset();
             onPickCatalogued();
         }
 

@@ -135,6 +135,8 @@
     <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
     <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
     <script src="{% static 'js/ayla-dialog.js' %}"></script>
+    <script src="{% static 'js/picker.js' %}"></script>
+    <script src="{% static 'js/genre-picker.js' %}"></script>
 </head>
 <body class="flex h-screen overflow-hidden">
 <a href="#main-content" class="skip-link">Skip to main content</a>
@@ -399,6 +401,7 @@
         </main>
     </div>
 
+    {{ genre_options|json_script:"genreOptionsData" }}
     <!-- Add Book Modal -->
     <div id="addBookModal" class="hidden absolute inset-0 bg-black/60 z-40 flex items-center justify-center p-4 overflow-y-auto">
         <div class="w-full max-w-2xl rounded-2xl border p-6 flex flex-col gap-5 shadow-2xl relative my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color);">
@@ -414,65 +417,97 @@
                 {% if error %}
                     <div class="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">{{ error }}</div>
                 {% endif %}
-                {# The ISBN first: typed or scanned, it fills in the rest. #}
+                {# Scan the ISBN: Enter fills in the rest, Enter again saves. #}
                 <div class="space-y-1.5">
-                    <label for="addIsbn" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">ISBN <span class="normal-case font-normal tracking-normal">(scan or type it first)</span></label>
+                    <label for="addIsbn" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">ISBN <span class="normal-case font-normal tracking-normal">(scan it, then Enter; blank if it has none)</span></label>
                     <div class="flex gap-2">
                         <input type="text" name="ISBN" id="addIsbn" autocomplete="off" placeholder="978-..." class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);">
                         <button type="button" onclick="lookupIsbn(true)" class="px-3 rounded-lg border border-slate-700 text-violet-400 hover:bg-slate-800/40 font-bold whitespace-nowrap"><i class="fa-solid fa-magnifying-glass text-[10px]"></i> Fill in</button>
                     </div>
                     <p id="addIsbnNote" class="hidden text-[10px] leading-relaxed"></p>
+                    <p data-add-error="ISBN" class="hidden text-[10px] text-rose-400 leading-relaxed"></p>
                 </div>
+                <p id="addMatchNote" class="hidden rounded-lg border border-amber-900/50 bg-amber-950/20 px-3 py-2 text-[10px] text-amber-300 leading-relaxed"></p>
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div class="space-y-1.5">
                         <label for="addTitle" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Title</label>
                         <input type="text" name="title" id="addTitle" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);" required>
+                        <p data-add-error="title" class="hidden text-[10px] text-rose-400 leading-relaxed"></p>
                     </div>
                     <div class="space-y-1.5">
                         <label for="addAuthor" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Author</label>
-                        <input type="text" name="author" id="addAuthor" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);" required>
+                        <input type="text" name="author" id="addAuthor" placeholder="Unknown if the book names none" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);" required>
+                        <p data-add-error="author" class="hidden text-[10px] text-rose-400 leading-relaxed"></p>
                     </div>
                 </div>
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div class="space-y-1.5">
-                        <label for="addPublicationYear" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Publication Year</label>
-                        <input type="number" name="publication_year" id="addPublicationYear" min="1000" max="2099" placeholder="e.g. 2023" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);">
-                    </div>
                     <div class="space-y-1.5">
                         <label for="addGenre" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Genre</label>
-                        <input type="text" name="genre" id="addGenre" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);">
+                        <input type="text" name="genre" id="addGenre" placeholder="Search the library's genres" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);" required>
+                        <input type="hidden" name="new_genre" id="addNewGenre" value="">
+                        <p id="addGenreNote" class="hidden text-[10px] text-violet-400 leading-relaxed"></p>
+                        <p data-add-error="genre" class="hidden text-[10px] text-rose-400 leading-relaxed"></p>
+                    </div>
+                    <div class="space-y-1.5">
+                        <label for="addPublicationYear" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Publication Year</label>
+                        <input type="number" name="publication_year" id="addPublicationYear" min="1450" max="{% now 'Y' %}" placeholder="e.g. 2023" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);">
+                        <p data-add-error="publication_year" class="hidden text-[10px] text-rose-400 leading-relaxed"></p>
                     </div>
                 </div>
-                {# Shelving it now means its label can be printed straight away. #}
+                {# The shelf is suggested from its other copies or its genre; it can wait. #}
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div class="space-y-1.5">
-                        <label for="addShelfLevel" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Shelf</label>
+                        <label for="addShelfLevel" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Shelf <span class="normal-case font-normal tracking-normal">(optional)</span></label>
                         <select name="shelf_level" id="addShelfLevel" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium appearance-none cursor-pointer" style="background-color: var(--bg-input);">
                             <option value="">Not shelved yet</option>
                             {% for shelf_level in shelf_levels %}<option value="{{ shelf_level.shelf_level_id }}">{% if shelf_level.shelf %}{{ shelf_level.shelf.name }} · {% endif %}{{ shelf_level.label }}{% if shelf_level.category %} — {{ shelf_level.category }}{% endif %}</option>{% endfor %}
                         </select>
+                        <p id="addShelfNote" class="hidden text-[10px] text-slate-500 leading-relaxed"></p>
+                    </div>
+                    <div class="space-y-1.5">
+                        <label for="addCopies" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Number of copies</label>
+                        <input type="number" name="copies" id="addCopies" min="1" max="50" value="1" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);" required>
+                        <p data-add-error="copies" class="hidden text-[10px] text-rose-400 leading-relaxed"></p>
+                    </div>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div class="space-y-1.5">
+                        <label for="addCondition" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Condition</label>
+                        <select name="condition" id="addCondition" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium appearance-none cursor-pointer" style="background-color: var(--bg-input);">
+                            {% for value, note in intake_conditions %}<option value="{{ value }}" data-note="{{ note }}">{{ value }}</option>{% endfor %}
+                        </select>
+                        <p id="addConditionNote" class="text-[10px] text-slate-500 leading-relaxed"></p>
                     </div>
                     <div class="space-y-1.5">
                         <label for="addPrice" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Price (₱)</label>
-                        <input type="number" name="price" id="addPrice" min="0" step="0.01" placeholder="Charged if lost; optional" value="" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);">
+                        <input type="number" name="price" id="addPrice" min="0" max="100000" step="0.01" placeholder="Charged if lost; optional" value="" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);">
+                        <p data-add-error="price" class="hidden text-[10px] text-rose-400 leading-relaxed"></p>
                     </div>
                 </div>
-                <div class="space-y-1.5">
-                    <label for="addMaterial" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Material Type</label>
-                    <select name="material_type" id="addMaterial" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium appearance-none pr-10 cursor-pointer" style="background-color: var(--bg-input);">
-                        {% for value, label in material_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
-                    </select>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div class="space-y-1.5">
+                        <label for="addMaterial" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Material Type</label>
+                        <select name="material_type" id="addMaterial" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium appearance-none pr-10 cursor-pointer" style="background-color: var(--bg-input);">
+                            {% for value, label in material_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+                        </select>
+                    </div>
+                    <div class="space-y-1.5">
+                        <label for="addCallNumber" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Call Number</label>
+                        <input type="text" name="call_number" id="addCallNumber" autocomplete="off" placeholder="Made from the genre, author and year" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);">
+                        <p id="addCallNote" class="text-[10px] text-slate-500 leading-relaxed">Filled in for you. Type over it only if the spine already has one.</p>
+                        <p data-add-error="call_number" class="hidden text-[10px] text-rose-400 leading-relaxed"></p>
+                    </div>
                 </div>
                 {# A book being catalogued is on hand. #}
                 <input type="hidden" name="status" value="Available">
-                <div class="pt-4 flex items-center justify-end gap-3">
+                <div class="pt-4 flex items-center justify-end gap-3 flex-wrap">
                     <button type="button" onclick="closeAddModal()" class="px-5 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:text-slate-100 hover:bg-slate-800/40 font-semibold tracking-wide transition-colors min-w-[100px]">
                         Cancel
                     </button>
-                    <button type="button" onclick="submitAndAddAnother()" class="bg-slate-900 border border-slate-700 hover:bg-slate-800/60 text-violet-400 font-bold px-5 py-2.5 rounded-lg flex items-center gap-2 tracking-wide transition-colors">
+                    <button type="button" id="addAnotherBtn" onclick="submitAndAddAnother()" class="bg-slate-900 border border-slate-700 hover:bg-slate-800/60 text-violet-400 font-bold px-5 py-2.5 rounded-lg flex items-center gap-2 tracking-wide transition-colors">
                         <i class="fa-solid fa-plus text-xs"></i> Save &amp; add another
                     </button>
-                    <button type="submit" class="bg-violet-700 hover:bg-violet-600 text-white font-bold px-5 py-2.5 rounded-lg flex items-center gap-2 tracking-wide transition-colors shadow-md">
+                    <button type="submit" id="addSaveBtn" class="bg-violet-700 hover:bg-violet-600 text-white font-bold px-5 py-2.5 rounded-lg flex items-center gap-2 tracking-wide transition-colors shadow-md">
                         <i class="fa-solid fa-check text-xs"></i> Add Book
                     </button>
                 </div>
@@ -525,7 +560,9 @@
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div class="space-y-1.5">
                         <label for="editGenre" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Genre</label>
-                        <input type="text" name="genre" id="editGenre" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);">
+                        <input type="text" name="genre" id="editGenre" placeholder="Search the library's genres" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);" required>
+                        <input type="hidden" name="new_genre" id="editNewGenre" value="">
+                        <p id="editGenreNote" class="hidden text-[10px] text-violet-400 leading-relaxed"></p>
                     </div>
                     <div class="space-y-1.5">
                         <label for="editMaterial" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Material Type</label>
@@ -919,16 +956,28 @@
 
     <script>
         function openAddModal() {
-            // Reset the added count.
+            // A fresh run.
             addedThisRun = 0;
+            callTouched = false;
+            shelfTouched = false;
+            lastLookup = '';
             const runNote = document.getElementById('addRunNote');
             if (runNote) runNote.classList.add('hidden');
             document.getElementById('addBookModal').classList.remove('hidden');
             document.getElementById('addBookForm').reset();
+            if (addGenrePicker) addGenrePicker.reset();
+            ['addIsbnNote', 'addMatchNote', 'addShelfNote'].forEach(function (id) {
+                document.getElementById(id).classList.add('hidden');
+            });
+            clearAddErrors();
+            showConditionNote();
+            document.getElementById('addIsbn').focus();
         }
 
         function closeAddModal() {
             document.getElementById('addBookModal').classList.add('hidden');
+            // Show what this run added.
+            if (addedThisRun) window.location.reload();
         }
 
         function closeEditModal() {
@@ -1207,16 +1256,153 @@
         // Keep shared fields for the next book.
         let addAnother = false;
         let addedThisRun = 0;
+        // A call number or shelf chosen by hand is never replaced by a suggestion.
+        let callTouched = false;
+        let shelfTouched = false;
+
+        const GENRE_OPTIONS = JSON.parse(document.getElementById('genreOptionsData').textContent || '[]');
+        const addGenrePicker = window.AylaGenrePicker ? AylaGenrePicker.attach(document.getElementById('addGenre'), {
+            genres: GENRE_OPTIONS,
+            flag: document.getElementById('addNewGenre'),
+            note: document.getElementById('addGenreNote'),
+            onChange: function () { askCatalogue(); },
+        }) : null;
+
+        const ADD_INPUTS = { ISBN: 'addIsbn', title: 'addTitle', author: 'addAuthor', genre: 'addGenre',
+                             publication_year: 'addPublicationYear', price: 'addPrice', copies: 'addCopies',
+                             condition: 'addCondition', call_number: 'addCallNumber' };
+
+        function clearAddErrors() {
+            document.querySelectorAll('[data-add-error]').forEach(function (p) {
+                p.textContent = '';
+                p.classList.add('hidden');
+            });
+            Object.values(ADD_INPUTS).forEach(function (id) {
+                const el = document.getElementById(id);
+                if (el) el.classList.remove('border-rose-500');
+            });
+        }
+
+        // Each problem under its own field, and the first of them focused.
+        function showAddErrors(problems) {
+            clearAddErrors();
+            let first = null;
+            problems.forEach(function (p) {
+                const box = document.querySelector('[data-add-error="' + p.field + '"]');
+                const input = document.getElementById(ADD_INPUTS[p.field]);
+                if (box) {
+                    box.textContent = p.error;
+                    box.classList.remove('hidden');
+                } else if (window.AylaDialog) {
+                    AylaDialog.toast(p.error, 'error');
+                }
+                if (input) {
+                    input.classList.add('border-rose-500');
+                    first = first || input;
+                }
+            });
+            if (first) first.focus();
+        }
+
+        function checkAddForm() {
+            const problems = [];
+            const val = function (id) { return document.getElementById(id).value.trim(); };
+            if (!val('addTitle')) problems.push({ field: 'title', error: 'Type the title.' });
+            if (!val('addAuthor')) problems.push({ field: 'author', error: 'Type the author, or "Unknown" if the book names none.' });
+            const genre = addGenrePicker ? addGenrePicker.problem() : (val('addGenre') ? '' : 'Choose a genre.');
+            if (genre) problems.push({ field: 'genre', error: genre });
+            if (problems.length) { showAddErrors(problems); return false; }
+            clearAddErrors();
+            return true;
+        }
+
+        // The next thing to fill in; once all is filled in, the save button, so Enter saves.
+        function focusNextEmpty() {
+            for (const id of ['addTitle', 'addAuthor', 'addGenre']) {
+                const el = document.getElementById(id);
+                if (!el.value.trim()) { el.focus(); return; }
+            }
+            if (addGenrePicker && addGenrePicker.problem()) { document.getElementById('addGenre').focus(); return; }
+            document.getElementById('addAnotherBtn').focus();
+        }
+
+        function showConditionNote() {
+            const sel = document.getElementById('addCondition');
+            const note = document.getElementById('addConditionNote');
+            if (!sel || !note) return;
+            const fate = { 'Damaged': ' Not lent until it is repaired.',
+                           'Beyond Repair': ' Recorded, but never lent; it is listed for disposal.' };
+            const opt = sel.options[sel.selectedIndex];
+            note.textContent = (opt ? opt.dataset.note : '') + '.' + (fate[sel.value] || '');
+            note.className = 'text-[10px] leading-relaxed ' + (fate[sel.value] ? 'text-amber-400' : 'text-slate-500');
+        }
+
+        // While the book is typed: is it here already, which shelf suits it, and its call number.
+        let assistTimer = null;
+        let assistSeq = 0;
+        function askCatalogue() {
+            clearTimeout(assistTimer);
+            assistTimer = setTimeout(runAssist, 250);
+        }
+        async function runAssist() {
+            const val = function (id) { return document.getElementById(id).value.trim(); };
+            const params = new URLSearchParams({ title: val('addTitle'), author: val('addAuthor'),
+                                                 genre: val('addGenre'), publication_year: val('addPublicationYear') });
+            if (!params.get('title') && !params.get('author') && !params.get('genre')) return;
+            const seq = ++assistSeq;
+            let data;
+            try {
+                const res = await fetch("{% url 'catalogue_assist' %}?" + params.toString(),
+                                        { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+                data = await res.json();
+            } catch (e) {
+                return;
+            }
+            if (seq !== assistSeq || !data || !data.success) return;
+
+            const matchNote = document.getElementById('addMatchNote');
+            if (data.match) {
+                const n = data.match.copies;
+                matchNote.innerHTML = '<i class="fa-solid fa-clone mr-1"></i>Already in the catalogue: <b>' + n
+                    + ' cop' + (n === 1 ? 'y' : 'ies') + '</b> of this title. Saving adds to them; '
+                    + 'what they share is filled in below.';
+                matchNote.classList.remove('hidden');
+                // What the copies share, without overwriting anything typed.
+                const fillEmpty = function (id, value) {
+                    const el = document.getElementById(id);
+                    if (el && !el.value.trim() && value !== '' && value != null) el.value = value;
+                };
+                if (!val('addGenre') && data.match.genre && addGenrePicker) addGenrePicker.set(data.match.genre);
+                fillEmpty('addIsbn', data.match.isbn);
+                fillEmpty('addPublicationYear', data.match.publication_year);
+                fillEmpty('addPrice', data.match.price);
+                if (data.match.material_type) document.getElementById('addMaterial').value = data.match.material_type;
+            } else {
+                matchNote.classList.add('hidden');
+            }
+
+            const shelfSel = document.getElementById('addShelfLevel');
+            const shelfNote = document.getElementById('addShelfNote');
+            if (!shelfTouched) {
+                shelfSel.value = data.shelf ? String(data.shelf.id) : '';
+                shelfNote.textContent = data.shelf
+                    ? 'Suggested: ' + data.shelf.label + ', ' + data.shelf.why + '. Change it if it belongs elsewhere.' : '';
+                shelfNote.classList.toggle('hidden', !data.shelf);
+            }
+            if (!callTouched) document.getElementById('addCallNumber').value = data.call_number || '';
+        }
 
         // The ISBN fills in the rest: from the catalogue if we hold it, else Open Library.
         let lastLookup = '';
-        async function lookupIsbn(force) {
+        // quiet: looked up on leaving the box, so the cursor stays where it was put.
+        async function lookupIsbn(force, quiet) {
             const isbn = document.getElementById('addIsbn').value.trim();
             const note = document.getElementById('addIsbnNote');
-            if (!isbn || (isbn === lastLookup && force !== true)) return;
+            const moveOn = function () { if (!quiet) focusNextEmpty(); };
+            if (!isbn || (isbn === lastLookup && force !== true)) { moveOn(); return; }
             lastLookup = isbn;
             note.className = 'text-[10px] leading-relaxed text-slate-500';
-            note.textContent = 'Looking it up\u2026';
+            note.textContent = 'Looking it up…';
             let data;
             try {
                 const res = await fetch("{% url 'isbn_lookup' %}?isbn=" + encodeURIComponent(isbn),
@@ -1228,6 +1414,7 @@
             if (!data.success) {
                 note.className = 'text-[10px] leading-relaxed text-amber-500';
                 note.textContent = data.error;
+                moveOn();
                 return;
             }
             const b = data.book;
@@ -1239,15 +1426,15 @@
             fill('addTitle', b.title, true);
             fill('addAuthor', b.author, true);
             fill('addPublicationYear', b.publication_year, true);
-            fill('addGenre', b.genre, same);
+            if (same && b.genre && addGenrePicker) addGenrePicker.set(b.genre);
             fill('addMaterial', b.material_type, same);
             fill('addPrice', b.price, same);
-            fill('addShelfLevel', b.shelf_level, same);
-            note.className = 'text-[10px] leading-relaxed ' + (same ? 'text-emerald-500' : 'text-cyan-500');
+            note.className = 'text-[10px] leading-relaxed ' + (same ? 'text-emerald-500' : 'text-violet-500');
             note.textContent = same
-                ? 'Already in the catalogue (' + data.copies + ' cop' + (data.copies === 1 ? 'y' : 'ies')
-                  + '). Saving adds another copy on the same shelf.'
-                : 'Filled in from Open Library. Check the details, then save.';
+                ? 'Found in the catalogue. Check the details, then press Enter to save.'
+                : 'Filled in from Open Library. Check the details and pick a genre, then save.';
+            askCatalogue();
+            moveOn();
         }
         (function () {
             const isbn = document.getElementById('addIsbn');
@@ -1256,23 +1443,46 @@
             isbn.addEventListener('keydown', function (e) {
                 if (e.key === 'Enter') { e.preventDefault(); lookupIsbn(); }
             });
-            isbn.addEventListener('change', lookupIsbn);
+            isbn.addEventListener('change', function () { lookupIsbn(false, true); });
+            ['addTitle', 'addAuthor', 'addPublicationYear'].forEach(function (id) {
+                document.getElementById(id).addEventListener('change', askCatalogue);
+            });
+            document.getElementById('addCallNumber').addEventListener('input', function () {
+                callTouched = this.value.trim() !== '';
+            });
+            document.getElementById('addShelfLevel').addEventListener('change', function () {
+                shelfTouched = true;
+                document.getElementById('addShelfNote').classList.add('hidden');
+            });
+            document.getElementById('addCondition').addEventListener('change', showConditionNote);
+            showConditionNote();
+            // Enter moves to what is still empty, and saves once nothing is.
+            document.getElementById('addBookForm').addEventListener('keydown', function (e) {
+                if (e.key !== 'Enter' || e.defaultPrevented || e.target.tagName === 'BUTTON'
+                    || e.target.tagName === 'TEXTAREA') return;
+                e.preventDefault();
+                const missing = ['addTitle', 'addAuthor', 'addGenre'].some(function (id) {
+                    return !document.getElementById(id).value.trim();
+                });
+                if (missing) focusNextEmpty();
+                else submitAndAddAnother();
+            });
         })();
 
         window.submitAndAddAnother = function () {
-            const form = document.getElementById('addBookForm');
-            // Run browser validation first.
-            if (!form.reportValidity()) return;
+            if (!checkAddForm()) return;
             addAnother = true;
-            form.requestSubmit();
+            document.getElementById('addBookForm').requestSubmit();
         };
 
         document.getElementById('addBookForm').addEventListener('submit', function(e) {
             e.preventDefault();
-            const formData = new FormData(this);
             const keepOpen = addAnother;
             addAnother = false;
-            
+            if (!checkAddForm()) return;
+            const formData = new FormData(this);
+            const copies = parseInt(formData.get('copies'), 10) || 1;
+
             fetch('/admin-portal/add-book/', {
                 method: 'POST',
                 body: formData,
@@ -1283,28 +1493,33 @@
             .then(response => response.json())
             .then(data => {
                 if (data.success && keepOpen) {
-                    addedThisRun += 1;
+                    addedThisRun += copies;
                     // What never repeats is cleared; what a run shares stays.
-                    ['addTitle', 'addAuthor', 'addIsbn', 'addPublicationYear', 'addPrice'].forEach(function (id) {
+                    ['addTitle', 'addAuthor', 'addIsbn', 'addPublicationYear', 'addPrice', 'addCallNumber'].forEach(function (id) {
                         const el = document.getElementById(id);
                         if (el) el.value = '';
                     });
-                    const isbnNote = document.getElementById('addIsbnNote');
-                    if (isbnNote) isbnNote.classList.add('hidden');
+                    document.getElementById('addCopies').value = '1';
+                    document.getElementById('addCondition').value = 'Good';
+                    showConditionNote();
+                    ['addIsbnNote', 'addMatchNote'].forEach(function (id) {
+                        document.getElementById(id).classList.add('hidden');
+                    });
                     lastLookup = '';
+                    callTouched = false;
                     const runNote = document.getElementById('addRunNote');
                     if (runNote) {
-                        runNote.textContent = addedThisRun + ' book'
-                            + (addedThisRun === 1 ? '' : 's') + ' added this run. Genre, '
-                            + 'shelf and material kept \u2014 change them by hand when one differs.';
+                        runNote.textContent = (data.message || 'Saved.') + ' ' + addedThisRun + ' book'
+                            + (addedThisRun === 1 ? '' : 's') + ' added this run. Genre and material are kept '
+                            + 'for the next one; change them when it differs.';
                         runNote.classList.remove('hidden');
                     }
-                    const first = document.getElementById('addTitle');
-                    if (first) first.focus();
+                    document.getElementById('addIsbn').focus();
                 } else if (data.success) {
                     window.location.href = '{% url 'staff_manage_books' %}';
                 } else {
-                    alert(data.error || 'An error occurred');
+                    showAddErrors(data.problems && data.problems.length ? data.problems
+                                  : [{ field: data.field || '', error: data.error || 'An error occurred' }]);
                 }
             })
             .catch(error => {
@@ -1313,8 +1528,20 @@
             });
         });
 
+        const editGenrePicker = window.AylaGenrePicker ? AylaGenrePicker.attach(document.getElementById('editGenre'), {
+            genres: GENRE_OPTIONS,
+            flag: document.getElementById('editNewGenre'),
+            note: document.getElementById('editGenreNote'),
+        }) : null;
+
         document.getElementById('editBookForm').addEventListener('submit', function(e) {
             e.preventDefault();
+            const genreProblem = editGenrePicker ? editGenrePicker.problem() : '';
+            if (genreProblem) {
+                if (window.AylaDialog) AylaDialog.toast(genreProblem, 'error'); else alert(genreProblem);
+                document.getElementById('editGenre').focus();
+                return;
+            }
             const formData = new FormData(this);
             const bookId = formData.get('book_id');
             
@@ -1375,11 +1602,14 @@
 
         // Import: preview first, save on confirm.
         let pendingImportFile = null;
+        // Ticked in the preview: the sheet's new genres are added on purpose.
+        let importNewGenres = false;
 
         function postImport(file, preview, copyRows) {
             const form = new FormData();
             form.append('excel_file', file);
             if (preview) form.append('preview', '1');
+            if (importNewGenres) form.append('new_genres', '1');
             // Which of the already-catalogued rows were ticked as real second copies.
             if (copyRows && copyRows.length) form.append('copy_rows', copyRows.join(','));
             return fetch('{% url 'import_books' %}', {
@@ -1404,6 +1634,7 @@
         function uploadExcelFile(input) {
             if (!input.files || !input.files[0]) return;
             pendingImportFile = input.files[0];
+            importNewGenres = false;
             // Clear so the same file can be picked again.
             input.value = '';
             showImportWorking('Reading ' + pendingImportFile.name + '...');
@@ -2176,6 +2407,51 @@
               + '</div>';
         }
 
+        // Rows the cataloguing rules refused, each with its reason.
+        function problemList(problems, total) {
+            const rows = problems.map(function (p) {
+                return '<li class="text-[10px] text-slate-400 leading-relaxed">' + esc(p) + '</li>';
+            }).join('');
+            return ''
+              + '<div class="rounded-xl border border-rose-500/25 bg-rose-500/[0.05] p-3 mt-1">'
+              +   '<p class="text-[11px] font-bold text-rose-300 mb-1"><i class="fa-solid fa-ban mr-1.5"></i>'
+              +     'Rows that break the cataloguing rules (' + total + ')</p>'
+              +   '<p class="text-[10px] text-slate-500 mb-2">These rows are not imported. Fix them in the sheet, then import it again.</p>'
+              +   '<ul class="space-y-0.5 overflow-y-auto" style="max-height: 22vh;">' + rows + '</ul>'
+              + '</div>';
+        }
+
+        // Genres the library lacks are added only when ticked.
+        function genreBox(genres, allowed) {
+            return ''
+              + '<div class="rounded-xl border border-violet-500/25 bg-violet-500/[0.05] p-3 mt-1">'
+              +   '<p class="text-[11px] font-bold text-violet-300 mb-1"><i class="fa-solid fa-tags mr-1.5"></i>'
+              +     'Genres the library does not have yet (' + genres.length + ')</p>'
+              +   '<p class="text-[10px] text-slate-300 mb-2 leading-relaxed">' + esc(genres.join(', ')) + '</p>'
+              +   '<label class="flex items-center gap-2 text-[11px] font-semibold text-slate-200 cursor-pointer">'
+              +     '<input type="checkbox"' + (allowed ? ' checked' : '') + ' onchange="setImportNewGenres(this.checked)">'
+              +     ' Add them as new genres</label>'
+              +   '<p class="text-[10px] text-slate-500 mt-1 leading-relaxed">Left unticked, their rows are not imported. '
+              +     'Check the spelling first: a misspelt genre becomes a genre of its own.</p>'
+              + '</div>';
+        }
+
+        window.setImportNewGenres = function (on) {
+            const file = pendingImportFile;
+            if (!file) return;
+            importNewGenres = !!on;
+            const keep = tickedCopyRows();
+            showImportWorking('Checking ' + file.name + ' again...');
+            postImport(file, true).then(function (data) {
+                showImportResult(data);
+                keep.forEach(function (v) {
+                    const box = document.querySelector('.clash-tick[value="' + v + '"]');
+                    if (box) box.checked = true;
+                });
+                updateClashCount();
+            }).catch(importFailed);
+        };
+
         window.showImportResult = function (data) {
             const icon = document.getElementById('importIcon');
             const body = document.getElementById('importSummary');
@@ -2208,9 +2484,10 @@
                     + 'This is what importing this file would do.');
             }
             String(data.message || '').split('. ').forEach(function (part) {
-                const t = part.trim().replace(/\.$/, '');
+                let t = part.trim().replace(/\.$/, '');
                 if (!t) return;
-                const bad = /skip|could not|new shelf board/i.test(t);
+                t = t.charAt(0).toUpperCase() + t.slice(1);
+                const bad = /skip|could not|new shelf board|new genre/i.test(t);
                 html += line(bad ? 'fa-circle-exclamation' : 'fa-circle-check',
                              bad ? 'text-amber-400' : 'text-emerald-400', esc(t) + '.');
             });
@@ -2224,6 +2501,16 @@
                     'Only the first ' + importedIds.length + ' can go on one label sheet.');
             }
             const clashes = (data.preview && data.clashes) || [];
+            if (data.preview && data.new_genres && data.new_genres.length) {
+                html += genreBox(data.new_genres, data.new_genres_allowed);
+            }
+            if (data.problems && data.problems.length) {
+                // Rows refused only for a new genre are covered by the box above.
+                const shown = data.problems.filter(function (p) {
+                    return !(data.preview && /: the genre "[^"]*" is new to the library$/.test(p));
+                });
+                if (shown.length) html += problemList(shown, shown.length);
+            }
             if (clashes.length) html += clashList(clashes, data.clashes_truncated);
             body.innerHTML = html;
 

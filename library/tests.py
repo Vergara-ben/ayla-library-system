@@ -62,6 +62,31 @@ def _signed_in(user):
     return c
 
 
+def _with_genre(rows):
+    """Sheets made for other tests, given the genre every new title now needs."""
+    rows = [list(row) for row in rows]
+    if not rows:
+        return rows
+    names = [str(h or '').strip().lower() for h in rows[0]]
+    col = next((i for i, n in enumerate(names) if n in ('genre', 'category', 'subject')), None)
+    if col is None:
+        rows[0].append('Genre')
+        col = len(rows[0]) - 1
+    for row in rows[1:]:
+        if not any(v not in (None, '') for v in row):
+            continue
+        row.extend([None] * (col + 1 - len(row)))
+        if row[col] in (None, ''):
+            row[col] = 'Fiction'
+    return rows
+
+
+def _with_genre_items(items):
+    """Receiving lines for a new title, given a genre the same way."""
+    return [item if item.get('book_id') else dict({'genre': 'Fiction', 'new_genre': True}, **item)
+            for item in items]
+
+
 class PagesRenderTests(TestCase):
     """Every admin page answers 200 for someone allowed to see it."""
 
@@ -1943,15 +1968,15 @@ class QRLabelSheetTests(TestCase):
 
         wb = openpyxl.Workbook()
         ws = wb.active
-        ws.append(['Title', 'Author', 'Quantity'])
-        ws.append(['Mga Ibong Mandaragit', 'Amado V. Hernandez', 2])
+        ws.append(['Title', 'Author', 'Quantity', 'Genre'])
+        ws.append(['Mga Ibong Mandaragit', 'Amado V. Hernandez', 2, 'Fiction'])
         buf = BytesIO()
         wb.save(buf)
 
         upload = SimpleUploadedFile(
             'delivery.xlsx', buf.getvalue(),
             content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-        r = self.client.post('/admin-portal/import-books/', {'excel_file': upload})
+        r = self.client.post('/admin-portal/import-books/', {'excel_file': upload, 'new_genres': '1'})
         data = r.json()
         self.assertTrue(data['success'], data)
         self.assertEqual(len(data['created_ids']), 2)
@@ -5339,13 +5364,13 @@ class CatalogueImportTests(TestCase):
         import openpyxl
         from django.core.files.uploadedfile import SimpleUploadedFile
         wb = openpyxl.Workbook()
-        for row in rows:
+        for row in _with_genre(rows):
             wb.active.append(row)
         buf = _io.BytesIO()
         wb.save(buf)
         up = SimpleUploadedFile('b.xlsx', buf.getvalue(),
                                 content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-        data = {'excel_file': up}
+        data = {'excel_file': up, 'new_genres': '1'}
         data.update(extra)          # preview=1, copy_rows=... when a test needs them
         return self.client.post('/admin-portal/import-books/', data).json()
 
@@ -5367,11 +5392,12 @@ class CatalogueImportTests(TestCase):
         self.assertTrue(r['success'], r)
         self.assertEqual(Book.objects.get(title='Emma').call_number, 'FIC A31e 1815')
 
-    def test_an_unknown_condition_does_not_fail_the_row(self):
+    def test_an_unknown_condition_is_refused_not_filed_as_good(self):
         r = self._import([['Title', 'Author', 'Condition'],
                           ['Emma', 'Austen, Jane', 'absolutely fine']])
         self.assertTrue(r['success'], r)
-        self.assertEqual(Book.objects.get(title='Emma').condition, 'Good')
+        self.assertIn('absolutely fine', r['problems'][0])
+        self.assertFalse(Book.objects.filter(title='Emma').exists())
 
     def test_a_sheet_with_no_such_columns_still_imports(self):
         """Every sheet written before these columns existed must still work."""
@@ -5467,13 +5493,13 @@ class LocationParsingTests(TestCase):
         import openpyxl
         from django.core.files.uploadedfile import SimpleUploadedFile
         wb = openpyxl.Workbook()
-        for row in rows:
+        for row in _with_genre(rows):
             wb.active.append(row)
         buf = _io.BytesIO()
         wb.save(buf)
         up = SimpleUploadedFile('b.xlsx', buf.getvalue(),
                                 content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-        data = {'excel_file': up}
+        data = {'excel_file': up, 'new_genres': '1'}
         data.update(extra)          # preview=1, copy_rows=... when a test needs them
         return self.client.post('/admin-portal/import-books/', data).json()
 
@@ -5541,13 +5567,13 @@ class ImportRepeatAndConditionTests(TestCase):
         import openpyxl
         from django.core.files.uploadedfile import SimpleUploadedFile
         wb = openpyxl.Workbook()
-        for row in rows:
+        for row in _with_genre(rows):
             wb.active.append(row)
         buf = _io.BytesIO()
         wb.save(buf)
         up = SimpleUploadedFile('b.xlsx', buf.getvalue(),
                                 content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-        data = {'excel_file': up}
+        data = {'excel_file': up, 'new_genres': '1'}
         data.update(extra)          # preview=1, copy_rows=... when a test needs them
         return self.client.post('/admin-portal/import-books/', data).json()
 
@@ -5627,8 +5653,8 @@ class ImportRepeatAndConditionTests(TestCase):
         self.assertEqual(
             Book.objects.filter(title='Communication for the Common Good').count(), 1)
 
-    def test_a_second_copy_does_not_carry_the_first_ones_isbn(self):
-        """The ISBN names the edition; the record already on file holds it."""
+    def test_every_copy_carries_the_editions_isbn(self):
+        """The ISBN names the edition, and each copy is that edition."""
         self._import(self.SHEET)
         preview = self._import(self.SHEET, preview='1')
         rows = ','.join(str(c['row']) for c in preview['clashes'])
@@ -5636,8 +5662,7 @@ class ImportRepeatAndConditionTests(TestCase):
 
         copies = Book.objects.filter(title='A Course on Words').order_by('book_id')
         self.assertEqual(copies.count(), 2)
-        self.assertEqual(copies[0].ISBN, '0-472-08101-2')
-        self.assertIsNone(copies[1].ISBN)
+        self.assertEqual([c.ISBN for c in copies], ['0-472-08101-2', '0-472-08101-2'])
 
     def test_a_copy_bound_for_another_shelf_is_still_a_repeat(self):
         """Re-importing a book for another shelf is flagged as a duplicate."""
@@ -5750,9 +5775,8 @@ class ImportRepeatAndConditionTests(TestCase):
         rows = [self.SHEET[0],
                 ['Odd One', 'Someone', 1990, '', 'EDUCATION', 'sparkly', '', 1, '']]
         r = self._import(rows)
-        self.assertIn('could not read the condition', r['message'])
-        self.assertIn('sparkly', r['message'])
-        self.assertEqual(Book.objects.get(title='Odd One').condition, 'Good')
+        self.assertIn('condition "sparkly"', r['problems'][0])
+        self.assertFalse(Book.objects.filter(title='Odd One').exists())
 
 
 class ImportPreviewTests(TestCase):
@@ -5780,13 +5804,13 @@ class ImportPreviewTests(TestCase):
         import openpyxl
         from django.core.files.uploadedfile import SimpleUploadedFile
         wb = openpyxl.Workbook()
-        for row in rows:
+        for row in _with_genre(rows):
             wb.active.append(row)
         buf = _io.BytesIO()
         wb.save(buf)
         up = SimpleUploadedFile('b.xlsx', buf.getvalue(),
                                 content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-        data = {'excel_file': up}
+        data = {'excel_file': up, 'new_genres': '1'}
         data.update(extra)
         return self.client.post('/admin-portal/import-books/', data).json()
 
@@ -6196,7 +6220,7 @@ class WrittenLocationReusesBoardsTests(TestCase):
             content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
         before = ShelfLevel.objects.count()
-        r = client.post('/admin-portal/import-books/', {'excel_file': upload})
+        r = client.post('/admin-portal/import-books/', {'excel_file': upload, 'new_genres': '1'})
         self.assertTrue(r.json()['success'], r.json())
         self.assertEqual(ShelfLevel.objects.count(), before,
                          'the import created a duplicate board')
@@ -6253,15 +6277,14 @@ class ImportShelfOrderTests(TestCase):
         import openpyxl
         from django.core.files.uploadedfile import SimpleUploadedFile
         wb = openpyxl.Workbook()
-        wb.active.append(header or ['Title', 'Author', 'Genre', 'Location'])
-        for row in rows:
+        for row in _with_genre([header or ['Title', 'Author', 'Genre', 'Location']] + list(rows)):
             wb.active.append(row)
         buf = io.BytesIO()
         wb.save(buf)
         upload = SimpleUploadedFile(
             'b.xlsx', buf.getvalue(),
             content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-        r = self.client.post('/admin-portal/import-books/', {'excel_file': upload})
+        r = self.client.post('/admin-portal/import-books/', {'excel_file': upload, 'new_genres': '1'})
         self.assertTrue(r.json()['success'], r.json())
         return r.json()
 
@@ -7867,7 +7890,7 @@ class BookPriceTests(TestCase):
         self.client.post('/admin-portal/inventory/receive/', {
             'source': 'Purchase', 'supplier': 'Shop', 'items': json.dumps([
                 {'title': 'Ibong Adarna', 'author': 'Anonymous', 'quantity': 2,
-                 'condition': 'Good', 'price': '180'}])})
+                 'condition': 'Good', 'price': '180', 'genre': 'Epic', 'new_genre': True}])})
         prices = list(Book.objects.filter(title='Ibong Adarna').values_list('price', flat=True))
         self.assertEqual(prices, [Decimal('180.00'), Decimal('180.00')])
 
@@ -8636,7 +8659,8 @@ class SpreadsheetImportTests(TestCase):
         import openpyxl
         from django.core.files.uploadedfile import SimpleUploadedFile
         wb = openpyxl.Workbook()
-        for row in rows:
+        cataloguing = 'import-books' in url or 'import-donations' in url
+        for row in (_with_genre(rows) if cataloguing else rows):
             wb.active.append(row)
         if active_guide:
             guide = wb.create_sheet('How to fill in', 0)
@@ -8647,7 +8671,8 @@ class SpreadsheetImportTests(TestCase):
         upload = SimpleUploadedFile(
             'sheet.xlsx', buf.getvalue(),
             content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-        return self.client.post(url, {'excel_file': upload}).json()
+        return self.client.post(url, dict({'excel_file': upload},
+                                          **({'new_genres': '1'} if cataloguing else {}))).json()
 
     def _patron(self, **extra):
         values = dict(first_name='Ana', last_name='Reyes', email='ana.import@example.invalid',
@@ -8683,7 +8708,7 @@ class SpreadsheetImportTests(TestCase):
         from django.core.files.uploadedfile import SimpleUploadedFile
         for url, target, values in (
                 ('/admin-portal/download-book-template/', '/admin-portal/import-books/',
-                 {'Title': 'Emma', 'Author': 'Austen, Jane', 'ISBN': '0385262787'}),
+                 {'Title': 'Emma', 'Author': 'Austen, Jane', 'ISBN': '0385262787', 'Genre': 'Fiction'}),
                 ('/admin-portal/download-patron-template/', '/admin-portal/import-patrons/',
                  {'first_name': 'Ana', 'last_name': 'Cruz', 'email': 'ana.cruz@example.invalid',
                   'contact_number': '09171234567'})):
@@ -8694,7 +8719,8 @@ class SpreadsheetImportTests(TestCase):
                 sheet.cell(row=2, column=headers.index(header) + 1, value=value)
             buf = io.BytesIO()
             wb.save(buf)
-            r = self.client.post(target, {'excel_file': SimpleUploadedFile('t.xlsx', buf.getvalue())}).json()
+            r = self.client.post(target, {'excel_file': SimpleUploadedFile('t.xlsx', buf.getvalue()),
+                                          'new_genres': '1'}).json()
             self.assertTrue(r['success'], r)
             self.assertNotIn('skip', r['message'].lower(), url)
             self.assertNotIn('Could not', r['message'], url)
@@ -8807,9 +8833,9 @@ class SpreadsheetImportTests(TestCase):
 
     def test_a_bad_date_skips_only_its_row(self):
         r = self._upload('/admin-portal/import-donations/', [
-            ['donor_name', 'date_donated', 'title', 'condition'],
-            ['Council', self._day(1), 'El Filibusterismo', 'Good'],
-            ['Council', 'last week', 'Florante at Laura', 'Good'],
+            ['donor_name', 'date_donated', 'title', 'author', 'condition'],
+            ['Council', self._day(1), 'El Filibusterismo', 'Rizal, Jose', 'Good'],
+            ['Council', 'last week', 'Florante at Laura', 'Balagtas', 'Good'],
         ])
         self.assertTrue(r['success'], r)
         self.assertIn('Row 3: "last week" is not a date', r['message'])
@@ -8828,9 +8854,9 @@ class SpreadsheetImportTests(TestCase):
 
         with mock.patch.object(views, '_sync_donation_row', side_effect=fail_second):
             r = self._upload('/admin-portal/import-donations/', [
-                ['donor_name', 'title', 'condition'],
-                ['Council', 'El Filibusterismo', 'Good'],
-                ['Council', 'Florante at Laura', 'Good'],
+                ['donor_name', 'title', 'author', 'condition'],
+                ['Council', 'El Filibusterismo', 'Rizal, Jose', 'Good'],
+                ['Council', 'Florante at Laura', 'Balagtas', 'Good'],
             ])
         self.assertFalse(r['success'])
         self.assertEqual(Book.objects.count(), 0)
@@ -8904,13 +8930,13 @@ class SpreadsheetImportTests(TestCase):
         from django.core.files.uploadedfile import SimpleUploadedFile
         import openpyxl
         wb = openpyxl.Workbook()
-        wb.active.append(['Title', 'Author', 'Location'])
-        wb.active.append(['Atlas', 'Grolier', 'Shelf A Level 9'])
+        wb.active.append(['Title', 'Author', 'Location', 'Genre'])
+        wb.active.append(['Atlas', 'Grolier', 'Shelf A Level 9', 'Reference'])
         buf = io.BytesIO()
         wb.save(buf)
         upload = SimpleUploadedFile('b.xlsx', buf.getvalue())
         r = self.client.post('/admin-portal/import-books/',
-                             {'excel_file': upload, 'preview': '1'}).json()
+                             {'excel_file': upload, 'preview': '1', 'new_genres': '1'}).json()
         self.assertEqual(r['new_boards'], ['Shelf A Level 9'])
         self.assertIn('new shelf board', r['message'])
         self.assertFalse(ShelfLevel.objects.filter(level_number=9).exists(), 'preview saved it')
@@ -8952,14 +8978,14 @@ class OneCopyPerBookTests(TestCase):
         return StockMovement.objects.filter(**kw)
 
     def _add_book(self, title='Noli Me Tangere', **extra):
-        data = {'title': title, 'author': 'Rizal, Jose', 'genre': 'Fiction'}
+        data = {'title': title, 'author': 'Rizal, Jose', 'genre': 'Fiction', 'new_genre': '1'}
         data.update(extra)
         self.client.post('/admin-portal/add-book/', data)
         return Book.objects.filter(title=title).order_by('-book_id').first()
 
     def _receive(self, items, source='Purchase', **extra):
         # The condition on arrival is required; these tests are about something else.
-        items = [dict({'condition': 'Good'}, **item) for item in items]
+        items = _with_genre_items([dict({'condition': 'Good'}, **item) for item in items])
         data = {'source': source, 'items': json.dumps(items)}
         data.update(extra)
         return self.client.post('/admin-portal/inventory/receive/', data)
@@ -8985,14 +9011,14 @@ class OneCopyPerBookTests(TestCase):
         import openpyxl
         from django.core.files.uploadedfile import SimpleUploadedFile
         wb = openpyxl.Workbook()
-        wb.active.append(['Title', 'Author', 'Quantity'])
-        wb.active.append(['Florante at Laura', 'Balagtas', 3])
+        wb.active.append(['Title', 'Author', 'Quantity', 'Genre'])
+        wb.active.append(['Florante at Laura', 'Balagtas', 3, 'Fiction'])
         buf = io.BytesIO()
         wb.save(buf)
         up = SimpleUploadedFile(
             'b.xlsx', buf.getvalue(),
             content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-        r = self.client.post('/admin-portal/import-books/', {'excel_file': up}).json()
+        r = self.client.post('/admin-portal/import-books/', {'excel_file': up, 'new_genres': '1'}).json()
         self.assertTrue(r['success'], r)
         books = Book.objects.filter(title='Florante at Laura')
         self.assertEqual(books.count(), 3)
