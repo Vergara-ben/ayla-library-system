@@ -96,7 +96,7 @@ from . import labels
 from . import analytics
 from .reports import (REPORT_TYPES, SNAPSHOT_REPORTS, parse_date_range, build_report,
                       render_report_pdf, render_report_excel)
-from .models import StockAuditLine
+from .models import CONDITION_NOTES, StockAuditLine
 from .accession import release_shelved_donations
 from .models import Book, Patron, PatronLog, Transaction, User, ShelfLevel, Donation, Donor, Announcement, FloorPlan, Shelf, Room, Door, Waypoint, BLEBeacon, WaypointConnection, SystemLog, BorrowingRule, Obstacle, Stairway, PasswordResetOTP, InventoryRecord, StockMovement, StockAudit, DueDateExtension, ReactivationRequest, PatronPhoto
 
@@ -548,7 +548,7 @@ def patron_register(request):
 
 
 # Public pages (no account needed).
-CATALOGUE_HIDDEN_STATUSES = ('Lost', 'Donated')
+CATALOGUE_HIDDEN_STATUSES = ('Lost', 'Donated', 'Beyond Repair')
 
 CATALOGUE_PAGE_SIZE = 20
 
@@ -2796,6 +2796,7 @@ def admin_edit_book(request, book_id):
             # Blank clears the slot; a missing field leaves it.
             if 'shelf_slot' in request.POST:
                 book.shelf_slot = parse_shelf_slot(request.POST.get('shelf_slot'))
+            condition_before = book.condition
             if 'condition' in request.POST:
                 value = (request.POST.get('condition') or '').strip().title()
                 if value in dict(Book.CONDITION_CHOICES):
@@ -2806,6 +2807,8 @@ def admin_edit_book(request, book_id):
             if 'price' in request.POST:
                 book.price = price
             book.save()
+            if book.condition != condition_before:
+                _copy_follows_book_condition(book, condition_before, request)
             log_admin_action(request, 'Update', 'Book', book.book_id, f'Updated "{book.title}"')
             success = 'Book details updated successfully.'
             initial.update({
@@ -4181,19 +4184,25 @@ def book_location_words(book):
     return ' \u00b7 '.join(p for p in parts if p)
 
 
-# Real sheets do not write "Worn".
+# The words sheets use for each step of the library's condition scale.
 CONDITION_WORDS = {
     'good': 'Good', 'goodcondition': 'Good', 'new': 'Good', 'fine': 'Good',
-    'excellent': 'Good', 'ok': 'Good', 'okay': 'Good', 'usable': 'Good',
+    'excellent': 'Good', 'ok': 'Good', 'okay': 'Good',
     'verygood': 'Good', 'g': 'Good',
 
-    'worn': 'Worn', 'worncondition': 'Worn', 'fair': 'Worn', 'used': 'Worn',
-    'aged': 'Worn', 'faircondition': 'Worn', 'moderate': 'Worn', 'w': 'Worn',
+    'minordamage': 'Minor Damage', 'minor': 'Minor Damage', 'slightlydamaged': 'Minor Damage',
+    'worn': 'Minor Damage', 'worncondition': 'Minor Damage', 'fair': 'Minor Damage',
+    'used': 'Minor Damage', 'aged': 'Minor Damage', 'faircondition': 'Minor Damage',
+    'moderate': 'Minor Damage', 'usable': 'Minor Damage', 'w': 'Minor Damage', 'md': 'Minor Damage',
 
     'bad': 'Damaged', 'badcondition': 'Damaged', 'damaged': 'Damaged',
     'damagedcondition': 'Damaged', 'poor': 'Damaged', 'poorcondition': 'Damaged',
     'torn': 'Damaged', 'brokenspine': 'Damaged', 'needsrepair': 'Damaged',
-    'forrepair': 'Damaged', 'unusable': 'Damaged', 'd': 'Damaged',
+    'forrepair': 'Damaged', 'd': 'Damaged',
+
+    'beyondrepair': 'Beyond Repair', 'unusable': 'Beyond Repair', 'destroyed': 'Beyond Repair',
+    'irreparable': 'Beyond Repair', 'fordisposal': 'Beyond Repair', 'discard': 'Beyond Repair',
+    'br': 'Beyond Repair',
 }
 
 
@@ -4280,6 +4289,8 @@ def admin_book_details_ajax(request, book_id):
         'genre': book.genre or 'General',
         'publication_year': book.publication_year or 'N/A',
         'status': book.status,
+        'condition': book.condition,
+        'condition_note': CONDITION_NOTES.get(book.condition, ''),
         'cover_img_url': book.cover_img_url,
         'qr_code': book.qr_code,
         'price': f'{book.price:.2f}' if book.price is not None else '',
@@ -4503,6 +4514,8 @@ def _book_qr_payload(book):
         'genre': book.genre or 'General',
         'publication_year': book.publication_year or 'N/A',
         'status': book.status,
+        'condition': book.condition,
+        'condition_note': CONDITION_NOTES.get(book.condition, ''),
         'cover_img_url': book.cover_img_url,
         'qr_code': book.qr_code,
         'price': f'{book.price:.2f}' if book.price is not None else '',
@@ -4616,7 +4629,7 @@ def download_book_template(request):
         ('ISBN', False, 'The ISBN or accession number. Leave blank if there is none.', ''),
         ('Genre', False, 'Any wording. Its first three letters start the code label.', 'Fiction'),
         ('Material Type', False, 'One of: %s. Blank means Book.' % materials, 'Book'),
-        ('Condition', False, 'One of: %s. Blank means Good.' % conditions, 'Worn'),
+        ('Condition', False, 'One of: %s. Blank means Good.' % conditions, 'Minor Damage'),
         ('Code Label', False, 'The call number on the spine. Leave blank to have it worked out.',
          'FIC A31p 1963'),
         ('Quantity', False, 'How many copies, 1 to 50. Blank means 1.', 1),
@@ -5685,7 +5698,8 @@ def download_donation_template(request):
         ('publication_year', False, 'Four digits.', 1961),
         ('material_type', False, 'One of: %s. Blank means Book.' % materials, 'Book'),
         ('quantity', False, 'How many copies of this title, 1 to 100. Blank means 1.', 2),
-        ('condition', False, 'How the copies arrived: Good, Worn or Damaged. Blank means Good.', 'Good'),
+        ('condition', False, 'How the copies arrived: Good, Minor Damage, Damaged or Beyond Repair. '
+                             'Blank means Good.', 'Good'),
     ], text_columns=('ISBN',))
 
 
@@ -5755,9 +5769,10 @@ def _import_donation_rows(request):
             continue
 
         raw_condition = _cell_text(values.get('condition'))
-        condition = _sheet_choice(raw_condition, [(c, c) for c in INTAKE_CONDITIONS]) if raw_condition else 'Good'
+        condition = (_sheet_choice(raw_condition, [(c, c) for c in INTAKE_CONDITIONS], CONDITION_WORDS)
+                     if raw_condition else 'Good')
         if condition is None:
-            problems.append('Row %d: condition must be Good, Worn or Damaged (got "%s")'
+            problems.append('Row %d: condition must be Good, Minor Damage, Damaged or Beyond Repair (got "%s")'
                             % (row_no, raw_condition[:20]))
             continue
 
@@ -5982,6 +5997,11 @@ def _apply_basket(request, transaction_type, book_ids, patron, admin, rule):
                 errors.append(f'Book not found: {book_id_int}')
                 continue
 
+            if transaction_type in ('Borrow', 'In-Library Reading') and book.status in ('Under Repair', 'Beyond Repair'):
+                errors.append(f'"{book.title}" is {book.condition} ({CONDITION_NOTES[book.condition].lower()}), '
+                              f'so it is not lent until it is ' + ('repaired.' if book.status == 'Under Repair'
+                                                                    else 'replaced.'))
+                continue
             if transaction_type == 'Borrow':
                 if book.status != 'Available':
                     errors.append(f'Book "{book.title}" is not Available (current status: {book.status})')
@@ -11617,15 +11637,18 @@ def _inventory_stats():
         'total_copies': held.count(),
         'in_stock': in_stock.count(),
         'good_count': in_stock.filter(condition='Good').count(),
-        'worn_count': in_stock.filter(condition='Worn').count(),
+        'minor_count': in_stock.filter(condition='Minor Damage').count(),
         'damaged_count': in_stock.filter(condition='Damaged').count(),
-        'repair_count': in_stock.filter(condition__in=['Worn', 'Damaged']).count(),
+        # Damaged copies are out of circulation until repaired.
+        'repair_count': in_stock.filter(condition='Damaged').count(),
+        'disposal_count': in_stock.filter(condition='Beyond Repair').count(),
         'lost_count': held.filter(condition='Lost').count(),
         'withdrawn_count': held.filter(condition='Withdrawn').count(),
         'gone_count': held.filter(condition__in=['Lost', 'Withdrawn']).count(),
         'removed_count': qs.filter(status='Removed').count(),
         'missing_count': qs.filter(status='Missing').count(),
-        'unshelved_count': held.filter(book__shelf_level__isnull=True).count(),
+        'unshelved_count': (held.filter(book__shelf_level__isnull=True)
+                            .exclude(condition__in=['Beyond Repair', 'Lost', 'Withdrawn']).count()),
         'uncatalogued': held.filter(book__isnull=True).count(),
     }
 
@@ -11645,11 +11668,14 @@ def inventory_management(request):
     )
     # Each summary card is a filter; removed copies only show when asked for.
     if state == 'repair':
-        records = records.filter(status='In Stock', condition__in=['Worn', 'Damaged'])
+        records = records.filter(status='In Stock', condition='Damaged')
+    elif state == 'disposal':
+        records = records.filter(status='In Stock', condition='Beyond Repair')
     elif state == 'gone':
         records = records.filter(condition__in=['Lost', 'Withdrawn']).exclude(status='Removed')
     elif state == 'unshelved':
-        records = records.filter(book__shelf_level__isnull=True).exclude(status='Removed')
+        records = (records.filter(book__shelf_level__isnull=True).exclude(status='Removed')
+                   .exclude(condition__in=['Beyond Repair', 'Lost', 'Withdrawn']))
     elif state == 'removed':
         records = records.filter(status='Removed')
     else:
@@ -11735,7 +11761,10 @@ def inventory_management(request):
         'source_filter': source,
         'state_filter': state,
         'condition_choices': InventoryRecord.CONDITION_CHOICES,
-        'intake_conditions': INTAKE_CONDITIONS,
+        'condition_options': CONDITION_OPTIONS,
+        'condition_options': CONDITION_OPTIONS,
+        'intake_conditions': INTAKE_CONDITION_OPTIONS,
+        'condition_notes': CONDITION_NOTES,
         'source_choices': InventoryRecord.SOURCE_CHOICES,
         'donor_names': list(Donor.objects.values_list('name', flat=True)[:500]),
         'ack_offer': _ack_offer(request),
@@ -11752,7 +11781,7 @@ def _sync_donation_row(record):
     """Keep a donated copy and its accessioning row in step."""
     if record.source != 'Donation' or record.book is None:
         return None
-    stage = record.processing_stage or 'Received'
+    stage = 'Not usable' if record.condition == 'Beyond Repair' else (record.processing_stage or 'Received')
     if record.donation is None:
         record.donation = Donation.objects.create(
             book=record.book,
@@ -11801,8 +11830,19 @@ def _ack_offer(request):
     return {'name': donor.name, 'url': reverse('donor_acknowledgement', args=[donor.donor_id, raw_day])}
 
 
-# A copy is received Good, Worn or Damaged; Lost and Withdrawn come later.
-INTAKE_CONDITIONS = InventoryRecord.HELD_CONDITIONS
+# A copy arrives on the four-step scale; Beyond Repair is recorded but never shelved or lent.
+INTAKE_CONDITIONS = InventoryRecord.ARRIVAL_CONDITIONS
+INTAKE_CONDITION_OPTIONS = [(c, CONDITION_NOTES[c]) for c in INTAKE_CONDITIONS]
+# Every state a copy can be put in by hand, with what it means.
+CONDITION_OPTIONS = [(c, CONDITION_NOTES[c]) for c in CONDITION_NOTES] + [
+    ('Lost', 'Cannot be found; the borrower or the library replaces it'),
+    ('Withdrawn', 'Taken out of the collection on purpose'),
+]
+# Every state a copy can be put in by hand, with what it means.
+CONDITION_OPTIONS = [(c, CONDITION_NOTES[c]) for c in CONDITION_NOTES] + [
+    ('Lost', 'Cannot be found; the borrower or the library replaces it'),
+    ('Withdrawn', 'Taken out of the collection on purpose'),
+]
 
 
 def isbn_typo(raw):
@@ -11933,7 +11973,7 @@ def _add_existing_copy(book, request, reason='Catalogued from the existing colle
     if book.inventory_records.exists():
         return None
     condition = 'Lost' if book.status == 'Lost' else (
-        'Damaged' if book.condition == 'Damaged' else 'Good')
+        book.condition if book.condition in CONDITION_NOTES else 'Good')
     missing = book.status == 'Missing'
     record = InventoryRecord.objects.create(
         book=book,
@@ -11947,6 +11987,19 @@ def _add_existing_copy(book, request, reason='Catalogued from the existing colle
     _record_movement(record, 'ExistingStock', request, reason=reason,
                      source='Existing collection', after=condition)
     return record
+
+
+def _copy_follows_book_condition(book, before, request):
+    """One copy per book: a condition set on the book is the copy's too, with a history line."""
+    record = (book.inventory_records.exclude(status='Removed')
+              .filter(condition__in=list(CONDITION_NOTES)).first())
+    if record is None or record.condition == book.condition:
+        return
+    was = record.condition
+    record.condition = book.condition
+    record.save(update_fields=['condition'])
+    _record_movement(record, 'ConditionChange', request, reason='Condition changed on the book record',
+                     source='Book record', before=was, after=book.condition)
 
 
 WITHDRAWN_REASON = 'Withdrawn from circulation'
@@ -11971,9 +12024,8 @@ def _match_book_to_copy(book, before, after, request):
     if before == 'Lost' and book.status == 'Lost' and not still_owed:
         book.status = 'Available'
         fields.append('status')
-    wanted = after if after in ('Damaged', 'Worn') else ('Worn' if book.condition == 'Worn' else 'Good')
-    if book.condition != wanted:
-        book.condition = wanted
+    if after in CONDITION_NOTES and book.condition != after:
+        book.condition = after
         fields.append('condition')
     if fields:
         book.save(update_fields=fields)
@@ -12062,7 +12114,8 @@ def receive_stock(request):
             return _receiving_redirect(request)
         condition = (item.get('condition') or 'Good').strip()
         if condition not in INTAKE_CONDITIONS:
-            messages.error(request, 'Line ' + str(index) + ': a copy arrives Good, Worn or Damaged.')
+            messages.error(request, 'Line ' + str(index) + ': a copy arrives Good, Minor Damage, Damaged '
+                                    'or Beyond Repair.')
             return _receiving_redirect(request)
         price, price_error = _parse_price(item.get('price'))
         if price_error:
@@ -12149,7 +12202,10 @@ def staff_inventory_receive(request):
         'shelf_levels_available': _shelf_capacity(),
         'books': Book.objects.order_by('title'),
         'condition_choices': InventoryRecord.CONDITION_CHOICES,
-        'intake_conditions': INTAKE_CONDITIONS,
+        'condition_options': CONDITION_OPTIONS,
+        'condition_options': CONDITION_OPTIONS,
+        'intake_conditions': INTAKE_CONDITION_OPTIONS,
+        'condition_notes': CONDITION_NOTES,
         'donor_names': list(Donor.objects.values_list('name', flat=True)[:500]),
         'ack_offer': _ack_offer(request),
         'donor_types': Donor.TYPE_CHOICES,
@@ -12334,9 +12390,9 @@ def search_inventory_by_qr(request):
 
 
 # Copies expected to be away from the shelf.
-ACCOUNTED_ELSEWHERE = ('Borrowed', 'Overdue', 'Being Read', 'For Reshelving')
+ACCOUNTED_ELSEWHERE = ('Borrowed', 'Overdue', 'Being Read', 'For Reshelving', 'Under Repair')
 # Written off. It is not expected on a shelf and its absence is not news.
-WRITTEN_OFF = ('Lost', 'Donated')
+WRITTEN_OFF = ('Lost', 'Donated', 'Beyond Repair')
 
 
 @admin_only_required

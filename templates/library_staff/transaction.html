@@ -1352,6 +1352,15 @@
         }
 
         function routeScannedBook(book) {
+            // Too damaged to lend: say so now, not when the transaction is processed.
+            const kind = document.querySelector('input[name="transaction_type"]:checked')?.value;
+            if ((kind === 'Borrow' || kind === 'In-Library Reading')
+                    && (book.status === 'Under Repair' || book.status === 'Beyond Repair')) {
+                scanStatus.textContent = '“' + book.title + '” is ' + book.condition + ' ('
+                    + String(book.condition_note || '').toLowerCase() + '), so it is not lent until it is '
+                    + (book.status === 'Under Repair' ? 'repaired.' : 'replaced.');
+                return;
+            }
             // Name the duplicate book.
             const already = scannedBooks.some(b => b.book_id === book.book_id);
             if (already) {
@@ -1515,6 +1524,9 @@
                     return 'bg-rose-500/10 text-rose-400 border border-rose-500/20';
                 case 'Being Read':
                     return 'bg-violet-500/10 text-violet-400 border border-violet-500/20';
+                case 'Under Repair':
+                case 'Beyond Repair':
+                    return 'bg-rose-500/10 text-rose-400 border border-rose-500/20';
                 default:
                     return 'bg-slate-800/50 text-slate-400 border border-slate-700/40';
             }

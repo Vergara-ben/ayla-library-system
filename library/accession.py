@@ -9,13 +9,15 @@ from .models import Book, Donation, InventoryRecord
 
 def release_shelved_donations(book_ids=None):
     """Make every donated book that now has a shelf Available, and mark its donation Shelved."""
-    held = Book.objects.filter(status='Donated', shelf_level__isnull=False)
+    held = Book.objects.filter(status='Donated', shelf_level__isnull=False).exclude(condition='Beyond Repair')
     if book_ids is not None:
         held = held.filter(book_id__in=list(book_ids))
     ids = list(held.values_list('book_id', flat=True))
     if not ids:
         return 0
     Book.objects.filter(book_id__in=ids).update(status='Available')
+    # A damaged copy goes on its shelf but stays out of circulation until repaired.
+    Book.sync_condition_status(Book.objects.filter(book_id__in=ids))
     (InventoryRecord.objects.filter(book_id__in=ids, source='Donation')
      .exclude(processing_stage='Shelved').update(processing_stage='Shelved'))
     # A donated title is Shelved once none of its copies is still waiting.

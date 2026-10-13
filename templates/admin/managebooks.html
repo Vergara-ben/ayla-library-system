@@ -348,8 +348,9 @@
                                 <td class="py-4 px-6">
                                     {# Condition badge. #}
                                     <span class="px-1.5 py-0.5 rounded text-[9px] font-bold tracking-wide uppercase border
-                                        {% if book.condition == 'Damaged' %}bg-rose-950/50 text-rose-300 border-rose-800/50
-                                        {% elif book.condition == 'Worn' %}bg-amber-950/50 text-amber-300 border-amber-800/50
+                                        {% if book.condition == 'Beyond Repair' %}bg-rose-950/50 text-rose-300 border-rose-800/50
+                                        {% elif book.condition == 'Damaged' %}bg-amber-950/50 text-amber-300 border-amber-800/50
+                                        {% elif book.condition == 'Minor Damage' %}bg-yellow-500/10 text-yellow-600 border-yellow-600/40
                                         {% else %}bg-slate-800/60 text-slate-400 border-slate-700/50{% endif %}">{{ book.condition|default:"Good" }}</span>
                                 </td>
                                 {# The spine number. #}
@@ -564,10 +565,12 @@
                     <div class="space-y-1.5">
                         <label for="editCondition" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Condition</label>
                         <select name="condition" id="editCondition" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
-                            <option value="Good">Good</option>
-                            <option value="Worn">Worn</option>
-                            <option value="Damaged">Damaged</option>
+                            <option value="Good">Good &mdash; no damage; fully functional</option>
+                            <option value="Minor Damage">Minor Damage &mdash; small defects; still usable</option>
+                            <option value="Damaged">Damaged &mdash; noticeable damage; functionality may be affected</option>
+                            <option value="Beyond Repair">Beyond Repair &mdash; severely damaged and no longer usable</option>
                         </select>
+                        <p class="text-[10px] text-slate-500">Damaged books are not lent until repaired; Beyond Repair books are never lent.</p>
                     </div>
                     <div class="space-y-1.5">
                         <label for="editCallNumber" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Code label</label>

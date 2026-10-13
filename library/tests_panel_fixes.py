@@ -106,15 +106,15 @@ class ReceivingConditionTests(TestCase):
                             'condition': condition}])
         self.assertFalse(Book.objects.filter(title='Ibong Adarna').exists())
 
-    def test_worn_arrives_as_worn_on_the_copy_and_the_book(self):
-        self._receive([{'title': 'Ibong Adarna', 'author': 'Anon', 'quantity': 2, 'condition': 'Worn'}])
+    def test_minor_damage_arrives_on_the_copy_and_the_book(self):
+        self._receive([{'title': 'Ibong Adarna', 'author': 'Anon', 'quantity': 2, 'condition': 'Minor Damage'}])
         books = Book.objects.filter(title='Ibong Adarna')
-        self.assertEqual(set(books.values_list('condition', flat=True)), {'Worn'})
+        self.assertEqual(set(books.values_list('condition', flat=True)), {'Minor Damage'})
         self.assertEqual(set(InventoryRecord.objects.filter(book__in=books)
-                             .values_list('condition', flat=True)), {'Worn'})
+                             .values_list('condition', flat=True)), {'Minor Damage'})
 
-    def test_worn_copies_are_still_on_hand(self):
-        self._receive([{'title': 'Ibong Adarna', 'author': 'Anon', 'quantity': 1, 'condition': 'Worn'}])
+    def test_minor_damage_copies_are_still_on_hand(self):
+        self._receive([{'title': 'Ibong Adarna', 'author': 'Anon', 'quantity': 1, 'condition': 'Minor Damage'}])
         self.assertTrue(InventoryRecord.objects.get().counts_as_held)
 
     def test_a_mistyped_isbn_is_refused(self):
@@ -126,7 +126,8 @@ class ReceivingConditionTests(TestCase):
     def test_the_form_offers_only_arrival_conditions(self):
         page = self.client.get('/admin-portal/inventory/').content.decode()
         picker = page.split('id="rcvCondition"')[1].split('</select>')[0]
-        self.assertIn('Worn', picker)
+        for value in ('Good', 'Minor Damage', 'Damaged', 'Beyond Repair'):
+            self.assertIn(value, picker)
         self.assertNotIn('Lost', picker)
         self.assertNotIn('Withdrawn', picker)
 
@@ -157,7 +158,7 @@ class DonationImportConditionTests(TestCase):
     def test_a_blank_condition_is_good_and_a_wrong_one_is_reported(self):
         result = self._import([['Barangay', 'Florante at Laura', 'Balagtas', ''],
                                ['Barangay', 'Noli Me Tangere', 'Rizal', 'Lost']])
-        self.assertIn('condition must be Good, Worn or Damaged (got "Lost")', result['message'])
+        self.assertIn('condition must be Good, Minor Damage, Damaged or Beyond Repair (got "Lost")', result['message'])
         self.assertEqual(InventoryRecord.objects.get().condition, 'Good')
 
 
@@ -1046,3 +1047,93 @@ class DonorManagementTests(TestCase):
         row = report['rows'][names.index('Regular Reader')]
         self.assertEqual((row[2], row[3], row[4]), ('0917 · rr@example.invalid', 'Sta. Rosa', 0))
         self.assertIn('Address', report['columns'])
+
+
+class ConditionScaleTests(TestCase):
+    """Good / Minor Damage / Damaged / Beyond Repair, and what each means for lending."""
+
+    def setUp(self):
+        self.staff = _staff(role='Admin', modules='transactions,books,inventory,donations')
+        self.client = _client(admin_id=self.staff.admin_id)
+
+    def _receive(self, condition, source='Purchase', **extra):
+        data = {'source': source, 'items': json.dumps([{'title': 'Ibong Adarna', 'author': 'Anon',
+                                                       'quantity': 1, 'condition': condition}])}
+        data.update(extra)
+        self.client.post('/admin-portal/inventory/receive/', data)
+        return Book.objects.get(title='Ibong Adarna')
+
+    def test_damaged_leaves_circulation_and_returns_when_repaired(self):
+        book = Book.objects.create(title='Noli', author='Rizal')
+        book.condition = 'Damaged'
+        book.save(update_fields=['condition'])
+        book.refresh_from_db()
+        self.assertEqual(book.status, 'Under Repair')
+        book.condition = 'Good'
+        book.save()
+        book.refresh_from_db()
+        self.assertEqual(book.status, 'Available')
+
+    def test_beyond_repair_on_arrival_is_recorded_but_never_shelved_or_lent(self):
+        from .views import _inventory_stats
+        book = self._receive('Beyond Repair')
+        self.assertEqual(book.status, 'Beyond Repair')
+        self.assertEqual(InventoryRecord.objects.get().condition, 'Beyond Repair')
+        stats = _inventory_stats()
+        self.assertEqual((stats['disposal_count'], stats['unshelved_count']), (1, 0))
+        page = Client().get('/patron/catalog/search/', {'q': 'Ibong'})
+        self.assertNotContains(page, 'Ibong Adarna')
+
+    def test_a_donation_that_arrives_unusable_is_not_left_waiting_for_a_shelf(self):
+        from .models import Donation
+        self._receive('Beyond Repair', source='Donation', donor_name='Rotary Club')
+        self.assertEqual(Donation.objects.get().status, 'Not usable')
+
+    def test_a_damaged_book_is_refused_at_the_desk(self):
+        patron = Patron.objects.create(first_name='Ana', last_name='Cruz', email='ana@example.invalid',
+                                       account_status='Active', identity_verified_at=timezone.now())
+        book = self._receive('Damaged')
+        self.assertEqual(book.status, 'Under Repair')
+        r = self.client.post('/admin-portal/process-transaction/', {
+            'transaction_type': 'Borrow', 'patron_id': patron.patron_id, 'book_ids': [book.book_id]},
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest').json()
+        self.assertFalse(r.get('success'))
+        self.assertIn('not lent until it is repaired', json.dumps(r))
+        self.assertFalse(Transaction.objects.exists())
+
+    def test_marking_a_copy_damaged_and_repaired_moves_the_book(self):
+        book = self._receive('Good')
+        record = InventoryRecord.objects.get()
+        url = '/admin-portal/inventory/condition/'
+        self.client.post(url, {'inventory_id': record.inventory_id, 'condition': 'Damaged',
+                               'reason': 'Water damage', 'admin_password': 'DeskTest123'})
+        book.refresh_from_db()
+        self.assertEqual((book.condition, book.status), ('Damaged', 'Under Repair'))
+        self.client.post(url, {'inventory_id': record.inventory_id, 'condition': 'Good',
+                               'reason': 'Repaired', 'admin_password': 'DeskTest123'})
+        book.refresh_from_db()
+        self.assertEqual((book.condition, book.status), ('Good', 'Available'))
+
+    def test_editing_the_books_condition_moves_its_copy_too(self):
+        book = self._receive('Good')
+        self.client.post('/admin-portal/edit-book/%d/' % book.book_id, {
+            'title': book.title, 'author': book.author, 'condition': 'Minor Damage'},
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest')
+        self.assertEqual(InventoryRecord.objects.get().condition, 'Minor Damage')
+
+    def test_a_book_found_damaged_while_out_goes_to_repair_when_returned(self):
+        patron = Patron.objects.create(first_name='Ben', last_name='Reyes', email='ben@example.invalid',
+                                       account_status='Active', identity_verified_at=timezone.now())
+        book = self._receive('Good')
+        post = lambda kind: self.client.post('/admin-portal/process-transaction/', {
+            'transaction_type': kind, 'patron_id': patron.patron_id, 'book_ids': [book.book_id]},
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest').json()
+        self.assertTrue(post('Borrow').get('success'))
+        self.client.post('/admin-portal/inventory/condition/', {
+            'inventory_id': InventoryRecord.objects.get().inventory_id, 'condition': 'Damaged',
+            'reason': 'Reported torn by the borrower', 'admin_password': 'DeskTest123'})
+        book.refresh_from_db()
+        self.assertEqual(book.status, 'Borrowed')
+        self.assertTrue(post('Return').get('success'))
+        book.refresh_from_db()
+        self.assertEqual(book.status, 'Under Repair')

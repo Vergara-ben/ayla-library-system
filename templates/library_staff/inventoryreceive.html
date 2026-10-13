@@ -209,8 +209,9 @@
                                 <div>
                                     <label for="rcvCondition" class="field-label">Condition on arrival</label>
                                     <select id="rcvCondition" class="field-input">
-                                                                        {% for value in intake_conditions %}<option value="{{ value }}">{{ value }}</option>{% endfor %}
+                                                                        {% for value, note in intake_conditions %}<option value="{{ value }}" data-note="{{ note }}">{{ value }}</option>{% endfor %}
                                     </select>
+                                    <p id="rcvConditionNote" class="text-[10px] text-slate-500 mt-1">No damage; fully functional</p>
                                 </div>
                                 <div>
                                     <label for="rcvQty" class="field-label">Number of copies</label>
@@ -560,6 +561,24 @@
                     onPick: function () { if (intake) intake.update(); },
                 });
             }
+        })();
+    </script>
+
+    <script>
+        // What the chosen condition means, and what happens to a copy that arrives that way.
+        (function () {
+            const sel = document.getElementById('rcvCondition');
+            const note = document.getElementById('rcvConditionNote');
+            if (!sel || !note) return;
+            const fate = { 'Damaged': ' Not lent until it is repaired.',
+                           'Beyond Repair': ' Recorded, but never shelved or lent; it is listed for disposal.' };
+            function show() {
+                const opt = sel.options[sel.selectedIndex];
+                note.textContent = (opt ? opt.dataset.note : '') + '.' + (fate[sel.value] || '');
+                note.className = 'text-[10px] mt-1 ' + (fate[sel.value] ? 'text-amber-400' : 'text-slate-500');
+            }
+            sel.addEventListener('change', show);
+            show();
         })();
     </script>
     {% include '_live.html' with topics='books transactions chat' %}
