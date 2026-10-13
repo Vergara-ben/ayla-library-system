@@ -87,6 +87,13 @@
             color: var(--text-muted); font-size: 12px; cursor: pointer;
         }
         .agone:hover { color: #e11d48; border-color: #e11d48; background: rgba(225,29,72,.1); }
+        .adamage:hover, .arow.damaged .adamage { color: #d97706; border-color: #d97706; background: rgba(217,119,6,.12); }
+        .arow.damaged { background: rgba(217, 119, 6, .12); }
+        .arow.damaged .atick { border-color: #d97706; color: #d97706; }
+        .arow.onshelf { opacity: 1; background: rgba(59, 130, 246, .12); }
+        .ahere { font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 6px; flex: 0 0 auto;
+                 border: 1px solid var(--border-color); background: transparent; color: var(--text-muted); cursor: pointer; }
+        .ahere:hover, .arow.onshelf .ahere { color: #2563eb; border-color: #2563eb; background: rgba(37,99,235,.1); }
         @media (max-width: 640px) { .ameta, .anote { display: none; } }
     </style>
     <link rel="stylesheet" href="{% static 'css/admin-enhance.css' %}">
@@ -194,10 +201,14 @@
                 {# Reading a shelf, rather than scanning one. #}
                 <div class="p-5 space-y-4">
                     <p class="text-xs text-slate-400 leading-relaxed">
-                        Pick a board and read it against the list. Mark only what is not there or
-                        is out of place, then confirm the rest in one go. Borrowed copies are
-                        accounted for already. Anything still unfound is marked
-                        <strong class="text-slate-300">Missing</strong> &mdash; not lost, because books
+                        Pick a board and read it against the list. Copies that are on loan, being read,
+                        waiting to be reshelved or under repair are <strong class="text-slate-300">recorded
+                        automatically</strong>. You only mark what the system cannot know: a book that is
+                        <strong class="text-rose-400">not found</strong> (&#x2715;), one that is
+                        <strong class="text-amber-400">damaged</strong> (!), a book on loan that is
+                        actually here (<strong class="text-blue-400">It&rsquo;s here</strong>), and any
+                        <strong class="text-slate-300">stray</strong> from another board (scan it). Then confirm
+                        the rest in one go. A book not found is marked Missing &mdash; not lost, because books
                         turn up. Giving up on one is a separate step on the Missing tab.
                     </p>
 
@@ -246,6 +257,7 @@
                         </div>
 
                         <div id="auditSheet" class="rounded-lg border border-slate-800 overflow-y-auto" style="background-color: var(--bg-main); max-height: 52vh;"></div>
+                        <div id="auditStrays" class="hidden rounded-lg border border-slate-800 px-4 py-3 space-y-1.5 text-xs" style="background-color: var(--bg-main);"></div>
 
                         <p class="text-[11px] text-slate-500 leading-relaxed">
                             Tap a row to mark it <strong class="text-emerald-400">here</strong>. Tap the
@@ -327,7 +339,9 @@
                 <div class="p-5 space-y-4">
                     <p class="text-xs text-slate-400 leading-relaxed">
                         Every shelf count that has been filed &mdash; when the shelf was last checked,
-                        who checked it, and what they found.
+                        who checked it, what they found, and what has become of it since. Open a count to
+                        follow each book from the count to now. The full record, for any period, is the
+                        <a href="{% url 'admin_reports' %}?type=stock_audits" class="text-cyan-400 hover:underline">Stock Audit Report</a>.
                     </p>
                     <div class="overflow-x-auto rounded-lg border border-slate-800">
                         <table class="w-full text-left border-collapse">
@@ -338,10 +352,11 @@
                                     <th class="py-3 px-4">Auditor</th>
                                     <th class="py-3 px-4 w-20 text-center">Should be there</th>
                                     <th class="py-3 px-4 w-20 text-center">Found</th>
-                                    <th class="py-3 px-4 w-20 text-center">Borrowed</th>
-                                    <th class="py-3 px-4 w-24 text-center">Not found</th>
-                                    <th class="py-3 px-4 w-24 text-center">Turned up</th>
-                                    <th class="py-3 px-4">Notes</th>
+                                    <th class="py-3 px-4 w-24 text-center">Recorded automatically</th>
+                                    <th class="py-3 px-4 w-20 text-center">Not found</th>
+                                    <th class="py-3 px-4 w-20 text-center">Damaged</th>
+                                    <th class="py-3 px-4 w-24 text-center">On loan but here / strays</th>
+                                    <th class="py-3 px-4">Follow-up since</th>
                                 </tr>
                             </thead>
                             <tbody data-live="inv-audits" class="divide-y divide-slate-800/40 text-xs text-slate-300">
@@ -356,11 +371,12 @@
                                     <td class="py-3 px-4 text-center {% if a.missing_count %}text-amber-400 font-bold{% else %}text-slate-600{% endif %}">
                                         {{ a.missing_count }}{% if a.missing_count %}<span class="block text-[10px] font-normal text-slate-600">{{ a.discrepancy_rate }}%</span>{% endif %}
                                     </td>
-                                    <td class="py-3 px-4 text-center {% if a.recovered_count %}text-emerald-400 font-bold{% else %}text-slate-600{% endif %}">{{ a.recovered_count }}</td>
-                                    <td class="py-3 px-4 text-slate-500 text-[11px]">{{ a.notes|default:"—" }}</td>
+                                    <td class="py-3 px-4 text-center {% if a.damaged_count %}text-amber-400 font-bold{% else %}text-slate-600{% endif %}">{{ a.damaged_count }}</td>
+                                    <td class="py-3 px-4 text-center {% if a.loan_mismatch_count or a.unexpected_count %}text-blue-400 font-bold{% else %}text-slate-600{% endif %}">{{ a.loan_mismatch_count }} / {{ a.unexpected_count }}</td>
+                                    <td class="py-3 px-4 text-[11px] {% if a.open_issues %}text-amber-300{% else %}text-slate-500{% endif %}" title="{{ a.notes|default:'' }}">{% if a.open_issues %}<span class="inline-block mb-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/30">{{ a.open_issues }} open</span><br>{% endif %}{{ a.follow_up }}</td>
                                 </tr>
                                 {% empty %}
-                                <tr><td colspan="9" class="py-8 px-4 text-center text-slate-500">No shelf count has been filed yet.</td></tr>
+                                <tr><td colspan="10" class="py-8 px-4 text-center text-slate-500">No shelf count has been filed yet.</td></tr>
                                 {% endfor %}
                             </tbody>
                         </table>
@@ -846,19 +862,21 @@
     <!-- QR label -->
     <!-- One filed count, book by book -->
     <div id="auditDetailModal" class="fixed inset-0 z-[60] hidden items-center justify-center p-4" style="background: var(--scrim);">
-        <div class="w-full max-w-3xl rounded-2xl border shadow-2xl max-h-[85vh] flex flex-col" style="background-color: var(--bg-modal); border-color: var(--border-modal);">
+        <div class="w-full max-w-6xl rounded-2xl border shadow-2xl max-h-[88vh] flex flex-col" style="background-color: var(--bg-modal); border-color: var(--border-modal);">
             <div class="flex items-center justify-between px-6 py-4 border-b" style="border-color: var(--border-modal);">
                 <div>
                     <h3 id="adTitle" class="text-sm font-bold text-slate-200 tracking-wide">Shelf count</h3>
                     <p id="adSub" class="text-[11px] text-slate-500"></p>
+                    <p id="adSummary" class="text-[11px] text-slate-300 mt-1"></p>
                 </div>
                 <button onclick="closeModal('auditDetailModal')" class="text-slate-500 hover:text-slate-300" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
             </div>
             <div class="overflow-y-auto">
                 <table class="w-full text-left text-xs">
                     <thead><tr class="text-[10px] font-bold tracking-wider text-slate-500 uppercase border-b border-slate-800/80">
-                        <th class="py-2.5 px-5">Book</th><th class="py-2.5 px-5">Recorded in the count</th>
-                        <th class="py-2.5 px-5">Status then</th><th class="py-2.5 px-5">Status now</th></tr></thead>
+                        <th class="py-2.5 px-4">Book</th><th class="py-2.5 px-4">Recorded in the count</th>
+                        <th class="py-2.5 px-4">At the count</th><th class="py-2.5 px-4">Now</th>
+                        <th class="py-2.5 px-4">What happened since</th><th class="py-2.5 px-4">Follow-up</th></tr></thead>
                     <tbody id="adRows" class="divide-y divide-slate-800/40 text-slate-300"></tbody>
                 </table>
             </div>
@@ -887,7 +905,8 @@
         // A filed count, each book's result then beside what it is now.
         async function openAuditDetail(auditId) {
             const rows = document.getElementById('adRows');
-            rows.innerHTML = '<tr><td colspan="4" class="py-6 text-center text-slate-500">Loading&hellip;</td></tr>';
+            rows.innerHTML = '<tr><td colspan="6" class="py-6 text-center text-slate-500">Loading&hellip;</td></tr>';
+            document.getElementById('adSummary').textContent = '';
             show('auditDetailModal');
             let d;
             try {
@@ -896,22 +915,40 @@
                 d = await r.json();
             } catch (e) { d = { success: false, error: 'Could not load the count.' }; }
             if (!d.success) {
-                rows.innerHTML = '<tr><td colspan="4" class="py-6 text-center text-rose-400">' + esc(d.error) + '</td></tr>';
+                rows.innerHTML = '<tr><td colspan="6" class="py-6 text-center text-rose-400">' + esc(d.error) + '</td></tr>';
                 return;
             }
             document.getElementById('adTitle').textContent = 'Shelf count: ' + d.shelf;
-            document.getElementById('adSub').textContent = d.when + (d.by ? ' by ' + d.by : '')
-                + ' · ' + d.lines.filter(function (l) { return l.changed; }).length + ' changed since';
+            document.getElementById('adSub').textContent = d.when + (d.by ? ' by ' + d.by : '');
+            document.getElementById('adSummary').textContent = d.summary;
             const tone = { 'Missing': 'text-rose-400', 'Found': 'text-emerald-400', 'Swept': 'text-emerald-400',
-                           'Recovered': 'text-emerald-400' };
+                           'Recovered': 'text-emerald-400', 'Damaged': 'text-amber-400',
+                           'Here on loan': 'text-blue-400', 'Stray': 'text-amber-300' };
+            // Status, condition and shelf; what changed since the count is picked out.
+            const state = function (st, changed) {
+                if (!st) return '<span class="text-rose-400">Removed from the records</span>';
+                return ['status', 'condition', 'location'].map(function (k) {
+                    const hot = changed && changed.indexOf(k) !== -1;
+                    return '<span class="block' + (hot ? ' text-amber-300 font-bold' : '') + '">' + esc(st[k] || '\u2014') + '</span>';
+                }).join('');
+            };
             rows.innerHTML = d.lines.length ? d.lines.map(function (l) {
-                return '<tr><td class="py-2.5 px-5 font-semibold text-slate-200">' + esc(l.title) + '</td>'
-                    + '<td class="py-2.5 px-5 ' + (tone[l.kind] || 'text-blue-400') + '">' + esc(l.result)
+                const trail = l.trail.length
+                    ? l.trail.map(function (e) {
+                        return '<span class="block"><span class="text-slate-500">' + esc(e.when) + '</span> ' + esc(e.text) + '</span>';
+                      }).join('')
+                    : '<span class="text-slate-600">Nothing since</span>';
+                const follow = l.outcome
+                    ? '<span class="font-semibold ' + (l.open ? 'text-amber-300' : 'text-emerald-400') + '">' + esc(l.outcome) + '</span>'
+                    : '<span class="text-slate-600">\u2014</span>';
+                return '<tr class="align-top"><td class="py-2.5 px-4 font-semibold text-slate-200">' + esc(l.title) + '</td>'
+                    + '<td class="py-2.5 px-4 ' + (tone[l.kind] || 'text-blue-400') + '">' + esc(l.result)
                     + (l.detail ? '<span class="block text-[10px] text-slate-500">' + esc(l.detail) + '</span>' : '') + '</td>'
-                    + '<td class="py-2.5 px-5 text-slate-400">' + esc(l.status_then) + '</td>'
-                    + '<td class="py-2.5 px-5 ' + (l.changed ? 'text-amber-400 font-bold' : 'text-slate-400') + '">'
-                    + esc(l.status_now) + '</td></tr>';
-            }).join('') : '<tr><td colspan="4" class="py-6 text-center text-slate-500">This count was filed before book-by-book records were kept.</td></tr>';
+                    + '<td class="py-2.5 px-4 text-slate-400">' + state(l.then) + '</td>'
+                    + '<td class="py-2.5 px-4 text-slate-300">' + state(l.now, l.changed) + '</td>'
+                    + '<td class="py-2.5 px-4 text-[11px] text-slate-300">' + trail + '</td>'
+                    + '<td class="py-2.5 px-4">' + follow + '</td></tr>';
+            }).join('') : '<tr><td colspan="6" class="py-6 text-center text-slate-500">This count was filed before book-by-book records were kept.</td></tr>';
         }
         function closeModal(id) { const m = document.getElementById(id); m.classList.add('hidden'); m.classList.remove('flex'); }
 
@@ -1149,7 +1186,8 @@
         }
 
         // Shelf count.
-        let sheet = { level: null, books: [], marks: {}, where: '' };
+        let sheet = { level: null, books: [], marks: {}, where: '', strays: [] };
+        const ON_LOAN = ['Borrowed', 'Overdue'];
         let auditStream = null, auditInterval = null, lastAuditCode = '';
 
         async function loadAuditSheet(levelId) {
@@ -1157,7 +1195,8 @@
             document.getElementById('auditReport').classList.add('hidden');
             if (!levelId) {
                 wrap.classList.add('hidden');
-                sheet = { level: null, books: [], marks: {}, where: '' };
+                sheet = { level: null, books: [], marks: {}, where: '', strays: [] };
+                renderStrays();
                 return;
             }
             const r = await fetch("{% url 'stock_audit_sheet' %}?level=" + encodeURIComponent(levelId),
@@ -1167,7 +1206,9 @@
             sheet.level = d.level;
             sheet.books = d.books;
             sheet.marks = {};
+            sheet.strays = [];
             sheet.where = d.shelf + ' · ' + d.label;
+            renderStrays();
             document.getElementById('auditWhere').textContent = sheet.where;
             wrap.classList.remove('hidden');
             renderSheet();
@@ -1180,8 +1221,9 @@
                      + (b.audit_misses > 1 ? ' · ' + b.audit_misses + ' counts' : '') + '</span>';
             }
             if (!b.expected_present) {
-                return '<span class="text-blue-400">' + esc(b.status)
-                     + ' — recorded automatically, nothing to check</span>';
+                return '<span class="text-blue-400">' + esc(b.status) + ' — recorded automatically'
+                     + (ON_LOAN.indexOf(b.status) !== -1 ? '; if it is here, tap It&rsquo;s here' : '')
+                     + '</span>';
             }
             return b.last_seen ? '<span class="text-slate-600">last seen ' + esc(b.last_seen) + '</span>'
                                : '<span class="text-slate-600">never confirmed</span>';
@@ -1191,19 +1233,28 @@
             const host = document.getElementById('auditSheet');
             host.innerHTML = sheet.books.map(function (b, i) {
                 const mark = sheet.marks[b.book_id] || '';
-                // Borrowed copies cannot be marked.
+                // Copies the system accounts for are not marked, except a loan found on the shelf.
                 const locked = !b.expected_present;
-                return '<div class="arow ' + (locked ? 'locked' : mark) + '"'
+                const onLoan = locked && ON_LOAN.indexOf(b.status) !== -1;
+                return '<div class="arow ' + (locked ? 'locked ' + (mark === 'onshelf' ? 'onshelf' : '') : mark) + '"'
                      + (locked ? '' : ' onclick="markHere(' + b.book_id + ')"') + '>'
                      + '<span class="apos">' + (b.slot || (i + 1)) + '</span>'
                      + '<span class="atick">'
-                        + (mark === 'here' || mark === 'bulk' ? '<i class="fa-solid fa-check"></i>'
-                           : mark === 'gone' ? '<i class="fa-solid fa-xmark"></i>' : '') + '</span>'
+                        + (mark === 'here' || mark === 'bulk' || mark === 'onshelf' ? '<i class="fa-solid fa-check"></i>'
+                           : mark === 'gone' ? '<i class="fa-solid fa-xmark"></i>'
+                           : mark === 'damaged' ? '<i class="fa-solid fa-exclamation"></i>' : '') + '</span>'
                      + '<span class="atitle">' + esc(b.title) + '</span>'
                      + '<span class="ameta">' + esc(b.call_number || b.author || '') + '</span>'
                      + '<span class="anote">' + statusNote(b) + '</span>'
+                     + (onLoan
+                        ? '<button type="button" class="ahere" title="This copy is on the shelf, though it is recorded on loan"'
+                          + ' onclick="event.stopPropagation(); markOnShelf(' + b.book_id + ')">It&rsquo;s here</button>'
+                        : '')
                      + (locked ? ''
-                        : '<button type="button" class="agone" title="Not found"'
+                        : '<button type="button" class="agone adamage" title="Here, but damaged"'
+                          + ' onclick="event.stopPropagation(); markDamaged(' + b.book_id + ')">'
+                          + '<i class="fa-solid fa-exclamation"></i></button>'
+                          + '<button type="button" class="agone" title="Not found"'
                           + ' onclick="event.stopPropagation(); markGone(' + b.book_id + ')">'
                           + '<i class="fa-solid fa-xmark"></i></button>')
                      + '</div>';
@@ -1212,21 +1263,26 @@
         }
 
         function paintTally() {
-            let here = 0, gone = 0, untouched = 0, elsewhere = 0;
+            let here = 0, gone = 0, damaged = 0, untouched = 0, elsewhere = 0, onshelf = 0;
             sheet.books.forEach(function (b) {
-                if (!b.expected_present) { elsewhere++; return; }
                 const m = sheet.marks[b.book_id];
+                if (!b.expected_present) { if (m === 'onshelf') onshelf++; else elsewhere++; return; }
                 if (m === 'here' || m === 'bulk') here++;
                 else if (m === 'gone') gone++;
+                else if (m === 'damaged') damaged++;
                 else untouched++;
             });
+            const strays = sheet.strays.length;
             document.getElementById('auditTally').innerHTML =
                 '<span class="text-emerald-400 font-semibold">' + here + ' here</span> · '
                 + '<span class="text-rose-400 font-semibold">' + gone + ' not found</span> · '
+                + (damaged ? '<span class="text-amber-400 font-semibold">' + damaged + ' damaged</span> · ' : '')
+                + (onshelf ? '<span class="text-blue-400 font-semibold">' + onshelf + ' on loan but here</span> · ' : '')
+                + (strays ? strays + ' stray' + (strays === 1 ? '' : 's') + ' · ' : '')
                 + untouched + ' untouched'
-                + (elsewhere ? ' · ' + elsewhere + ' recorded automatically (on loan, being read or reshelving)' : '');
+                + (elsewhere ? ' · ' + elsewhere + ' recorded automatically' : '');
             // Filing needs a verdict on something.
-            document.getElementById('auditFileBtn').disabled = !(here || gone);
+            document.getElementById('auditFileBtn').disabled = !(here || gone || damaged || onshelf || strays);
             document.getElementById('auditFileLabel').textContent = untouched
                 ? 'File this count — the ' + untouched + ' untouched count as here'
                 : 'File this count';
@@ -1241,6 +1297,29 @@
             sheet.marks[id] = sheet.marks[id] === 'gone' ? '' : 'gone';
             renderSheet();
         }
+        function markDamaged(id) {
+            sheet.marks[id] = sheet.marks[id] === 'damaged' ? '' : 'damaged';
+            renderSheet();
+        }
+        function markOnShelf(id) {
+            sheet.marks[id] = sheet.marks[id] === 'onshelf' ? '' : 'onshelf';
+            renderSheet();
+        }
+
+        // Books from another board found here: recorded in this count and sent back to their own shelf.
+        function renderStrays() {
+            const box = document.getElementById('auditStrays');
+            if (!box) return;
+            box.classList.toggle('hidden', !sheet.strays.length);
+            box.innerHTML = '<p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Found here, but belonging elsewhere</p>'
+                + sheet.strays.map(function (st, i) {
+                    return '<div class="flex items-center justify-between gap-2"><span><strong class="text-slate-200">'
+                        + esc(st.title) + '</strong> <span class="text-slate-500">belongs on ' + esc(st.belongs) + '</span></span>'
+                        + '<button type="button" class="text-[10px] text-slate-500 hover:text-rose-400 underline" onclick="dropStray(' + i + ')">Remove</button></div>';
+                }).join('');
+            paintTally();
+        }
+        function dropStray(i) { sheet.strays.splice(i, 1); renderStrays(); }
         // A sweep is its own mark, not the same one a tap writes.
         function markRest() {
             sheet.books.forEach(function (b) {
@@ -1273,10 +1352,18 @@
                 status.innerHTML = '<span class="text-emerald-400">Ticked ' + esc(owner.title) + '.</span>';
                 return;
             }
-            status.innerHTML = d.success
-                ? '<span class="text-amber-400">' + esc(d.book.title) + ' belongs on '
-                  + esc(d.book.shelf_level) + ', not this board.</span>'
-                : '<span class="text-rose-400">No book carries that label.</span>';
+            if (d.success && sheet.level) {
+                if (!sheet.strays.some(function (st) { return st.book_id === d.book.book_id; })) {
+                    sheet.strays.push({ book_id: d.book.book_id, title: d.book.title,
+                                        belongs: (d.book.category && d.book.category !== 'N/A' ? d.book.category + ', ' : '')
+                                                 + d.book.shelf_level });
+                    renderStrays();
+                }
+                status.innerHTML = '<span class="text-amber-400">' + esc(d.book.title) + ' belongs on '
+                  + esc(d.book.shelf_level) + ', not this board. Recorded as a stray; it goes on the reshelving cart when you file.</span>';
+                return;
+            }
+            status.innerHTML = '<span class="text-rose-400">No book carries that label.</span>';
         }
 
         async function toggleAuditCamera() {
@@ -1326,23 +1413,31 @@
             body.append('level', sheet.level);
             let untouched = 0;
             sheet.books.forEach(function (b) {
-                if (!b.expected_present) return;
                 const m = sheet.marks[b.book_id];
+                if (!b.expected_present) {
+                    if (m === 'onshelf') body.append('onshelf_ids', b.book_id);
+                    return;
+                }
                 if (m === 'here') body.append('found_ids', b.book_id);
                 else if (m === 'gone') body.append('missing_ids', b.book_id);
+                else if (m === 'damaged') body.append('damaged_ids', b.book_id);
                 // Swept and untouched rows are counted together.
                 else { body.append('bulk_ids', b.book_id); untouched++; }
             });
+            sheet.strays.forEach(function (st) { body.append('stray_ids', st.book_id); });
 
-            const gone = sheet.books.filter(function (b) {
-                return sheet.marks[b.book_id] === 'gone'; }).length;
+            const count = function (mark) {
+                return sheet.books.filter(function (b) { return sheet.marks[b.book_id] === mark; }).length; };
+            const gone = count('gone'), damaged = count('damaged'), onshelf = count('onshelf');
+            const notes = [];
+            if (gone) notes.push(gone + ' marked Missing (not written off: a book absent from one count is usually mislaid)');
+            if (damaged) notes.push(damaged + ' recorded as Damaged and taken out of circulation for repair');
+            if (onshelf) notes.push(onshelf + ' on loan but here: the desk is alerted to check them in');
+            if (sheet.strays.length) notes.push(sheet.strays.length + ' stray(s) put on the reshelving cart');
             const ok = await AylaDialog.confirm(
                 'File this count for ' + sheet.where + '?',
                 { title: 'File the count',
-                  detail: gone
-                    ? gone + ' copy(ies) will be marked Missing. They stay in the catalogue and '
-                      + 'are not written off — a book absent from one count is usually mislaid.'
-                    : 'Nothing will be marked missing.',
+                  detail: notes.length ? notes.join('. ') + '.' : 'Nothing will be marked missing.',
                   confirmLabel: 'File it', danger: false });
             if (!ok) return;
 
@@ -1367,6 +1462,12 @@
                     + '</span> marked Missing — not written off. Review them on the Missing tab.</li>' : '')
               + (d.recovered ? '<li><span class="text-cyan-400 font-semibold">' + d.recovered
                     + '</span> turned up again and are back in stock.</li>' : '')
+              + (d.damaged ? '<li><span class="text-amber-400 font-semibold">' + d.damaged
+                    + '</span> found damaged: under repair, not lent until fixed.</li>' : '')
+              + (d.onshelf ? '<li><span class="text-blue-400 font-semibold">' + d.onshelf
+                    + '</span> on the shelf while on loan: check them in at the desk.</li>' : '')
+              + (d.strays ? '<li><span class="text-slate-200 font-semibold">' + d.strays
+                    + '</span> from other boards: on the reshelving cart.</li>' : '')
               + '</ul>';
             report.classList.remove('hidden');
             stopAuditCamera();

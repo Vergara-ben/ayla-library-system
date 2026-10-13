@@ -21,6 +21,7 @@ REPORT_TYPES = [
     ('donors', 'Donors Report'),
     ('stock_levels', 'Stock Levels Report'),
     ('stock_movement', 'Stock Movement Report'),
+    ('stock_audits', 'Stock Audit Report'),
     ('unreturned', 'Unreturned Books Report'),
     ('penalties', 'Penalties Report'),
     ('analytics', 'Borrowing Analytics Report'),
@@ -1143,7 +1144,82 @@ def _donors(start, end):
     }
 
 
+def _stock_audits(start, end):
+    """Every shelf count in the period, book by book, followed from the count to the book as it is now."""
+    from .audittrail import audit_rows, summary
+    from .models import StockAudit
+
+    def words(st):
+        if st is None:
+            return 'Removed from the records'
+        return ' · '.join(x for x in (st['status'], st['condition'], st['location']) if x) or DASH
+
+    audits = (StockAudit.objects.filter(audited_at__date__range=(start, end))
+              .select_related('audited_by').order_by('-audited_at'))
+    rows, all_rows, per_board = [], [], {}
+    for audit in audits:
+        found = audit_rows(audit)
+        all_rows += found
+        board = audit.shelf_name.strip() or DASH
+        b = per_board.setdefault(board, {'counts': 0, 'checked': 0, 'missing': 0, 'open': 0})
+        b['counts'] += 1
+        b['checked'] += len(found)
+        b['missing'] += sum(1 for r in found if r['kind'] == 'Missing')
+        b['open'] += sum(1 for r in found if r['open'])
+        # What needed following up first, then the rest of the board.
+        for r in sorted(found, key=lambda r: (not r['outcome'], r['title'].lower())):
+            trail = '; '.join(('%s %s' % (d.strftime('%Y-%m-%d'), t)) if d else t for d, t in r['trail'][-4:])
+            rows.append([
+                _fmt_date(timezone.localtime(audit.audited_at).date()), board,
+                _text(audit.audited_by.fullname if audit.audited_by else None),
+                r['title'],
+                r['result'] + (' (' + r['detail'] + ')' if r['detail'] else ''),
+                words(r['then']), words(r['now']),
+                trail or 'Nothing since',
+                r['outcome'] or DASH,
+            ])
+    s = summary(all_rows)
+    # Every follow-up outcome the counts produced, by name.
+    tally = {}
+    for r in all_rows:
+        if r['outcome']:
+            tally[r['outcome']] = tally.get(r['outcome'], 0) + 1
+    follow = sorted(tally.items(), key=lambda kv: -kv[1])
+    return {
+        'key': 'stock_audits',
+        'title': 'Stock Audit Report',
+        'subtitle': 'Every shelf count in the period, each book followed from the count to its state now',
+        'columns': ['Counted', 'Board', 'Counted By', 'Book', 'Result at the Count', 'At the Count',
+                    'Now', 'What Happened Since', 'Follow-up'],
+        'rows': rows,
+        'summary': [
+            ('Counts Filed', audits.count()),
+            ('Books Checked', s['checked']),
+            ('Not Found', s['missing']),
+            ('Found Again Since', s['found_again']),
+            ('Written Off', s['written_off']),
+            ('Still Missing', s['still_missing']),
+            ('Found Damaged', s['damaged']),
+            ('On the Shelf While on Loan', s['loan_mismatch']),
+            ('Found on the Wrong Shelf', s['strays']),
+            ('Still Open', s['open']),
+        ],
+        'chart': _chart(
+            [(k, v) for k, v in follow if v], kind='bar',
+            title='What the counts found, and what became of it',
+            note='Each finding followed up to now.',
+            empty_note='No count in this period found anything needing follow-up.',
+            axis_note='Follow-up · vertical axis is number of books'),
+        'breakdown': {
+            'By board': [(k, '%d count(s), %d books, %d not found, %d open'
+                          % (v['counts'], v['checked'], v['missing'], v['open']))
+                         for k, v in sorted(per_board.items())],
+        },
+    }
+
+
 _BUILDERS['donors'] = _donors
+_BUILDERS['stock_audits'] = _stock_audits
 _BUILDERS['unreturned'] = _unreturned
 _BUILDERS['penalties'] = _penalties
 _BUILDERS['analytics'] = _analytics

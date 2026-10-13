@@ -1325,6 +1325,9 @@ class StockAudit(models.Model):
     missing_count = models.IntegerField(default=0)
     recovered_count = models.IntegerField(default=0)
     unexpected_count = models.IntegerField(default=0)
+    damaged_count = models.IntegerField(default=0)
+    # On the shelf while the system says on loan: the desk must check them in.
+    loan_mismatch_count = models.IntegerField(default=0)
     notes = models.TextField(blank=True, null=True)
 
     class Meta:
@@ -1357,6 +1360,11 @@ class StockAuditLine(models.Model):
         ('On loan', 'On loan'),
         ('Being read', 'Being read in the library'),
         ('Reshelving', 'Waiting to be reshelved'),
+        ('Under repair', 'Under repair'),
+        # Marked by the reader beyond here / not found.
+        ('Damaged', 'Found damaged'),
+        ('Here on loan', 'On the shelf, but recorded on loan'),
+        ('Stray', 'Found on the wrong shelf'),
     ]
 
     line_id = models.AutoField(primary_key=True)
@@ -1370,6 +1378,9 @@ class StockAuditLine(models.Model):
     status_then = models.CharField(max_length=50, blank=True, default='')
     # Who had it and until when, for a book out on loan.
     detail = models.CharField(max_length=255, blank=True, default='')
+    # Condition and shelf the count left it with, so later damage or moves show too.
+    condition_then = models.CharField(max_length=20, blank=True, default='')
+    location_then = models.CharField(max_length=255, blank=True, default='')
 
     class Meta:
         db_table = 'Stock_Audit_Lines'
