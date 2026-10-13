@@ -3727,7 +3727,6 @@ def _logs_page(request, template):
     if desk_mode:
         return render(request, 'desk/kiosk.html', {
             'purpose_choices': PURPOSE_CHOICES,
-            'patron_type_choices': Patron.PATRON_TYPE_CHOICES,
             'known_schools': known_schools(),
             'today': today,
         })

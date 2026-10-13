@@ -7377,6 +7377,11 @@ class DeskKioskTests(TestCase):
         self.assertIsNone(visitor.card_number)
         self.assertEqual(PatronLog.objects.filter(patron=visitor).count(), 1)
 
+    def test_a_walk_in_is_always_a_general_visitor(self):
+        self._post('/desk/visitor/', direction='entry', name='Ana Reyes',
+                   patron_type='Teacher', purpose='Reading')
+        self.assertEqual(Patron.objects.get(fullname='Ana Reyes').patron_type, 'General Visitor')
+
     def test_a_returning_walk_in_is_the_same_person(self):
         self._post('/desk/visitor/', direction='entry', name='Ana Reyes',
                    purpose='Reading')

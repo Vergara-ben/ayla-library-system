@@ -994,7 +994,8 @@ def desk_visitor(request):
 
     name = ' '.join((request.POST.get('name') or '').split())
     contact = (request.POST.get('contact') or '').strip()
-    patron_type = (request.POST.get('patron_type') or 'General Visitor').strip()
+    # Anyone signing in here without a card is a general visitor.
+    patron_type = 'General Visitor'
     school = (request.POST.get('school') or '').strip()
     purpose = (request.POST.get('purpose') or '').strip()
     if purpose == 'Other':
@@ -1007,8 +1008,6 @@ def desk_visitor(request):
     if len(''.join(tokenise(name))) < 2:
         return JsonResponse({'success': False, 'field': 'name',
                              'error': 'Please type your full name.'})
-    if patron_type not in dict(Patron.PATRON_TYPE_CHOICES):
-        patron_type = 'General Visitor'
     if direction == 'entry' and not purpose:
         return JsonResponse({'success': False, 'field': 'purpose',
                              'error': 'Please choose what brings you in today.'})
