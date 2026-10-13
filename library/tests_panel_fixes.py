@@ -965,3 +965,84 @@ class FixLinkTests(TestCase):
             'password': 'Secret12345!', 'confirm_password': 'Secret12345!', 'patron_type': 'Student',
             'contact_number': '09170000000', 'address': 'Somewhere', 'accept_terms': 'yes'})
         self.assertContains(page, 'still reviewing it')
+
+
+class DonorManagementTests(TestCase):
+    """Donors are registered with their details, listed in full, and thanked in writing."""
+
+    def setUp(self):
+        from .models import Donor
+        self.client = _client(admin_id=_staff(role='Admin').admin_id)
+        self.bravo = Donor.objects.create(name='Johny Bravo')
+
+    def _register(self, **data):
+        data.setdefault('action', 'add')
+        return self.client.post('/admin-portal/donors/', data)
+
+    def test_registering_takes_every_detail_at_once(self):
+        from .models import Donor
+        self._register(name='Rotary Club of Cabuyao', donor_type='Organization',
+                       contact_number='0917 111 2222', email='rotary@example.invalid', address='Cabuyao')
+        d = Donor.objects.get(name='Rotary Club of Cabuyao')
+        self.assertEqual((d.donor_type, d.contact_number, d.email, d.address),
+                         ('Organization', '0917 111 2222', 'rotary@example.invalid', 'Cabuyao'))
+        page = self._register(name='Rotary 2', email='not-an-email')
+        self.assertContains(page, 'is not a valid email address')
+        self.assertFalse(Donor.objects.filter(name='Rotary 2').exists())
+
+    def test_a_near_duplicate_needs_confirming(self):
+        from .models import Donor
+        page = self._register(name='Johnny Bravo')
+        self.assertContains(page, 'Is this someone already registered?')
+        self.assertFalse(Donor.objects.filter(name='Johnny Bravo').exists())
+        self._register(name='Johnny Bravo', confirm_new='1')
+        self.assertTrue(Donor.objects.filter(name='Johnny Bravo').exists())
+        # The same name, however typed, opens the saved record instead.
+        self.assertRedirects(self._register(name='  johny   BRAVO '), '/admin-portal/donors/?d=%d' % self.bravo.donor_id)
+
+    def _donate(self, donor_name, **extra):
+        data = {'source': 'Donation', 'donor_name': donor_name, 'donated_date': '2026-10-01',
+                'items': json.dumps([{'title': 'Noli', 'author': 'Rizal', 'quantity': 2, 'condition': 'Good'}])}
+        data.update(extra)
+        return self.client.post('/admin-portal/inventory/receive/', data)
+
+    def test_a_new_donor_is_saved_with_their_contact_when_receiving(self):
+        from .models import Donor
+        r = self._donate('Brgy. Council', donor_type='Government', donor_contact_number='0917 000 1111',
+                         donor_email='brgy@example.invalid', donor_address='Poblacion')
+        d = Donor.objects.get(name='Brgy. Council')
+        self.assertEqual((d.donor_type, d.email), ('Government', 'brgy@example.invalid'))
+        self.assertIn('ack=%d&ackdate=2026-10-01' % d.donor_id, r['Location'])
+        page = self.client.get(r['Location'])
+        self.assertContains(page, 'Print acknowledgement')
+
+    def test_receiving_never_overwrites_a_saved_donors_details(self):
+        self.bravo.contact_number = '0917 555 0000'
+        self.bravo.save()
+        self._donate('Johny Bravo', donor_contact_number='0999 999 9999', donor_address='Calamba')
+        self.bravo.refresh_from_db()
+        self.assertEqual((self.bravo.contact_number, self.bravo.address), ('0917 555 0000', 'Calamba'))
+
+    def test_the_acknowledgement_lists_the_gift(self):
+        self._donate('Johny Bravo')
+        page = self.client.get('/admin-portal/donors/%d/acknowledgement/2026-10-01/' % self.bravo.donor_id)
+        self.assertContains(page, 'Acknowledgement of Donation')
+        self.assertContains(page, 'Noli')
+        self.assertContains(page, 'DON-20261001-%04d' % self.bravo.donor_id)
+        self.assertEqual(page.context['total_copies'], 2)
+        missing = self.client.get('/admin-portal/donors/%d/acknowledgement/2026-01-01/' % self.bravo.donor_id)
+        self.assertEqual(missing.status_code, 404)
+
+    def test_the_donors_report_lists_every_donor_with_contact(self):
+        from datetime import date
+        from .models import Donor
+        from .reports import build_report
+        Donor.objects.create(name='Regular Reader', contact_number='0917', email='rr@example.invalid',
+                             address='Sta. Rosa')
+        self._donate('Johny Bravo')
+        report = build_report('donors', date(2026, 10, 1), date(2026, 10, 31))
+        names = [r[0] for r in report['rows']]
+        self.assertEqual(names[0], 'Johny Bravo')
+        row = report['rows'][names.index('Regular Reader')]
+        self.assertEqual((row[2], row[3], row[4]), ('0917 · rr@example.invalid', 'Sta. Rosa', 0))
+        self.assertIn('Address', report['columns'])

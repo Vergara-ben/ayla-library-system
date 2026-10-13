@@ -4188,6 +4188,10 @@ class PasswordToggleTests(TestCase):
         self.assertContains(r, 'js/password-toggle.js')
 
 
+# Printed rather than read on screen, so they keep their own paper styling.
+PRINTED_DOCUMENTS = ('librarycard.html', 'donoracknowledgement.html')
+
+
 class ReadabilityTests(TestCase):
     """The librarians' pages use the larger, higher-contrast text."""
 
@@ -4198,8 +4202,8 @@ class ReadabilityTests(TestCase):
                 path = os.path.join(folder, name)
                 with open(path, encoding='utf-8') as f:
                     html = f.read()
-                # Full pages only; the library card is printed, not read on screen.
-                if '<html' in html and name != 'librarycard.html' and 'readability.css' not in html:
+                # Full pages only; the library card and the donation acknowledgement are printed documents.
+                if '<html' in html and name not in PRINTED_DOCUMENTS and 'readability.css' not in html:
                     missing.append(path)
         self.assertEqual(missing, [])
 
@@ -4208,7 +4212,7 @@ class ReadabilityTests(TestCase):
         tiny = []
         for folder in ('templates/admin', 'templates/library_staff', 'templates/desk'):
             for name in os.listdir(folder):
-                if name == 'librarycard.html':
+                if name in PRINTED_DOCUMENTS:
                     continue
                 with open(os.path.join(folder, name), encoding='utf-8') as f:
                     for size in _re.findall(r'font-size:\s*(\d+(?:\.\d+)?)px', f.read()):

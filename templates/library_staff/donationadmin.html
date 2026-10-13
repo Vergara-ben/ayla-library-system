@@ -182,7 +182,7 @@
                                     {% elif gift.stage == 'Shelved' %}<span class="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-1 rounded text-[10px] font-bold tracking-wide uppercase">On the shelf</span>
                                     {% else %}<span class="bg-slate-500/10 text-slate-400 border border-slate-500/20 px-2 py-1 rounded text-[10px] font-bold tracking-wide uppercase whitespace-nowrap" title="Some titles are shelved, some are not yet">Partly shelved</span>{% endif %}
                                 </td>
-                                <td class="py-3 px-6"></td>
+                                <td class="py-3 px-6 text-center">{% if gift.ack_url %}<a href="{{ gift.ack_url }}" target="_blank" rel="noopener" class="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-1 rounded-md border border-slate-700 text-slate-300 hover:bg-slate-800/50 whitespace-nowrap" title="A printable acknowledgement of this gift for the donor"><i class="fa-solid fa-file-signature text-[9px]"></i> Acknowledgement</a>{% endif %}</td>
                             </tr>
                             {% for donation in gift.lines %}
                             <tr class="hover:bg-slate-800/10 transition-colors">

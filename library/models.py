@@ -738,6 +738,53 @@ class Donor(models.Model):
             return None
         return cls.objects.filter(name__iexact=clean).first() or cls.objects.create(name=clean)
 
+    DETAIL_FIELDS = ('donor_type', 'contact_number', 'email', 'address', 'notes')
+
+    @classmethod
+    def register(cls, name, **details):
+        """The donor with this name: a new one gets these details, a saved one only fills its blanks."""
+        clean = ' '.join((name or '').split())
+        if not clean:
+            return None
+        donor = cls.objects.filter(name__iexact=clean).first()
+        created = donor is None
+        if created:
+            donor = cls(name=clean)
+        changed = []
+        for field in cls.DETAIL_FIELDS:
+            value = (details.get(field) or '').strip()
+            if not value or (field == 'donor_type' and value not in dict(cls.TYPE_CHOICES)):
+                continue
+            if created or (field != 'donor_type' and not getattr(donor, field)):
+                setattr(donor, field, value)
+                changed.append(field)
+        if created:
+            donor.save()
+        elif changed:
+            donor.save(update_fields=changed)
+        return donor
+
+    @classmethod
+    def similar_to(cls, name, limit=3):
+        """Saved donors whose names are close to this one but not the same: likely typos."""
+        import difflib
+        import re as _re
+
+        def norm(text):
+            return ' '.join(_re.sub(r'[^a-z0-9 ]', ' ', (text or '').lower()).split())
+        target = norm(name)
+        if not target:
+            return []
+        scored = []
+        for donor in cls.objects.only('donor_id', 'name'):
+            other = norm(donor.name)
+            if other == target:
+                continue
+            ratio = difflib.SequenceMatcher(None, target, other).ratio()
+            if ratio >= 0.85 or (len(target) >= 5 and (target in other or other in target)):
+                scored.append((ratio, donor))
+        return [d for _, d in sorted(scored, key=lambda t: -t[0])[:limit]]
+
 
 class Donation(Archivable):
 
