@@ -595,6 +595,8 @@ class Book(Archivable):
     price = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
     ISBN = models.CharField(max_length=255, blank=True, null=True)
     genre = models.CharField(max_length=255, blank=True, null=True)
+    # Finer detail than the genre, e.g. "Legal Thriller"; optional and searchable.
+    subject = models.CharField(max_length=255, blank=True, null=True)
     material_type = models.CharField(
         max_length=20, choices=MATERIAL_TYPE_CHOICES, default='Book')
     status = models.CharField(
@@ -686,7 +688,7 @@ class Book(Archivable):
 
     # Novels of every kind share one prefix, as the library already shelves them.
     FICTION_WORDS = re.compile(r"\b(fiction|novel|thriller|suspense|mystery|romance|young adult|horror|fantasy|"
-                               r"dystopian|gothic|spy|crime|legal|adventure|sci-fi|picture book|"
+                               r"dystopian|gothic|spy|crime|legal|adventure|sci-fi|picture books?|"
                                r"children's literature|short stor|drama|satire)\b", re.I)
 
     def derive_call_number(self):

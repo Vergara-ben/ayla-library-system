@@ -339,7 +339,7 @@
                                     <div class="w-8 h-10 rounded bg-cyan-950/40 border border-cyan-900/30 flex-shrink-0 flex items-center justify-center text-[10px] font-medium text-cyan-700 select-none"></div>
                                     <div>
                                         <div class="font-bold text-slate-200">{{ book.title }}</div>
-                                        <div class="text-[10px] text-slate-500 mt-0.5">{{ book.genre|default:"" }}</div>
+                                        <div class="text-[10px] text-slate-500 mt-0.5">{{ book.subject|default:book.genre|default:"" }}</div>
                                     </div>
                                 </td>
                                 <td class="py-4 px-6 text-slate-300">{{ book.author }}</td>
@@ -563,6 +563,8 @@
                         <input type="text" name="genre" id="editGenre" placeholder="Search the library's genres" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" required>
                         <input type="hidden" name="new_genre" id="editNewGenre" value="">
                         <p id="editGenreNote" class="hidden text-[10px] text-cyan-400 leading-relaxed"></p>
+                        <label for="editSubject" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px] pt-2">Subject <span class="normal-case font-normal tracking-normal">(optional detail, e.g. Legal Thriller)</span></label>
+                        <input type="text" name="subject" id="editSubject" maxlength="255" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
                     </div>
                     <div class="space-y-1.5">
                         <label for="editMaterial" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Material Type</label>
@@ -884,6 +886,7 @@
                             <p id="detailAuthor" class="text-sm text-slate-400 mt-1">Author</p>
                             <div class="flex flex-wrap gap-2 mt-3">
                                 <span id="detailGenre" class="text-xs px-2 py-0.5 rounded bg-blue-950/60 text-blue-400 border border-blue-900 font-medium">Genre</span>
+                                <span id="detailSubject" class="hidden text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-medium"></span>
                                 <span id="detailShelf" class="text-xs px-2 py-0.5 rounded bg-teal-950/60 text-teal-400 border border-teal-900 font-medium">Shelf Level</span>
                                 <span id="detailYear" class="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-400 font-medium">Year</span>
                                 <span id="detailPrice" class="hidden text-xs px-2 py-0.5 rounded bg-amber-950/60 text-amber-400 border border-amber-900 font-medium"></span>
@@ -1080,6 +1083,9 @@
                         document.getElementById('detailTitleMain').textContent = data.title;
                         document.getElementById('detailAuthor').textContent = data.author;
                         document.getElementById('detailGenre').textContent = data.genre;
+                        const subjectTag = document.getElementById('detailSubject');
+                        subjectTag.textContent = data.subject || '';
+                        subjectTag.classList.toggle('hidden', !data.subject);
                         document.getElementById('detailShelf').textContent = data.shelf_level;
                         document.getElementById('detailYear').textContent = data.publication_year;
                         const priceTag = document.getElementById('detailPrice');
@@ -1570,17 +1576,19 @@
         {% if book %}
             document.addEventListener('DOMContentLoaded', function() {
                 document.getElementById('editBookId').value = '{{ book.book_id }}';
-                document.getElementById('editTitle').value = '{{ initial.title|default:"" }}';
-                document.getElementById('editAuthor').value = '{{ initial.author|default:"" }}';
-                document.getElementById('editPublicationYear').value = '{{ initial.publication_year|default:"" }}';
-                document.getElementById('editIsbn').value = '{{ initial.ISBN|default:"" }}';
-                document.getElementById('editGenre').value = '{{ initial.genre|default:"" }}';
-                document.getElementById('editCoverImgUrl').value = '{{ initial.cover_img_url|default:"" }}';
-                document.getElementById('editStatus').value = '{{ initial.status|default:"Available" }}';
-                document.getElementById('editShelfLevel').value = '{{ initial.shelf_level_id|default:"" }}';
-                document.getElementById('editShelfSlot').value = '{{ initial.shelf_slot|default:"" }}';
-                document.getElementById('editCondition').value = '{{ initial.condition|default:"Good" }}';
-                document.getElementById('editCallNumber').value = '{{ initial.call_number|default:"" }}';
+                document.getElementById('editTitle').value = '{{ initial.title|default:""|escapejs }}';
+                document.getElementById('editAuthor').value = '{{ initial.author|default:""|escapejs }}';
+                document.getElementById('editPublicationYear').value = '{{ initial.publication_year|default:""|escapejs }}';
+                document.getElementById('editIsbn').value = '{{ initial.ISBN|default:""|escapejs }}';
+                document.getElementById('editGenre').value = '{{ initial.genre|default:""|escapejs }}';
+                document.getElementById('editSubject').value = '{{ initial.subject|default:""|escapejs }}';
+                document.getElementById('editMaterial').value = '{{ initial.material_type|default:"Book"|escapejs }}';
+                document.getElementById('editCoverImgUrl').value = '{{ initial.cover_img_url|default:""|escapejs }}';
+                document.getElementById('editStatus').value = '{{ initial.status|default:"Available"|escapejs }}';
+                document.getElementById('editShelfLevel').value = '{{ initial.shelf_level_id|default:""|escapejs }}';
+                document.getElementById('editShelfSlot').value = '{{ initial.shelf_slot|default:""|escapejs }}';
+                document.getElementById('editCondition').value = '{{ initial.condition|default:"Good"|escapejs }}';
+                document.getElementById('editCallNumber').value = '{{ initial.call_number|default:""|escapejs }}';
                 document.getElementById('editBookModal').classList.remove('hidden');
             });
         {% endif %}

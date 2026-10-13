@@ -219,6 +219,14 @@ def clean_genre(raw, allow_new=False, known=None):
                   'new genre on purpose.' % genre[:40])
 
 
+def matched_genre(raw, known=None):
+    """The library genre a sheet's own wording belongs to ("Legal Thriller" -> Thriller & Suspense), or None."""
+    from .genres import standard_genre
+    target = standard_genre(raw)
+    known = known_genres() if known is None else known
+    return known.get(target.lower()) if target else None
+
+
 def same_title(title, author):
     """Live books already catalogued under this title and author."""
     return Book.objects.filter(title__iexact=tidy(title), author__iexact=tidy(author))

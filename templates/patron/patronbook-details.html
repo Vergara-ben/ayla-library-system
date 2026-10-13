@@ -170,6 +170,7 @@
     <div class="detail-row"><div class="detail-key">Year</div><div class="detail-val">{{ book.publication_year|default:"N/A" }}</div></div>
     <div class="detail-row"><div class="detail-key">ISBN</div><div class="detail-val">{{ book.ISBN|default:"N/A" }}</div></div>
     <div class="detail-row"><div class="detail-key">Genre</div><div class="detail-val">{{ book.genre|default:"N/A" }}</div></div>
+    {% if book.subject %}<div class="detail-row"><div class="detail-key">Subject</div><div class="detail-val">{{ book.subject }}</div></div>{% endif %}
     <div class="detail-row"><div class="detail-key">Status</div><div class="detail-val">{{ book.status }}</div></div>
   </div>
 

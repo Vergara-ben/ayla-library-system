@@ -992,7 +992,8 @@ def _book_search_q(term):
     q = (Q(title__icontains=term)
          | Q(author__icontains=term)
          | Q(ISBN__icontains=term)
-         | Q(genre__icontains=term))
+         | Q(genre__icontains=term)
+         | Q(subject__icontains=term))
     bare = re.sub(r'[^0-9A-Za-z]', '', term)
     if bare and bare != term:
         q |= Q(ISBN__icontains=bare)
@@ -1914,9 +1915,20 @@ def _books_page(request, template):
 
 
 def _genre_options():
-    """The library's genres for a picker, one spelling each."""
+    """The library's genres for a picker, with the finer wording each one covers so either finds it."""
+    from collections import Counter, defaultdict
     from .catalogue import known_genres
-    return sorted(known_genres().values(), key=str.lower)
+    subjects = defaultdict(Counter)
+    for genre, subject in (Book.objects.exclude(subject__isnull=True).exclude(subject='')
+                           .values_list('genre', 'subject')):
+        subjects[(genre or '').lower()][subject] += 1
+    options = []
+    for genre in sorted(known_genres().values(), key=str.lower):
+        common = subjects[genre.lower()]
+        options.append({'label': genre,
+                        'sub': ', '.join(s for s, _n in common.most_common(3)),
+                        'search': ' '.join(common)})
+    return options
 
 
 @admin_module_required('books')
@@ -1984,12 +1996,14 @@ def admin_add_book(request):
             shelf_slot = parse_shelf_slot(request.POST.get('shelf_slot'))
             cover_img_url = request.POST.get('cover_img_url', '').strip()
             copies = values['copies']
+            # Copies of a title share its call number and subject.
+            from .catalogue import same_title, tidy
+            siblings = same_title(values['title'], values['author'])
             if not values['call_number']:
-                # Copies of a title share its call number.
-                from .catalogue import same_title
-                values['call_number'] = (same_title(values['title'], values['author'])
-                                         .exclude(call_number__isnull=True).exclude(call_number='')
+                values['call_number'] = (siblings.exclude(call_number__isnull=True).exclude(call_number='')
                                          .values_list('call_number', flat=True).first())
+            subject = (tidy(request.POST.get('subject')) or siblings.exclude(subject__isnull=True)
+                       .exclude(subject='').values_list('subject', flat=True).first() or None)
 
             # Each copy is a record of its own, with its own QR label, all on the same shelf.
             first = None
@@ -1999,6 +2013,7 @@ def admin_add_book(request):
                     author=values['author'],
                     ISBN=values['ISBN'] or None,
                     genre=values['genre'],
+                    subject=subject,
                     material_type=values['material_type'],
                     status=(request.POST.get('status') or 'Available').strip() or 'Available',
                     shelf_level=shelf_level,
@@ -2039,6 +2054,7 @@ def admin_add_book(request):
         'error': error,
         'genre_options': _genre_options(),
         'intake_conditions': INTAKE_CONDITION_OPTIONS,
+        'material_choices': Book.MATERIAL_TYPE_CHOICES,
     }
     return render(request, 'admin/managebooks.html', context)
 
@@ -2818,6 +2834,8 @@ def admin_edit_book(request, book_id):
         'shelf_level_id': book.shelf_level.shelf_level_id if book.shelf_level else '',
         'shelf_slot': book.shelf_slot or '',
         'condition': book.condition or 'Good',
+        'subject': book.subject or '',
+        'material_type': book.material_type or 'Book',
         'call_number': book.call_number or '',
         'price': book.price if book.price is not None else '',
     }
@@ -2861,6 +2879,8 @@ def admin_edit_book(request, book_id):
                 book.condition = values['condition']
             if 'material_type' in request.POST:
                 book.material_type = values['material_type']
+            if 'subject' in request.POST:
+                book.subject = ' '.join(request.POST.get('subject', '').split())[:255] or None
             if 'call_number' in request.POST:
                 # Cleared deliberately means "renumber it": save() fills a blank.
                 book.call_number = (request.POST.get('call_number') or '').strip() or None
@@ -2907,6 +2927,7 @@ def admin_edit_book(request, book_id):
         'initial': initial,
         'genre_options': _genre_options(),
         'intake_conditions': INTAKE_CONDITION_OPTIONS,
+        'material_choices': Book.MATERIAL_TYPE_CHOICES,
     }
     return render(request, 'admin/managebooks.html', context)
 
@@ -4331,6 +4352,7 @@ def admin_book_details_ajax(request, book_id):
         'author': book.author,
         'ISBN': book.ISBN or 'N/A',
         'genre': book.genre or 'General',
+        'subject': book.subject or '',
         'publication_year': book.publication_year or 'N/A',
         'status': book.status,
         'condition': book.condition,
@@ -4556,6 +4578,7 @@ def _book_qr_payload(book):
         'author': book.author,
         'ISBN': book.ISBN or 'N/A',
         'genre': book.genre or 'General',
+        'subject': book.subject or '',
         'publication_year': book.publication_year or 'N/A',
         'status': book.status,
         'condition': book.condition,
@@ -4671,7 +4694,9 @@ def download_book_template(request):
          'Austen, Jane'),
         ('Publication Year', False, 'Four digits.', 1963),
         ('ISBN', False, 'The ISBN or accession number. Leave blank if there is none.', ''),
-        ('Genre', False, 'Any wording. Its first three letters start the code label.', 'Fiction'),
+        ('Genre', True, "One of the library's genres, e.g. Fiction or Science. Other wording, like Legal "
+                        "Thriller, is matched to the nearest genre and kept as the subject.", 'Fiction'),
+        ('Subject', False, 'Optional finer detail, e.g. Legal Thriller. It can be searched.', ''),
         ('Material Type', False, 'One of: %s. Blank means Book.' % materials, 'Book'),
         ('Condition', False, 'One of: %s. Blank means Good.' % conditions, 'Minor Damage'),
         ('Code Label', False, 'The call number on the spine. Leave blank to have it worked out.',
@@ -5289,7 +5314,7 @@ def _import_books_body(request):
         'copyright': 'publication_year',
         'isbn': 'ISBN', 'isbn13': 'ISBN', 'isbn10': 'ISBN', 'barcode': 'ISBN',
         'accessionnumber': 'ISBN',
-        'genre': 'genre', 'genr': 'genre', 'category': 'genre', 'subject': 'genre',
+        'genre': 'genre', 'genr': 'genre', 'category': 'genre', 'subject': 'subject',
         'shelflevelid': 'shelf_level_id', 'shelflevel': 'shelf_level_id',
         'storagearea': 'storage_area', 'storage': 'storage_area',
         'location': 'storage_area', 'shelf': 'storage_area', 'zone': 'storage_area',
@@ -5340,11 +5365,13 @@ def _import_books_body(request):
         imported = skipped_dup = skipped_blank = copies_created = 0
         # Rows that break the cataloguing rules are not imported; each is named with its reason.
         from .catalogue import (clean_author, clean_copies, clean_genre, clean_isbn, clean_price,
-                                clean_title, clean_year, known_genres)
+                                clean_title, clean_year, known_genres, matched_genre, tidy)
         problems = []
         genres = known_genres()
         allow_new_genres = request.POST.get('new_genres') in ('1', 'true', 'True', 'on')
         new_genres = set()
+        # A sheet's own wording, matched to one of the library's genres: wording -> genre.
+        matched_genres = {}
         # Collected so the caller can print labels for exactly this delivery.
         created_ids = []
         unmatched_areas = set()
@@ -5410,7 +5437,17 @@ def _import_books_body(request):
             author = rule(clean_author(author)) or author
             isbn = rule(clean_isbn(field(row, 'ISBN'), title)) or ''
             raw_genre = field(row, 'genre')
-            genre, genre_problem = clean_genre(raw_genre, allow_new=allow_new_genres, known=genres)
+            subject = tidy(field(row, 'subject')) or None
+            genre, genre_problem = clean_genre(raw_genre, allow_new=False, known=genres)
+            if genre_problem:
+                # "Legal Thriller" is a Thriller & Suspense book; the sheet's wording becomes its subject.
+                genre = matched_genre(raw_genre or subject, known=genres)
+                if genre:
+                    matched_genres[tidy(raw_genre or subject)] = genre
+                    subject = subject or tidy(raw_genre)
+                    genre_problem = None
+                else:
+                    genre, genre_problem = clean_genre(raw_genre, allow_new=allow_new_genres, known=genres)
             if genre_problem:
                 if raw_genre.strip():
                     new_genres.add(' '.join(raw_genre.split()))
@@ -5502,6 +5539,7 @@ def _import_books_body(request):
                     publication_year=publication_year,
                     ISBN=isbn or None,
                     genre=genre,
+                    subject=subject,
                     material_type=material_type,
                     condition=condition,
                     # Blank is the normal case: Book.save() derives it.
@@ -5544,6 +5582,11 @@ def _import_books_body(request):
             parts.append(f'{skipped_word} {skipped_example} sample row(s) left from the template')
         if problems:
             parts.append(f'{skipped_word} {len(problems)} row(s) that break the cataloguing rules')
+        if matched_genres:
+            sample = sorted(matched_genres.items())[:3]
+            parts.append('matched %d genre wording(s) to the library\'s list, e.g. %s; the sheet\'s wording is '
+                         'kept as the subject' % (len(matched_genres), ', '.join(
+                             '"%s" to %s' % (k, v) for k, v in sample)))
         if new_genres and allow_new_genres:
             parts.append(f'{"will add" if preview else "added"} {len(new_genres)} new genre(s): '
                          + ', '.join(sorted(new_genres)[:10])
@@ -5578,6 +5621,7 @@ def _import_books_body(request):
             'problems': problems[:100],
             'new_genres': sorted(new_genres),
             'new_genres_allowed': allow_new_genres,
+            'matched_genres': matched_genres,
         }
         return JsonResponse(payload)
 
@@ -5738,7 +5782,9 @@ def download_donation_template(request):
         ('title', True, 'The title as printed on the book.', 'Noli Me Tangere'),
         ('author', False, 'Surname, First or First Surname.', 'Rizal, Jose'),
         ('ISBN', False, 'Used to recognise a title the library already has.', ''),
-        ('genre', False, 'Any wording.', 'Classic Philippine Literature'),
+        ('genre', False, "Needed for a title the library does not have yet: one of its genres. Other wording "
+                         "is matched to the nearest genre and kept as the subject.", 'Philippine Literature'),
+        ('subject', False, 'Optional finer detail, e.g. Classic Novel. It can be searched.', ''),
         ('publication_year', False, 'Four digits.', 1961),
         ('material_type', False, 'One of: %s. Blank means Book.' % materials, 'Book'),
         ('quantity', False, 'How many copies of this title, 1 to 100. Blank means 1.', 2),
@@ -5754,7 +5800,7 @@ DONATION_IMPORT_COLUMNS = {
     'title': 'title', 'booktitle': 'title',
     'author': 'author', 'authors': 'author',
     'isbn': 'isbn', 'isbn13': 'isbn', 'isbn10': 'isbn',
-    'genre': 'genre', 'category': 'genre', 'subject': 'genre',
+    'genre': 'genre', 'category': 'genre', 'subject': 'subject',
     'publicationyear': 'publication_year', 'yearpublished': 'publication_year',
     'year': 'publication_year',
     'materialtype': 'material_type', 'material': 'material_type', 'format': 'material_type',
@@ -5781,6 +5827,8 @@ def _import_donation_rows(request):
     problems = []
     allow_new_genres = request.POST.get('new_genres') in ('1', 'true', 'True', 'on')
     new_genres = set()
+    from .catalogue import clean_genre, known_genres, matched_genre
+    genres = known_genres()
     # Rows this sheet has already received, so a title listed twice is not a repeat.
     received_now = set()
 
@@ -5829,12 +5877,17 @@ def _import_donation_rows(request):
                             % (row_no, raw_material[:30]))
             continue
 
+        genre, subject = _cell_text(values.get('genre')), _cell_text(values.get('subject'))
+        if clean_genre(genre, known=genres)[1] and matched_genre(genre or subject, known=genres):
+            # "Legal Thriller" is a Thriller & Suspense book; the sheet's wording becomes its subject.
+            genre, subject = matched_genre(genre or subject, known=genres), subject or genre
         item = {
             'new_genre': allow_new_genres,
             'title': title,
             'author': _cell_text(values.get('author')),
             'isbn': _cell_text(values.get('isbn')),
-            'genre': _cell_text(values.get('genre')),
+            'genre': genre,
+            'subject': subject,
             'material_type': material_type,
             'publication_year': _cell_text(values.get('publication_year')),
         }
@@ -11980,7 +12033,16 @@ def _resolve_intake_book(item, source):
         return existing, False
 
     # Only a title new to the catalogue needs its genre and year.
-    genre, problem = clean_genre(item.get('genre'), allow_new=bool(item.get('new_genre')))
+    from .catalogue import matched_genre, tidy
+    subject = tidy(item.get('subject')) or None
+    genre, problem = clean_genre(item.get('genre'), allow_new=False)
+    if problem and not item.get('new_genre'):
+        # "Legal Thriller" is a Thriller & Suspense book; the wording is kept as its subject.
+        genre = matched_genre(item.get('genre') or subject)
+        if genre:
+            subject, problem = subject or tidy(item.get('genre')), None
+    if problem:
+        genre, problem = clean_genre(item.get('genre'), allow_new=bool(item.get('new_genre')))
     if problem:
         error = ValueError('"%s": %s' % (named, problem))
         # Named, so an import can offer to add the sheet's new genres in one go.
@@ -11996,6 +12058,7 @@ def _resolve_intake_book(item, source):
         author=author,
         ISBN=isbn or None,
         genre=genre or None,
+        subject=subject,
         material_type=material_type,
         publication_year=year,
         # Donated books become available once shelved.
@@ -12028,6 +12091,7 @@ def _intake_book_for_copy(book, reuse, source, condition):
         author=book.author,
         publication_year=book.publication_year,
         genre=book.genre,
+        subject=book.subject,
         material_type=book.material_type,
         call_number=book.call_number,
         cover_img_url=book.cover_img_url,
@@ -13535,7 +13599,7 @@ def catalogue_assist(request):
             match = {'copies': len(copies), 'genre': first.genre or '', 'material_type': first.material_type,
                      'isbn': first.ISBN or '', 'publication_year': first.publication_year or '',
                      'price': str(first.price) if first.price is not None else '',
-                     'call_number': first.call_number or ''}
+                     'call_number': first.call_number or '', 'subject': first.subject or ''}
 
     shelf = None
     shelved = [b.shelf_level for b in (same_title(title, author).select_related('shelf_level__shelf')

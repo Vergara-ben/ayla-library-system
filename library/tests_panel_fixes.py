@@ -1453,3 +1453,112 @@ class StricterCataloguingTests(TestCase):
         self.client.post('/admin-portal/inventory/receive/', {'source': 'Purchase', 'items': json.dumps(
             [{'book_id': self.noli.book_id, 'quantity': 1, 'condition': 'Good'}])})
         self.assertEqual(Book.objects.filter(title='Noli Me Tangere').count(), before + 1)
+
+
+class GenreTidyTests(TestCase):
+    """584 one-off descriptions became 45 genres; the old wording lives on as the subject."""
+
+    def setUp(self):
+        self.staff = _staff(role='Admin', modules='books,inventory,donations')
+        self.client = _client(admin_id=self.staff.admin_id, admin_role='Admin')
+        self.ajax = {'HTTP_X_REQUESTED_WITH': 'XMLHttpRequest'}
+
+    def test_old_wording_lands_in_the_standard_list(self):
+        from .genres import STANDARD_GENRES, standard_genre
+        cases = {
+            'Legal Thriller': 'Thriller & Suspense',
+            "Children's Picture Book / Dinosaurs & Pop-Up": "Children's Picture Books",
+            'General Reference / Encyclopedia': 'Encyclopedias',
+            'Values Education Textbook': 'Values Education',
+            'Social Studies / Textbook (HEKASI)': 'Social Studies',
+            'Academic Literature / Poetry': 'Filipino Language & Literature',
+            'Non-Fiction / History': 'History',
+            'Politics / Non-Fiction': 'Social Sciences',
+            'Political Science & Government': 'Social Sciences',
+            'Business Statistics': 'Statistics',
+            'Auditing & Information Systems': 'Accounting',
+            'fiction': 'Fiction',
+        }
+        for old, new in cases.items():
+            self.assertEqual(standard_genre(old), new, old)
+        self.assertEqual(len(STANDARD_GENRES), 45)
+        self.assertIsNone(standard_genre('Underwater Basketweaving'))
+
+    def test_the_tidy_keeps_the_old_wording_as_the_subject(self):
+        import importlib
+        from django.apps import apps
+        from .models import SystemLog
+        legal = Book.objects.create(title='The Firm', author='Grisham, John', genre='Legal Thriller')
+        plain = Book.objects.create(title='Emma', author='Austen, Jane', genre='Fiction')
+        odd = Book.objects.create(title='Odd', author='Cruz, Ana', genre='Underwater Basketweaving')
+        importlib.import_module('library.migrations.0089_tidy_genres').tidy_genres(apps, None)
+        for book in (legal, plain, odd):
+            book.refresh_from_db()
+        self.assertEqual((legal.genre, legal.subject), ('Thriller & Suspense', 'Legal Thriller'))
+        self.assertEqual((plain.genre, plain.subject), ('Fiction', None))
+        self.assertEqual((odd.genre, odd.subject), ('Underwater Basketweaving', None))
+        self.assertTrue(SystemLog.objects.filter(detail__startswith='Tidied genres').exists())
+
+    def test_every_search_box_finds_the_subject(self):
+        Book.objects.create(title='The Firm', author='Grisham, John', genre='Thriller & Suspense',
+                            subject='Legal Thriller')
+        page = self.client.get('/admin-portal/management/', {'q': 'legal thrill'})
+        self.assertEqual([b.title for b in page.context['books']], ['The Firm'])
+
+    def test_the_import_matches_wording_and_keeps_it_as_the_subject(self):
+        Book.objects.create(title='The Firm', author='Grisham, John', genre='Thriller & Suspense')
+        rows = [['Title', 'Author', 'Genre', 'Subject'],
+                ['The Client', 'Grisham, John', 'Legal Thriller', ''],
+                ['The Spy', 'Le Carre, John', '', 'Spy Thriller'],
+                ['The Basket', 'Cruz, Ana', 'Underwater Basketweaving', '']]
+        r = self.client.post('/admin-portal/import-books/', {'excel_file': _sheet(rows)}).json()
+        client = Book.objects.get(title='The Client')
+        self.assertEqual((client.genre, client.subject), ('Thriller & Suspense', 'Legal Thriller'))
+        spy = Book.objects.get(title='The Spy')
+        self.assertEqual((spy.genre, spy.subject), ('Thriller & Suspense', 'Spy Thriller'))
+        self.assertIn('kept as the subject', r['message'])
+        # Wording no rule fits is still a new genre, added only on purpose.
+        self.assertEqual(r['new_genres'], ['Underwater Basketweaving'])
+        self.assertFalse(Book.objects.filter(title='The Basket').exists())
+
+    def test_the_donation_import_matches_too(self):
+        Book.objects.create(title='The Firm', author='Grisham, John', genre='Thriller & Suspense')
+        rows = [['Donor', 'Title', 'Author', 'Genre'], ['Ana Cruz', 'The Client', 'Grisham, John', 'Legal Thriller']]
+        r = self.client.post('/admin-portal/import-donations/', {'excel_file': _sheet(rows)}).json()
+        self.assertTrue(r['success'], r)
+        client = Book.objects.get(title='The Client')
+        self.assertEqual((client.genre, client.subject), ('Thriller & Suspense', 'Legal Thriller'))
+
+    def test_another_copy_takes_its_titles_subject_and_editing_changes_it(self):
+        first = Book.objects.create(title='The Firm', author='Grisham, John', genre='Thriller & Suspense',
+                                    subject='Legal Thriller')
+        r = self.client.post('/admin-portal/add-book/', {'title': 'The Firm', 'author': 'Grisham, John',
+                                                         'genre': 'Thriller & Suspense'}, **self.ajax).json()
+        self.assertTrue(r['success'], r)
+        self.assertEqual(set(Book.objects.filter(title='The Firm').values_list('subject', flat=True)),
+                         {'Legal Thriller'})
+        self.client.post('/admin-portal/edit-book/%d/' % first.book_id, {
+            'title': 'The Firm', 'author': 'Grisham, John', 'genre': 'Thriller & Suspense',
+            'subject': '  Courtroom   Drama '}, **self.ajax)
+        first.refresh_from_db()
+        self.assertEqual(first.subject, 'Courtroom Drama')
+
+    def test_the_edit_form_fills_in_an_apostrophe_as_typed(self):
+        book = Book.objects.create(title="Charlotte's Web", author='White, E. B.', genre="Children's Fiction")
+        page = self.client.get('/admin-portal/edit-book/%d/' % book.book_id).content.decode()
+        self.assertIn("Children\\u0027s Fiction", page)
+        self.assertNotIn("value = 'Children&#x27;s", page)
+
+    def test_editing_keeps_a_magazine_a_magazine(self):
+        book = Book.objects.create(title='Reader', author='Unknown', genre='Fiction', material_type='Magazine')
+        page = self.client.get('/admin-portal/edit-book/%d/' % book.book_id).content.decode()
+        self.assertIn('<option value="Magazine">', page)
+        self.assertIn("getElementById('editMaterial').value = 'Magazine'", page)
+
+    def test_the_picker_shows_what_each_genre_covers(self):
+        from .views import _genre_options
+        Book.objects.create(title='The Firm', author='Grisham, John', genre='Thriller & Suspense',
+                            subject='Legal Thriller')
+        option = next(o for o in _genre_options() if o['label'] == 'Thriller & Suspense')
+        self.assertIn('Legal Thriller', option['sub'])
+        self.assertIn('Legal Thriller', option['search'])
