@@ -1225,3 +1225,62 @@ class AuditFollowUpTests(AuditTrailTests):
         page = self.client.get('/admin-portal/reports/', {'type': 'stock_audits', 'generate': 1,
                                                           'start': today.isoformat(), 'end': today.isoformat()})
         self.assertContains(page, 'Stock Audit Report')
+
+
+class NewPatronNoticeTests(TestCase):
+    """The people who approve registrations hear about a new one: sidebar, sign-in, dashboard, email."""
+
+    def setUp(self):
+        self.admin = _staff(role='Admin', modules='')
+        self.reviewer = User.objects.create(fullname='Desk Patrons', email='patrons@example.invalid',
+                                            password_hash=hash_password('DeskTest123'), role='Staff',
+                                            account_status='Active', modules='patrons')
+        self.other = User.objects.create(fullname='Desk Books', email='books@example.invalid',
+                                         password_hash=hash_password('DeskTest123'), role='Staff',
+                                         account_status='Active', modules='books')
+
+    def _applicant(self, **extra):
+        data = dict(first_name='Ana', last_name='Cruz', email='ana@example.invalid', account_status='Pending',
+                    registration_channel='Online', otp_verified=False, otp_code='123456',
+                    otp_expires_at=timezone.now() + timedelta(minutes=5), patron_type='Student')
+        data.update(extra)
+        return Patron.objects.create(**data)
+
+    def test_confirming_the_email_tells_every_reviewer(self):
+        from django.core import mail
+        self._applicant()
+        Client().post('/patron/register/', {'action': 'verify_otp', 'email': 'ana@example.invalid', 'otp': '123456'})
+        to = sorted(m.to[0] for m in mail.outbox)
+        self.assertEqual(to, sorted([self.admin.email, 'patrons@example.invalid']))
+        message = next(m for m in mail.outbox if m.to == ['patrons@example.invalid'])
+        self.assertIn('New registration: Ana Cruz', message.subject)
+        self.assertIn('/library-staff/patrons/', message.body)
+
+    def test_a_resubmission_is_emailed_too(self):
+        from django.core import mail
+        patron = self._applicant(otp_verified=True, fix_token='tok', fix_note='The ID has expired',
+                                 fix_requested_at=timezone.now())
+        Client().post('/patron/registration/fix/tok/', {'first_name': 'Ana', 'last_name': 'Cruz',
+                                                       'patron_type': 'Student'})
+        patron.refresh_from_db()
+        self.assertIsNotNone(patron.resubmitted_at)
+        self.assertTrue(any('Registration resubmitted' in m.subject and 'The ID has expired' in m.body
+                            for m in mail.outbox))
+
+    def test_the_sidebar_and_dashboard_show_what_is_waiting(self):
+        self._applicant(otp_verified=True)
+        staff = _client(admin_id=self.reviewer.admin_id, admin_role='Staff')
+        page = staff.get('/library-staff/dashboard/')
+        self.assertEqual(page.context['registrations_waiting'], 1)
+        self.assertContains(page, 'data-alert-badge="registrations"')
+        self.assertContains(page, 'waiting for review')
+        books_only = _client(admin_id=self.other.admin_id, admin_role='Staff')
+        self.assertEqual(books_only.get('/library-staff/dashboard/').context['registrations_waiting'], 0)
+
+    def test_the_sign_in_notice_comes_once_per_sign_in(self):
+        self._applicant(otp_verified=True)
+        admin = _client(admin_id=self.admin.admin_id, admin_role='Admin')
+        first = {i['key']: i for i in admin.get('/portal/alerts/').json()['items']}
+        self.assertIn('1 registration is waiting for review', first['registrations']['notice'])
+        again = {i['key']: i for i in admin.get('/portal/alerts/').json()['items']}
+        self.assertNotIn('notice', again['registrations'])
