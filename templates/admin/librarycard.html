@@ -548,12 +548,16 @@
       window.addEventListener('resize', fit);
     })();
 
-    // Rejecting from the card asks for an optional reason, shown to the patron.
+    // Rejecting from the card needs a reason, shown to the patron.
     function askRejectNote(form) {
-      const note = prompt('Reason for rejecting this photo (optional, shown to the patron):', '');
-      if (note === null) return false;
-      form.querySelector('[name=staff_note]').value = note;
-      return true;
+      let ask = 'Why is this photo rejected? The patron sees this (e.g. the face is not clearly visible, '
+              + 'the photo is blurry or too dark, or it is not a recent photo).';
+      for (;;) {
+        const note = prompt(ask, '');
+        if (note === null) return false;
+        if (note.trim()) { form.querySelector('[name=staff_note]').value = note.trim(); return true; }
+        ask = 'A reason is required, so the patron knows what to send instead.\n\n' + ask;
+      }
     }
 
     // Download link uses the same QR image, including one issued while the card is open.

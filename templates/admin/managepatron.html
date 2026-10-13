@@ -212,7 +212,7 @@
                                 </td>
                                 <td class="py-4 px-6 text-slate-400">{{ p.registration_date|date:'M j, Y' }}</td>
                                 <td class="py-4 px-6 text-center">
-                                    <button type="button" onclick="openReview(this)"
+                                    <button type="button" onclick="openReview(this)" data-review-id="{{ p.patron_id }}"
                                             data-patron-id="{{ p.patron_id }}"
                                             data-name="{{ p.fullname }}"
                                             data-type="{{ p.patron_type }}"
@@ -237,6 +237,41 @@
             </div>
             {% endif %}
 
+            {# Applications turned down, so "why was I rejected?" has an answer. #}
+            {% if rejected_count %}
+            <details class="rounded-xl border border-slate-800/80 overflow-hidden" style="background-color: var(--bg-card);">
+                <summary class="p-5 cursor-pointer select-none flex items-center gap-2">
+                    <i class="fa-solid fa-user-xmark text-rose-400 text-xs"></i>
+                    <h4 class="text-sm font-bold text-slate-200 tracking-wide">Rejected Applications</h4>
+                    <span class="bg-rose-500/10 text-rose-400 border border-rose-500/30 px-2 py-0.5 rounded text-[10px] font-bold">{{ rejected_count }}</span>
+                    <span class="ml-auto text-[10px] text-slate-500">Click to show who was turned down, when, by whom and why</span>
+                </summary>
+                <div class="overflow-x-auto border-t border-slate-800">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="border-b border-slate-800/80 text-[10px] font-bold tracking-wider text-slate-500 uppercase">
+                                <th class="py-3 px-6">Applicant</th>
+                                <th class="py-3 px-6">Applied</th>
+                                <th class="py-3 px-6">Rejected</th>
+                                <th class="py-3 px-6">Reason</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-800/40 text-xs text-slate-300">
+                            {% for r in rejected_applications %}
+                            <tr>
+                                <td class="py-3 px-6"><div class="font-semibold text-slate-200">{{ r.name }}</div><div class="text-[10px] text-slate-500">{{ r.email|default:"email released for a new application" }}{% if r.channel %} &middot; {{ r.channel|lower }}{% endif %}</div></td>
+                                <td class="py-3 px-6 text-slate-400 whitespace-nowrap">{{ r.applied|date:"M j, Y" }}</td>
+                                <td class="py-3 px-6 text-slate-400 whitespace-nowrap">{{ r.when|date:"M j, Y" }}{% if r.by %}<div class="text-[10px] text-slate-500">by {{ r.by }}</div>{% endif %}</td>
+                                <td class="py-3 px-6 text-slate-300">{{ r.reason|default:"No reason was recorded (rejected before reasons were required)" }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                    {% if rejected_count > rejected_applications|length %}<p class="px-6 py-3 text-[10px] text-slate-500">Showing the latest {{ rejected_applications|length }} of {{ rejected_count }}. Older ones are in the Activity Log.</p>{% endif %}
+                </div>
+            </details>
+            {% endif %}
+
             {% if pending_reactivations %}
             <div class="rounded-xl border border-violet-800/60 overflow-hidden shadow-2xl" style="background-color: var(--bg-card);">
                 <div class="p-5 border-b border-slate-800 flex items-center gap-2">
@@ -257,7 +292,7 @@
                                 <input type="hidden" name="action" value="approve">
                                 <button type="submit" class="rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2.5 py-1.5 text-[10px] font-semibold hover:bg-emerald-500/20 hover:text-emerald-100">Approve</button>
                             </form>
-                            <form method="post" action="{% url 'respond_to_reactivation' r.request_id %}" class="inline-block" onsubmit="return fillRejectNote(this)">
+                            <form method="post" action="{% url 'respond_to_reactivation' r.request_id %}" class="inline-block" data-name="{{ r.patron.fullname }}" onsubmit="return askRejectReason(this, 'reactivation')">
                                 {% csrf_token %}
                                 <input type="hidden" name="action" value="reject">
                                 <input type="hidden" name="staff_note" value="">
@@ -296,7 +331,7 @@
                                 <input type="hidden" name="action" value="approve">
                                 <button type="submit" class="rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2.5 py-1.5 text-[10px] font-semibold hover:bg-emerald-500/20 hover:text-emerald-100">Approve</button>
                             </form>
-                            <form method="post" action="{% url 'respond_to_card_photo' ph.photo_id %}" class="inline-block" onsubmit="return fillPhotoRejectNote(this)">
+                            <form method="post" action="{% url 'respond_to_card_photo' ph.photo_id %}" class="inline-block" data-name="{{ ph.patron.fullname }}" onsubmit="return askRejectReason(this, 'photo')">
                                 {% csrf_token %}
                                 <input type="hidden" name="action" value="reject">
                                 <input type="hidden" name="staff_note" value="">
@@ -460,7 +495,9 @@
                                             </form>
                                         {% else %}
                                             <span class="text-slate-600">Not verified</span>
-                                            {% if patron.account_status != 'Visitor' %}
+                                            {% if patron.account_status == 'Pending' %}
+                                            <span class="block text-[10px] text-amber-400">Checked in its review</span>
+                                            {% elif patron.account_status != 'Visitor' %}
                                             <form method="post" action="{% url 'set_patron_identity' patron.patron_id %}" class="block mt-1" data-confirm="Record that {{ patron.fullname }} presented their ID? Do this once you have seen it — the check is saved under your name." data-confirm-title="Record ID check" data-confirm-label="Record check">
                                                 {% csrf_token %}
                                                 <button type="submit" class="text-[10px] font-bold px-2 py-1 rounded-lg bg-cyan-700/25 text-cyan-400 border border-cyan-800/70 hover:bg-cyan-700/45 transition-colors whitespace-nowrap"><i class="fa-solid fa-id-card text-[9px]"></i> Record ID check</button>
@@ -490,6 +527,11 @@
                                                     <i class="fa-solid fa-user-plus text-[9px]"></i> Register as member
                                                 </button>
                                             </form>
+                                            {% elif patron.account_status == 'Pending' %}
+                                            {# An application is decided in its review, with the ID and, to reject, a reason. #}
+                                            <button type="button" onclick="document.querySelector('[data-review-id=&quot;{{ patron.patron_id }}&quot;]').click()" class="text-[10px] font-bold px-2.5 py-1.5 rounded-lg bg-amber-700/30 text-amber-300 border border-amber-800/80 hover:bg-amber-700/50 transition-colors whitespace-nowrap">
+                                                <i class="fa-solid fa-id-card text-[9px]"></i> Review ID
+                                            </button>
                                             {% else %}
                                             <a title="Library card" href="{% url 'patron_library_card' patron.patron_id %}" target="_blank" class="w-7 h-7 rounded border border-slate-800 text-emerald-500 hover:text-emerald-300 hover:bg-slate-800/40 transition-colors flex items-center justify-center"><i class="fa-solid fa-id-card text-[10px]"></i></a>
                                             <button onclick="openModal('edit', '{{ patron.patron_id }}')"
@@ -592,11 +634,20 @@
 
                     <div class="mt-4 space-y-1.5">
                         <label for="rvReason" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Reason (needed to send it back or reject it)</label>
-                        <div class="flex flex-wrap gap-1.5">
-                            {% for why in rejection_reasons %}<button type="button" onclick="pickReason(this)" class="text-[10px] font-semibold px-2 py-1 rounded-md border border-slate-700/60 text-slate-400 hover:text-slate-200 hover:border-slate-500">{{ why }}</button>{% endfor %}
+                        <div id="rvFixReasons" class="space-y-1">
+                            <p class="text-[10px] text-slate-500">Something to correct &rarr; <span class="text-amber-400 font-semibold">Ask to fix</span></p>
+                            <div class="flex flex-wrap gap-1.5">
+                            {% for why in fix_reasons %}<button type="button" onclick="pickReason(this)" class="text-[10px] font-semibold px-2 py-1 rounded-md border border-slate-700/60 text-slate-400 hover:text-slate-200 hover:border-slate-500">{{ why }}</button>{% endfor %}
+                            </div>
                         </div>
-                        <textarea id="rvReason" rows="2" placeholder="e.g. the ID is unreadable, or the name does not match" class="w-full rounded-lg px-3 py-2 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-rose-800 text-[11px] placeholder-slate-600" style="background-color: var(--bg-input);"></textarea>
-                        <p id="rvReasonError" class="hidden text-[10px] font-semibold text-rose-400">Pick or type the reason first, so the applicant knows what to fix.</p>
+                        <div class="space-y-1">
+                            <p class="text-[10px] text-slate-500">Not accepted &rarr; <span class="text-rose-400 font-semibold">Reject</span></p>
+                            <div class="flex flex-wrap gap-1.5">
+                            {% for why in reject_reasons %}<button type="button" onclick="pickReason(this)" class="text-[10px] font-semibold px-2 py-1 rounded-md border border-slate-700/60 text-slate-400 hover:text-slate-200 hover:border-slate-500">{{ why }}</button>{% endfor %}
+                            </div>
+                        </div>
+                        <textarea id="rvReason" rows="2" maxlength="{{ reject_reason_max }}" placeholder="e.g. the ID is unreadable, or the name does not match" class="w-full rounded-lg px-3 py-2 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-rose-800 text-[11px] placeholder-slate-600" style="background-color: var(--bg-input);"></textarea>
+                        <p id="rvReasonError" class="hidden text-[10px] font-semibold text-rose-400">Pick or type the reason first. It is emailed to the applicant, so they know why.</p>
                     </div>
 
                     <div class="mt-5 flex items-center justify-end gap-2.5">
@@ -612,6 +663,29 @@
                         </button>
                     </div>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Reason for rejecting a reactivation or a card photo: required, and shown to the patron. -->
+    {{ reactivation_reasons|json_script:"reactivationReasons" }}
+    {{ photo_reasons|json_script:"photoReasons" }}
+    <div id="reasonOverlay" class="modal-overlay fixed inset-0 bg-black/70 z-50 items-center justify-center p-4">
+        <div class="w-full max-w-md rounded-2xl border p-6 flex flex-col gap-4 shadow-2xl" style="background-color: var(--bg-modal); border-color: var(--border-modal);">
+            <div class="flex items-center justify-between">
+                <h3 id="reasonTitle" class="text-base font-bold text-slate-200 tracking-wide">Reject</h3>
+                <button type="button" onclick="closeRejectReason()" class="text-slate-500 hover:text-slate-300 text-lg leading-none px-1" aria-label="Close">&times;</button>
+            </div>
+            <p id="reasonWho" class="text-xs text-slate-400"></p>
+            <div class="space-y-1.5">
+                <label for="reasonText" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Reason (required, shown to the patron)</label>
+                <div id="reasonChips" class="flex flex-wrap gap-1.5"></div>
+                <textarea id="reasonText" rows="3" maxlength="255" placeholder="Pick a reason above or type your own" class="w-full rounded-lg px-3 py-2 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-rose-800 text-[11px] placeholder-slate-600" style="background-color: var(--bg-input);"></textarea>
+                <p id="reasonError" class="hidden text-[10px] font-semibold text-rose-400">Pick or type the reason first, so the patron knows why.</p>
+            </div>
+            <div class="flex items-center justify-end gap-2.5">
+                <button type="button" onclick="closeRejectReason()" class="px-4 py-2.5 rounded-lg border border-slate-700/80 text-slate-300 hover:bg-slate-800/40 text-xs font-semibold">Cancel</button>
+                <button type="button" onclick="submitRejectReason()" class="bg-rose-700/30 text-rose-300 border border-rose-800/70 hover:bg-rose-700/50 text-xs font-bold px-4 py-2.5 rounded-lg"><i class="fa-solid fa-xmark text-[10px]"></i> <span id="reasonSubmitLabel">Reject</span></button>
             </div>
         </div>
     </div>
@@ -808,32 +882,49 @@
         // Review a pending online registration.
         let rvPatron = null;
 
-        // Asks, then collects the reason, then submits.
-        async function fillPhotoRejectNote(form) {
-            if (form.dataset.aylaConfirmed === '1') return true;
-            if (!await AylaDialog.confirm('Reject this card photo?',
-                    { title: 'Reject photo', confirmLabel: 'Reject' })) return false;
-            const note = await AylaDialog.prompt(
-                'Reason for rejecting — optional, and shown to the patron.', '',
-                { title: 'Reason', multiline: true, confirmLabel: 'Reject photo' });
-            if (note === null) return false;
-            form.querySelector('[name=staff_note]').value = note;
-            form.dataset.aylaConfirmed = '1';
-            form.requestSubmit ? form.requestSubmit() : form.submit();
+        // Rejecting a reactivation or a card photo: one window, and the reason is required.
+        const REJECT_REASONS = {
+            reactivation: JSON.parse(document.getElementById('reactivationReasons').textContent),
+            photo: JSON.parse(document.getElementById('photoReasons').textContent),
+        };
+        let reasonForm = null;
+        function askRejectReason(form, kind) {
+            reasonForm = form;
+            const photo = kind === 'photo';
+            document.getElementById('reasonTitle').textContent = photo ? 'Reject card photo' : 'Reject reactivation';
+            document.getElementById('reasonSubmitLabel').textContent = photo ? 'Reject photo' : 'Reject request';
+            document.getElementById('reasonWho').textContent = (photo ? 'Photo sent by ' : 'Request from ') + (form.dataset.name || 'this patron');
+            const chips = document.getElementById('reasonChips');
+            chips.innerHTML = '';
+            (REJECT_REASONS[kind] || []).forEach(function (why) {
+                const b = document.createElement('button');
+                b.type = 'button';
+                b.className = 'text-[10px] font-semibold px-2 py-1 rounded-md border border-slate-700/60 text-slate-400 hover:text-slate-200 hover:border-slate-500';
+                b.textContent = why;
+                b.onclick = function () { document.getElementById('reasonText').value = why; document.getElementById('reasonError').classList.add('hidden'); };
+                chips.appendChild(b);
+            });
+            document.getElementById('reasonText').value = '';
+            document.getElementById('reasonError').classList.add('hidden');
+            document.getElementById('reasonOverlay').classList.add('active');
+            setTimeout(function () { document.getElementById('reasonText').focus(); }, 50);
             return false;
         }
-        async function fillRejectNote(form) {
-            if (form.dataset.aylaConfirmed === '1') return true;
-            if (!await AylaDialog.confirm('Reject this reactivation request?',
-                    { title: 'Reject reactivation', confirmLabel: 'Reject' })) return false;
-            const note = await AylaDialog.prompt(
-                'Reason for rejecting — optional, and shown to the patron.', '',
-                { title: 'Reason', multiline: true, confirmLabel: 'Reject request' });
-            if (note === null) return false;
-            form.querySelector('[name=staff_note]').value = note;
-            form.dataset.aylaConfirmed = '1';
-            form.requestSubmit ? form.requestSubmit() : form.submit();
-            return false;
+        function closeRejectReason() {
+            document.getElementById('reasonOverlay').classList.remove('active');
+            reasonForm = null;
+        }
+        function submitRejectReason() {
+            const text = document.getElementById('reasonText').value.trim();
+            if (!text) {
+                document.getElementById('reasonError').classList.remove('hidden');
+                document.getElementById('reasonText').focus();
+                return;
+            }
+            const form = reasonForm;
+            form.querySelector('[name=staff_note]').value = text;
+            closeRejectReason();
+            form.submit();
         }
 
         // A common reason in one click; it can still be edited.
@@ -847,6 +938,7 @@
             document.getElementById('rvReason').value = '';
             document.getElementById('rvReasonError').classList.add('hidden');
             document.getElementById('rvFixBtn').classList.toggle('hidden', btn.dataset.channel !== 'Online');
+            document.getElementById('rvFixReasons').classList.toggle('hidden', btn.dataset.channel !== 'Online');
             rvPatron = {
                 id: btn.dataset.patronId,
                 doc: btn.dataset.doc || '',

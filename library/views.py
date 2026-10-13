@@ -2152,6 +2152,10 @@ def set_patron_identity(request, patron_id):
         messages.error(request, f'{patron.fullname} is a walk-in visitor. Register them as a '
                                 f'member first, then record the ID check.')
         return _patron_page_redirect(request)
+    if patron.account_status == 'Pending':
+        messages.error(request, f'{patron.fullname} is a pending application. Check their ID in Review ID, '
+                                f'where it is approved or rejected with a reason.')
+        return _patron_page_redirect(request)
 
     if (request.POST.get('verified') or '1').strip() == '0':
         patron.identity_verified_by = None
@@ -2180,7 +2184,7 @@ def verify_unverified_patrons(request):
 
     waiting = (Patron.objects
                .filter(identity_verified_at__isnull=True)
-               .exclude(account_status='Visitor'))
+               .exclude(account_status__in=['Visitor', 'Pending']))
     names = list(waiting.values_list('fullname', flat=True)[:5])
     checker = User.objects.filter(admin_id=request.session.get('admin_id')).first()
     marked = waiting.update(identity_verified_by=checker, identity_verified_at=timezone.now())
@@ -2216,6 +2220,33 @@ def promote_visitor(request, patron_id):
     return _patron_page_redirect(request)
 
 
+# One-click reasons. Fixable problems send a registration back; the rest reject it outright.
+REGISTRATION_FIX_REASONS = ['The ID photo is blurry or unreadable', 'The name does not match the ID',
+                            'The ID has expired', 'This is not a valid ID']
+REGISTRATION_REJECT_REASONS = ['Already a member (duplicate application)', 'Not eligible for library membership',
+                               'No valid ID was provided', 'The details could not be verified']
+REACTIVATION_REJECT_REASONS = ['Unreturned books or unpaid fines on the account',
+                               'The account was closed for a rules violation',
+                               'Please come to the library in person to reactivate']
+PHOTO_REJECT_REASONS = ['The face is not clearly visible', 'The photo is blurry or too dark',
+                        'It is not a recent photo of you', 'Please use a plain background']
+# Fits the archive note with its "Registration rejected: " prefix.
+REJECT_REASON_MAX = 450
+
+
+def _rejected_applications(limit=50):
+    """Registrations turned down, newest first, with who decided and why."""
+    prefix = 'Registration rejected'
+    qs = (Patron.all_objects.filter(archived_at__isnull=False, archive_reason__startswith=prefix)
+          .order_by('-archived_at'))
+    rows = [{
+        'name': p.fullname, 'email': p.email or '', 'applied': p.registration_date,
+        'channel': p.registration_channel, 'when': p.archived_at, 'by': p.archived_by,
+        'reason': p.archive_reason[len(prefix):].lstrip(': ').strip(),
+    } for p in qs[:limit]]
+    return rows, qs.count()
+
+
 @admin_or_module_required('patrons')
 def reject_patron(request, patron_id):
     """Reject a pending registration: notify the applicant and remove the row."""
@@ -2226,7 +2257,7 @@ def reject_patron(request, patron_id):
         messages.error(request, 'Pending patron not found.')
         return _patron_page_redirect(request)
 
-    reason = (request.POST.get('reason') or '').strip()[:1000]
+    reason = (request.POST.get('reason') or '').strip()[:REJECT_REASON_MAX]
     if not reason:
         messages.error(request, 'Give the reason, so the applicant knows what was wrong.')
         return _patron_page_redirect(request)
@@ -2325,6 +2356,9 @@ def respond_to_reactivation(request, request_id):
         return _patron_page_redirect(request)
     action = request.POST.get('action')
     admin = User.objects.filter(admin_id=request.session.get('admin_id')).first()
+    if action == 'reject' and not (request.POST.get('staff_note') or '').strip():
+        messages.error(request, 'Give the reason for rejecting the reactivation, so the patron knows why.')
+        return _patron_page_redirect(request)
 
     # Lock the request while deciding, and email after saving.
     notify = None
@@ -2477,13 +2511,15 @@ def _patrons_page(request, template):
     patrons_with_borrows = patrons_queryset.filter(active_borrows__gt=0).count()
     patrons_overdue = patrons_queryset.filter(overdue_count__gt=0).count()
     visitor_count = Patron.objects.filter(account_status='Visitor').count()
+    # Applications are checked in their own review, so the bulk check leaves them out.
     unverified_count = (Patron.objects
                         .filter(identity_verified_at__isnull=True)
-                        .exclude(account_status='Visitor')
+                        .exclude(account_status__in=['Visitor', 'Pending'])
                         .count())
 
     # Registrations awaiting review, online and from the desk.
     pending_patrons = Patron.objects.filter(account_status='Pending').order_by('-registration_date')
+    rejected_rows, rejected_count = _rejected_applications()
 
     # Self-service reactivation requests awaiting Admin approval (Figure 19).
     pending_reactivations = ReactivationRequest.objects.select_related('patron').filter(
@@ -2511,8 +2547,13 @@ def _patrons_page(request, template):
         'patrons_overdue': patrons_overdue,
         'pending_patrons': pending_patrons,
         # One-click reasons for sending a registration back or rejecting it.
-        'rejection_reasons': ['The ID photo is blurry or unreadable', 'The name does not match the ID',
-                              'The ID has expired', 'This is not a valid ID'],
+        'fix_reasons': REGISTRATION_FIX_REASONS,
+        'reject_reasons': REGISTRATION_REJECT_REASONS,
+        'reactivation_reasons': REACTIVATION_REJECT_REASONS,
+        'photo_reasons': PHOTO_REJECT_REASONS,
+        'reject_reason_max': REJECT_REASON_MAX,
+        'rejected_applications': rejected_rows,
+        'rejected_count': rejected_count,
         'pending_reactivations': pending_reactivations,
         'pending_photos': pending_photos,
         'visitor_count': visitor_count,
@@ -2564,6 +2605,9 @@ def admin_edit_patron(request, patron_id):
             error = 'Patron type and email are required.'
         elif Patron.all_objects.exclude(patron_id=patron_id).filter(email=email).exists():
             error = 'A different patron already uses that email.'
+        elif patron.account_status == 'Pending' and account_status != 'Pending':
+            error = (f'{patron.fullname} is a pending application. Approve or reject it from Review ID, '
+                     f'where the ID is checked and a rejection needs a reason.')
         else:
             patron.fullname = fullname
             patron.first_name = first_name
@@ -2635,7 +2679,10 @@ def admin_delete_patron(request, patron_id):
     """Delete a patron: hidden from every page, kept in the database."""
     if request.method == 'POST':
         patron = Patron.objects.filter(patron_id=patron_id).first()
-        if patron:
+        if patron and patron.account_status == 'Pending':
+            messages.error(request, f'{patron.fullname} is a pending application. Open Review ID to '
+                                    f'approve it or reject it with a reason, so the applicant is told why.')
+        elif patron:
             name = patron.fullname
             out = Transaction.objects.filter(patron=patron, transaction_type='Borrow',
                                              return_date__isnull=True).count()
@@ -12922,6 +12969,10 @@ def respond_to_card_photo(request, photo_id):
         return _patron_page_redirect(request)
     action = request.POST.get('action')
     admin = User.objects.filter(admin_id=request.session.get('admin_id')).first()
+    if action == 'reject' and not (request.POST.get('staff_note') or '').strip():
+        photo = PatronPhoto.objects.filter(photo_id=photo_id).first()
+        messages.error(request, 'Give the reason for rejecting the photo, so the patron knows what to send instead.')
+        return _back(photo.patron_id if photo else None)
 
     with transaction.atomic():
         photo = (PatronPhoto.objects.select_for_update().select_related('patron')

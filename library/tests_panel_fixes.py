@@ -828,3 +828,69 @@ class BeaconDefaultsTests(TestCase):
         page = self.client.get('/admin-portal/floorplan-management/').content.decode()
         for marker in ('id="beaconUuidPick"', 'id="beaconScanBtn"', '/admin-portal/beacon-defaults/', 'requestLEScan'):
             self.assertIn(marker, page)
+
+
+class RejectionReasonTests(TestCase):
+    """Every way of turning a patron down needs a reason, and the reason can be found later."""
+
+    def setUp(self):
+        self.applicant = Patron.objects.create(
+            first_name='Ana', last_name='Cruz', email='ana@example.invalid', account_status='Pending',
+            registration_channel='Online', credential_document='credentials/x.png', otp_verified=True)
+        self.member = Patron.objects.create(first_name='Ben', last_name='Reyes', email='ben@example.invalid',
+                                            account_status='Inactive', otp_verified=True)
+        self.admin = _client(admin_id=_staff(role='Admin', modules='patrons').admin_id, admin_role='Admin')
+        self.staff = _client(admin_id=_staff(modules='patrons').admin_id, admin_role='Staff')
+
+    def test_a_rejection_is_emailed_and_listed_with_its_reason(self):
+        from django.core import mail
+        self.staff.post('/admin-portal/reject-patron/%d/' % self.applicant.patron_id,
+                        {'mode': 'reject', 'reason': 'Already a member (duplicate application)'})
+        self.assertIn('Already a member (duplicate application)', mail.outbox[-1].body)
+        page = self.staff.get('/library-staff/patrons/')
+        self.assertEqual(page.context['rejected_count'], 1)
+        row = page.context['rejected_applications'][0]
+        self.assertEqual((row['name'], row['reason']), ('Ana Cruz', 'Already a member (duplicate application)'))
+        self.assertContains(page, 'Rejected Applications')
+
+    def test_an_application_cannot_be_deleted_edited_or_id_checked_around_the_review(self):
+        pid = self.applicant.patron_id
+        self.admin.post('/admin-portal/delete-patron/%d/' % pid)
+        self.admin.post('/admin-portal/edit-patron/%d/' % pid, {
+            'first_name': 'Ana', 'last_name': 'Cruz', 'patron_type': 'Student',
+            'email': 'ana@example.invalid', 'account_status': 'Inactive'})
+        self.staff.post('/admin-portal/patron-id-check/%d/' % pid)
+        self.applicant.refresh_from_db()
+        self.assertIsNone(self.applicant.archived_at)
+        self.assertEqual(self.applicant.account_status, 'Pending')
+        self.assertIsNone(self.applicant.identity_verified_at)
+
+    def test_the_patron_list_offers_only_the_review_for_an_application(self):
+        page = self.admin.get('/admin-portal/manage-patron/').content.decode()
+        row = page.split('Ana Cruz')[-1].split('</tr>')[0]
+        self.assertIn('Review ID', row)
+        self.assertNotIn('admin-portal/delete-patron/%d/' % self.applicant.patron_id, row)
+        for reason in ('The ID has expired', 'Not eligible for library membership'):
+            self.assertIn(reason, page)
+
+    def test_rejecting_a_reactivation_needs_a_reason(self):
+        from .models import ReactivationRequest
+        req = ReactivationRequest.objects.create(patron=self.member)
+        url = '/admin-portal/reactivation/%d/respond/' % req.request_id
+        self.admin.post(url, {'action': 'reject', 'staff_note': '  '})
+        req.refresh_from_db()
+        self.assertEqual(req.status, 'Pending')
+        self.admin.post(url, {'action': 'reject', 'staff_note': 'Unreturned books or unpaid fines on the account'})
+        req.refresh_from_db()
+        self.assertEqual((req.status, req.staff_note), ('Rejected', 'Unreturned books or unpaid fines on the account'))
+
+    def test_rejecting_a_card_photo_needs_a_reason(self):
+        from .models import PatronPhoto
+        photo = PatronPhoto.objects.create(patron=self.member, content_type='image/png', data=b'x')
+        url = '/admin-portal/card-photo/%d/respond/' % photo.photo_id
+        self.staff.post(url, {'action': 'reject'})
+        photo.refresh_from_db()
+        self.assertEqual(photo.status, 'Pending')
+        self.staff.post(url, {'action': 'reject', 'staff_note': 'The photo is blurry or too dark'})
+        photo.refresh_from_db()
+        self.assertEqual((photo.status, photo.staff_note), ('Rejected', 'The photo is blurry or too dark'))
