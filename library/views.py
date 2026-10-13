@@ -1907,8 +1907,16 @@ def _books_page(request, template):
         'label': label,
         'querystring': urlencode(params),
         'paginator': paginator,
+        'genre_options': _genre_options(),
+        'intake_conditions': INTAKE_CONDITION_OPTIONS,
     }
     return render(request, template, context)
+
+
+def _genre_options():
+    """The library's genres for a picker, one spelling each."""
+    from .catalogue import known_genres
+    return sorted(known_genres().values(), key=str.lower)
 
 
 @admin_module_required('books')
@@ -1921,66 +1929,96 @@ def staff_manage_books(request):
     return _books_page(request, 'library_staff/managebooks.html')
 
 
+def _catalogue_entry(post, exclude_ids=(), editing=False):
+    """The cataloguing rules on a typed book: (clean values, [(field, problem)]).
+
+    editing: a genre that is not sent is left as it is, like the edit form's other fields."""
+    from .catalogue import (clean_author, clean_condition, clean_copies, clean_genre, clean_isbn,
+                            clean_price, clean_title, clean_year)
+    problems = []
+
+    def take(field, result):
+        value, problem = result
+        if problem:
+            problems.append((field, problem))
+        return value
+
+    values = {}
+    values['title'] = take('title', clean_title(post.get('title')))
+    values['author'] = take('author', clean_author(post.get('author')))
+    values['ISBN'] = take('ISBN', clean_isbn(post.get('ISBN'), values['title'] or '', exclude_ids))
+    if 'genre' in post or not editing:
+        values['genre'] = take('genre', clean_genre(post.get('genre'), allow_new=post.get('new_genre') == '1'))
+    values['publication_year'] = take('publication_year', clean_year(post.get('publication_year')))
+    values['price'] = take('price', clean_price(post.get('price')))
+    if 'condition' in post:
+        values['condition'] = take('condition', clean_condition(post.get('condition')))
+    values['copies'] = take('copies', clean_copies(post.get('copies')))
+    call_number = (post.get('call_number') or '').strip() or None
+    if call_number_error(call_number):
+        problems.append(('call_number', call_number_error(call_number)))
+    values['call_number'] = call_number
+    material_type = (post.get('material_type') or 'Book').strip()
+    values['material_type'] = material_type if material_type in dict(Book.MATERIAL_TYPE_CHOICES) else 'Book'
+    return values, problems
+
+
 @granted_module_required('books')
 def admin_add_book(request):
     error = None
 
     if request.method == 'POST':
-        title = request.POST.get('title', '').strip()
-        author = request.POST.get('author', '').strip()
-        isbn = request.POST.get('ISBN', '').strip()
-        genre = request.POST.get('genre', '').strip()
-        # Default to Book if the material type is missing.
-        material_type = request.POST.get('material_type', 'Book').strip()
-        if material_type not in {c[0] for c in Book.MATERIAL_TYPE_CHOICES}:
-            material_type = 'Book'
-        status = request.POST.get('status', 'Available').strip()
-        shelf_level_id = request.POST.get('shelf_level', '').strip()
-        shelf_slot = parse_shelf_slot(request.POST.get('shelf_slot'))
-        condition = (request.POST.get('condition') or '').strip().title()
-        if condition not in dict(Book.CONDITION_CHOICES):
-            condition = 'Good'
-        call_number = (request.POST.get('call_number') or '').strip() or None
-        publication_year = request.POST.get('publication_year', '').strip()
-        cover_img_url = request.POST.get('cover_img_url', '').strip()
-        price, price_error = _parse_price(request.POST.get('price'))
-        call_error = call_number_error(call_number)
-
-        if not title or not author or price_error or call_error:
-            error = price_error or call_error or 'Title and author are required.'
-            if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-                from django.http import JsonResponse
-                return JsonResponse({'success': False, 'error': error})
+        from django.http import JsonResponse
+        ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+        values, problems = _catalogue_entry(request.POST)
+        if problems:
+            error = problems[0][1]
+            if ajax:
+                return JsonResponse({'success': False, 'error': error, 'field': problems[0][0],
+                                     'problems': [{'field': f, 'error': e} for f, e in problems]})
         else:
             shelf_level = None
-
+            shelf_level_id = request.POST.get('shelf_level', '').strip()
             if shelf_level_id:
                 shelf_level = ShelfLevel.objects.filter(shelf_level_id=shelf_level_id).first()
+            shelf_slot = parse_shelf_slot(request.POST.get('shelf_slot'))
+            cover_img_url = request.POST.get('cover_img_url', '').strip()
+            copies = values['copies']
+            if not values['call_number']:
+                # Copies of a title share its call number.
+                from .catalogue import same_title
+                values['call_number'] = (same_title(values['title'], values['author'])
+                                         .exclude(call_number__isnull=True).exclude(call_number='')
+                                         .values_list('call_number', flat=True).first())
 
-            qr_code = str(uuid4())
+            # Each copy is a record of its own, with its own QR label, all on the same shelf.
+            first = None
+            for n in range(copies):
+                book = Book.objects.create(
+                    title=values['title'],
+                    author=values['author'],
+                    ISBN=values['ISBN'] or None,
+                    genre=values['genre'],
+                    material_type=values['material_type'],
+                    status=(request.POST.get('status') or 'Available').strip() or 'Available',
+                    shelf_level=shelf_level,
+                    shelf_slot=(shelf_slot + n) if shelf_slot is not None else None,
+                    condition=values.get('condition') or 'Good',
+                    call_number=values['call_number'],
+                    publication_year=values['publication_year'],
+                    cover_img_url=cover_img_url or None,
+                    price=values['price'],
+                    qr_code=str(uuid4()),
+                )
+                first = first or book
+                _add_existing_copy(book, request)
+            log_admin_action(request, 'Create', 'Book', first.book_id,
+                             f'Added "{first.title}"' + (f' ({copies} copies)' if copies > 1 else ''))
 
-            book = Book.objects.create(
-                title=title,
-                author=author,
-                ISBN=isbn,
-                genre=genre,
-                material_type=material_type,
-                status=status or 'Available',
-                shelf_level=shelf_level,
-                shelf_slot=shelf_slot,
-                condition=condition,
-                call_number=call_number,
-                publication_year=int(publication_year) if publication_year else None,
-                cover_img_url=cover_img_url if cover_img_url else None,
-                price=price,
-                qr_code=qr_code
-            )
-            _add_existing_copy(book, request)
-            log_admin_action(request, 'Create', 'Book', book.book_id, f'Added "{book.title}"')
-
-            if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-                from django.http import JsonResponse
-                return JsonResponse({'success': True, 'message': 'Book added successfully.'})
+            if ajax:
+                return JsonResponse({'success': True, 'message': (
+                    f'Added {copies} copies of "{first.title}".' if copies > 1
+                    else f'Added "{first.title}".'), 'call_number': first.call_number})
             return portal_redirect(request, 'admin_management')
 
     # Get books list context for managebooks.html
@@ -1999,6 +2037,8 @@ def admin_add_book(request):
         'borrowed_count': borrowed_count,
         'shelf_levels': shelf_levels,
         'error': error,
+        'genre_options': _genre_options(),
+        'intake_conditions': INTAKE_CONDITION_OPTIONS,
     }
     return render(request, 'admin/managebooks.html', context)
 
@@ -2791,19 +2831,23 @@ def admin_edit_book(request, book_id):
         cover_img_url = request.POST.get('cover_img_url', '').strip()
         status = request.POST.get('status', '').strip()
         shelf_level_id = request.POST.get('shelf_level', '').strip()
-        price, price_error = _parse_price(request.POST.get('price'))
-        call_error = call_number_error(request.POST.get('call_number'))
+        # The same cataloguing rules as adding a book; its own ISBN is not a clash.
+        values, problems = _catalogue_entry(request.POST, exclude_ids=[book.book_id], editing=True)
+        price = values['price']
 
-        if not title or not author or price_error or call_error:
-            error = price_error or call_error or 'Title and author are required.'
+        if problems:
+            error = problems[0][1]
             if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
                 from django.http import JsonResponse
-                return JsonResponse({'success': False, 'error': error})
+                return JsonResponse({'success': False, 'error': error, 'field': problems[0][0],
+                                     'problems': [{'field': f, 'error': e} for f, e in problems]})
         else:
+            title, author, isbn = values['title'], values['author'], values['ISBN']
+            genre = values.get('genre', book.genre)
             book.title = title
             book.author = author
-            book.ISBN = isbn
-            book.publication_year = int(publication_year) if publication_year else None
+            book.ISBN = isbn or None
+            book.publication_year = values['publication_year']
             book.genre = genre
             book.cover_img_url = cover_img_url if cover_img_url else None
             book.status = status or book.status
@@ -2813,10 +2857,10 @@ def admin_edit_book(request, book_id):
             if 'shelf_slot' in request.POST:
                 book.shelf_slot = parse_shelf_slot(request.POST.get('shelf_slot'))
             condition_before = book.condition
-            if 'condition' in request.POST:
-                value = (request.POST.get('condition') or '').strip().title()
-                if value in dict(Book.CONDITION_CHOICES):
-                    book.condition = value
+            if values.get('condition'):
+                book.condition = values['condition']
+            if 'material_type' in request.POST:
+                book.material_type = values['material_type']
             if 'call_number' in request.POST:
                 # Cleared deliberately means "renumber it": save() fills a blank.
                 book.call_number = (request.POST.get('call_number') or '').strip() or None
@@ -2861,6 +2905,8 @@ def admin_edit_book(request, book_id):
         'error': error,
         'success': success,
         'initial': initial,
+        'genre_options': _genre_options(),
+        'intake_conditions': INTAKE_CONDITION_OPTIONS,
     }
     return render(request, 'admin/managebooks.html', context)
 
@@ -2984,23 +3030,6 @@ def transaction_action_preview(request, transaction_id):
     else:
         data.update({'action': 'return', 'total_fine': f'{overdue_fine:.2f}'})
     return JsonResponse({'success': True, 'preview': data})
-
-
-def _parse_price(raw):
-    """(price or None, error) from a typed or imported value; blank means no price."""
-    text = str(raw if raw is not None else '').strip().replace(',', '')
-    for mark in ('\u20b1', 'PHP', 'Php', 'php', 'P'):
-        if text.startswith(mark):
-            text = text[len(mark):].strip()
-    if not text:
-        return None, None
-    try:
-        price = Decimal(text)
-    except (InvalidOperation, ValueError):
-        return None, 'The price "%s" is not a number.' % str(raw).strip()[:20]
-    if not price.is_finite() or price < 0 or price >= Decimal('100000000'):
-        return None, 'The price must be between 0 and 99,999,999.99.'
-    return price.quantize(Decimal('0.01')), None
 
 
 def _lost_book_charge(request, book):
@@ -5309,13 +5338,17 @@ def _import_books_body(request):
             return clean(row[idx]) if idx is not None and idx < len(row) else ''
 
         imported = skipped_dup = skipped_blank = copies_created = 0
+        # Rows that break the cataloguing rules are not imported; each is named with its reason.
+        from .catalogue import (clean_author, clean_copies, clean_genre, clean_isbn, clean_price,
+                                clean_title, clean_year, known_genres)
+        problems = []
+        genres = known_genres()
+        allow_new_genres = request.POST.get('new_genres') in ('1', 'true', 'True', 'on')
+        new_genres = set()
         # Collected so the caller can print labels for exactly this delivery.
         created_ids = []
         unmatched_areas = set()
-        unreadable_conditions = set()
         refused_call_numbers = set()
-        unreadable_prices = set()
-        unreadable_materials = set()
         # Boards named by the sheet that did not exist, in the order first met.
         new_boards = []
         skipped_example = 0
@@ -5335,10 +5368,11 @@ def _import_books_body(request):
             if shelf_name:
                 entry['shelves'].add(shelf_name)
 
+        def isbn_key(v):
+            return re.sub(r'[\s-]', '', str(v or '')).upper()
         existing_isbns = set(
-            str(v).strip().lower()
-            for v in Book.objects.exclude(ISBN__isnull=True).exclude(ISBN='')
-                                 .values_list('ISBN', flat=True))
+            isbn_key(v) for v in Book.objects.exclude(ISBN__isnull=True).exclude(ISBN='')
+                                         .values_list('ISBN', flat=True))
 
         # Rows that match existing books.
         clashes = []
@@ -5363,12 +5397,50 @@ def _import_books_body(request):
                 skipped_example += 1
                 continue
 
-            isbn = field(row, 'ISBN')
+            # The cataloguing rules, row by row.
+            row_problems = []
+
+            def rule(result):
+                value, problem = result
+                if problem:
+                    row_problems.append(problem)
+                return value
+
+            title = rule(clean_title(title)) or title
+            author = rule(clean_author(author)) or author
+            isbn = rule(clean_isbn(field(row, 'ISBN'), title)) or ''
+            raw_genre = field(row, 'genre')
+            genre, genre_problem = clean_genre(raw_genre, allow_new=allow_new_genres, known=genres)
+            if genre_problem:
+                if raw_genre.strip():
+                    new_genres.add(' '.join(raw_genre.split()))
+                    row_problems.append('the genre "%s" is new to the library' % raw_genre.strip()[:40])
+                else:
+                    row_problems.append('no genre')
+            elif genre.lower() not in genres:
+                genres[genre.lower()] = genre
+                new_genres.add(genre)
+            publication_year = rule(clean_year(field(row, 'publication_year')))
+            price = rule(clean_price(field(row, 'price')))
+            raw_condition = field(row, 'condition')
+            condition = parse_condition(raw_condition) if raw_condition else 'Good'
+            if condition is None:
+                row_problems.append('condition "%s" is not Good, Minor Damage, Damaged or Beyond Repair'
+                                    % str(raw_condition).strip()[:30])
+            raw_material = field(row, 'material_type')
+            material_type = (_sheet_choice(raw_material, Book.MATERIAL_TYPE_CHOICES, MATERIAL_TYPE_WORDS)
+                             if raw_material else 'Book')
+            if material_type is None:
+                row_problems.append('material type "%s" is not one the library uses' % str(raw_material).strip()[:30])
+            quantity = rule(clean_copies(field(row, 'quantity')))
+            if row_problems:
+                problems.append('Row %d: %s' % (row_no, '; '.join(row_problems)))
+                continue
 
             # Is this book already catalogued?
             seen = already_here.get((title.strip().lower(), author.strip().lower()))
             clash = None
-            if isbn and isbn.strip().lower() in existing_isbns:
+            if isbn and isbn_key(isbn) in existing_isbns:
                 clash = 'isbn'
             elif seen:
                 clash = 'title'
@@ -5393,45 +5465,6 @@ def _import_books_body(request):
 
             if clash:
                 copies_of_existing += 1
-
-            price, price_error = _parse_price(field(row, 'price'))
-            if price_error:
-                unreadable_prices.add(str(field(row, 'price')).strip()[:20])
-
-            raw_year = field(row, 'publication_year')
-            publication_year = None
-            if raw_year:
-                try:
-                    year = int(float(raw_year))
-                    # Ignore impossible years rather than storing them.
-                    if 1000 <= year <= timezone.localdate().year + 1:
-                        publication_year = year
-                except (TypeError, ValueError):
-                    publication_year = None
-
-            # Unknown conditions default to Good but are reported.
-            raw_condition = field(row, 'condition')
-            condition = parse_condition(raw_condition)
-            if condition is None:
-                if raw_condition:
-                    unreadable_conditions.add(str(raw_condition).strip()[:40])
-                condition = 'Good'
-
-            raw_material = field(row, 'material_type')
-            material_type = _sheet_choice(raw_material, Book.MATERIAL_TYPE_CHOICES,
-                                          MATERIAL_TYPE_WORDS)
-            if material_type is None:
-                if raw_material:
-                    unreadable_materials.add(str(raw_material).strip()[:40])
-                material_type = 'Book'
-
-            quantity = 1
-            raw_qty = field(row, 'quantity')
-            if raw_qty:
-                try:
-                    quantity = max(1, min(int(float(raw_qty)), 50))
-                except (TypeError, ValueError):
-                    quantity = 1
 
             shelf_level = None
             raw_level_id = field(row, 'shelf_level_id')
@@ -5467,8 +5500,8 @@ def _import_books_body(request):
                     title=title,
                     author=author,
                     publication_year=publication_year,
-                    ISBN=(isbn or None) if (copy_no == 0 and not clash) else None,
-                    genre=field(row, 'genre') or None,
+                    ISBN=isbn or None,
+                    genre=genre,
                     material_type=material_type,
                     condition=condition,
                     # Blank is the normal case: Book.save() derives it.
@@ -5502,26 +5535,19 @@ def _import_books_body(request):
             parts.append(f'{skipped_word} {skipped_repeat} row(s) already in the catalogue')
         if skipped_blank:
             parts.append(f'{skipped_word} {skipped_blank} row(s) with no title or author')
-        if unreadable_conditions:
-            # List unreadable conditions by name.
-            parts.append('could not read the condition "'
-                         + '", "'.join(sorted(unreadable_conditions)[:5])
-                         + '" — filed as Good')
         if refused_call_numbers:
             parts.append('code label "'
                          + '", "'.join(sorted(refused_call_numbers)[:5])
                          + ('" and %d more' % (len(refused_call_numbers) - 5) if len(refused_call_numbers) > 5 else '"')
                          + ' was just a number, not a call number — one was made from the genre, author and year')
-        if unreadable_prices:
-            parts.append('could not read the price "'
-                         + '", "'.join(sorted(unreadable_prices)[:5])
-                         + '" — left without a price')
-        if unreadable_materials:
-            parts.append('could not read the material type "'
-                         + '", "'.join(sorted(unreadable_materials)[:5])
-                         + '" — filed as Book')
         if skipped_example:
             parts.append(f'{skipped_word} {skipped_example} sample row(s) left from the template')
+        if problems:
+            parts.append(f'{skipped_word} {len(problems)} row(s) that break the cataloguing rules')
+        if new_genres and allow_new_genres:
+            parts.append(f'{"will add" if preview else "added"} {len(new_genres)} new genre(s): '
+                         + ', '.join(sorted(new_genres)[:10])
+                         + ('' if len(new_genres) <= 10 else f' and {len(new_genres) - 10} more'))
         if unmatched_areas:
             parts.append('could not match storage area: ' + ', '.join(sorted(unmatched_areas))
                          + ' — those books have no shelf yet')
@@ -5549,6 +5575,9 @@ def _import_books_body(request):
             'clashes_truncated': clashes_total > len(clashes),
             'copies_of_existing': copies_of_existing,
             'new_boards': new_boards,
+            'problems': problems[:100],
+            'new_genres': sorted(new_genres),
+            'new_genres_allowed': allow_new_genres,
         }
         return JsonResponse(payload)
 
@@ -5749,8 +5778,9 @@ def _import_donation_rows(request):
     admin = User.objects.filter(admin_id=request.session.get('admin_id')).first()
     today = timezone.localdate()
     titles = copies = new_titles = already = 0
-    unreadable_materials = set()
     problems = []
+    allow_new_genres = request.POST.get('new_genres') in ('1', 'true', 'True', 'on')
+    new_genres = set()
     # Rows this sheet has already received, so a title listed twice is not a repeat.
     received_now = set()
 
@@ -5792,13 +5822,15 @@ def _import_donation_rows(request):
             continue
 
         raw_material = _cell_text(values.get('material_type'))
-        material_type = _sheet_choice(raw_material, Book.MATERIAL_TYPE_CHOICES, MATERIAL_TYPE_WORDS)
+        material_type = (_sheet_choice(raw_material, Book.MATERIAL_TYPE_CHOICES, MATERIAL_TYPE_WORDS)
+                         if raw_material else 'Book')
         if material_type is None:
-            if raw_material:
-                unreadable_materials.add(raw_material[:40])
-            material_type = 'Book'
+            problems.append('Row %d: material type "%s" is not one the library uses'
+                            % (row_no, raw_material[:30]))
+            continue
 
         item = {
+            'new_genre': allow_new_genres,
             'title': title,
             'author': _cell_text(values.get('author')),
             'isbn': _cell_text(values.get('isbn')),
@@ -5809,6 +5841,8 @@ def _import_donation_rows(request):
         try:
             book, is_new = _resolve_intake_book(item, 'Donation')
         except ValueError as exc:
+            if getattr(exc, 'new_genre', ''):
+                new_genres.add(exc.new_genre)
             problems.append('Row %d: %s' % (row_no, exc))
             continue
 
@@ -5847,14 +5881,21 @@ def _import_donation_rows(request):
         copies += quantity
         new_titles += 1 if is_new else 0
 
+    # A genre the library lacks is added only on purpose, so nothing is saved until that is answered.
+    if new_genres and not allow_new_genres:
+        transaction.set_rollback(True)
+        return JsonResponse({
+            'success': False, 'new_genres': sorted(new_genres),
+            'error': 'This sheet uses %d genre(s) the library does not have yet: %s.'
+                     % (len(new_genres), ', '.join(sorted(new_genres)[:10])),
+        })
+
     summary = 'Received %d donated copy(ies) across %d title(s)' % (copies, titles)
     if new_titles:
         summary += ' (%d new to the catalogue)' % new_titles
     notes = [
         ('Skipped %d row(s) already imported for the same donor, date and title' % already
          if already else ''),
-        ('Could not read the material type "%s", so those were filed as Book'
-         % '", "'.join(sorted(unreadable_materials)[:5]) if unreadable_materials else ''),
     ]
     return JsonResponse({
         'success': True,
@@ -11793,6 +11834,7 @@ def inventory_management(request):
         'today': timezone.localdate().isoformat(),
         'books': Book.objects.order_by('title'),
         'shelves': shelf_list,
+        'genre_options': _genre_options(),
     }
     context.update(_inventory_stats())
     return render(request, 'admin/inventoryadmin.html', context)
@@ -11911,40 +11953,47 @@ def _resolve_intake_book(item, source):
             raise ValueError('One of the titles is no longer in the catalogue.')
         return book, False
 
-    title = (item.get('title') or '').strip()
-    if not title:
+    # A new title follows the same cataloguing rules as Add Book.
+    from .catalogue import clean_author, clean_genre, clean_isbn, clean_title, clean_year
+    if not (item.get('title') or '').strip():
         raise ValueError('Every line needs either a catalogued title or a new title.')
-    author = (item.get('author') or '').strip()
-    isbn = (item.get('isbn') or '').strip()
-    genre = (item.get('genre') or '').strip()
-    material_type = (item.get('material_type') or 'Book').strip()
-    if material_type not in {c[0] for c in Book.MATERIAL_TYPE_CHOICES}:
-        material_type = 'Book'
-    year = None
-    raw_year = str(item.get('publication_year') or '').strip()
-    if raw_year:
-        try:
-            year = int(raw_year)
-        except ValueError:
-            raise ValueError('Publication year must be a number (got "' + raw_year + '").')
-        if year < 1000 or year > timezone.localdate().year + 1:
-            raise ValueError('Publication year ' + raw_year + ' is out of range.')
-    if isbn:
-        isbn_problem = isbn_typo(isbn)
-        if isbn_problem:
-            raise ValueError(isbn_problem)
+    named = (item.get('title') or '').strip()[:60]
+
+    def rule(result):
+        value, problem = result
+        if problem:
+            raise ValueError('"%s": %s' % (named, problem))
+        return value
+
+    title = rule(clean_title(item.get('title')))
+    author = rule(clean_author(item.get('author')))
+    isbn = rule(clean_isbn(item.get('isbn'), title))
 
     existing = None
     if isbn:
-        existing = Book.objects.filter(ISBN__iexact=isbn).first()
+        # The rules above already refused an ISBN that belongs to a different title.
+        from .catalogue import books_with_isbn
+        existing = books_with_isbn(re.sub(r'[\s-]', '', isbn).upper()).first()
     if existing is None and author:
         existing = Book.objects.filter(title__iexact=title, author__iexact=author).first()
     if existing is not None:
         return existing, False
 
+    # Only a title new to the catalogue needs its genre and year.
+    genre, problem = clean_genre(item.get('genre'), allow_new=bool(item.get('new_genre')))
+    if problem:
+        error = ValueError('"%s": %s' % (named, problem))
+        # Named, so an import can offer to add the sheet's new genres in one go.
+        error.new_genre = ' '.join(str(item.get('genre') or '').split())
+        raise error
+    year = rule(clean_year(item.get('publication_year')))
+    material_type = (item.get('material_type') or 'Book').strip()
+    if material_type not in {c[0] for c in Book.MATERIAL_TYPE_CHOICES}:
+        material_type = 'Book'
+
     book = Book.objects.create(
         title=title,
-        author=author or 'Unknown',
+        author=author,
         ISBN=isbn or None,
         genre=genre or None,
         material_type=material_type,
@@ -12138,7 +12187,8 @@ def receive_stock(request):
             messages.error(request, 'Line ' + str(index) + ': a copy arrives Good, Minor Damage, Damaged '
                                     'or Beyond Repair.')
             return _receiving_redirect(request)
-        price, price_error = _parse_price(item.get('price'))
+        from .catalogue import clean_price
+        price, price_error = clean_price(item.get('price'))
         if price_error:
             messages.error(request, 'Line ' + str(index) + ': ' + price_error)
             return _receiving_redirect(request)
@@ -12231,6 +12281,7 @@ def staff_inventory_receive(request):
         'ack_offer': _ack_offer(request),
         'donor_types': Donor.TYPE_CHOICES,
         'today': timezone.localdate().isoformat(),
+        'genre_options': _genre_options(),
     })
 
 
@@ -13462,6 +13513,57 @@ def _open_library(isbn):
 
 
 @admin_or_module_required('books')
+def catalogue_assist(request):
+    """While a book is typed in: is it already here, which shelf suits it, and its call number."""
+    from collections import Counter
+    from .catalogue import clean_author, clean_genre, clean_title, known_genres, same_title, tidy
+
+    def label(level):
+        return ('%s · %s' % (level.shelf.name, level.label)) if level.shelf_id else level.label
+
+    title = clean_title(request.GET.get('title'))[0] or tidy(request.GET.get('title'))
+    author = clean_author(request.GET.get('author'))[0] or tidy(request.GET.get('author'))
+    genres = known_genres()
+    genre = clean_genre(request.GET.get('genre'), known=genres)[0] or tidy(request.GET.get('genre'))
+    year = (request.GET.get('publication_year') or '').strip()
+
+    match = None
+    if title and author:
+        copies = list(same_title(title, author).select_related('shelf_level__shelf'))
+        if copies:
+            first = copies[0]
+            match = {'copies': len(copies), 'genre': first.genre or '', 'material_type': first.material_type,
+                     'isbn': first.ISBN or '', 'publication_year': first.publication_year or '',
+                     'price': str(first.price) if first.price is not None else '',
+                     'call_number': first.call_number or ''}
+
+    shelf = None
+    shelved = [b.shelf_level for b in (same_title(title, author).select_related('shelf_level__shelf')
+                                       if match else []) if b.shelf_level_id]
+    if shelved:
+        shelf = {'id': shelved[0].shelf_level_id, 'label': label(shelved[0]), 'why': 'where its other copies are'}
+    elif genre:
+        levels = Counter(Book.objects.filter(genre__iexact=genre, shelf_level__isnull=False)
+                         .values_list('shelf_level', flat=True))
+        level = (ShelfLevel.objects.select_related('shelf').filter(shelf_level_id=levels.most_common(1)[0][0]).first()
+                 if levels else ShelfLevel.objects.select_related('shelf').filter(category__iexact=genre).first())
+        if level is not None:
+            shelf = {'id': level.shelf_level_id, 'label': label(level),
+                     'why': ('where most %s books are' % genre) if levels else 'the board labelled %s' % genre}
+
+    try:
+        year_value = int(year) if year else None
+    except ValueError:
+        year_value = None
+    # Copies of a title share its call number; a new title gets one made from its details.
+    preview = (match['call_number'] if match and match['call_number'] else
+               Book(title=title or '', author=author or '', genre=genre or '',
+                    publication_year=year_value).derive_call_number() if (title or author or genre) else '')
+    return JsonResponse({'success': True, 'match': match, 'shelf': shelf, 'call_number': preview,
+                         'genre': genre, 'genre_known': bool(genre) and genre.lower() in genres})
+
+
+@admin_or_module_required('books')
 def isbn_lookup(request):
     """Fill in a book from its ISBN: from our own catalogue first, then Open Library."""
     raw = (request.GET.get('isbn') or '').strip()
@@ -13469,11 +13571,9 @@ def isbn_lookup(request):
     if problem:
         return JsonResponse({'success': False, 'error': problem})
     digits = re.sub(r'[\s-]', '', raw).upper()
-    from django.db.models import Value
-    from django.db.models.functions import Replace, Upper
-    known = list(Book.objects.annotate(
-        isbn_digits=Upper(Replace(Replace('ISBN', Value('-'), Value('')), Value(' '), Value(''))))
-        .filter(isbn_digits=digits).order_by('book_id'))
+    from .catalogue import books_with_isbn
+    # The 10- and 13-digit forms of an ISBN are the same book.
+    known = list(books_with_isbn(digits).order_by('book_id'))
     if known:
         book = known[0]
         return JsonResponse({'success': True, 'source': 'catalogue', 'copies': len(known), 'book': {

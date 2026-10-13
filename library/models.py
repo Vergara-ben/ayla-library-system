@@ -2,6 +2,7 @@ import math
 
 from django.db import models
 from django.utils import timezone
+import re
 from datetime import time, timedelta
 
 from .modules import MODULE_LABELS, clean_module_keys
@@ -627,7 +628,9 @@ class Book(Archivable):
     @staticmethod
     def _surname_of(author):
         """Austen from "Austen, Jane" or from "Jane Austen"."""
-        author = (author or '').strip()
+        # The first author named; a bracketed illustrator or editor is not who it files under.
+        author = re.sub(r'\([^)]*\)?', ' ', author or '')
+        author = re.split(r'\s+(?:and|&)\s+|;|/', author)[0].strip()
         if not author:
             return ''
         if ',' in author:
@@ -681,9 +684,23 @@ class Book(Archivable):
     def location_short(self):
         return self.location_label(short=True)
 
+    # Novels of every kind share one prefix, as the library already shelves them.
+    FICTION_WORDS = re.compile(r"\b(fiction|novel|thriller|suspense|mystery|romance|young adult|horror|fantasy|"
+                               r"dystopian|gothic|spy|crime|legal|adventure|sci-fi|picture book|"
+                               r"children's literature|short stor|drama|satire)\b", re.I)
+
     def derive_call_number(self):
         """The spine number this copy would be given."""
-        klass = ''.join(ch for ch in (self.genre or '') if ch.isalpha())[:3].upper()
+        genre = (self.genre or '').strip()
+        first = genre.split('/')[0]
+        if re.search(r'non-?fiction|true crime|memoir', genre, re.I):
+            # Non-fiction is filed by its subject: "Non-Fiction / History" is HIS.
+            words = [w for w in re.findall(r'[A-Za-z]+', genre) if w.lower() not in ('non', 'fiction')]
+            klass = words[0][:3].upper() if words else ''
+        elif self.FICTION_WORDS.search(first) or re.search(r'\bfiction\b', genre, re.I):
+            klass = 'FIC'
+        else:
+            klass = ''.join(ch for ch in first if ch.isalpha())[:3].upper()
         surname = self._surname_of(self.author)
         mark = ''
         if surname:
