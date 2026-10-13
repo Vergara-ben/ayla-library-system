@@ -7,7 +7,7 @@
   if (!url) return;
 
   var STORE = 'ayla.alerts';
-  var TOPICS = ['patrons', 'transactions', 'chat'];
+  var TOPICS = ['patrons', 'transactions', 'chat', 'books'];
   var stack = null;
   var busy = false;
 
@@ -36,13 +36,25 @@
         var now = {};
         data.items.forEach(function (item) {
           now[item.key] = { count: item.count, latest: item.latest, stamp: item.stamp || '' };
-          // The first look in this tab sets the baseline instead of raising old news.
+          // The first look in this tab sets the baseline instead of raising old news,
+          // except the once-per-sign-in notice of what is already waiting.
           if (before && isNew(item, before[item.key])) show(item);
+          else if (item.notice) show({ key: item.key, icon: item.icon, url: item.url,
+                                       title: 'Waiting for review', text: item.notice });
+          paintBadges(item);
         });
         remember(now);
       })
       .catch(function () { /* offline; the next change tries again */ })
       .then(function () { busy = false; });
+  }
+
+  // Counts shown on the sidebar follow every check, so they are live on every page.
+  function paintBadges(item) {
+    document.querySelectorAll('[data-alert-badge="' + item.key + '"]').forEach(function (el) {
+      el.textContent = item.count;
+      el.hidden = !item.count;
+    });
   }
 
   function esc(s) {
@@ -74,8 +86,8 @@
     while (stack.children.length > 4) stack.lastChild.remove();
   }
 
-  document.addEventListener('ayla:live', function (e) {
-    if (e.detail.topics.some(function (t) { return TOPICS.indexOf(t) !== -1; })) check();
+  document.addEventListener('ayla:live-any', function (e) {
+    if (e.detail.topics.some(function (t) { return t === '*' || TOPICS.indexOf(t) !== -1; })) check();
   });
   check();
 })();

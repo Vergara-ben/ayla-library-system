@@ -38,7 +38,7 @@
       if (api.connected) {
         stopFallbackPoll();
         // Anything could have changed while the connection was down.
-        if (everConnected) queue(pageTopics);
+        if (everConnected) { announce(['*']); queue(pageTopics); }
         everConnected = true;
       } else if (s.current !== 'connecting') {
         startFallbackPoll();
@@ -46,19 +46,27 @@
     });
     (cfg.channels || '').split(/\s+/).filter(Boolean).forEach(function (name) {
       pusher.subscribe(name).bind('changed', function (msg) {
-        if (msg && msg.topics) queue(wanted(msg.topics), !!cfg.origin && msg.origin === cfg.origin);
+        if (!msg || !msg.topics) return;
+        announce(msg.topics);
+        queue(wanted(msg.topics), !!cfg.origin && msg.origin === cfg.origin);
       });
     });
   }
 
   function startFallbackPoll() {
     if (pollTimer) return;
-    pollTimer = setInterval(function () { queue(pageTopics); }, FALLBACK_POLL_MS);
+    pollTimer = setInterval(function () { announce(['*']); queue(pageTopics); }, FALLBACK_POLL_MS);
   }
 
   function stopFallbackPoll() {
     clearInterval(pollTimer);
     pollTimer = null;
+  }
+
+  // Every change, whatever this page shows: small always-on parts (the alerts) listen for this.
+  // '*' means "anything could have changed".
+  function announce(topics) {
+    document.dispatchEvent(new CustomEvent('ayla:live-any', { detail: { topics: topics } }));
   }
 
   // ---- refresh ------------------------------------------------------------

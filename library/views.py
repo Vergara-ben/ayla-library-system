@@ -376,6 +376,19 @@ def _release_archived_email(patron):
     patron.save(update_fields=['email', 'archive_reason'])
 
 
+def _tell_reviewers(request, patron, resubmitted=False):
+    """Email every Administrator, and Staff with Patrons, that a registration is ready for review."""
+    from .alerts import reviewers
+    from .emails import registration_waiting_email, send_in_background
+    messages_out = []
+    for user in reviewers():
+        link = request.build_absolute_uri(
+            reverse('staff_manage_patron' if user.role == 'Staff' else 'admin_manage_patron'))
+        subject, body = registration_waiting_email(patron, link, resubmitted)
+        messages_out.append((subject, body, user.email))
+    send_in_background(messages_out)
+
+
 def _email_taken(email):
     """True when a live patron already holds this email; archived ones release it."""
     existing = Patron.all_objects.filter(email__iexact=email).first()
@@ -418,6 +431,8 @@ def patron_register(request):
         patron.otp_expires_at = None
         patron.otp_attempts = 0
         patron.save(update_fields=['otp_verified', 'otp_code', 'otp_expires_at', 'otp_attempts'])
+        # Now it is real: the people who approve registrations hear about it.
+        _tell_reviewers(request, patron)
         return render(request, 'patron/patronregister.html', {'stage': 'pending'})
 
     # Resend OTP
@@ -2390,6 +2405,7 @@ def registration_fix(request, token):
         patron.fix_token = None
         patron.resubmitted_at = timezone.now()
         patron.save()
+    _tell_reviewers(request, patron, resubmitted=True)
     log_patron_action(request, 'Update', 'Patron', patron.patron_id,
                       'Resubmitted the registration after the library asked for a fix'
                       + (' with a new ID' if credential is not None else ''), patron=patron)

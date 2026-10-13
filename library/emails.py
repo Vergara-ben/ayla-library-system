@@ -1,6 +1,7 @@
 """Email notifications for the AYLA library system."""
 
 import logging
+from concurrent.futures import ThreadPoolExecutor
 
 from django.conf import settings
 from django.core.mail import get_connection, send_mail
@@ -10,6 +11,46 @@ logger = logging.getLogger(__name__)
 
 def _library_name():
     return getattr(settings, 'LIBRARY_NAME', 'Ayla Public Library')
+
+
+# Mail for staff goes out off the request, so a patron never waits on the mail server.
+_background = ThreadPoolExecutor(max_workers=1, thread_name_prefix='mail')
+
+
+def send_in_background(messages):
+    """Send [(subject, body, recipient)] after the response; inline under the test mail backend."""
+    messages = [m for m in messages if m[2]]
+    if not messages:
+        return
+
+    def run():
+        connection = bulk_connection()
+        for subject, body, recipient in messages:
+            send_email(subject, body, recipient, connection=connection)
+
+    if getattr(settings, 'EMAIL_BACKEND', '').endswith('locmem.EmailBackend'):
+        run()
+    else:
+        _background.submit(run)
+
+
+def registration_waiting_email(patron, link, resubmitted=False):
+    """(subject, body) telling a reviewer a registration is ready for them."""
+    lib = _library_name()
+    what = 'Registration resubmitted' if resubmitted else 'New registration'
+    lines = [
+        'A registration is waiting for your review.' if not resubmitted else
+        'An applicant you asked to fix their registration has sent it back.',
+        '',
+        f'    Name:     {patron.fullname}',
+        f'    Type:     {patron.patron_type}' + (f', {patron.school}' if patron.school else ''),
+        f'    Email:    {patron.email or "-"}',
+        f'    Applied:  {patron.registration_date:%B %d, %Y}' + (' (online)' if patron.registration_channel == 'Online' else ' (at the desk)'),
+    ]
+    if resubmitted and patron.fix_note:
+        lines += [f'    Asked to fix: {patron.fix_note}']
+    lines += ['', 'Check their ID and approve or reject it in Pending Registrations:', link, '', f'- {lib}']
+    return f'[{lib}] {what}: {patron.fullname}', '\n'.join(lines)
 
 
 def bulk_connection():

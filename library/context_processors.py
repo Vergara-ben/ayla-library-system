@@ -1,5 +1,6 @@
 """Template context shared across the portal templates."""
 
+from .alerts import may_review, waiting_registrations
 from .models import Book, Conversation, Patron, Transaction, User
 
 
@@ -22,6 +23,11 @@ def staff_modules(request):
         # Badged on the Transactions nav item.
         'pending_transactions_count': Transaction.objects.filter(
             transaction_type='Borrow', return_date__isnull=True).count(),
+        # Badged on the patrons nav item, for those who review registrations.
+        'registrations_waiting': waiting_registrations().count() if may_review(user) else 0,
+        'newest_registration': (waiting_registrations().order_by('-patron_id').first()
+                                if may_review(user) else None),
+        'can_review_registrations': may_review(user),
     }
 
 

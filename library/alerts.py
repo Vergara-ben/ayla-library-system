@@ -18,6 +18,22 @@ def _portal_url(role, admin_name, staff_name):
     return reverse(staff_name if role == 'Staff' else admin_name)
 
 
+def waiting_registrations():
+    """Registrations ready for a reviewer: email confirmed or made at the desk, and not sent back to fix."""
+    return (Patron.objects.filter(account_status='Pending', fix_token__isnull=True)
+            .filter(Q(otp_verified=True) | Q(registration_channel='On-site')))
+
+
+def reviewers():
+    """Active accounts that approve registrations: every Administrator, and Staff with Patrons."""
+    return [u for u in User.objects.filter(account_status='Active').exclude(email__isnull=True).exclude(email='')
+            if _may(u, u.role, 'patrons')]
+
+
+def may_review(user):
+    return user is not None and _may(user, user.role, 'patrons')
+
+
 def portal_alerts(request):
     """Counts and the newest item of each kind this account can act on."""
     user = User.objects.filter(admin_id=request.session.get('admin_id'),
@@ -29,8 +45,7 @@ def portal_alerts(request):
 
     if _may(user, role, 'patrons'):
         # Desk sign-ups, and online ones whose email is confirmed; not those sent back to fix.
-        waiting = (Patron.objects.filter(account_status='Pending', fix_token__isnull=True)
-                   .filter(Q(otp_verified=True) | Q(registration_channel='On-site')))
+        waiting = waiting_registrations()
         newest_new = waiting.order_by('-patron_id').first()
         newest_back = waiting.filter(resubmitted_at__isnull=False).order_by('-resubmitted_at').first()
         # A resubmission is news even though the applicant's id is old; name whichever came last.
@@ -43,11 +58,19 @@ def portal_alerts(request):
             'latest': newest_new.patron_id if newest_new else 0,
             'stamp': newest_back.resubmitted_at.isoformat() if newest_back else '',
             'text': (('%s resubmitted their registration' if newest.resubmitted_at
-                      else '%s registered online and is waiting for approval') % newest.fullname)
-                    if newest else '',
+                      else '%s registered ' + ('online' if newest.registration_channel == 'Online'
+                                               else 'at the desk') + ' and is waiting for approval')
+                     % newest.fullname) if newest else '',
             'title': 'New registration', 'icon': 'fa-user-plus',
             'url': _portal_url(role, 'admin_manage_patron', 'staff_manage_patron'),
         })
+        # Once per sign-in, say what is already waiting, not only what arrives while watching.
+        count = items[-1]['count']
+        if count and not request.session.get('registrations_notice_shown'):
+            request.session['registrations_notice_shown'] = True
+            items[-1]['notice'] = '%d registration%s waiting for review%s' % (
+                count, ' is' if count == 1 else 's are',
+                ', the newest from %s' % newest.fullname if newest else '')
 
     if _may(user, role, 'transactions'):
         requests = (DueDateExtension.objects.filter(status='Pending')
