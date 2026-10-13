@@ -11712,6 +11712,12 @@ def inventory_management(request):
 
     audits = (StockAudit.objects.select_related('shelf', 'audited_by').all())
     audit_page = Paginator(audits, 15).get_page(request.GET.get('apage', 1))
+    if tab == 'audits':
+        # Each count's findings, followed up to now.
+        from .audittrail import audit_rows, summary, summary_words
+        for a in audit_page:
+            s = summary(audit_rows(a))
+            a.follow_up, a.open_issues = summary_words(s), s['open']
 
     # When each shelf was last counted.
     last_audited = {}
@@ -12460,20 +12466,31 @@ def stock_audit_file(request):
     found = ids('found_ids')          # confirmed one by one
     bulk = ids('bulk_ids')            # covered by "the rest are here"
     missing = ids('missing_ids')
+    damaged = ids('damaged_ids')      # here, but damaged
+    onshelf = ids('onshelf_ids')      # here, though the system has it out on loan
+    strays = ids('stray_ids')         # here, though it belongs on another board
 
     # A copy cannot be both.
-    bulk -= found
-    found -= missing
+    bulk -= found | damaged
+    found -= missing | damaged
     bulk -= missing
+    damaged -= missing
 
     on_board = set(level.book_set.exclude(status__in=WRITTEN_OFF)
                    .values_list('book_id', flat=True))
     found &= on_board
     bulk &= on_board
     missing &= on_board
-    seen = found | bulk
+    damaged &= on_board
+    onshelf = set(level.book_set.filter(book_id__in=onshelf, status__in=('Borrowed', 'Overdue'))
+                  .values_list('book_id', flat=True))
+    # Strays are read as they were, so the count can say where each belongs.
+    stray_books = list(Book.objects.select_related('shelf_level', 'shelf_level__shelf')
+                       .filter(book_id__in=strays - on_board).exclude(status__in=WRITTEN_OFF))
+    strays = {b.book_id for b in stray_books}
+    seen = found | bulk | damaged
 
-    if not seen and not missing:
+    if not seen and not missing and not onshelf and not strays:
         return JsonResponse({'success': False,
                              'error': 'Mark what you found before filing the count.'})
 
@@ -12532,37 +12549,80 @@ def stock_audit_file(request):
                                  source='Stock audit', before=record.condition,
                                  after=record.condition)
 
+        # Found damaged: the condition changes, with its history, and the book goes for repair.
+        for book in Book.objects.filter(book_id__in=damaged):
+            for record in book.inventory_records.exclude(status='Removed').filter(
+                    condition__in=InventoryRecord.HELD_CONDITIONS).exclude(condition='Damaged'):
+                was = record.condition
+                record.condition = 'Damaged'
+                record.save(update_fields=['condition'])
+                _record_movement(record, 'ConditionChange', request,
+                                 reason='Found damaged in the shelf count of ' + board,
+                                 source='Stock audit', before=was, after='Damaged')
+                _match_book_to_copy(book, was, 'Damaged', request)
+
+        # On the shelf though on loan: seen, but the loan is the desk's to close.
+        Book.objects.filter(book_id__in=onshelf).update(last_seen=now)
+
+        # A stray is seen, comes back if it was missing, and goes to be reshelved where it belongs.
+        for book in Book.objects.filter(book_id__in=strays):
+            book.last_seen = now
+            if book.status == 'Missing':
+                recovered_ids.add(book.book_id)
+                book.missing_since = None
+                book.audit_misses = 0
+                recovered += 1
+                for record in book.inventory_records.filter(status='Missing'):
+                    record.status = 'In Stock'
+                    record.missing_since = None
+                    record.audit_misses = 0
+                    record.save(update_fields=['status', 'missing_since', 'audit_misses'])
+                    _record_movement(record, 'Found', request,
+                                     reason='Found on ' + board + ', away from its own shelf',
+                                     source='Stock audit', before=record.condition,
+                                     after=record.condition)
+            if book.status in ('Available', 'Missing'):
+                book.status = 'For Reshelving'
+            book.save()
+
         audit = StockAudit.objects.create(
             shelf=level.shelf,
             shelf_name='%s %s' % (level.shelf.name if level.shelf else '', level.label),
             audited_by=User.objects.filter(admin_id=request.session.get('admin_id')).first(),
             expected_count=len(seen) + len(missing),
             # What the reader actually confirmed by hand, as opposed to swept.
-            scanned_count=len(found),
+            scanned_count=len(found) + len(damaged),
             found_count=len(seen),
             on_loan_count=level.book_set.filter(status__in=ACCOUNTED_ELSEWHERE).count(),
             missing_count=flagged,
             recovered_count=recovered,
-            unexpected_count=0,
+            unexpected_count=len(strays),
+            damaged_count=len(damaged),
+            loan_mismatch_count=len(onshelf),
             notes=(request.POST.get('notes') or '').strip() or None,
         )
         _record_audit_lines(audit, board_books, status_before,
-                            found, bulk, missing, recovered_ids)
+                            found, bulk, missing, recovered_ids,
+                            damaged=damaged, onshelf=onshelf, strays=stray_books)
 
     log_admin_action(
         request, 'Create', 'Inventory', audit.audit_id,
         'Shelf read of %s: %d confirmed (%d one by one, %d in bulk), '
-        '%d flagged missing, %d recovered'
-        % (audit.shelf_name.strip(), len(seen), len(found), len(bulk), flagged, recovered))
+        '%d flagged missing, %d recovered, %d damaged, %d on loan but here, %d strays'
+        % (audit.shelf_name.strip(), len(seen), len(found), len(bulk), flagged, recovered,
+           len(damaged), len(onshelf), len(strays)))
 
     return JsonResponse({
         'success': True,
         'audit_id': audit.audit_id,
         'confirmed': len(seen),
-        'individually': len(found),
+        'individually': len(found | damaged),
         'in_bulk': len(bulk),
         'flagged': flagged,
         'recovered': recovered,
+        'damaged': len(damaged),
+        'onshelf': len(onshelf),
+        'strays': len(strays),
         'message': '%s filed. %d confirmed, %d flagged missing%s.'
                    % (audit.shelf_name.strip(), len(seen), flagged,
                       ', %d recovered' % recovered if recovered else ''),
@@ -12571,27 +12631,41 @@ def stock_audit_file(request):
 
 # Where a book away from its shelf is, recorded by the count without anyone marking it.
 AWAY_RESULT = {'Borrowed': 'On loan', 'Overdue': 'On loan',
-               'Being Read': 'Being read', 'For Reshelving': 'Reshelving'}
+               'Being Read': 'Being read', 'For Reshelving': 'Reshelving',
+               'Under Repair': 'Under repair'}
 
 
-def _record_audit_lines(audit, books, status_before, found, bulk, missing, recovered_ids):
-    """One line per book on the board: what the reader marked, or where the system knows it is."""
+def _record_audit_lines(audit, books, status_before, found, bulk, missing, recovered_ids,
+                        damaged=(), onshelf=(), strays=()):
+    """One line per book: what the reader marked, or where the system knows it is."""
+    ids = [b.book_id for b in books] + [b.book_id for b in strays]
+    stray_ids = {b.book_id for b in strays}
     loans = {t.book_id: t for t in Transaction.objects.select_related('patron').filter(
-        book_id__in=[b.book_id for b in books], transaction_type='Borrow', return_date__isnull=True)}
+        book_id__in=ids, transaction_type='Borrow', return_date__isnull=True)}
     # As the count left them, which is what "changed since" is measured against.
-    after = dict(Book.objects.filter(book_id__in=[b.book_id for b in books])
-                 .values_list('book_id', 'status'))
+    after = {b.book_id: b for b in Book.objects.select_related('shelf_level', 'shelf_level__shelf')
+             .filter(book_id__in=ids)}
     lines = []
-    for book in books:
+    for book in list(books) + list(strays):
         before = status_before.get(book.book_id, book.status)
-        then = after.get(book.book_id, before)
+        left = after.get(book.book_id, book)
+        loan = loans.get(book.book_id)
+        who = (loan.patron.fullname if loan.patron else 'a guest') if loan else ''
         detail = ''
-        if before in AWAY_RESULT:
+        if book.book_id in onshelf:
+            result = 'Here on loan'
+            detail = 'recorded on loan to %s; check it in at the desk' % (who or 'a patron')
+        elif book.book_id in stray_ids:
+            result = 'Stray'
+            detail = 'belongs on %s' % (book.location_short or 'another shelf')
+        elif before in AWAY_RESULT:
             result = AWAY_RESULT[before]
-            loan = loans.get(book.book_id)
             if loan is not None and result == 'On loan':
-                who = loan.patron.fullname if loan.patron else 'a guest'
                 detail = 'with %s, due %s' % (who, loan.due_date.strftime('%b %d, %Y') if loan.due_date else '-')
+        elif book.book_id in damaged:
+            result = 'Damaged'
+            if book.book_id in recovered_ids:
+                detail = 'had been missing'
         elif book.book_id in recovered_ids:
             result = 'Recovered'
         elif book.book_id in found:
@@ -12602,35 +12676,33 @@ def _record_audit_lines(audit, books, status_before, found, bulk, missing, recov
             result = 'Missing'
         else:
             continue
-        lines.append(StockAuditLine(audit=audit, book=book, title=book.title[:255],
-                                    result=result, status_then=then, detail=detail[:255]))
+        lines.append(StockAuditLine(audit=audit, book=book, title=book.title[:255], result=result,
+                                    status_then=left.status, condition_then=left.condition or '',
+                                    location_then=(left.location_short or '')[:255],
+                                    detail=detail[:255]))
     StockAuditLine.objects.bulk_create(lines)
 
 
 @admin_only_required
 def stock_audit_detail(request, audit_id):
-    """One filed count, each book's result then beside its status now."""
+    """One filed count: each book then and now, what happened since, and whether it is settled."""
+    from .audittrail import audit_rows, summary, summary_words
     audit = StockAudit.objects.filter(audit_id=audit_id).select_related('audited_by').first()
     if audit is None:
         return JsonResponse({'success': False, 'error': 'That count no longer exists.'})
-    rows = []
-    for line in audit.lines.select_related('book'):
-        now = line.book.status if line.book else 'Removed'
-        rows.append({
-            'title': line.title,
-            'result': line.get_result_display(),
-            'kind': line.result,
-            'status_then': line.status_then,
-            'status_now': now,
-            'changed': now != line.status_then,
-            'detail': line.detail,
-        })
+    rows = audit_rows(audit)
     return JsonResponse({
         'success': True,
         'shelf': audit.shelf_name.strip(),
         'when': timezone.localtime(audit.audited_at).strftime('%b %d, %Y %I:%M %p'),
         'by': audit.audited_by.fullname if audit.audited_by else '',
-        'lines': rows,
+        'summary': summary_words(summary(rows)),
+        'lines': [{
+            'title': r['title'], 'result': r['result'], 'kind': r['kind'], 'detail': r['detail'],
+            'then': r['then'], 'now': r['now'], 'changed': r['changed'],
+            'trail': [{'when': d.strftime('%b %d, %Y') if d else '', 'text': t} for d, t in r['trail']],
+            'outcome': r['outcome'], 'open': r['open'],
+        } for r in rows],
     })
 
 

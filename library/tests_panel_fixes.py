@@ -295,7 +295,7 @@ class AlertTests(TestCase):
     def test_staff_get_alerts_for_their_modules_only(self):
         desk = _staff(modules='transactions')
         items = self._alerts(desk)
-        self.assertEqual(set(items), {'extensions', 'overdue'})
+        self.assertEqual(set(items), {'extensions', 'overdue', 'loan_on_shelf'})
 
     def test_a_new_registration_is_reported_but_not_one_waiting_on_the_applicant(self):
         admin = _staff(role='Admin', modules='')
@@ -435,7 +435,8 @@ class AuditTrailTests(TestCase):
         self.out.save()
         detail = self.client.get('/admin-portal/inventory/audit/%d/' % r['audit_id']).json()
         out = next(l for l in detail['lines'] if l['title'] == 'Out')
-        self.assertEqual((out['status_then'], out['status_now'], out['changed']), ('Borrowed', 'Available', True))
+        self.assertEqual((out['then']['status'], out['now']['status']), ('Borrowed', 'Available'))
+        self.assertIn('status', out['changed'])
 
 
 class ReviewFollowUpTests(TestCase):
@@ -1137,3 +1138,90 @@ class ConditionScaleTests(TestCase):
         self.assertTrue(post('Return').get('success'))
         book.refresh_from_db()
         self.assertEqual(book.status, 'Under Repair')
+
+
+class AuditFollowUpTests(AuditTrailTests):
+    """A count records what the system knows by itself, what the reader marks, and follows it all up."""
+
+    def setUp(self):
+        super().setUp()
+        from .models import Shelf, ShelfLevel
+        other = ShelfLevel.objects.create(shelf=Shelf.objects.get(), level_number=2)
+        self.torn = Book.objects.create(title='Torn', author='E', shelf_level=self.level)
+        self.repairing = Book.objects.create(title='Repairing', author='F', shelf_level=self.level,
+                                             condition='Damaged')
+        self.stray = Book.objects.create(title='Stray', author='G', shelf_level=other, status='Missing')
+        for b in (self.here, self.gone, self.torn, self.stray):
+            InventoryRecord.objects.create(book=b, source='Existing', qr_label='lbl-%d' % b.book_id,
+                                           status='Missing' if b is self.stray else 'In Stock')
+
+    def _file(self):
+        return self.client.post('/admin-portal/inventory/audit/file/', {
+            'level': self.level.shelf_level_id,
+            'found_ids': [self.here.book_id], 'missing_ids': [self.gone.book_id],
+            'damaged_ids': [self.torn.book_id], 'onshelf_ids': [self.out.book_id],
+            'stray_ids': [self.stray.book_id]}).json()
+
+    def test_every_kind_of_finding_is_recorded_and_acted_on(self):
+        from .models import StockAudit, StockAuditLine
+        r = self._file()
+        self.assertTrue(r['success'], r)
+        lines = {l.title: l for l in StockAuditLine.objects.all()}
+        self.assertEqual(lines['Repairing'].result, 'Under repair')
+        self.assertEqual(lines['Torn'].result, 'Damaged')
+        self.assertEqual(lines['Out'].result, 'Here on loan')
+        self.assertIn('check it in', lines['Out'].detail)
+        self.assertEqual(lines['Stray'].result, 'Stray')
+        self.assertEqual(lines['Here'].condition_then, 'Good')
+        self.assertTrue(lines['Here'].location_then)
+
+        self.torn.refresh_from_db()
+        self.assertEqual((self.torn.condition, self.torn.status), ('Damaged', 'Under Repair'))
+        self.stray.refresh_from_db()
+        self.assertEqual(self.stray.status, 'For Reshelving')
+        self.out.refresh_from_db()
+        self.assertEqual(self.out.status, 'Borrowed')      # the desk closes the loan, not the count
+        audit = StockAudit.objects.get()
+        self.assertEqual((audit.damaged_count, audit.loan_mismatch_count, audit.unexpected_count), (1, 1, 1))
+
+        alerts = self.client.get('/portal/alerts/').json()['items']
+        self.assertEqual(next(i for i in alerts if i['key'] == 'loan_on_shelf')['count'], 1)
+
+    def test_the_trail_follows_each_finding_to_now(self):
+        r = self._file()
+        # The loan is closed at the desk, the missing book is written off, the stray goes home.
+        loan = Transaction.objects.get(book=self.out)
+        loan.return_date = timezone.localdate()
+        loan.save()
+        self.out.status = 'Available'
+        self.out.save()
+        self.gone.status = 'Lost'
+        self.gone.save()
+        self.stray.status = 'Available'
+        self.stray.save()
+
+        d = self.client.get('/admin-portal/inventory/audit/%d/' % r['audit_id']).json()
+        lines = {l['title']: l for l in d['lines']}
+        self.assertEqual((lines['Out']['outcome'], lines['Out']['open']), ('Checked in', False))
+        self.assertTrue(any('Returned by Ana' in e['text'] for e in lines['Out']['trail']))
+        self.assertEqual(lines['Gone']['outcome'], 'Written off')
+        self.assertEqual(lines['Stray']['outcome'], 'Back in place')
+        self.assertEqual((lines['Torn']['outcome'], lines['Torn']['open']), ('Still under repair', True))
+        self.assertIn('1 still open', d['summary'])
+
+    def test_the_stock_audit_report(self):
+        from .reports import build_report
+        self._file()
+        today = timezone.localdate()
+        report = build_report('stock_audits', today, today)
+        self.assertEqual(report['title'], 'Stock Audit Report')
+        summary = dict(report['summary'])
+        self.assertEqual((summary['Counts Filed'], summary['Not Found'], summary['Found Damaged'],
+                          summary['On the Shelf While on Loan'], summary['Found on the Wrong Shelf']),
+                         (1, 1, 1, 1, 1))
+        books = [row[3] for row in report['rows']]
+        self.assertIn('Torn', books)
+        self.assertIn('Stray', books)
+        page = self.client.get('/admin-portal/reports/', {'type': 'stock_audits', 'generate': 1,
+                                                          'start': today.isoformat(), 'end': today.isoformat()})
+        self.assertContains(page, 'Stock Audit Report')

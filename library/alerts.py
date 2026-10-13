@@ -4,7 +4,7 @@ from django.db.models import Q
 from django.http import JsonResponse
 from django.urls import reverse
 
-from .models import Conversation, DueDateExtension, Patron, Transaction, User
+from .models import Conversation, DueDateExtension, Patron, StockAuditLine, Transaction, User
 
 
 def _may(user, role, module):
@@ -74,6 +74,19 @@ def portal_alerts(request):
                      newest.book.title)) if newest else '',
             'title': 'Overdue loans', 'icon': 'fa-triangle-exclamation',
             'url': _portal_url(role, 'admin_transaction', 'staff_transaction') + '?status=overdue',
+        })
+        # A shelf count found these on the shelf while they are still recorded on loan.
+        on_shelf = (StockAuditLine.objects.filter(result='Here on loan',
+                                                  book__status__in=('Borrowed', 'Overdue'))
+                    .select_related('book').order_by('-line_id'))
+        newest = on_shelf.first()
+        count = on_shelf.values('book_id').distinct().count()
+        items.append({
+            'key': 'loan_on_shelf', 'count': count, 'latest': newest.line_id if newest else 0,
+            'text': ('"%s" was found on the shelf but is still recorded on loan. Check it in.'
+                     % newest.book.title) if newest else '',
+            'title': 'Check in a returned book', 'icon': 'fa-book-bookmark',
+            'url': _portal_url(role, 'admin_transaction', 'staff_transaction'),
         })
 
     if _may(user, role, 'chat'):
