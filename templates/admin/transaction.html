@@ -180,7 +180,7 @@
                     {% for ext in pending_extensions %}
                     <div class="p-4 flex flex-col sm:flex-row sm:items-center gap-3 justify-between" id="ext-row-{{ ext.extension_id }}">
                         <div class="text-xs">
-                            <div class="font-semibold text-slate-200">{{ ext.transaction.book.title }}</div>
+                            <div class="font-semibold text-slate-200">{{ ext.transaction.book.title }}{% if ext.transaction.book.copy_number %} <span class="text-slate-500 font-normal whitespace-nowrap">&middot; Copy {{ ext.transaction.book.copy_number }}</span>{% endif %}</div>
                             <div class="text-slate-500 mt-0.5">{{ ext.transaction.patron.fullname|default:"—" }} &middot;
                                 due <span class="{% if ext.transaction.overdue_flag %}text-rose-400{% else %}text-slate-400{% endif %}">{{ ext.previous_due_date|date:"M j, Y" }}</span>
                                 &rarr; requesting <span class="text-amber-400 font-semibold">{{ ext.requested_due_date|date:"M j, Y" }}</span>
@@ -286,7 +286,7 @@
                                         </div>
                                     </td>
                                     <td class="py-4 px-6">
-                                        <div class="font-medium text-slate-300">{{ tx.book.title }}</div>
+                                        <div class="font-medium text-slate-300">{{ tx.book.title }}{% if tx.book.copy_number %} <span class="text-slate-500 font-normal whitespace-nowrap">&middot; Copy {{ tx.book.copy_number }}</span>{% endif %}</div>
                                         <div class="text-[10px] text-slate-500 mt-0.5">{{ tx.book.author }}</div>
                                     </td>
                                     <td class="py-4 px-6">
@@ -1418,13 +1418,14 @@
                         option.className = 'p-3 hover:bg-slate-800 cursor-pointer border-b border-slate-800 last:border-b-0 flex items-center justify-between gap-2';
                         option.innerHTML = `
                             <div class="min-w-0">
-                                <div class="font-medium text-slate-200 text-xs truncate">${book.title}</div>
+                                <div class="font-medium text-slate-200 text-xs truncate">${book.title}${book.copy_number ? ' <span class="text-slate-500 font-normal">&middot; Copy ' + book.copy_number + '</span>' : ''}</div>
                                 <div class="text-[10px] text-slate-500 truncate">${book.author || ''}</div>
                             </div>
                             <span class="inline-block px-2 py-0.5 rounded text-[10px] font-medium flex-shrink-0 ${getStatusClass(book.status)}">${book.status}</span>
                         `;
                         option.addEventListener('click', () => {
-                            addScannedBook({ book_id: book.book_id, title: book.title, author: book.author || '', status: book.status });
+                            addScannedBook({ book_id: book.book_id, title: book.title, author: book.author || '', status: book.status,
+                                             copy_number: book.copy_number });
                             bookSearchInput.value = '';
                             bookDropdown.classList.add('hidden');
                         });
@@ -1541,12 +1542,17 @@
                 : patron.fullname + ' identified. Scan the books.';
         }
 
+        // "Noli Me Tangere" (Copy 2): which copy, in every message about a scanned book.
+        function copyName(book) {
+            return '\u201c' + book.title + '\u201d' + (book.copy_number ? ' (Copy ' + book.copy_number + ')' : '');
+        }
+
         function routeScannedBook(book) {
             // Too damaged to lend: say so now, not when the transaction is processed.
             const kind = document.querySelector('input[name="transaction_type"]:checked')?.value;
             if ((kind === 'Borrow' || kind === 'In-Library Reading')
                     && (book.status === 'Under Repair' || book.status === 'Beyond Repair')) {
-                scanStatus.textContent = '“' + book.title + '” is ' + book.condition + ' ('
+                scanStatus.textContent = copyName(book) + ' is ' + book.condition + ' ('
                     + String(book.condition_note || '').toLowerCase() + '), so it is not lent until it is '
                     + (book.status === 'Under Repair' ? 'repaired.' : 'replaced.');
                 return;
@@ -1554,11 +1560,11 @@
             // Name the duplicate book.
             const already = scannedBooks.some(b => b.book_id === book.book_id);
             if (already) {
-                scanStatus.textContent = '\u201c' + book.title + '\u201d is already in the list.';
+                scanStatus.textContent = copyName(book) + ' is already in the list.';
                 return;
             }
             addScannedBook(book);
-            scanStatus.textContent = '\u201c' + book.title + '\u201d added \u2014 '
+            scanStatus.textContent = copyName(book) + ' added \u2014 '
                 + scannedBooks.length + ' book' + (scannedBooks.length === 1 ? '' : 's')
                 + ' staged. Scan another, or process the transaction.';
         }        // ── Book detail pane ────────────────────────────────────────────────
@@ -1619,13 +1625,16 @@
                 .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
             return ''
                 + '<div>'
-                +   '<h4 class="text-sm font-bold text-slate-100 leading-snug">' + esc(d.title) + '</h4>'
+                +   '<h4 class="text-sm font-bold text-slate-100 leading-snug">' + esc(d.title)
+                +     (d.copy_number ? ' <span class="text-slate-400 font-semibold">&middot; Copy ' + d.copy_number + '</span>' : '')
+                +   '</h4>'
                 +   '<p class="text-xs text-slate-500 mt-1">' + esc(d.author) + '</p>'
                 +   '<span class="inline-block mt-2 px-2 py-0.5 rounded text-[10px] font-medium '
                 +     getStatusClass(d.status) + '">' + esc(d.status) + '</span>'
                 + '</div>'
                 + '<div class="grid grid-cols-2 gap-3 pt-2 border-t border-slate-800">'
                 +   detailRow('ISBN', esc(d.ISBN))
+                +   detailRow('Copy', d.copy_number ? 'Copy ' + d.copy_number : '—')
                 +   detailRow('Genre', esc(d.genre))
                 +   detailRow('Published', esc(d.publication_year))
                 +   detailRow('Copies', esc(d.copies))
@@ -1682,7 +1691,7 @@
             listContainer.innerHTML = scannedBooks.map(book => `
                 <div class="flex items-center justify-between p-3 bg-slate-900/50 rounded-lg border border-slate-800">
                     <div class="flex-1 min-w-0">
-                        <div class="font-medium text-slate-200 text-xs truncate">${book.title}</div>
+                        <div class="font-medium text-slate-200 text-xs truncate">${book.title}${book.copy_number ? ' <span class="text-slate-500 font-normal">&middot; Copy ' + book.copy_number + '</span>' : ''}</div>
                         <div class="text-[10px] text-slate-500">${book.author}</div>
                         <div class="text-[10px] mt-1">
                             <span class="inline-block px-2 py-0.5 rounded text-[10px] font-medium ${getStatusClass(book.status)}">${book.status}</span>

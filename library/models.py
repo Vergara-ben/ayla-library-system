@@ -600,6 +600,8 @@ class Book(Archivable):
     genre = models.CharField(max_length=255, blank=True, null=True)
     # Finer detail than the genre, e.g. "Legal Thriller"; optional and searchable.
     subject = models.CharField(max_length=255, blank=True, null=True)
+    # Which copy of its title this is: given once, never reused, so a printed label stays true.
+    copy_number = models.PositiveIntegerField(blank=True, null=True, db_index=True)
     material_type = models.CharField(
         max_length=20, choices=MATERIAL_TYPE_CHOICES, default='Book')
     status = models.CharField(
@@ -736,10 +738,26 @@ class Book(Archivable):
         (queryset.exclude(condition__in=list(UNLENDABLE_STATUS))
          .filter(status__in=('Under Repair', 'Beyond Repair')).update(status='Available'))
 
+    def next_copy_number(self):
+        """One more than the highest copy number its title has ever had, deleted copies included."""
+        same = Book.all_objects.filter(title__iexact=(self.title or '').strip(),
+                                       author__iexact=(self.author or '').strip())
+        if self.pk:
+            same = same.exclude(pk=self.pk)
+        return (same.aggregate(m=models.Max('copy_number'))['m'] or 0) + 1
+
+    @property
+    def copy_label(self):
+        return 'Copy %d' % self.copy_number if self.copy_number else ''
+
     def save(self, *args, **kwargs):
         # Generate the call number once, on first save.
         if not (self.call_number or '').strip():
             self.call_number = self.derive_call_number()
+        if not self.copy_number:
+            self.copy_number = self.next_copy_number()
+            if kwargs.get('update_fields') is not None:
+                kwargs['update_fields'] = set(kwargs['update_fields']) | {'copy_number'}
         # A copy too damaged to lend leaves circulation, and comes back once repaired.
         wanted = self.status_for_condition()
         if wanted:
