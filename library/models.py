@@ -594,6 +594,9 @@ class Book(Archivable):
     # What the library charges if this copy is lost; every book is worth something different.
     price = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
     ISBN = models.CharField(max_length=255, blank=True, null=True)
+    # Said on purpose when the book was catalogued, so a blank is never an oversight.
+    isbn_none = models.BooleanField(default=False)
+    year_unknown = models.BooleanField(default=False)
     genre = models.CharField(max_length=255, blank=True, null=True)
     # Finer detail than the genre, e.g. "Legal Thriller"; optional and searchable.
     subject = models.CharField(max_length=255, blank=True, null=True)

@@ -582,12 +582,14 @@
                             <div>
                                 <label for="rcvIsbn" class="field-label">ISBN</label>
                                 <input type="text" id="rcvIsbn" class="field-input" placeholder="978-...">
+                                <label class="inline-flex items-center gap-1.5 text-[11px] text-slate-400 mt-1 cursor-pointer select-none"><input type="checkbox" id="rcvNoIsbn" onchange="rcvNone('rcvIsbn', this.checked)"> No ISBN</label>
                             </div>
                         </div>
                         <div class="grid grid-cols-2 gap-3">
                             <div>
                                 <label for="rcvYear" class="field-label">Publication year</label>
                                 <input type="number" id="rcvYear" class="field-input" placeholder="2024" min="1450" max="2100">
+                                <label class="inline-flex items-center gap-1.5 text-[11px] text-slate-400 mt-1 cursor-pointer select-none"><input type="checkbox" id="rcvYearUnknown" onchange="rcvNone('rcvYear', this.checked)"> Year unknown</label>
                             </div>
                             <div>
                                 <label for="rcvGenre" class="field-label">Genre</label>
@@ -614,7 +616,7 @@
                     </div>
                     <div>
                         <label for="rcvPrice" class="field-label">Price per copy (₱)</label>
-                        <input type="number" id="rcvPrice" class="field-input" min="0" step="0.01" placeholder="Optional — charged if a copy is lost">
+                        <input type="number" id="rcvPrice" class="field-input" min="0" step="0.01" placeholder="Charged if a copy is lost; needed for a new title">
                     </div>
 
                     <p id="rcvItemError" class="hidden text-[11px] text-rose-400 font-semibold"></p>
@@ -936,6 +938,14 @@
                 note: document.getElementById('rcvGenreNote'),
             }) : null;
 
+        // A box ticked "none" is cleared and locked.
+        function rcvNone(id, on) {
+            const el = document.getElementById(id);
+            if (on) el.value = '';
+            el.disabled = on;
+            el.classList.toggle('opacity-50', on);
+        }
+
         function addIntakeItem() {
             const sel = document.getElementById('rcvBook');
             const bookId = sel.value;
@@ -961,6 +971,16 @@
                 const genreBad = rcvGenrePicker ? rcvGenrePicker.problem() : '';
                 if (genreBad) { rcvItemError(genreBad); document.getElementById('rcvGenre').focus(); return; }
                 const isbnText = document.getElementById('rcvIsbn').value.trim();
+                // A new title is complete: the ISBN and year, or their tick, and its price.
+                const noIsbn = document.getElementById('rcvNoIsbn').checked;
+                const yearUnknown = document.getElementById('rcvYearUnknown').checked;
+                if (!isbnText && !noIsbn) { rcvItemError('Type the ISBN, or tick "No ISBN".'); return; }
+                if (!document.getElementById('rcvYear').value.trim() && !yearUnknown) {
+                    rcvItemError('Type the publication year, or tick "Year unknown".'); return;
+                }
+                if (!priceText) {
+                    rcvItemError('Type the price of a new title. It is what a patron pays if a copy is lost.'); return;
+                }
                 const isbnBad = isbnText && isbnProblem(isbnText);
                 if (isbnBad) { rcvItemError(isbnBad); return; }
                 const yearText = document.getElementById('rcvYear').value.trim();
@@ -973,6 +993,8 @@
                 item.isbn = document.getElementById('rcvIsbn').value.trim();
                 item.publication_year = document.getElementById('rcvYear').value.trim();
                 item.genre = document.getElementById('rcvGenre').value.trim();
+                item.isbn_none = noIsbn;
+                item.year_unknown = yearUnknown;
                 item.new_genre = !!(rcvGenrePicker && rcvGenrePicker.isNew());
                 item.label = title;
                 item.sub = [item.author, item.isbn].filter(Boolean).join(' · ') || 'New to the catalogue';
@@ -995,6 +1017,9 @@
             // Back to Good, so one damaged title does not mark the next one damaged too.
             document.getElementById('rcvCondition').value = 'Good';
             if (rcvGenrePicker) rcvGenrePicker.reset();
+            ['rcvNoIsbn', 'rcvYearUnknown'].forEach(function (id) { document.getElementById(id).checked = false; });
+            rcvNone('rcvIsbn', false);
+            rcvNone('rcvYear', false);
             onPickCatalogued();
         }
 

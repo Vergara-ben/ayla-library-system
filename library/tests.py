@@ -62,29 +62,45 @@ def _signed_in(user):
     return c
 
 
+# What every new title needs, and what a sheet made for another test is given when it has none.
+_SHEET_DEFAULTS = [
+    ('Genre', ('genre', 'genr', 'category'), 'Fiction'),
+    ('ISBN', ('isbn', 'isbn13', 'isbn10', 'barcode', 'accessionnumber'), 'none'),
+    ('Publication Year', ('publicationyear', 'yearpublished', 'yearpublish', 'year', 'copyright'), 'unknown'),
+    ('Price', ('price', 'cost', 'value', 'replacementcost'), '100'),
+]
+
+
 def _with_genre(rows):
-    """Sheets made for other tests, given the genre every new title now needs."""
+    """Sheets made for other tests, completed with what every new title now needs:
+    a genre, an ISBN or "none", a year or "unknown", and a price."""
+    import re as _re
     rows = [list(row) for row in rows]
     if not rows:
         return rows
-    names = [str(h or '').strip().lower() for h in rows[0]]
-    col = next((i for i, n in enumerate(names) if n in ('genre', 'category', 'subject')), None)
-    if col is None:
-        rows[0].append('Genre')
-        col = len(rows[0]) - 1
-    for row in rows[1:]:
-        if not any(v not in (None, '') for v in row):
-            continue
-        row.extend([None] * (col + 1 - len(row)))
-        if row[col] in (None, ''):
-            row[col] = 'Fiction'
+    for header, aliases, default in _SHEET_DEFAULTS:
+        names = [_re.sub(r'[^a-z0-9]', '', str(h or '').lower()) for h in rows[0]]
+        col = next((i for i, n in enumerate(names) if n in aliases), None)
+        if col is None:
+            rows[0].append(header)
+            col = len(rows[0]) - 1
+        for row in rows[1:]:
+            if not any(v not in (None, '') for v in row):
+                continue
+            row.extend([None] * (col + 1 - len(row)))
+            if row[col] in (None, ''):
+                row[col] = default
     return rows
 
 
 def _with_genre_items(items):
-    """Receiving lines for a new title, given a genre the same way."""
-    return [item if item.get('book_id') else dict({'genre': 'Fiction', 'new_genre': True}, **item)
-            for item in items]
+    """Receiving lines for a new title, completed the same way."""
+    defaults = {'genre': 'Fiction', 'new_genre': True, 'isbn_none': True, 'year_unknown': True, 'price': '100'}
+    return [item if item.get('book_id') else dict(defaults, **item) for item in items]
+
+
+# Add Book's fields a test about something else does not care about.
+COMPLETE_BOOK = {'no_isbn': '1', 'year_unknown': '1', 'price': '100'}
 
 
 class PagesRenderTests(TestCase):
@@ -1968,8 +1984,8 @@ class QRLabelSheetTests(TestCase):
 
         wb = openpyxl.Workbook()
         ws = wb.active
-        ws.append(['Title', 'Author', 'Quantity', 'Genre'])
-        ws.append(['Mga Ibong Mandaragit', 'Amado V. Hernandez', 2, 'Fiction'])
+        ws.append(['Title', 'Author', 'Quantity', 'Genre', 'ISBN', 'Publication Year', 'Price'])
+        ws.append(['Mga Ibong Mandaragit', 'Amado V. Hernandez', 2, 'Fiction', 'none', 1969, 200])
         buf = BytesIO()
         wb.save(buf)
 
@@ -6215,9 +6231,9 @@ class WrittenLocationReusesBoardsTests(TestCase):
         import openpyxl
         from django.core.files.uploadedfile import SimpleUploadedFile
         wb = openpyxl.Workbook()
-        wb.active.append(['Title', 'Author', 'Genre', 'Location'])
+        wb.active.append(['Title', 'Author', 'Genre', 'Location', 'ISBN', 'Publication Year', 'Price'])
         wb.active.append(['A Book', 'An Author', 'EDUCATION',
-                          'Shelf C Column 1 Level 3'])
+                          'Shelf C Column 1 Level 3', 'none', 'unknown', 100])
         buf = io.BytesIO()
         wb.save(buf)
         upload = SimpleUploadedFile(
@@ -7895,7 +7911,8 @@ class BookPriceTests(TestCase):
         self.client.post('/admin-portal/inventory/receive/', {
             'source': 'Purchase', 'supplier': 'Shop', 'items': json.dumps([
                 {'title': 'Ibong Adarna', 'author': 'Anonymous', 'quantity': 2,
-                 'condition': 'Good', 'price': '180', 'genre': 'Epic', 'new_genre': True}])})
+                 'condition': 'Good', 'price': '180', 'genre': 'Epic', 'new_genre': True,
+                 'isbn_none': True, 'year_unknown': True}])})
         prices = list(Book.objects.filter(title='Ibong Adarna').values_list('price', flat=True))
         self.assertEqual(prices, [Decimal('180.00'), Decimal('180.00')])
 
@@ -8713,7 +8730,8 @@ class SpreadsheetImportTests(TestCase):
         from django.core.files.uploadedfile import SimpleUploadedFile
         for url, target, values in (
                 ('/admin-portal/download-book-template/', '/admin-portal/import-books/',
-                 {'Title': 'Emma', 'Author': 'Austen, Jane', 'ISBN': '0385262787', 'Genre': 'Fiction'}),
+                 {'Title': 'Emma', 'Author': 'Austen, Jane', 'ISBN': '0385262787', 'Genre': 'Fiction',
+                  'Publication Year': 1996, 'Price': 300}),
                 ('/admin-portal/download-patron-template/', '/admin-portal/import-patrons/',
                  {'first_name': 'Ana', 'last_name': 'Cruz', 'email': 'ana.cruz@example.invalid',
                   'contact_number': '09171234567'})):
@@ -8935,8 +8953,8 @@ class SpreadsheetImportTests(TestCase):
         from django.core.files.uploadedfile import SimpleUploadedFile
         import openpyxl
         wb = openpyxl.Workbook()
-        wb.active.append(['Title', 'Author', 'Location', 'Genre'])
-        wb.active.append(['Atlas', 'Grolier', 'Shelf A Level 9', 'Reference'])
+        wb.active.append(['Title', 'Author', 'Location', 'Genre', 'ISBN', 'Publication Year', 'Price'])
+        wb.active.append(['Atlas', 'Grolier', 'Shelf A Level 9', 'Reference', 'none', 'unknown', 500])
         buf = io.BytesIO()
         wb.save(buf)
         upload = SimpleUploadedFile('b.xlsx', buf.getvalue())
@@ -8983,7 +9001,7 @@ class OneCopyPerBookTests(TestCase):
         return StockMovement.objects.filter(**kw)
 
     def _add_book(self, title='Noli Me Tangere', **extra):
-        data = {'title': title, 'author': 'Rizal, Jose', 'genre': 'Fiction', 'new_genre': '1'}
+        data = dict(COMPLETE_BOOK, title=title, author='Rizal, Jose', genre='Fiction', new_genre='1')
         data.update(extra)
         self.client.post('/admin-portal/add-book/', data)
         return Book.objects.filter(title=title).order_by('-book_id').first()
@@ -9016,8 +9034,8 @@ class OneCopyPerBookTests(TestCase):
         import openpyxl
         from django.core.files.uploadedfile import SimpleUploadedFile
         wb = openpyxl.Workbook()
-        wb.active.append(['Title', 'Author', 'Quantity', 'Genre'])
-        wb.active.append(['Florante at Laura', 'Balagtas', 3, 'Fiction'])
+        wb.active.append(['Title', 'Author', 'Quantity', 'Genre', 'ISBN', 'Publication Year', 'Price'])
+        wb.active.append(['Florante at Laura', 'Balagtas', 3, 'Fiction', 'none', 'unknown', 150])
         buf = io.BytesIO()
         wb.save(buf)
         up = SimpleUploadedFile(

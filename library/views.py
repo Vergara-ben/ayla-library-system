@@ -1975,6 +1975,16 @@ def _catalogue_entry(post, exclude_ids=(), editing=False):
     if 'condition' in post:
         values['condition'] = take('condition', clean_condition(post.get('condition')))
     values['copies'] = take('copies', clean_copies(post.get('copies')))
+    # No ISBN and no year are allowed only when ticked; the price is always needed.
+    from .catalogue import missing_details
+    values['isbn_none'] = post.get('no_isbn') == '1' and not values['ISBN']
+    values['year_unknown'] = post.get('year_unknown') == '1' and values['publication_year'] is None
+    flagged = {field for field, _problem in problems}
+    for field, problem in missing_details(values['ISBN'], values['isbn_none'], values['publication_year'],
+                                          values['year_unknown'], values['price']):
+        # An edit that does not send a field leaves it as it is.
+        if field not in flagged and (not editing or field in post):
+            problems.append((field, problem))
     call_number = (post.get('call_number') or '').strip() or None
     if call_number_error(call_number):
         problems.append(('call_number', call_number_error(call_number)))
@@ -2033,6 +2043,8 @@ def admin_add_book(request):
                     publication_year=values['publication_year'],
                     cover_img_url=cover_img_url or None,
                     price=values['price'],
+                    isbn_none=values['isbn_none'],
+                    year_unknown=values['year_unknown'],
                     qr_code=str(uuid4()),
                 )
                 first = first or book
@@ -2847,6 +2859,8 @@ def admin_edit_book(request, book_id):
         'shelf_level_id': book.shelf_level.shelf_level_id if book.shelf_level else '',
         'shelf_slot': book.shelf_slot or '',
         'condition': book.condition or 'Good',
+        'isbn_none': book.isbn_none,
+        'year_unknown': book.year_unknown,
         'subject': book.subject or '',
         'material_type': book.material_type or 'Book',
         'call_number': book.call_number or '',
@@ -2878,6 +2892,10 @@ def admin_edit_book(request, book_id):
             book.title = title
             book.author = author
             book.ISBN = isbn or None
+            if 'ISBN' in request.POST:
+                book.isbn_none = values['isbn_none']
+            if 'publication_year' in request.POST:
+                book.year_unknown = values['year_unknown']
             book.publication_year = values['publication_year']
             book.genre = genre
             book.cover_img_url = cover_img_url if cover_img_url else None
@@ -4705,8 +4723,8 @@ def download_book_template(request):
         ('Title', True, 'The title as printed on the book.', 'Pride and Prejudice'),
         ('Author', True, 'Surname, First or First Surname. Several authors can share one cell.',
          'Austen, Jane'),
-        ('Publication Year', False, 'Four digits.', 1963),
-        ('ISBN', False, 'The ISBN or accession number. Leave blank if there is none.', ''),
+        ('Publication Year', True, 'Four digits, or "unknown" if the book does not say.', 1963),
+        ('ISBN', True, 'The ISBN or accession number, or "none" if the book has neither.', 'none'),
         ('Genre', True, "One of the library's genres, e.g. Fiction or Science. Other wording, like Legal "
                         "Thriller, is matched to the nearest genre and kept as the subject.", 'Fiction'),
         ('Subject', False, 'Optional finer detail, e.g. Legal Thriller. It can be searched.', ''),
@@ -4715,8 +4733,7 @@ def download_book_template(request):
         ('Code Label', False, 'The call number on the spine. Leave blank to have it worked out.',
          'FIC A31p 1963'),
         ('Quantity', False, 'How many copies, 1 to 50. Blank means 1.', 1),
-        ('Price', False, 'What the book is worth in pesos, charged if it is lost. Blank means '
-                         'not set yet.', 350),
+        ('Price', True, 'What the book is worth in pesos, charged if it is lost.', 350),
         ('Location', False, 'The shelf board, long or short: Shelf A Column 1 Level 2, A C1 L2, '
                             'Table 1 Top. A board that does not exist yet is listed before '
                             'anything is saved.', 'Shelf A Column 1 Level 2'),
@@ -4807,6 +4824,11 @@ def _cell_text(value):
         value = int(value)
     text = str(value).strip()
     return '' if text.lower() in ('n/a', 'na', 'none', '-', '--') else text
+
+
+def _said_none(value, words):
+    """A cell that says on purpose there is nothing to write, like "none" or "N/A"."""
+    return value is not None and str(value).strip().lower() in words
 
 
 def _sheet_date(value):
@@ -5375,6 +5397,10 @@ def _import_books_body(request):
             idx = columns.get(name)
             return clean(row[idx]) if idx is not None and idx < len(row) else ''
 
+        def raw_cell(row, name):
+            idx = columns.get(name)
+            return str(row[idx]).strip() if idx is not None and idx < len(row) and row[idx] is not None else ''
+
         imported = skipped_dup = skipped_blank = copies_created = 0
         # Rows that break the cataloguing rules are not imported; each is named with its reason.
         from .catalogue import (clean_author, clean_copies, clean_genre, clean_isbn, clean_price,
@@ -5448,7 +5474,11 @@ def _import_books_body(request):
 
             title = rule(clean_title(title)) or title
             author = rule(clean_author(author)) or author
-            isbn = rule(clean_isbn(field(row, 'ISBN'), title)) or ''
+            from .catalogue import NO_ISBN_WORDS, UNKNOWN_YEAR_WORDS, missing_details
+            raw_isbn = field(row, 'ISBN')
+            # "none" or "N/A" in the cell is said on purpose, unlike an empty one.
+            isbn_none = not raw_isbn and raw_cell(row, 'ISBN').lower() in NO_ISBN_WORDS
+            isbn = '' if isbn_none else (rule(clean_isbn(raw_isbn, title)) or '')
             raw_genre = field(row, 'genre')
             subject = tidy(field(row, 'subject')) or None
             genre, genre_problem = clean_genre(raw_genre, allow_new=False, known=genres)
@@ -5470,8 +5500,14 @@ def _import_books_body(request):
             elif genre.lower() not in genres:
                 genres[genre.lower()] = genre
                 new_genres.add(genre)
-            publication_year = rule(clean_year(field(row, 'publication_year')))
+            raw_year = field(row, 'publication_year')
+            year_unknown = raw_year.strip().lower() in UNKNOWN_YEAR_WORDS or (
+                not raw_year and raw_cell(row, 'publication_year').lower() in UNKNOWN_YEAR_WORDS)
+            publication_year = None if year_unknown else rule(clean_year(raw_year))
             price = rule(clean_price(field(row, 'price')))
+            if not row_problems:
+                row_problems.extend(problem for _field, problem in missing_details(
+                    isbn, isbn_none, publication_year, year_unknown, price, sheet=True))
             raw_condition = field(row, 'condition')
             condition = parse_condition(raw_condition) if raw_condition else 'Good'
             if condition is None:
@@ -5553,6 +5589,8 @@ def _import_books_body(request):
                     ISBN=isbn or None,
                     genre=genre,
                     subject=subject,
+                    isbn_none=isbn_none,
+                    year_unknown=year_unknown,
                     material_type=material_type,
                     condition=condition,
                     # Blank is the normal case: Book.save() derives it.
@@ -5798,11 +5836,13 @@ def download_donation_template(request):
          '2026-09-01'),
         ('title', True, 'The title as printed on the book.', 'Noli Me Tangere'),
         ('author', False, 'Surname, First or First Surname.', 'Rizal, Jose'),
-        ('ISBN', False, 'Used to recognise a title the library already has.', ''),
+        ('ISBN', False, 'Used to recognise a title the library already has. For a new title, the ISBN or '
+                        '"none".', 'none'),
         ('genre', False, "Needed for a title the library does not have yet: one of its genres. Other wording "
                          "is matched to the nearest genre and kept as the subject.", 'Philippine Literature'),
         ('subject', False, 'Optional finer detail, e.g. Classic Novel. It can be searched.', ''),
-        ('publication_year', False, 'Four digits.', 1961),
+        ('publication_year', False, 'For a new title: four digits, or "unknown".', 1961),
+        ('price', False, 'For a new title: what it is worth in pesos, charged if it is lost.', 250),
         ('material_type', False, 'One of: %s. Blank means Book.' % materials, 'Book'),
         ('quantity', False, 'How many copies of this title, 1 to 100. Blank means 1.', 2),
         ('condition', False, 'How the copies arrived: Good, Minor Damage, Damaged or Beyond Repair. '
@@ -5825,6 +5865,7 @@ DONATION_IMPORT_COLUMNS = {
     'year': 'publication_year',
     'materialtype': 'material_type', 'material': 'material_type', 'format': 'material_type',
     'quantity': 'quantity', 'qty': 'quantity', 'copies': 'quantity',
+    'price': 'price', 'cost': 'price', 'value': 'price',
     'condition': 'condition', 'conditiononarrival': 'condition', 'state': 'condition',
 }
 
@@ -5848,7 +5889,7 @@ def _import_donation_rows(request):
     problems = []
     allow_new_genres = request.POST.get('new_genres') in ('1', 'true', 'True', 'on')
     new_genres = set()
-    from .catalogue import clean_genre, known_genres, matched_genre
+    from .catalogue import NO_ISBN_WORDS, UNKNOWN_YEAR_WORDS, clean_genre, known_genres, matched_genre
     genres = known_genres()
     # Rows this sheet has already received, so a title listed twice is not a repeat.
     received_now = set()
@@ -5917,6 +5958,11 @@ def _import_donation_rows(request):
             'isbn': _cell_text(values.get('isbn')),
             'genre': genre,
             'subject': subject,
+            'price': _cell_text(values.get('price')),
+            # "none" or "N/A" in these cells is said on purpose, unlike an empty one.
+            'isbn_none': _said_none(values.get('isbn'), NO_ISBN_WORDS),
+            'year_unknown': _said_none(values.get('publication_year'), UNKNOWN_YEAR_WORDS),
+            'from_sheet': True,
             'material_type': material_type,
             'publication_year': _cell_text(values.get('publication_year')),
         }
@@ -12032,7 +12078,10 @@ def _resolve_intake_book(item, source):
 
     title = rule(clean_title(item.get('title')))
     author = rule(clean_author(item.get('author')))
-    isbn = rule(clean_isbn(item.get('isbn'), title))
+    from .catalogue import NO_ISBN_WORDS
+    # "none" in a sheet says the book has no ISBN; it is not a number to check.
+    isbn = ('' if str(item.get('isbn') or '').strip().lower() in NO_ISBN_WORDS
+            else rule(clean_isbn(item.get('isbn'), title)))
 
     existing = None
     if isbn:
@@ -12044,7 +12093,7 @@ def _resolve_intake_book(item, source):
     if existing is not None:
         return existing, False
 
-    # Only a title new to the catalogue needs its genre and year.
+    # Only a title new to the catalogue needs its genre, year and the rest.
     from .catalogue import matched_genre, tidy
     subject = tidy(item.get('subject')) or None
     genre, problem = clean_genre(item.get('genre'), allow_new=False)
@@ -12060,7 +12109,15 @@ def _resolve_intake_book(item, source):
         # Named, so an import can offer to add the sheet's new genres in one go.
         error.new_genre = ' '.join(str(item.get('genre') or '').split())
         raise error
-    year = rule(clean_year(item.get('publication_year')))
+    from .catalogue import NO_ISBN_WORDS, UNKNOWN_YEAR_WORDS, clean_price, missing_details
+    raw_year = str(item.get('publication_year') or '').strip()
+    year_unknown = bool(item.get('year_unknown')) or raw_year.lower() in UNKNOWN_YEAR_WORDS
+    year = None if year_unknown else rule(clean_year(raw_year))
+    isbn_none = bool(item.get('isbn_none')) or str(item.get('isbn') or '').strip().lower() in NO_ISBN_WORDS
+    price = rule(clean_price(item.get('price')))
+    for _field, problem in missing_details(isbn, isbn_none, year, year_unknown, price,
+                                           sheet=bool(item.get('from_sheet'))):
+        raise ValueError('"%s": %s' % (named, problem))
     material_type = (item.get('material_type') or 'Book').strip()
     if material_type not in {c[0] for c in Book.MATERIAL_TYPE_CHOICES}:
         material_type = 'Book'
@@ -12069,6 +12126,9 @@ def _resolve_intake_book(item, source):
         title=title,
         author=author,
         ISBN=isbn or None,
+        isbn_none=isbn_none,
+        year_unknown=year_unknown,
+        price=price,
         genre=genre or None,
         subject=subject,
         material_type=material_type,
@@ -12104,6 +12164,9 @@ def _intake_book_for_copy(book, reuse, source, condition):
         publication_year=book.publication_year,
         genre=book.genre,
         subject=book.subject,
+        isbn_none=book.isbn_none,
+        year_unknown=book.year_unknown,
+        price=book.price,
         material_type=book.material_type,
         call_number=book.call_number,
         cover_img_url=book.cover_img_url,
