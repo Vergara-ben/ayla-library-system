@@ -1244,11 +1244,16 @@
             status.textContent = 'You are not signed in at the moment.';
         }
 
-        // Both buttons always work.
+        // Both buttons work, except that a membership on hold can only leave.
         const entry = document.getElementById('wayEntryBtn');
         const exit = document.getElementById('wayExitBtn');
         entry.classList.toggle('opacity-50', r.suggest === 'exit');
         exit.classList.toggle('opacity-50', r.suggest === 'entry');
+        entry.classList.toggle('hidden', !!r.exit_only);
+        if (r.exit_only) {
+            status.innerHTML += ' Your membership is on hold, so you can sign out here; '
+                              + 'please see the librarian before your next visit.';
+        }
 
         // Purpose belongs to an arrival only.
         document.getElementById('wayPurposeWrap').classList.toggle('hidden', r.inside);
@@ -1417,8 +1422,10 @@
 
         document.getElementById('resultMessage').textContent = r.message || '';
 
+        // Overdue books or an unpaid charge are said here; they never stop anyone coming in.
         const note = document.getElementById('resultNote');
-        if (r.note) { note.textContent = r.note; note.classList.remove('hidden'); }
+        const noteText = [r.note, r.notice].filter(Boolean).join(' ');
+        if (noteText) { note.textContent = noteText; note.classList.remove('hidden'); }
         else { note.classList.add('hidden'); }
 
         const modal = document.getElementById('resultModal');

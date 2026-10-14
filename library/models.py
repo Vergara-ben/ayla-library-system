@@ -1331,6 +1331,8 @@ class PatronLog(Archivable):
     exit_time = models.DateTimeField(blank=True, null=True)
     # People leave without logging out.
     auto_closed = models.BooleanField(default=False)
+    # Why a member whose account is on hold was let in, and by whom.
+    entry_note = models.CharField(max_length=255, blank=True, null=True)
 
     class Meta:
         db_table = 'Patron_Logs'

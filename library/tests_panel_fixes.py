@@ -1828,3 +1828,65 @@ class CompleteBookRecordTests(TestCase):
         self.assertEqual(Book.objects.filter(title='Noli Me Tangere').count(), 2)
         self.assertFalse(Book.objects.filter(title='Doctrina Christiana').exists())
         self.assertEqual(Book.objects.get(title='Urbana at Feliza').price, Decimal('80.00'))
+
+
+class DeskAccountIssueTests(TestCase):
+    """A membership on hold cannot come in by any route, can always leave, and staff can let it in with a reason."""
+
+    def setUp(self):
+        from .models import PatronLog
+        self.PatronLog = PatronLog
+        self.held = Patron.objects.create(first_name='Ana', last_name='Cruz', fullname='Ana Cruz',
+                                          email='ana.held@example.invalid', contact_number='09171234567',
+                                          account_status='Suspended', qr_code='card-ana')
+        self.staff_user = _staff(role='Admin', modules='logs')
+        self.staff = _client(admin_id=self.staff_user.admin_id, admin_role='Admin')
+        self.kiosk = _client(admin_id=self.staff_user.admin_id, admin_role='Admin', desk_mode=True)
+
+    def test_typing_the_name_no_longer_makes_a_new_visitor(self):
+        before = Patron.objects.count()
+        for url, data in (('/desk/sign/', {'name': 'Ana Cruz', 'contact': ''}),
+                          ('/desk/visitor/', {'name': 'Ana Cruz', 'contact': '', 'purpose': 'Study'})):
+            r = self.kiosk.post(url, data).json()
+            self.assertFalse(r['success'], url)
+            self.assertIn('on hold', r['error'])
+        self.assertEqual(Patron.objects.count(), before)
+        self.assertFalse(self.PatronLog.objects.exists())
+
+    def test_the_kiosk_refuses_entry_by_card_but_lets_them_leave(self):
+        self.assertFalse(self.kiosk.post('/desk/scan/', {'code': 'card-ana'}).json()['success'])
+        self.PatronLog.objects.create(patron=self.held, entry_time=timezone.now() - timedelta(hours=2))
+        r = self.kiosk.post('/desk/scan/', {'code': 'card-ana'}).json()
+        self.assertEqual((r['success'], r['action']), (True, 'exit'))
+        self.PatronLog.objects.create(patron=self.held, entry_time=timezone.now() - timedelta(hours=1))
+        who = self.kiosk.post('/desk/identify/', {'value': 'ana.held@example.invalid'}).json()
+        self.assertTrue(who['exit_only'])
+        self.assertTrue(self.kiosk.post('/desk/visit/', {'direction': 'exit'}).json()['success'])
+
+    def test_staff_can_let_them_in_only_with_a_reason_which_is_kept(self):
+        from .models import SystemLog
+        r = self.staff.post('/desk/scan/', {'code': 'card-ana'}).json()
+        self.assertTrue(r['needs_override'])
+        self.assertFalse(self.PatronLog.objects.exists())
+        # The kiosk never offers it, reason or not.
+        r = self.kiosk.post('/desk/scan/', {'code': 'card-ana', 'override_reason': 'Returning books'}).json()
+        self.assertFalse(r['success'])
+        self.assertNotIn('needs_override', r)
+        r = self.staff.post('/desk/sign/', {'name': 'Ana Cruz', 'contact': '',
+                                            'override_reason': 'Returning two books'}).json()
+        self.assertTrue(r['success'], r)
+        note = self.PatronLog.objects.get().entry_note
+        self.assertIn('Returning two books', note)
+        self.assertIn('suspended', note)
+        self.assertTrue(SystemLog.objects.filter(detail__contains='Returning two books').exists())
+
+    def test_overdue_books_and_charges_are_said_at_the_door_without_stopping_anyone(self):
+        from .models import Transaction
+        member = Patron.objects.create(first_name='Ben', last_name='Reyes', fullname='Ben Reyes',
+                                       account_status='Active', qr_code='card-ben')
+        book = Book.objects.create(title='Noli', author='Rizal', status='Borrowed', qr_code='q-noli')
+        Transaction.objects.create(book=book, patron=member, transaction_type='Borrow',
+                                   due_date=timezone.localdate() - timedelta(days=3))
+        r = self.kiosk.post('/desk/scan/', {'code': 'card-ben'}).json()
+        self.assertEqual(r['action'], 'entry')
+        self.assertIn('1 overdue book', r['notice'])

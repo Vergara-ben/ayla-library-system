@@ -69,7 +69,8 @@ def _find_patron(name, contact):
     digits = _digits(contact)
     is_email = '@' in contact
 
-    people = list(Patron.objects.exclude(account_status__in=('Suspended', 'Inactive'))
+    # Held accounts are found too: refusing them is the caller's job, not pretending they are new.
+    people = list(Patron.objects.all()
                   .only('patron_id', 'fullname', 'first_name', 'middle_name',
                         'last_name', 'email', 'contact_number',
                         'account_status', 'patron_type'))
@@ -531,7 +532,7 @@ def _open_visit_for(patron):
             .first())
 
 
-def _sign_in(patron, purpose='', school=''):
+def _sign_in(patron, purpose='', school='', note=None):
     """Record an arrival, and only ever an arrival."""
     returned_from = None
     open_visit = _open_visit_for(patron)
@@ -563,6 +564,7 @@ def _sign_in(patron, purpose='', school=''):
         purpose_of_visit=purpose or None,
         school=school or None,
         entry_time=timezone.now(),
+        entry_note=note,
     )
     at = timezone.localtime(log.entry_time).strftime('%I:%M %p')
     if returned_from:
@@ -572,10 +574,10 @@ def _sign_in(patron, purpose='', school=''):
     else:
         message = 'Welcome, ' + patron.fullname.split(' ')[0] + ' — signed in at ' + at + '.'
     return {'success': True, 'action': 'entry', 'name': patron.fullname,
-            'returned': bool(returned_from), 'message': message}
+            'returned': bool(returned_from), 'message': message, 'notice': _loan_notice(patron)}
 
 
-def _toggle_visit(patron, purpose='', school=''):
+def _toggle_visit(patron, purpose='', school='', note=None):
     """Arrive or leave, whichever the patron is not doing."""
     open_visit = (PatronLog.objects
                   .filter(patron=patron, exit_time__isnull=True)
@@ -605,10 +607,12 @@ def _toggle_visit(patron, purpose='', school=''):
         purpose_of_visit=purpose or None,
         school=school or None,
         entry_time=timezone.now(),
+        entry_note=note,
     )
     return {'success': True, 'action': 'entry', 'name': patron.fullname,
             'message': ('Welcome, ' + patron.fullname.split(' ')[0] + ' — signed in at '
-                        + timezone.localtime(log.entry_time).strftime('%I:%M %p') + '.')}
+                        + timezone.localtime(log.entry_time).strftime('%I:%M %p') + '.'),
+            'notice': _loan_notice(patron)}
 
 
 def remember_desk_viewer(request, patron):
@@ -682,7 +686,10 @@ def desk_sign(request):
         return JsonResponse({'success': False, 'error': error})
 
     if patron is not None:
-        result = _sign_in(patron, purpose, school)
+        held = _held_back(request, patron)
+        if held:
+            return held
+        result = _sign_in(patron, purpose, school, note=_override_note(request, patron))
         result['is_visitor'] = patron.account_status == 'Visitor'
         remember_desk_viewer(request, patron)
         return JsonResponse(result)
@@ -754,11 +761,14 @@ def desk_scan(request):
     if patron is None:
         return JsonResponse({'success': False,
                              'error': 'That card was not recognised. Please see the librarian.'})
-    if patron.account_status in ('Suspended', 'Inactive'):
-        return JsonResponse({'success': False,
-                             'error': 'This account is not active. Please see the librarian.'})
+    # Leaving is never refused; only coming in is.
+    if _open_visit_for(patron) is None:
+        held = _held_back(request, patron)
+        if held:
+            return held
 
-    result = _toggle_visit(patron, (request.POST.get('purpose') or '').strip())
+    result = _toggle_visit(patron, (request.POST.get('purpose') or '').strip(),
+                           note=None if _open_visit_for(patron) else _override_note(request, patron))
     result['is_visitor'] = patron.account_status == 'Visitor'
     if result.get('action') == 'exit':
         forget_desk_viewer(request)      # gone: nothing of theirs stays on screen
@@ -850,6 +860,64 @@ def _account_problem(patron):
     return None
 
 
+def _held_back(request, patron):
+    """None if this person may come in; otherwise the reply that stops them.
+
+    A suspended or closed member is refused at the kiosk. At the staff log page the librarian may let them
+    in, but only by giving the reason, which is kept with the visit."""
+    problem = _account_problem(patron)
+    if not problem:
+        return None
+    if not desk_is_armed(request) and _override_reason(request):
+        return None
+    if not desk_is_armed(request):
+        return JsonResponse({
+            'success': False, 'needs_override': True, 'name': patron.fullname,
+            'status': patron.account_status,
+            'error': ('%s\'s membership is %s. To let them in anyway, give the reason; it is kept with '
+                      'the visit.' % (patron.fullname, 'on hold (suspended)'
+                                      if patron.account_status == 'Suspended' else 'closed')),
+        })
+    return JsonResponse({'success': False, 'error': problem})
+
+
+def _override_reason(request):
+    return ' '.join((request.POST.get('override_reason') or '').split())[:180]
+
+
+def _override_note(request, patron):
+    """What the visit keeps when a held account was let in: who allowed it, and why."""
+    if not _account_problem(patron):
+        return None
+    from .models import User
+    staff = User.objects.filter(admin_id=request.session.get('admin_id')).first()
+    note = 'Let in by %s although the account is %s: %s' % (
+        staff.fullname if staff else 'staff', patron.account_status.lower(), _override_reason(request))
+    log_admin_action(request, 'Update', 'Patron', patron.patron_id, note)
+    return note[:255]
+
+
+def _loan_notice(patron):
+    """Overdue books and unpaid lost-book charges, said at the door without stopping anyone."""
+    from .models import BorrowingRule, Transaction
+    today = timezone.localdate()
+    open_loans = Transaction.objects.filter(patron=patron, transaction_type='Borrow', return_date__isnull=True)
+    overdue = [t for t in open_loans.filter(marked_lost=False, due_date__lt=today)]
+    lost = open_loans.filter(marked_lost=True, fine_amount__gt=0)
+    parts = []
+    if overdue:
+        rule = BorrowingRule.current()
+        so_far = sum(rule.compute_fine(t.due_date, today) for t in overdue)
+        parts.append('%d overdue book%s%s' % (len(overdue), '' if len(overdue) == 1 else 's',
+                                             ' (₱%s in fines so far)' % f'{so_far:,.2f}' if so_far else ''))
+    if lost.exists():
+        owed = sum(t.fine_amount for t in lost)
+        parts.append('₱%s unpaid for a lost book' % f'{owed:,.2f}')
+    if not parts:
+        return ''
+    return 'You have ' + ' and '.join(parts) + '. Please see the desk.'
+
+
 def _identify(value):
     """Find the member behind a card number, an email, or a scanned QR."""
     from .cardnumbers import is_valid, normalise
@@ -898,11 +966,11 @@ def desk_identify(request):
     if error:
         return JsonResponse({'success': False, 'error': error})
 
-    problem = _account_problem(patron)
-    if problem:
-        return JsonResponse({'success': False, 'error': problem})
-
     open_visit = _open_visit_for(patron)
+    # Someone already inside may always leave; a held account may not come in.
+    problem = _account_problem(patron)
+    if problem and open_visit is None:
+        return JsonResponse({'success': False, 'error': problem})
     _remember_pending(request, patron)
 
     inside_since = ''
@@ -918,6 +986,8 @@ def desk_identify(request):
         'inside_since': inside_since,
         # Which button to emphasise.
         'suggest': 'exit' if open_visit is not None else 'entry',
+        # On hold while inside: the only way is out.
+        'exit_only': bool(problem),
         'is_visitor': patron.account_status == 'Visitor',
         'purpose': _last_visit_details(patron)[1],
     })
@@ -939,10 +1009,11 @@ def desk_visit(request):
     if direction not in ('entry', 'exit'):
         return JsonResponse({'success': False, 'error': 'Choose Entry or Exit.'})
 
-    problem = _account_problem(patron)
-    if problem:
-        forget_pending(request)
-        return JsonResponse({'success': False, 'error': problem})
+    if direction == 'entry':
+        held = _held_back(request, patron)
+        if held:
+            forget_pending(request)
+            return held
 
     purpose = (request.POST.get('purpose') or '').strip()
     if purpose == 'Other':
@@ -950,7 +1021,7 @@ def desk_visit(request):
     school = (request.POST.get('school') or '').strip()
 
     if direction == 'entry':
-        result = _sign_in(patron, purpose, school)
+        result = _sign_in(patron, purpose, school, note=_override_note(request, patron))
         result['card'] = patron.card_display
         result['at'] = timezone.localtime(timezone.now()).strftime('%I:%M %p')
         forget_pending(request)
@@ -1021,10 +1092,10 @@ def desk_visitor(request):
         return JsonResponse({'success': False, 'error': error})
 
     if patron is not None:
-        problem = _account_problem(patron)
-        if problem:
-            return JsonResponse({'success': False, 'error': problem})
-        result = _sign_in(patron, purpose, school)
+        held = _held_back(request, patron)
+        if held:
+            return held
+        result = _sign_in(patron, purpose, school, note=_override_note(request, patron))
         result['is_visitor'] = patron.account_status == 'Visitor'
         result['card'] = patron.card_display
         result['at'] = timezone.localtime(timezone.now()).strftime('%I:%M %p')
