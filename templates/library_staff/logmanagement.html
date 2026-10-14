@@ -348,7 +348,7 @@
                                     <td class="py-4 px-6 text-slate-400">{{ log.patron.patron_type|default:"—" }}</td>
                                     <td class="py-4 px-6 text-slate-400">{{ log.school|default:"—" }}</td>
                                     <td class="py-4 px-6 text-slate-400">{{ log.purpose_of_visit|default:"—" }}</td>
-                                    <td class="py-4 px-6 text-slate-300 font-medium">{{ log.entry_time|date:"M j, Y" }} · {{ log.entry_time|time:"h:i A" }}</td>
+                                    <td class="py-4 px-6 text-slate-300 font-medium">{{ log.entry_time|date:"M j, Y" }} · {{ log.entry_time|time:"h:i A" }}{% if log.entry_note %}<span class="block text-[9px] font-bold text-amber-500" title="{{ log.entry_note }}">LET IN ON HOLD</span>{% endif %}</td>
                                     <td class="py-4 px-6 text-slate-300 font-medium">{% if log.exit_time %}{{ log.exit_time|date:"M j, Y" }} · {{ log.exit_time|time:"h:i A" }}{% if log.auto_closed %}<span class="block text-[9px] font-bold text-amber-500" title="Nobody signed this visit out. It was closed at the library's closing time, so the exit is an assumption rather than a record.">ASSUMED</span>{% endif %}{% else %}<span class="text-slate-600">—</span>{% endif %}</td>
                                     <td class="py-4 px-6 text-center">
                                         {% if log.exit_time %}
@@ -632,11 +632,34 @@
             const row = document.getElementById('deskMsgRow');
             const box = document.getElementById('deskMsg');
             box.textContent = text;
-            box.className = 'text-xs font-bold ' + (kind === 'error' ? 'text-rose-400' : 'text-emerald-400');
+            box.className = 'text-xs font-bold ' + (kind === 'error' ? 'text-rose-400'
+                                                    : kind === 'notice' ? 'text-amber-400' : 'text-emerald-400');
             row.classList.remove('hidden');
         }
 
         function deskPurposeChanged() { syncPurposeOther('deskPurpose'); }
+
+        // A membership on hold: staff may let the person in, but only by saying why.
+        async function deskWithOverride(url, data) {
+            let r = await deskPost(url, data);
+            if (r.success || !r.needs_override) return r;
+            const reason = await AylaDialog.prompt(r.error, '', {
+                title: 'Membership ' + (r.status === 'Suspended' ? 'on hold' : 'closed'),
+                confirmLabel: 'Let them in' });
+            if (reason === null || reason === undefined) {
+                return { success: false, error: r.name + ' was not signed in.' };
+            }
+            if (!String(reason).trim()) {
+                return { success: false, error: 'A reason is needed to let ' + r.name + ' in.' };
+            }
+            return deskPost(url, Object.assign({}, data, { override_reason: String(reason).trim() }));
+        }
+
+        // What was done, and any overdue books or charge to bring up with them.
+        function deskShowResult(r) {
+            deskShowMessage(r.message + (r.notice ? ' ' + r.notice : ''), r.notice ? 'notice' : 'ok');
+            return r.notice ? 5000 : 1600;
+        }
 
         function deskClearEntryRow() {
             ['deskName', 'deskContact', 'deskSchool', 'deskPurposeOther'].forEach(function (id) {
@@ -653,7 +676,7 @@
             deskBusy = true;
             document.getElementById('deskSignBtn').disabled = true;
             try {
-                const r = await deskPost(DESK_URLS.sign, {
+                const r = await deskWithOverride(DESK_URLS.sign, {
                     name: document.getElementById('deskName').value.trim(),
                     contact: document.getElementById('deskContact').value.trim(),
                     patron_type: document.getElementById('deskType').value,
@@ -662,10 +685,10 @@
                     purpose_other: document.getElementById('deskPurposeOther').value.trim(),
                 });
                 if (!r.success) { deskShowMessage(r.error, 'error'); return; }
-                deskShowMessage(r.message, 'ok');
+                const wait = deskShowResult(r);
                 deskClearEntryRow();
                 // The table is the record, so it has to show what just happened.
-                setTimeout(function () { window.location.reload(); }, 1600);
+                setTimeout(function () { window.location.reload(); }, wait);
             } finally {
                 deskBusy = false;
                 document.getElementById('deskSignBtn').disabled = false;
@@ -710,14 +733,14 @@
             if (!code || deskScanBusy) return;
             deskScanBusy = true;
             try {
-                const r = await deskPost(DESK_URLS.scan, {
+                const r = await deskWithOverride(DESK_URLS.scan, {
                     code: code,
                     purpose: document.getElementById('deskPurpose').value,
                 });
                 deskCloseScan();
-                deskShowMessage(r.success ? r.message : r.error, r.success ? 'ok' : 'error');
+                const wait = r.success ? deskShowResult(r) : (deskShowMessage(r.error, 'error'), 0);
                 // On success the page reloads, so the lock stays on.
-                if (r.success) setTimeout(function () { window.location.reload(); }, 1600);
+                if (r.success) setTimeout(function () { window.location.reload(); }, wait);
                 else deskScanBusy = false;
             } catch (err) {
                 deskScanBusy = false;
