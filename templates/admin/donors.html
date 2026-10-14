@@ -175,12 +175,22 @@
                     <div class="rounded-lg border border-amber-800/60 bg-amber-950/30 px-3 py-2.5 text-[11px] text-amber-200 space-y-2">
                         <p class="font-semibold">Is this someone already registered?</p>
                         <div class="flex flex-wrap gap-1.5">{% for d in similar %}<a href="?d={{ d.donor_id }}" class="px-2 py-1 rounded-md border border-amber-700/60 hover:bg-amber-900/40 font-semibold">Open {{ d.name }}</a>{% endfor %}</div>
-                        <p class="text-amber-300/80">If not, press Register again to save "{{ new_form.name }}" as a new donor.</p>
+                        <p class="text-amber-300/80">If not, press Register again to save "{{ new_form.display }}" as a new donor.</p>
                         <input type="hidden" name="confirm_new" value="1">
                     </div>
                     {% endif %}
-                    <label class="block"><span class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Name</span>
-                        <input name="name" value="{{ new_form.name|default:'' }}" required autofocus class="mt-1 w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200" placeholder="Person, school or organisation"></label>
+                    <div class="space-y-3" data-donor-name>
+                        <div class="grid grid-cols-3 gap-2" data-person>
+                            <label class="block"><span class="text-[10px] uppercase font-bold tracking-wider text-slate-500">First name</span>
+                                <input name="first_name" value="{{ new_form.first_name|default:'' }}" autofocus class="mt-1 w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200"></label>
+                            <label class="block"><span class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Middle name</span>
+                                <input name="middle_name" value="{{ new_form.middle_name|default:'' }}" placeholder="Optional" class="mt-1 w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200"></label>
+                            <label class="block"><span class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Surname</span>
+                                <input name="last_name" value="{{ new_form.last_name|default:'' }}" class="mt-1 w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200"></label>
+                        </div>
+                        <label class="block hidden" data-org><span class="text-[10px] uppercase font-bold tracking-wider text-slate-500" data-org-label>Name</span>
+                            <input name="name" value="{{ new_form.name|default:'' }}" class="mt-1 w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200" placeholder="School, office or organisation"></label>
+                    </div>
                     <div class="grid grid-cols-2 gap-3">
                         <label class="block"><span class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Type</span>
                             <select name="donor_type" class="mt-1 w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200">
@@ -195,7 +205,7 @@
                         <input name="address" value="{{ new_form.address|default:'' }}" class="mt-1 w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200"></label>
                     <label class="block"><span class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Notes</span>
                         <input name="notes" value="{{ new_form.notes|default:'' }}" placeholder="e.g. gives school books every quarter" class="mt-1 w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200"></label>
-                    <p class="text-[10px] text-slate-500">Only the name is required. Contact details let the library thank them and send the acknowledgement.</p>
+                    <p class="text-[10px] text-slate-500">Only the name is required: first name and surname for a person. Contact details let the library thank them and send the acknowledgement.</p>
                     <button type="submit" class="w-full bg-cyan-700 hover:bg-cyan-600 text-white font-bold py-2 rounded-lg"><i class="fa-solid fa-user-plus text-[10px]"></i> Register</button>
                 </form>
                 {% elif selected %}
@@ -204,8 +214,18 @@
                         {% csrf_token %}
                         <input type="hidden" name="donor_id" value="{{ selected.donor_id }}">
                         <p class="text-sm font-bold text-slate-200">{{ selected.name }}</p>
-                        <label class="block"><span class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Name</span>
-                            <input name="name" value="{{ selected.name }}" class="mt-1 w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200" required></label>
+                        <div class="space-y-3" data-donor-name>
+                            <div class="grid grid-cols-3 gap-2" data-person>
+                                <label class="block"><span class="text-[10px] uppercase font-bold tracking-wider text-slate-500">First name</span>
+                                    <input name="first_name" value="{{ selected.first_name|default:'' }}" class="mt-1 w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200"></label>
+                                <label class="block"><span class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Middle name</span>
+                                    <input name="middle_name" value="{{ selected.middle_name|default:'' }}" placeholder="Optional" class="mt-1 w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200"></label>
+                                <label class="block"><span class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Surname</span>
+                                    <input name="last_name" value="{{ selected.last_name|default:'' }}" class="mt-1 w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200"></label>
+                            </div>
+                            <label class="block hidden" data-org><span class="text-[10px] uppercase font-bold tracking-wider text-slate-500" data-org-label>Name</span>
+                                <input name="name" value="{{ selected.name|default:'' }}" class="mt-1 w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200" placeholder="School, office or organisation"></label>
+                        </div>
                         <div class="grid grid-cols-2 gap-3">
                             <label class="block"><span class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Type</span>
                                 <select name="donor_type" class="mt-1 w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200">
@@ -252,6 +272,26 @@
 
     <script>
         function toggleSidebar() { document.querySelector('aside').classList.toggle('open'); }
+
+        // A person is named in three boxes; a school, office or organisation in one.
+        document.querySelectorAll('[data-donor-name]').forEach(function (box) {
+            const form = box.closest('form');
+            const kind = form.querySelector('select[name="donor_type"]');
+            const person = box.querySelector('[data-person]'), org = box.querySelector('[data-org]');
+            function show() {
+                const isPerson = kind.value === 'Individual';
+                person.classList.toggle('hidden', !isPerson);
+                org.classList.toggle('hidden', isPerson);
+                person.querySelectorAll('input').forEach(function (i) { i.disabled = !isPerson; });
+                org.querySelector('input').disabled = isPerson;
+                form.querySelector('[name="first_name"]').required = isPerson;
+                form.querySelector('[name="last_name"]').required = isPerson;
+                org.querySelector('input').required = !isPerson;
+                box.querySelector('[data-org-label]').textContent = kind.options[kind.selectedIndex].text + ' name';
+            }
+            kind.addEventListener('change', show);
+            show();
+        });
     </script>
 
     <script src="{% static 'js/admin-enhance.js' %}" defer></script>

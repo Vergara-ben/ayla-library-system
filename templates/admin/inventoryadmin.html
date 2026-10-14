@@ -62,6 +62,7 @@
     <script src="{% static 'js/genre-picker.js' %}"></script>
     <script src="{% static 'js/donor-intake.js' %}"></script>
     {{ donor_names|json_script:'donorNamesData' }}
+    {{ donor_options|json_script:'donorOptionsData' }}
 </head>
 <body class="flex h-screen overflow-hidden">
 <a href="#main-content" class="skip-link">Skip to main content</a>
@@ -500,22 +501,36 @@
                 <div id="donationFields" class="hidden space-y-4">
                     <div class="grid grid-cols-2 gap-4">
                         <div>
-                            <label for="rcvDonor" class="field-label">Donor name</label>
-                            <input type="text" name="donor_name" id="rcvDonor" class="field-input" placeholder="Past donor or new name">
+                            <label for="rcvDonorType" class="field-label">Donor type</label>
+                            <select id="rcvDonorType" name="donor_type" class="field-input">{% for value, label in donor_types %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select>
                         </div>
                         <div>
                             <label for="f_donated_date" class="field-label">Date donated</label>
                             <input id="f_donated_date" type="date" name="donated_date" class="field-input" value="{{ today }}">
                         </div>
                     </div>
+                    <div id="donorPersonFields" class="grid grid-cols-3 gap-3">
+                        <div>
+                            <label for="rcvDonorFirst" class="field-label">First name</label>
+                            <input type="text" name="donor_first_name" id="rcvDonorFirst" class="field-input" placeholder="Juan" autocomplete="off">
+                        </div>
+                        <div>
+                            <label for="rcvDonorMiddle" class="field-label">Middle name</label>
+                            <input type="text" name="donor_middle_name" id="rcvDonorMiddle" class="field-input" placeholder="Optional" autocomplete="off">
+                        </div>
+                        <div>
+                            <label for="rcvDonorLast" class="field-label">Surname</label>
+                            <input type="text" name="donor_last_name" id="rcvDonorLast" class="field-input" placeholder="Dela Cruz" autocomplete="off">
+                        </div>
+                    </div>
+                    <div id="donorOrgFields" class="hidden">
+                        <label for="rcvDonor" id="donorOrgLabel" class="field-label">Organisation name</label>
+                        <input type="text" name="donor_name" id="rcvDonor" class="field-input" placeholder="Past donor or new name" autocomplete="off">
+                    </div>
                     <p id="donorSuggest" class="hidden text-[11px] text-amber-300"></p>
                     <div id="newDonorFields" class="hidden rounded-lg border border-cyan-900/50 bg-cyan-950/10 p-3 space-y-3">
                         <p class="text-[11px] text-slate-300"><strong class="text-cyan-300">New donor.</strong> How to reach them, if they give it (optional). It is saved on their donor record for the acknowledgement and next time.</p>
                         <div class="grid grid-cols-2 gap-3">
-                            <div>
-                                <label for="rcvDonorType" class="field-label">Donor type</label>
-                                <select id="rcvDonorType" name="donor_type" class="field-input">{% for value, label in donor_types %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select>
-                            </div>
                             <div>
                                 <label for="rcvDonorContact" class="field-label">Contact number</label>
                                 <input id="rcvDonorContact" type="text" name="donor_contact_number" class="field-input" placeholder="09XX XXX XXXX">
@@ -867,7 +882,10 @@
             document.getElementById('rcvSource').value = kind;
             document.getElementById('shipmentFields').classList.toggle('hidden', donation);
             document.getElementById('donationFields').classList.toggle('hidden', !donation);
-            document.getElementById('rcvDonor').required = donation;
+            // A disabled box (the naming the donor type does not use) is never checked.
+            ['rcvDonor', 'rcvDonorFirst', 'rcvDonorLast'].forEach(function (id) {
+                document.getElementById(id).required = donation;
+            });
             const active = ['bg-cyan-700/30', 'text-cyan-400', 'border', 'border-cyan-800/50'];
             const idle = ['text-slate-400', 'hover:text-slate-200', 'hover:bg-slate-800/40'];
             const ship = document.getElementById('srcShipmentBtn');
@@ -1183,17 +1201,9 @@
                     onType: function () { if (sel.value) { sel.value = ''; onPickCatalogued(); } },
                 });
             }
-            const donor = document.getElementById('rcvDonor');
-            if (window.AylaPicker && donor) {
-                const names = JSON.parse(document.getElementById('donorNamesData').textContent || '[]');
-                const donors = names.map(function (n) { return { value: n, label: n }; });
-                const intake = window.AylaDonorIntake ? AylaDonorIntake.attach(donor, names) : null;
-                AylaPicker.attach(donor, {
-                    items: donors,
-                    newLabel: function (q) { return q ? '+ New donor: \u201c' + q + '\u201d' : '+ New donor \u2014 type their name'; },
-                    onNew: function () { donor.focus(); if (intake) intake.update(); },
-                    onPick: function () { if (intake) intake.update(); },
-                });
+            // The donor: a person's three name boxes or one organisation name, with past donors suggested.
+            if (window.AylaDonorIntake) {
+                AylaDonorIntake.attach(JSON.parse(document.getElementById('donorOptionsData').textContent || '[]'));
             }
         })();
     </script>

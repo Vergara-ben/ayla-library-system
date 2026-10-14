@@ -1672,3 +1672,73 @@ class ShelvingLabelsAuditTests(TestCase):
         needs = sorted(row[0] for row in report['rows'])
         self.assertEqual(needs, ['No label', 'Waiting for a shelf', 'Waiting for a shelf'])
         self.assertIn(('Waiting for a Shelf', 2), report['summary'])
+
+
+class DonorNamePartsTests(TestCase):
+    """A person who donates is named as first name, middle name (optional) and surname."""
+
+    def setUp(self):
+        self.client = _client(admin_id=_staff(role='Admin').admin_id, admin_role='Admin')
+        self.book = Book.objects.create(title='Noli', author='Rizal', genre='Fiction', qr_code='q-noli')
+
+    def _give(self, **donor):
+        data = {'source': 'Donation', 'donated_date': '2026-10-01',
+                'items': json.dumps([{'book_id': self.book.pk, 'quantity': 1, 'condition': 'Good'}])}
+        data.update(donor)
+        return self.client.post('/admin-portal/inventory/receive/', data, follow=True)
+
+    def test_a_person_is_saved_with_the_name_split(self):
+        from .models import Donor
+        self._give(donor_type='Individual', donor_first_name=' juan ', donor_middle_name='Perez',
+                   donor_last_name='Dela Cruz')
+        donor = Donor.objects.get()
+        self.assertEqual((donor.first_name, donor.middle_name, donor.last_name), ('juan', 'Perez', 'Dela Cruz'))
+        self.assertEqual(donor.name, 'juan Perez Dela Cruz')
+        self.assertEqual(InventoryRecord.objects.get().donor_name, 'juan Perez Dela Cruz')
+
+    def test_the_surname_is_required_but_the_middle_name_is_not(self):
+        from .models import Donor
+        page = self._give(donor_type='Individual', donor_first_name='Juan')
+        self.assertContains(page, 'first name and surname')
+        self.assertFalse(Donor.objects.exists())
+        self._give(donor_type='Individual', donor_first_name='Juan', donor_last_name='Cruz')
+        self.assertEqual(Donor.objects.get().middle_name, None)
+
+    def test_an_organisation_keeps_one_name(self):
+        from .models import Donor
+        self._give(donor_type='School', donor_name='Pulo National High School')
+        donor = Donor.objects.get()
+        self.assertEqual((donor.name, donor.first_name, donor.donor_type),
+                         ('Pulo National High School', None, 'School'))
+
+    def test_a_past_donor_is_matched_by_their_name_parts(self):
+        from .models import Donor
+        Donor.objects.create(name='Dela Cruz, Juan', first_name='Juan', last_name='Dela Cruz')
+        self._give(donor_type='Individual', donor_first_name='JUAN', donor_last_name='dela cruz')
+        self.assertEqual(Donor.objects.count(), 1)
+        self.assertEqual(InventoryRecord.objects.get().donor_name, 'Dela Cruz, Juan')
+
+    def test_the_donors_page_registers_and_edits_by_parts(self):
+        from .models import Donor
+        self.client.post('/admin-portal/donors/', {'action': 'add', 'donor_type': 'Individual',
+                                                   'first_name': 'Ana', 'last_name': 'Reyes', 'confirm_new': '1'})
+        donor = Donor.objects.get()
+        self.assertEqual(donor.name, 'Ana Reyes')
+        self.client.post('/admin-portal/donors/', {'donor_id': donor.pk, 'donor_type': 'Individual',
+                                                   'first_name': 'Ana', 'middle_name': 'Santos',
+                                                   'last_name': 'Reyes'})
+        donor.refresh_from_db()
+        self.assertEqual((donor.name, donor.middle_name), ('Ana Santos Reyes', 'Santos'))
+
+    def test_the_sheet_takes_name_columns(self):
+        from .models import Donor
+        rows = [['first_name', 'middle_name', 'last_name', 'donor_name', 'title', 'author', 'genre'],
+                ['Juan', '', 'Cruz', '', 'Noli', 'Rizal', 'Fiction'],
+                ['', '', '', 'Rotary Club', 'Noli', 'Rizal', 'Fiction'],
+                ['Pedro', '', '', '', 'Noli', 'Rizal', 'Fiction']]
+        r = self.client.post('/admin-portal/import-donations/', {'excel_file': _sheet(rows)}).json()
+        self.assertTrue(r['success'], r)
+        self.assertIn('Row 4: a person needs both a first name and a surname', r['message'])
+        self.assertEqual(Donor.objects.get(first_name='Juan').last_name, 'Cruz')
+        self.assertEqual(set(InventoryRecord.objects.values_list('donor_name', flat=True)),
+                         {'Juan Cruz', 'Rotary Club'})

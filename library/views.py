@@ -5789,7 +5789,11 @@ def _import_patron_rows(request):
 def download_donation_template(request):
     materials = ', '.join(value for value, _label in Book.MATERIAL_TYPE_CHOICES)
     return _template_response('donation_import_template.xlsx', 'Donations', [
-        ('donor_name', True, 'Who gave the books.', 'Barangay Council'),
+        ('first_name', False, "A person's first name. Use these three columns for a person.", 'Juan'),
+        ('middle_name', False, 'Optional.', 'Perez'),
+        ('last_name', False, "A person's surname.", 'Dela Cruz'),
+        ('donor_name', False, 'For a school, office or organisation, its name. Leave blank for a person.',
+         ''),
         ('date_donated', False, 'An Excel date, 2026-09-01 or 09/01/2026. Blank means today.',
          '2026-09-01'),
         ('title', True, 'The title as printed on the book.', 'Noli Me Tangere'),
@@ -5808,6 +5812,9 @@ def download_donation_template(request):
 
 DONATION_IMPORT_COLUMNS = {
     'donorname': 'donor_name', 'donor': 'donor_name', 'donatedby': 'donor_name',
+    'firstname': 'first_name', 'donorfirstname': 'first_name', 'givenname': 'first_name',
+    'middlename': 'middle_name', 'donormiddlename': 'middle_name',
+    'lastname': 'last_name', 'surname': 'last_name', 'donorlastname': 'last_name', 'donorsurname': 'last_name',
     'datedonated': 'date_donated', 'donationdate': 'date_donated',
     'donateddate': 'date_donated', 'date': 'date_donated',
     'title': 'title', 'booktitle': 'title',
@@ -5830,7 +5837,8 @@ def import_donations(request):
 def _import_donation_rows(request):
     """Receive each row the way the Receive Stock form does."""
     sheet, columns, error = _open_import_sheet(
-        request, DONATION_IMPORT_COLUMNS, [('donor_name',), ('title',)], 'donor_name and title')
+        request, DONATION_IMPORT_COLUMNS, [('donor_name', 'first_name', 'last_name'), ('title',)],
+        'the donor (first_name and last_name, or donor_name) and title')
     if error:
         return error
 
@@ -5846,7 +5854,15 @@ def _import_donation_rows(request):
     received_now = set()
 
     for row_no, values in _sheet_rows(sheet, columns):
+        parts = {f: ' '.join(_cell_text(values.get(f)).split()) for f in Donor.NAME_PARTS}
         donor = _cell_text(values.get('donor_name'))
+        if parts['first_name'] or parts['last_name']:
+            if not (parts['first_name'] and parts['last_name']):
+                problems.append("Row %d: a person needs both a first name and a surname" % row_no)
+                continue
+            donor = Donor.full_name(parts['first_name'], parts['middle_name'], parts['last_name'])
+            saved = Donor.find(donor, **parts)
+            donor = saved.name if saved else Donor.register(donor, **parts).name
         title = _cell_text(values.get('title'))
         if not donor:
             problems.append('Row %d: no donor name' % row_no)
@@ -11877,6 +11893,7 @@ def inventory_management(request):
         'condition_notes': CONDITION_NOTES,
         'source_choices': InventoryRecord.SOURCE_CHOICES,
         'donor_names': list(Donor.objects.values_list('name', flat=True)[:500]),
+        'donor_options': _donor_options(),
         'ack_offer': _ack_offer(request),
         'donor_types': Donor.TYPE_CHOICES,
         'today': timezone.localdate().isoformat(),
@@ -12196,10 +12213,14 @@ def receive_stock(request):
     supplier = po_number = donor_name = processing_stage = None
     donated_date = None
     if source == 'Donation':
-        donor_name = ' '.join((request.POST.get('donor_name') or '').split())
-        if not donor_name:
-            messages.error(request, 'A donation needs the donor name for the record.')
+        donor_name, donor_parts, problem = _posted_donor_name(request.POST, prefix='donor_')
+        if problem:
+            messages.error(request, 'Donor: ' + problem)
             return _receiving_redirect(request)
+        # A saved donor is recorded under the name already on file, however it was typed today.
+        saved = Donor.find(donor_name, **donor_parts)
+        if saved is not None:
+            donor_name = saved.name
         donor_details = {
             'donor_type': request.POST.get('donor_type'),
             'contact_number': request.POST.get('donor_contact_number'),
@@ -12265,7 +12286,7 @@ def receive_stock(request):
     try:
         with transaction.atomic():
             if source == 'Donation':
-                Donor.register(donor_name, **donor_details)
+                Donor.register(donor_name, **donor_details, **donor_parts)
             for item, quantity, condition, price in parsed:
                 book, was_created = _resolve_intake_book(item, source)
                 if was_created:
@@ -12337,6 +12358,7 @@ def staff_inventory_receive(request):
         'intake_conditions': INTAKE_CONDITION_OPTIONS,
         'condition_notes': CONDITION_NOTES,
         'donor_names': list(Donor.objects.values_list('name', flat=True)[:500]),
+        'donor_options': _donor_options(),
         'ack_offer': _ack_offer(request),
         'donor_types': Donor.TYPE_CHOICES,
         'today': timezone.localdate().isoformat(),
@@ -13373,6 +13395,31 @@ def serve_card_photo(request, photo_id):
     return response
 
 
+def _donor_options():
+    """Every saved donor, for the receiving form's name boxes to suggest."""
+    return [{'name': d.name, 'type': d.donor_type, 'first': d.first_name or '', 'middle': d.middle_name or '',
+             'last': d.last_name or ''}
+            for d in Donor.objects.only('name', 'donor_type', *Donor.NAME_PARTS)[:1000]]
+
+
+def _posted_donor_name(post, prefix=''):
+    """(full name, {first/middle/last}, problem) from a donor form: a person's three name boxes,
+    or one name for an organisation, school or office."""
+    def get(field):
+        return ' '.join((post.get(prefix + field) or '').split())
+    kind = (post.get(prefix + 'type') or post.get('donor_type') or 'Individual').strip()
+    first, middle, last = get('first_name'), get('middle_name'), get('last_name')
+    if kind == 'Individual' and (first or last or middle or not get('name')):
+        if not first or not last:
+            return '', {}, "Type the donor's first name and surname. The middle name can be left blank."
+        parts = {'first_name': first[:100], 'middle_name': middle[:100], 'last_name': last[:100]}
+        return Donor.full_name(first, middle, last)[:255], parts, None
+    name = get('name')
+    if not name:
+        return '', {}, 'Type the name of the %s.' % dict(Donor.TYPE_CHOICES).get(kind, 'donor').lower()
+    return name[:255], {}, None
+
+
 @admin_or_module_required('donations')
 def donors_page(request):
     """Everyone who has given books, how often, and what they gave."""
@@ -13381,19 +13428,19 @@ def donors_page(request):
     similar = []
     if request.method == 'POST' and request.POST.get('action') == 'add':
         # Registered in one go, before or with their first gift.
-        name = ' '.join((request.POST.get('name') or '').split())
+        name, parts, name_problem = _posted_donor_name(request.POST)
         details = {f: (request.POST.get(f) or '').strip() for f in Donor.DETAIL_FIELDS}
-        existing = Donor.objects.filter(name__iexact=name).first() if name else None
+        existing = Donor.find(name, **parts) if name else None
         if existing is not None:
             messages.info(request, f'{existing.name} is already registered, so their record is open below.')
             return redirect(f"{reverse('donors_page')}?d={existing.donor_id}")
-        new_error = _donor_detail_error(name, details)
+        new_error = name_problem or _donor_detail_error(name, details)
         if not new_error and request.POST.get('confirm_new') != '1':
             similar = Donor.similar_to(name)
         if new_error or similar:
-            new_form = dict(details, name=name)
+            new_form = dict(details, name=name if not parts else '', display=name, **parts)
         else:
-            donor = Donor.register(name, **details)
+            donor = Donor.register(name, **details, **parts)
             log_admin_action(request, 'Create', 'Donor', donor.donor_id, f'Registered donor "{donor.name}"')
             messages.success(request, f'{donor.name} is registered as a donor.')
             return redirect(f"{reverse('donors_page')}?d={donor.donor_id}")
@@ -13403,9 +13450,9 @@ def donors_page(request):
         if donor is None:
             messages.error(request, 'Donor not found.')
             return redirect('donors_page')
-        name = ' '.join((request.POST.get('name') or '').split())
-        if not name:
-            messages.error(request, 'A donor needs a name.')
+        name, parts, problem = _posted_donor_name(request.POST)
+        if problem:
+            messages.error(request, problem)
             return redirect(f"{reverse('donors_page')}?d={donor.donor_id}")
         if Donor.objects.exclude(donor_id=donor.donor_id).filter(name__iexact=name).exists():
             messages.error(request, f'Another donor is already called "{name}".')
@@ -13415,6 +13462,9 @@ def donors_page(request):
             messages.error(request, bad)
             return redirect(f"{reverse('donors_page')}?d={donor.donor_id}")
         donor.name = name
+        # An organisation keeps no person's name parts.
+        for field in Donor.NAME_PARTS:
+            setattr(donor, field, parts.get(field) or None)
         kind = (request.POST.get('donor_type') or '').strip()
         donor.donor_type = kind if kind in dict(Donor.TYPE_CHOICES) else donor.donor_type
         donor.contact_number = (request.POST.get('contact_number') or '').strip() or None
