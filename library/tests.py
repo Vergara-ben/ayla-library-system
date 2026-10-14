@@ -1917,17 +1917,14 @@ class QRLabelSheetTests(TestCase):
         codes = {b.qr_code for b in self.copies}
         self.assertEqual(len(codes), 3)
 
-    def test_copy_numbers_count_the_whole_catalogue(self):
-        """Printing two of three copies still reads 2 of 3, not 1 of 2."""
-        from .labels import copy_numbers
-        subset = self.copies[1:]
-        numbers = copy_numbers(subset)
-        self.assertEqual(numbers[subset[0].book_id], (2, 3))
-        self.assertEqual(numbers[subset[1].book_id], (3, 3))
-
-    def test_a_single_copy_is_not_numbered(self):
-        from .labels import copy_numbers
-        self.assertNotIn(self.single.book_id, copy_numbers([self.single]))
+    def test_a_label_says_only_its_own_copy_number(self):
+        """Copy 2 stays Copy 2 when a fourth copy arrives, so nothing needs reprinting."""
+        from .labels import _label_lines
+        second = self.copies[1]
+        Book.objects.create(title=second.title, author=second.author, status='Available')
+        lines = dict(_label_lines(second, {'copy': True}))
+        self.assertEqual(lines['copy'], 'Copy 2')
+        self.assertEqual(dict(_label_lines(self.single, {'copy': True}))['copy'], 'Copy 1')
 
     def test_a_book_with_no_qr_gets_one_minted(self):
         """Otherwise it is silently left off the sheet and nobody notices."""
@@ -5883,98 +5880,37 @@ class ImportPreviewTests(TestCase):
         self.assertEqual(Book.objects.count(), 3)
 
 
-class CopiesColumnTests(TestCase):
-    """The Copies column counts copies, and can be searched on."""
+class CopyNumberColumnTests(TestCase):
+    """Manage Books says which copy of its title each book is, and the number never changes."""
 
     def setUp(self):
         self.user = _admin(modules='books')
         self.client = _signed_in(self.user)
-        for i in range(4):
-            Book.objects.create(title='Four Of These', author='Ann Author',
-                                genre='FICTION', status='Available')
-        Book.objects.create(title='Only One', author='Bob Byline',
-                            genre='FICTION', status='Available')
-        for i in range(2):
-            Book.objects.create(title='Two Of These', author='Cee Creator',
-                                genre='FICTION', status='Available')
-        # Same title, different author: a different book, not another copy.
-        Book.objects.create(title='Only One', author='Dee Different',
-                            genre='FICTION', status='Available')
+        self.copies = [Book.objects.create(title='Four Of These', author='Ann Author', genre='Fiction')
+                       for _ in range(3)]
 
-    def _rows(self, query=''):
-        r = self.client.get('/admin-portal/management/' + query)
-        self.assertEqual(r.status_code, 200)
-        return r.context['books'].paginator.count
+    def test_each_copy_of_a_title_has_its_own_number(self):
+        self.assertEqual([b.copy_number for b in self.copies], [1, 2, 3])
+        other = Book.objects.create(title='Four Of These', author='Someone Else', genre='Fiction')
+        self.assertEqual(other.copy_number, 1, 'a different author is a different book')
 
-    def test_the_column_counts_the_copies_rather_than_always_saying_one(self):
-        r = self.client.get('/admin-portal/management/?q=Four Of These')
-        counts = {b.copies for b in r.context['books']}
-        self.assertEqual(counts, {4})
+    def test_a_number_is_never_reused(self):
+        self.copies[2].archive('tester', 'test')
+        self.assertEqual(Book.objects.create(title='four of these', author='ann author').copy_number, 4)
 
-    def test_a_different_author_is_a_different_book(self):
-        r = self.client.get('/admin-portal/management/?q=Only One')
-        self.assertEqual({b.copies for b in r.context['books']}, {1})
+    def test_the_column_shows_the_number_and_the_old_filter_is_gone(self):
+        page = self.client.get('/admin-portal/management/')
+        self.assertContains(page, 'Copy No.')
+        self.assertNotContains(page, 'copiesFilter')
+        self.assertEqual([b.copy_number for b in page.context['books']], [1, 2, 3])
 
-    def test_searching_for_single_copies(self):
-        self.assertEqual(self._rows('?copies=1'), 2)
-
-    def test_searching_for_an_exact_number(self):
-        self.assertEqual(self._rows('?copies=4'), 4)
-        self.assertEqual(self._rows('?copies=2'), 2)
-
-    def test_searching_for_that_many_or_more(self):
-        self.assertEqual(self._rows('?copies=2%2B'), 6)
-        self.assertEqual(self._rows('?copies=4%2B'), 4)
-
-    def test_nonsense_is_ignored_rather_than_emptying_the_table(self):
-        for bad in ('?copies=banana', '?copies=0', '?copies=-3', '?copies=%2B',
-                    '?copies=999999'):
-            self.assertEqual(self._rows(bad), 8, bad)
-
-    def test_the_filter_survives_paging(self):
-        r = self.client.get('/admin-portal/management/?copies=2%2B')
-        self.assertIn('copies=2%2B', r.context['querystring'])
-
-    def test_it_combines_with_the_other_filters(self):
-        Book.objects.create(title='Four Of These', author='Ann Author',
-                            genre='FICTION', status='Borrowed')
-        # Five rows share the title now; only the four available ones match.
-        self.assertEqual(self._rows('?copies=5&status=Available'), 4)
-
-    def test_the_staff_page_can_search_on_copies_too(self):
-        staff = User.objects.create(
-            fullname='Smoke Staff', email='smoke-staff@example.invalid',
-            password_hash=hash_password('SmokeTest123'),
-            role='Staff', account_status='Active', modules='books')
-        r = _signed_in(staff).get('/library-staff/books/?copies=4')
-        self.assertEqual(r.status_code, 200)
-        self.assertEqual(r.context['books'].paginator.count, 4)
-
-
-class ParseCopiesFilterTests(TestCase):
-    """What the dropdown sends, and what someone types into the address bar."""
-
-    def setUp(self):
-        from library.views import COPIES_FILTER_CHOICES, parse_copies_filter
-        self.parse = parse_copies_filter
-        self.choices = COPIES_FILTER_CHOICES
-
-    def test_a_bare_number_means_exactly_that_many(self):
-        self.assertEqual(self.parse('3'), {'copies': 3})
-
-    def test_a_trailing_plus_means_that_many_or_more(self):
-        self.assertEqual(self.parse('3+'), {'copies__gte': 3})
-
-    def test_whitespace_is_forgiven(self):
-        self.assertEqual(self.parse('  2+  '), {'copies__gte': 2})
-
-    def test_nothing_recognisable_means_no_filter(self):
-        for raw in ('', None, 'banana', '0', '-1', '+', '1.5', '100', '3++'):
-            self.assertIsNone(self.parse(raw), raw)
-
-    def test_every_dropdown_option_parses(self):
-        for value, label in self.choices:
-            self.assertIsNotNone(self.parse(value), value)
+    def test_a_book_renamed_into_another_title_takes_the_next_free_number(self):
+        other = Book.objects.create(title='Another', author='Ann Author', genre='Fiction')
+        self.client.post('/admin-portal/edit-book/%d/' % other.pk, {
+            'title': 'Four Of These', 'author': 'Ann Author', 'genre': 'Fiction'},
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest')
+        other.refresh_from_db()
+        self.assertEqual((other.title, other.copy_number), ('Four Of These', 4))
 
 
 class SlowRequestLoggingTests(TestCase):
@@ -9555,7 +9491,7 @@ class PageTableTests(TestCase):
             table = [t for t in _tables_on(self._page(client, url)) if 'Borrower' in t['texts']][0]
             row = table['rows'][0]
             cells = dict(zip(table['texts'], row['texts']))
-            self.assertEqual(cells['Copy #'], 'BOOK-%d' % self.book.book_id)
+            self.assertEqual(cells['Copy #'], 'Copy 1BOOK-%d' % self.book.book_id)
             self.assertEqual(cells['Title'], 'Noli Me Tangere')
             self.assertEqual(cells['Author'], 'Rizal, Jose')
             self.assertEqual(cells['Location'], 'Shelf A Column 1 Level 2')

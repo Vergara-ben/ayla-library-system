@@ -230,7 +230,7 @@
                                 <tbody class="divide-y divide-slate-800/50 text-xs text-slate-300">
                             {% for book in books %}
                                 <tr class="hover:bg-slate-800/20 transition-colors">
-                                    <td class="py-3.5 px-5 font-mono text-slate-400">BOOK-{{ book.book_id }}</td>
+                                    <td class="py-3.5 px-5"><span class="font-bold text-slate-200">Copy {{ book.copy_number|default:"?" }}</span><span class="block font-mono text-[10px] text-slate-500">BOOK-{{ book.book_id }}</span></td>
                                     <td class="py-3.5 px-5">{{ book.title }}</td>
                                     <td class="py-3.5 px-5 text-slate-400">{{ book.author|default:"&mdash;" }}</td>
                                     <td class="py-3.5 px-5 text-slate-400">{{ book.ISBN|default:"&mdash;" }}</td>

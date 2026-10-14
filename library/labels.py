@@ -71,33 +71,6 @@ def _fit(canvas, text, font, size, max_w):
     return (text[:lo].rstrip() + ell) if lo else ''
 
 
-def copy_numbers(books):
-    """{book_id: (n, total)} for every book that shares a title with another."""
-    from .models import Book
-
-    keys = {(_safe(b.title).lower(), _safe(b.author).lower()) for b in books}
-    if not keys:
-        return {}
-
-    lookup = Q()
-    for title, _author in keys:
-        lookup |= Q(title__iexact=title)
-    siblings = Book.objects.filter(lookup).order_by('book_id').values_list(
-        'book_id', 'title', 'author')
-
-    grouped = {}
-    for book_id, title, author in siblings:
-        grouped.setdefault((_safe(title).lower(), _safe(author).lower()), []).append(book_id)
-
-    numbers = {}
-    for key, ids in grouped.items():
-        if len(ids) < 2:
-            continue
-        for index, book_id in enumerate(ids, start=1):
-            numbers[book_id] = (index, len(ids))
-    return numbers
-
-
 def sort_for_printing(books):
     """Shelf, then board, then the position along it, the walking order."""
     def key(b):
@@ -203,19 +176,19 @@ def _wrap(text, font, size, max_w, max_lines):
     return [l for l in lines if l]
 
 
-def _label_lines(book, numbers, show):
+def _label_lines(book, show):
     """The text under one QR, in priority order, already filtered by `show`."""
     lines = []
     if show.get('title'):
         lines.append(('title', _safe(book.title) or 'Untitled'))
     if show.get('author') and _safe(book.author):
         lines.append(('author', _safe(book.author)))
-    # Call number above the copy count.
+    # Call number above the copy number.
     if show.get('call_number') and _safe(getattr(book, 'call_number', '')):
         lines.append(('call_number', _safe(book.call_number)))
-    if show.get('copy') and book.book_id in numbers:
-        n, total = numbers[book.book_id]
-        lines.append(('copy', 'Copy %d of %d' % (n, total)))
+    # Just this copy's own number: a copy added later never makes an older label wrong.
+    if show.get('copy') and getattr(book, 'copy_number', None):
+        lines.append(('copy', 'Copy %d' % book.copy_number))
     if show.get('location'):
         where = location_of(book)
         if where:
@@ -233,7 +206,6 @@ def build_label_sheet(books, page=DEFAULT_PAGE, qr_mm=DEFAULT_QR_MM,
     _label, size = PAGE_SIZES.get(page, PAGE_SIZES[DEFAULT_PAGE])
     page_w, page_h = size
 
-    numbers = copy_numbers(books) if show.get('copy') else {}
 
     font, bold = 'Helvetica', 'Helvetica-Bold'
     fs = _font_size(qr_mm)
@@ -247,7 +219,7 @@ def build_label_sheet(books, page=DEFAULT_PAGE, qr_mm=DEFAULT_QR_MM,
     rendered = {}
     for book in books:
         out = []
-        for kind, value in _label_lines(book, numbers, show):
+        for kind, value in _label_lines(book, show):
             if kind == 'title':
                 for line in _wrap(value, bold, fs, inner_w, MAX_TITLE_LINES):
                     out.append((kind, line))

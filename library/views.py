@@ -1742,16 +1742,6 @@ def admin_signin(request):
 
 
 # What the Copies dropdown offers.
-COPIES_FILTER_CHOICES = [
-    ('1', 'Single copy only'),
-    ('2', 'Exactly 2'),
-    ('3', 'Exactly 3'),
-    ('4', 'Exactly 4'),
-    ('2+', '2 or more (duplicated)'),
-    ('5+', '5 or more'),
-]
-
-
 def _shelf_filter_choices():
     """Every shelf with its boards, for the two location selects."""
     boards = {}
@@ -1779,37 +1769,12 @@ def _shelf_filter_choices():
     return out
 
 
-def _copies_annotation():
-    """How many copies of this book the library holds, per row."""
-    same_book = (
-        Book.objects
-        .filter(title=OuterRef('title'), author=OuterRef('author'))
-        .order_by().values('title', 'author')
-        .annotate(n=Count('*')).values('n')[:1]
-    )
-    return Subquery(same_book, output_field=IntegerField())
-
-
-def parse_copies_filter(raw):
-    """'3' -> exactly three, '3+' -> three or more, anything else -> no filter."""
-    text = (raw or '').strip()
-    at_least = text.endswith('+')
-    digits = text[:-1] if at_least else text
-    if not digits.isdigit():
-        return None
-    n = int(digits)
-    if n < 1 or n > 99:
-        return None
-    return {'copies__gte': n} if at_least else {'copies': n}
-
-
 def _books_page(request, template):
     from urllib.parse import urlencode
     q = (request.GET.get('q') or '').strip()
     status = (request.GET.get('status') or '').strip()
     genre = (request.GET.get('genre') or '').strip()
     material = (request.GET.get('material') or '').strip()
-    copies = (request.GET.get('copies') or '').strip()
     # Where the book is.
     shelf = (request.GET.get('shelf') or '').strip()
     level = (request.GET.get('level') or '').strip()
@@ -1817,7 +1782,6 @@ def _books_page(request, template):
 
     books_queryset = (
         Book.objects.select_related('shelf_level', 'shelf_level__shelf')
-        .annotate(copies=_copies_annotation())
     )
     if q:
         books_queryset = books_queryset.filter(_book_search_q(q))
@@ -1850,12 +1814,7 @@ def _books_page(request, template):
     else:
         label = ''
 
-    copies_filter = parse_copies_filter(copies)
-    if copies_filter:
-        books_queryset = books_queryset.filter(**copies_filter)
-    else:
-        copies = ''
-    books_queryset = books_queryset.order_by('title')
+    books_queryset = books_queryset.order_by('title', 'author', 'copy_number')
 
     # Every matching id, for "select all matching books".
     if request.GET.get('ids') == 'all':
@@ -1881,7 +1840,7 @@ def _books_page(request, template):
 
     params = {}
     for key, value in (('q', q), ('status', status), ('genre', genre),
-                       ('material', material), ('copies', copies),
+                       ('material', material),
                        ('shelf', shelf), ('level', level), ('label', label)):
         if value:
             params[key] = value
@@ -1900,8 +1859,6 @@ def _books_page(request, template):
         'q': q,
         'status': status,
         'genre': genre,
-        'copies': copies,
-        'copies_choices': COPIES_FILTER_CHOICES,
         'shelf': shelf,
         'level': level,
         'shelf_choices': _shelf_filter_choices(),
@@ -2054,9 +2011,10 @@ def admin_add_book(request):
                              f'Added "{first.title}"' + (f' ({copies} copies)' if copies > 1 else ''))
 
             if ajax:
+                last = Book.objects.get(pk=created[-1])
                 return JsonResponse({'success': True, 'message': (
-                    f'Added {copies} copies of "{first.title}".' if copies > 1
-                    else f'Added "{first.title}".'), 'call_number': first.call_number,
+                    f'Added "{first.title}" as copies {first.copy_number} to {last.copy_number}.' if copies > 1
+                    else f'Added "{first.title}" as Copy {first.copy_number}.'), 'call_number': first.call_number,
                     # A shelved book can have its label printed straight away.
                     'ids': created, 'shelved': shelf_level is not None})
             return portal_redirect(request, 'admin_management')
@@ -2889,6 +2847,10 @@ def admin_edit_book(request, book_id):
         else:
             title, author, isbn = values['title'], values['author'], values['ISBN']
             genre = values.get('genre', book.genre)
+            # Renamed into another title whose copies already use this number: it takes the next free one.
+            if (title.lower(), author.lower()) != ((book.title or '').lower(), (book.author or '').lower())                     and Book.all_objects.filter(title__iexact=title, author__iexact=author,
+                                                copy_number=book.copy_number).exclude(pk=book.pk).exists():
+                book.copy_number = None
             book.title = title
             book.author = author
             book.ISBN = isbn or None
@@ -3440,7 +3402,7 @@ def delete_transaction(request, transaction_id):
     return JsonResponse({'success': True, 'book_freed': freed})
 
 def _book_detail_page(request, template):
-    books = Book.objects.select_related('shelf_level', 'shelf_level__shelf').order_by('title')
+    books = Book.objects.select_related('shelf_level', 'shelf_level__shelf').order_by('title', 'author', 'copy_number')
     total_books = books.count()
     available_count = books.filter(status='Available').count()
     borrowed_count = books.filter(status='Borrowed').count()
@@ -4384,6 +4346,7 @@ def admin_book_details_ajax(request, book_id):
         'ISBN': book.ISBN or 'N/A',
         'genre': book.genre or 'General',
         'subject': book.subject or '',
+        'copy_number': book.copy_number,
         'publication_year': book.publication_year or 'N/A',
         'status': book.status,
         'condition': book.condition,
@@ -4610,6 +4573,7 @@ def _book_qr_payload(book):
         'ISBN': book.ISBN or 'N/A',
         'genre': book.genre or 'General',
         'subject': book.subject or '',
+        'copy_number': book.copy_number,
         'publication_year': book.publication_year or 'N/A',
         'status': book.status,
         'condition': book.condition,
@@ -6240,7 +6204,7 @@ def _apply_basket(request, transaction_type, book_ids, patron, admin, rule):
                     due_date=None,
                 )
 
-            processed_books.append(book.title)
+            processed_books.append(book.title + (f' (Copy {book.copy_number})' if book.copy_number else ''))
 
         # Raise to roll back the whole basket.
         if errors:
@@ -6317,7 +6281,8 @@ def process_transaction(request):
     if transaction_type != 'Return':
         log_admin_action(
             request, 'Process', 'Transaction', None,
-            f'{transaction_type}: {len(processed_books)} book(s){patron_label}{verification}',
+            f'{transaction_type}: {len(processed_books)} book(s){patron_label}{verification}: '
+            + '; '.join(processed_books[:6]) + (' and more' if len(processed_books) > 6 else ''),
             patron=patron,
         )
 
@@ -7541,7 +7506,7 @@ def staff_shelf(request):
 def get_books_for_placement(request):
     """Searchable list of books, for the shelf-placement picker and Transactions."""
     q = (request.GET.get('q') or '').strip()
-    books = Book.objects.select_related('shelf_level').order_by('title')
+    books = Book.objects.select_related('shelf_level').order_by('title', 'author', 'copy_number')
     if q:
         books = books.filter(_book_search_q(q))
     data = []
@@ -7554,6 +7519,7 @@ def get_books_for_placement(request):
             'book_id': b.book_id,
             'title': b.title,
             'author': b.author,
+            'copy_number': b.copy_number,
             'status': b.status,
             'shelf_level_id': b.shelf_level_id,
             'location': location,
@@ -13829,7 +13795,8 @@ def catalogue_assist(request):
             match = {'copies': len(copies), 'genre': first.genre or '', 'material_type': first.material_type,
                      'isbn': first.ISBN or '', 'publication_year': first.publication_year or '',
                      'price': str(first.price) if first.price is not None else '',
-                     'call_number': first.call_number or '', 'subject': first.subject or ''}
+                     'call_number': first.call_number or '', 'subject': first.subject or '',
+                     'next_copy': Book(title=first.title, author=first.author).next_copy_number()}
 
     shelf = None
     shelved = [b.shelf_level for b in (same_title(title, author).select_related('shelf_level__shelf')

@@ -179,7 +179,7 @@
     <div class="loan-row">
       <div class="loan-cover">{{ tx.book.title|truncatechars:12 }}</div>
       <div class="loan-info">
-        <div class="loan-title">{{ tx.book.title }}</div>
+        <div class="loan-title">{{ tx.book.title }}{% if tx.book.copy_number %} <span style="opacity:.65;font-weight:500;">&middot; Copy {{ tx.book.copy_number }}</span>{% endif %}</div>
         <div class="loan-author">{{ tx.book.author }}</div>
         <div class="loan-due">
           <span class="due-label">Due:</span>
@@ -224,7 +224,7 @@
     <div class="hist-row">
       <div class="hist-icon"><i class="fa-solid fa-book" aria-hidden="true"></i></div>
       <div class="hist-info">
-        <div class="hist-title">{{ tx.book.title }}</div>
+        <div class="hist-title">{{ tx.book.title }}{% if tx.book.copy_number %} <span style="opacity:.65;font-weight:500;">&middot; Copy {{ tx.book.copy_number }}</span>{% endif %}</div>
         <div class="hist-dates">Borrowed {{ tx.transaction_date|date:"M j" }} → Returned {{ tx.return_date|date:"M j, Y" }}{% if tx.fine_amount %} · <span style="color:var(--danger);font-weight:700">Fine ₱{{ tx.fine_amount }}</span>{% endif %}</div>
       </div>
       <div style="font-size:10px;padding:3px 8px;border-radius:5px;background:var(--tint-accent);color:var(--accent);font-weight:700">Returned</div>

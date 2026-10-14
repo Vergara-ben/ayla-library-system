@@ -285,7 +285,7 @@
         <div class="book-item">
           <div class="book-thumb">{{ tx.book.title|truncatechars:11 }}</div>
           <div class="book-info">
-            <div class="book-title">{{ tx.book.title }}</div>
+            <div class="book-title">{{ tx.book.title }}{% if tx.book.copy_number %} <span style="opacity:.65;font-weight:500;">&middot; Copy {{ tx.book.copy_number }}</span>{% endif %}</div>
             <div class="book-author">{{ tx.book.author }}</div>
             <div class="progress-bar"><div class="progress-fill {% if tx.overdue_flag %}fill-red{% else %}fill-green{% endif %}" style="width:{% if tx.overdue_flag %}100{% else %}50{% endif %}%"></div></div>
           </div>
@@ -310,7 +310,7 @@
         <div class="history-item">
           <div class="hist-icon"><i class="fa-solid fa-book" aria-hidden="true"></i></div>
           <div style="flex:1">
-            <div class="hist-title">{{ tx.book.title }}</div>
+            <div class="hist-title">{{ tx.book.title }}{% if tx.book.copy_number %} <span style="opacity:.65;font-weight:500;">&middot; Copy {{ tx.book.copy_number }}</span>{% endif %}</div>
             <div class="hist-date">Returned {{ tx.return_date|date:"M j, Y" }}</div>
           </div>
           <div class="hist-status" style="border-radius:5px;padding:3px 8px;font-size:10px;background:var(--tint-accent);color:var(--accent)">Returned</div>
@@ -341,7 +341,7 @@
           <div class="overdue-title"><i class="fa-solid fa-circle-exclamation" aria-hidden="true"></i> {{ overdue_count }} Overdue Book{{ overdue_count|pluralize }}</div>
           {% for tx in overdue_loans %}
           <div class="overdue-item">
-            <div style="font-weight:600;font-size:12px;">{{ tx.book.title }}</div>
+            <div style="font-weight:600;font-size:12px;">{{ tx.book.title }}{% if tx.book.copy_number %} <span style="opacity:.65;font-weight:500;">&middot; Copy {{ tx.book.copy_number }}</span>{% endif %}</div>
             <div class="overdue-days">Due {{ tx.due_date|date:"M j" }}{% if tx.fine_amount %} · Fine ₱{{ tx.fine_amount }}{% endif %}</div>
           </div>
           {% endfor %}

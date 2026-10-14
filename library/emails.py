@@ -140,6 +140,8 @@ def borrow_confirmation_email(patron, books, due_date):
     ]
     for book in books:
         title = book.title if hasattr(book, 'title') else str(book)
+        if getattr(book, 'copy_number', None):
+            title += f' (Copy {book.copy_number})'
         lines.append(f"  - {title}")
     lines += [
         "",
@@ -162,6 +164,8 @@ def return_receipt_email(patron, books, had_overdue=False):
     ]
     for book in books:
         title = book.title if hasattr(book, 'title') else str(book)
+        if getattr(book, 'copy_number', None):
+            title += f' (Copy {book.copy_number})'
         lines.append(f"  - {title}")
     lines.append("")
     if had_overdue:
