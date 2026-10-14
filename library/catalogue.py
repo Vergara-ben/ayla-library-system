@@ -219,6 +219,34 @@ def clean_genre(raw, allow_new=False, known=None):
                   'new genre on purpose.' % genre[:40])
 
 
+def matched_genre(raw, known=None):
+    """The library genre a sheet's own wording belongs to ("Legal Thriller" -> Thriller & Suspense), or None."""
+    from .genres import standard_genre
+    target = standard_genre(raw)
+    known = known_genres() if known is None else known
+    return known.get(target.lower()) if target else None
+
+
+# What a sheet writes when a book has no ISBN, or does not say its year.
+NO_ISBN_WORDS = {'none', 'no isbn', 'no-isbn', 'without isbn', 'n/a', 'na', '-', '--'}
+UNKNOWN_YEAR_WORDS = {'unknown', 'year unknown', 'unknown year', 'n.d.', 'nd', 'no date', 'n/a', 'na', '-', '--'}
+
+
+def missing_details(isbn, no_isbn, year, year_unknown, price, sheet=False):
+    """What a book still lacks: [(field, problem)]. A blank ISBN or year is fine only when said on purpose."""
+    out = []
+    if not isbn and not no_isbn:
+        out.append(('ISBN', 'no ISBN: write it, or "none" if the book has none' if sheet else
+                    'Type or scan the ISBN, or tick "No ISBN" if the book has none.'))
+    if year is None and not year_unknown:
+        out.append(('publication_year', 'no publication year: write it, or "unknown"' if sheet else
+                    'Type the publication year, or tick "Year unknown".'))
+    if price is None:
+        out.append(('price', 'no price, which is what a patron pays if the book is lost' if sheet else
+                    'Type the price. It is what a patron pays if the book is lost.'))
+    return out
+
+
 def same_title(title, author):
     """Live books already catalogued under this title and author."""
     return Book.objects.filter(title__iexact=tidy(title), author__iexact=tidy(author))

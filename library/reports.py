@@ -22,13 +22,14 @@ REPORT_TYPES = [
     ('stock_levels', 'Stock Levels Report'),
     ('stock_movement', 'Stock Movement Report'),
     ('stock_audits', 'Stock Audit Report'),
+    ('shelving', 'Books Without a Shelf or Label'),
     ('unreturned', 'Unreturned Books Report'),
     ('penalties', 'Penalties Report'),
     ('analytics', 'Borrowing Analytics Report'),
 ]
 
 # Reports that represent a real-time snapshot rather than a date range.
-SNAPSHOT_REPORTS = {'books', 'patrons', 'stock_levels', 'unreturned'}
+SNAPSHOT_REPORTS = {'books', 'patrons', 'stock_levels', 'unreturned', 'shelving'}
 
 LIBRARY_NAME = 'Ayla Public Library'
 LIBRARY_LOCATION = 'Brgy. Sala, Cabuyao, Laguna'
@@ -1218,6 +1219,50 @@ def _stock_audits(start, end):
     }
 
 
+def _shelving(start, end):
+    """Books not yet ready for the floor: here with no board, or on a board with no label."""
+    from collections import Counter
+    from .shelving import BoardSuggester, need_label, need_shelf
+    suggester = BoardSuggester()
+    rows = []
+    for b in need_shelf().order_by('title', 'book_id'):
+        level, _why = suggester.suggest(b.title, b.author, b.genre)
+        rows.append(['Waiting for a shelf', b.book_id, b.title, _text(b.author), _text(b.call_number),
+                     b.status, ('Suggested: %s %s' % (level.shelf.name if level.shelf_id else '', level.label)).strip()
+                     if level else DASH])
+    per_shelf = Counter()
+    unlabelled = list(need_label().select_related('shelf_level', 'shelf_level__shelf')
+                      .order_by('shelf_level__shelf__name', 'shelf_level__column_number',
+                                'shelf_level__level_number', 'shelf_slot', 'title'))
+    for b in unlabelled:
+        rows.append(['No label', b.book_id, b.title, _text(b.author), _text(b.call_number),
+                     b.status, _book_location(b)])
+        per_shelf[b.shelf_level.shelf.name if b.shelf_level.shelf_id else 'No shelf'] += 1
+    waiting = len(rows) - len(unlabelled)
+    return {
+        'key': 'shelving',
+        'title': 'Books Without a Shelf or Label',
+        'subtitle': 'Books here with no board yet, and books on a board with no label printed or confirmed',
+        'columns': ['Needs', 'Book ID', 'Title', 'Author', 'Call Number', 'Status', 'Board'],
+        'rows': rows,
+        'summary': [
+            ('Waiting for a Shelf', waiting),
+            ('On a Shelf, No Label', len(unlabelled)),
+            ('Shelves With Unlabelled Books', len(per_shelf)),
+        ],
+        'chart': _chart(
+            per_shelf.most_common(12), kind='bar',
+            title='Books with no label, by shelf',
+            note="Print a shelf's labels, or confirm them by auditing it.",
+            empty_note='Every shelved book has its label.',
+            axis_note='Shelf · vertical axis is number of books'),
+        'breakdown': {
+            'By shelf': [(k, '%d book(s) with no label' % v) for k, v in sorted(per_shelf.items())],
+        },
+    }
+
+
+_BUILDERS['shelving'] = _shelving
 _BUILDERS['donors'] = _donors
 _BUILDERS['stock_audits'] = _stock_audits
 _BUILDERS['unreturned'] = _unreturned

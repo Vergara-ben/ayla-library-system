@@ -625,6 +625,7 @@
         const CSRF = "{{ csrf_token }}";
         const U = {
             tree: "{% url 'get_shelf_tree' %}",
+            shelfAudit: "{% url 'shelf_audit' 0 %}",
             flat: "{% url 'get_shelf_levels_flat' %}",
             toggle: "{% url 'toggle_active' %}",
             mapData: "{% url 'get_map_data' %}",
@@ -699,6 +700,8 @@
             if (node.type === 'floorplan') a += '<button class="tbtn view" title="Show this floor on the plan above" onclick="switchMiniFloor(' + node.id + ')"><i class="fa-solid fa-map-location-dot"></i></button>';
             if (t.child) a += '<button class="tbtn add" title="Add ' + childWord[t.child] + '" onclick="openAdd(\'' + node.type + '\',' + node.id + ')"><i class="fa-solid fa-plus"></i></button>';
             if (isBoard || node.type === 'shelf') a += '<button class="tbtn view" title="View book placement" onclick="openViewPlacement(\'' + node.type + '\',' + node.id + ')"><i class="fa-solid fa-eye"></i></button>';
+            // Check every record on the shelf, then count its boards.
+            if (node.type === 'shelf') a += '<a class="tbtn view" title="Audit this shelf" href="' + U.shelfAudit.replace('0', node.id) + '"><i class="fa-solid fa-clipboard-check"></i></a>';
             if (isBoard) a += '<button class="tbtn view" title="Show on the front view" onclick="showElevation(' + node.id + ')"><i class="fa-solid fa-bars-staggered"></i></button>';
             if (isBoard) a += '<button class="tbtn add" title="Add Books" onclick="openPlacement(' + node.id + ', this)"><i class="fa-solid fa-book-medical"></i></button>';
             // Move and reorder buttons for a board.
@@ -1140,6 +1143,7 @@
             const box = document.getElementById('pane' + side + 'Search');
             if (box) box.value = '';
             pane.name = d.shelf + ' · ' + d.label;
+            pane.shelfId = d.shelf_id || null;
             document.getElementById('pane' + side + 'Board').value = String(d.level);
             renderPane(side);
         };
@@ -1196,11 +1200,14 @@
             const n = pane.sel.size;
             const shown = (pane.view || pane.books).length;
             const total = pane.books.length;
-            document.getElementById('pane' + side + 'Count').textContent =
+            document.getElementById('pane' + side + 'Count').innerHTML =
                 pane.level === null ? ''
                 : (shown === total ? total + ' book' + (total === 1 ? '' : 's')
                                    : shown + ' of ' + total + ' shown')
-                  + (n ? ' · ' + n + ' selected' : '');
+                  + (n ? ' · ' + n + ' selected' : '')
+                  // Books just put on a shelf can be checked there and then.
+                  + (pane.shelfId ? ' · <a class="underline font-semibold text-violet-400" href="'
+                     + U.shelfAudit.replace('0', pane.shelfId) + '">Audit this shelf</a>' : '');
             paintArrows();
         }
 

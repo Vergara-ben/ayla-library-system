@@ -1,0 +1,115 @@
+{% load static %}
+{# Counting one board against its records. Open a board with loadAuditSheet(levelId). #}
+<div id="shelfCount" class="space-y-4"
+     data-sheet-url="{% url 'stock_audit_sheet' %}" data-file-url="{% url 'stock_audit_file' %}"
+     data-qr-url="{% url 'search_book_by_qr' %}" data-labels-url="{% url 'book_qr_labels' %}"
+     data-csrf="{{ csrf_token }}">
+    <div class="flex items-center gap-2 flex-wrap">
+        <button type="button" id="auditCamBtn" onclick="toggleAuditCamera()" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-{{ accent|default:'cyan' }}-400 text-xs font-bold px-3 py-2.5 rounded-lg">
+            <i class="fa-solid fa-camera mr-1"></i> Scan a book
+        </button>
+        <div class="flex gap-2 flex-1 min-w-[240px] max-w-md">
+            <input type="text" id="auditManual" class="field-input" placeholder="Or type a label from a sticker, then Enter"
+                   onkeydown="if (event.key === 'Enter') { event.preventDefault(); checkStray(this.value); this.value=''; }">
+            <button type="button" onclick="checkStray(document.getElementById('auditManual').value); document.getElementById('auditManual').value='';" class="px-3 rounded-lg border border-slate-700 text-slate-300 text-xs font-semibold hover:bg-slate-800/50">Check</button>
+        </div>
+    </div>
+
+    <div id="auditCamWrap" class="hidden space-y-2">
+        <div class="relative aspect-video w-full max-w-[260px] bg-slate-900 rounded-lg overflow-hidden">
+            <video id="auditVideo" class="w-full h-full object-contain" autoplay playsinline></video>
+            <canvas id="auditCanvas" class="hidden"></canvas>
+        </div>
+        <p class="text-[11px] text-slate-500">
+            Scanning a book on this board ticks it. Scanning one that belongs
+            elsewhere says where it should go &mdash; which is the thing tapping
+            down a list can never tell you.
+        </p>
+    </div>
+
+    <p id="auditScanStatus" class="text-[11px] text-slate-500"></p>
+
+    <div id="auditSheetWrap" class="hidden space-y-3">
+        <div class="flex items-center gap-2 flex-wrap">
+            <span id="auditWhere" class="text-xs font-bold text-slate-200"></span>
+            <span id="auditTally" class="text-[11px] text-slate-500"></span>
+            <div class="ml-auto flex items-center gap-1.5 flex-wrap">
+                <button type="button" onclick="markRest()" class="text-[10px] font-semibold px-2.5 py-1.5 rounded-md border border-emerald-800/60 text-emerald-400 hover:bg-emerald-950/40">The rest are here</button>
+                <button type="button" onclick="clearMarks()" class="text-[10px] font-semibold px-2.5 py-1.5 rounded-md border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/50">Start over</button>
+            </div>
+        </div>
+
+        <div id="auditSheet" class="rounded-lg border border-slate-800 overflow-y-auto" style="background-color: var(--bg-main); max-height: 52vh;"></div>
+        <div id="auditStrays" class="hidden rounded-lg border border-slate-800 px-4 py-3 space-y-1.5 text-xs" style="background-color: var(--bg-main);"></div>
+
+        <p class="text-[11px] text-slate-500 leading-relaxed">
+            Tap a row to mark it <strong class="text-emerald-400">here</strong>. Tap the
+            cross to mark it <strong class="text-rose-400">not found</strong>, and the tag when the book has
+            <strong class="text-violet-400">no label</strong> on it. A book confirmed here without that mark is
+            recorded as labelled. Rows you never touch are covered by &ldquo;the rest are here&rdquo;, and the
+            count records how many you confirmed one by one against how many were swept, so the shortcut shows
+            in the history rather than hiding in it.
+        </p>
+
+        <button type="button" id="auditFileBtn" onclick="fileShelfRead()" disabled class="w-full bg-{{ accent|default:'cyan' }}-600/20 text-{{ accent|default:'cyan' }}-400 border border-{{ accent|default:'cyan' }}-600/30 disabled:opacity-40 disabled:cursor-not-allowed px-4 py-3 rounded-lg text-sm font-semibold hover:bg-{{ accent|default:'cyan' }}-600/30 transition-colors">
+            <i class="fa-solid fa-clipboard-check mr-1"></i> <span id="auditFileLabel">File this count</span>
+        </button>
+    </div>
+
+    <div id="auditReport" class="hidden rounded-lg border border-slate-800 p-4 space-y-3" style="background-color: var(--bg-main);"></div>
+</div>
+
+<style>
+    /* Shelf count sheet. */
+    .arow {
+        display: flex; align-items: center; gap: 10px;
+        padding: 8px 10px; cursor: pointer; user-select: none;
+        border-bottom: 1px solid var(--border-color);
+        transition: background-color .1s ease;
+    }
+    .arow:last-child { border-bottom: 0; }
+    .arow:hover { background: var(--tint-accent); }
+    .arow.here { background: rgba(16, 185, 129, .12); }
+    /* Covered by "the rest are here". */
+    .arow.bulk { background: rgba(16, 185, 129, .05); }
+    .arow.gone { background: rgba(225, 29, 72, .12); }
+    /* Borrowed copies. */
+    .arow.locked { cursor: default; opacity: .55; }
+    .arow.locked:hover { background: transparent; }
+    .apos {
+        width: 30px; flex: 0 0 auto; text-align: right; font-size: 12px;
+        font-variant-numeric: tabular-nums; color: var(--text-muted);
+    }
+    .atick {
+        width: 20px; height: 20px; flex: 0 0 auto; border-radius: 6px;
+        border: 1px solid var(--border-color); display: flex;
+        align-items: center; justify-content: center; font-size: 12px;
+    }
+    .arow.here .atick { border-color: rgb(var(--tw-emerald-500)); color: rgb(var(--tw-emerald-500)); }
+    .arow.bulk .atick { border-color: rgba(16, 185, 129, .45); color: rgba(16, 185, 129, .55); }
+    .arow.gone .atick { border-color: #e11d48; color: #e11d48; }
+    .atitle {
+        flex: 1 1 auto; min-width: 0; font-size: 14px; color: var(--text-primary);
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .ameta { font-size: 12px; color: var(--text-muted); flex: 0 0 auto; }
+    .anote { font-size: 12px; flex: 0 0 auto; }
+    .agone {
+        width: 22px; height: 22px; flex: 0 0 auto; border-radius: 6px;
+        border: 1px solid var(--border-color); background: transparent;
+        color: var(--text-muted); font-size: 12px; cursor: pointer;
+    }
+    .agone:hover { color: #e11d48; border-color: #e11d48; background: rgba(225,29,72,.1); }
+    .adamage:hover, .arow.damaged .adamage { color: #d97706; border-color: #d97706; background: rgba(217,119,6,.12); }
+    .alabel:hover, .alabel.on { color: #7c3aed; border-color: #7c3aed; background: rgba(124,58,237,.12); }
+    .arow.damaged { background: rgba(217, 119, 6, .12); }
+    .arow.damaged .atick { border-color: #d97706; color: #d97706; }
+    .arow.onshelf { opacity: 1; background: rgba(59, 130, 246, .12); }
+    .ahere { font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 6px; flex: 0 0 auto;
+             border: 1px solid var(--border-color); background: transparent; color: var(--text-muted); cursor: pointer; }
+    .ahere:hover, .arow.onshelf .ahere { color: #2563eb; border-color: #2563eb; background: rgba(37,99,235,.1); }
+    @media (max-width: 640px) { .ameta, .anote { display: none; } }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js" integrity="sha384-hStSInNIZ8ljtOVrmrgf7zdHMapaLBWoSnPTtF0nzsybp4+LuhDz6sHuEVpWIX8o" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="{% static 'js/label-print.js' %}"></script>
+<script src="{% static 'js/shelf-count.js' %}"></script>

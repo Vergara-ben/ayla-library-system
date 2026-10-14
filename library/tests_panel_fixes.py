@@ -3,6 +3,7 @@
 import io
 import json
 from datetime import timedelta
+from decimal import Decimal
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client, TestCase
@@ -12,7 +13,7 @@ from .auth_utils import hash_password
 from .models import (
     Book, BorrowingRule, DueDateExtension, InventoryRecord, Patron, Transaction, User,
 )
-from .tests import _with_genre, _with_genre_items
+from .tests import COMPLETE_BOOK, _with_genre, _with_genre_items
 from .views import isbn_error
 
 
@@ -753,8 +754,9 @@ class CallNumberGuardTests(TestCase):
             self.assertIsNone(call_number_error(good), good)
 
     def test_add_book_refuses_a_plain_number(self):
-        r = self.client.post('/admin-portal/add-book/', {'title': 'Noli', 'author': 'Rizal, Jose', 'genre': 'Fiction',
-                                                         'new_genre': '1', 'call_number': '739'}, **self.ajax).json()
+        r = self.client.post('/admin-portal/add-book/', dict(COMPLETE_BOOK, title='Noli', author='Rizal, Jose',
+                                                              genre='Fiction', new_genre='1', call_number='739'),
+                             **self.ajax).json()
         self.assertFalse(r['success'])
         self.assertIn('just a number', r['error'])
         self.assertFalse(Book.objects.filter(title='Noli').exists())
@@ -770,9 +772,9 @@ class CallNumberGuardTests(TestCase):
     def test_import_replaces_a_plain_number_and_says_so(self):
         import openpyxl
         wb = openpyxl.Workbook()
-        wb.active.append(['Title', 'Author', 'Genre', 'Publication Year', 'Code Label'])
-        wb.active.append(['Noli Me Tangere', 'Rizal, Jose', 'Fiction', 1887, 739])
-        wb.active.append(['El Filibusterismo', 'Rizal, Jose', 'Fiction', 1891, 'FIC R49e 1891'])
+        wb.active.append(['Title', 'Author', 'Genre', 'Publication Year', 'Code Label', 'ISBN', 'Price'])
+        wb.active.append(['Noli Me Tangere', 'Rizal, Jose', 'Fiction', 1887, 739, 'none', 300])
+        wb.active.append(['El Filibusterismo', 'Rizal, Jose', 'Fiction', 1891, 'FIC R49e 1891', 'none', 300])
         buf = io.BytesIO()
         wb.save(buf)
         upload = SimpleUploadedFile('books.xlsx', buf.getvalue())
@@ -1313,7 +1315,7 @@ class StricterCataloguingTests(TestCase):
         self.ajax = {'HTTP_X_REQUESTED_WITH': 'XMLHttpRequest'}
 
     def _add(self, **data):
-        return self.client.post('/admin-portal/add-book/', data, **self.ajax).json()
+        return self.client.post('/admin-portal/add-book/', dict(COMPLETE_BOOK, **data), **self.ajax).json()
 
     def test_the_rules(self):
         from .catalogue import (clean_author, clean_copies, clean_genre, clean_isbn, clean_price,
@@ -1409,12 +1411,12 @@ class StricterCataloguingTests(TestCase):
         self.assertEqual(Book._surname_of('Jane Austen and John Smith'), 'Austen')
 
     def test_the_import_refuses_rule_breaking_rows_and_adds_new_genres_on_purpose(self):
-        rows = [['Title', 'Author', 'ISBN', 'Genre', 'Publication Year'],
-                ['Good Book', 'Cruz, Ana', '', 'fiction', 2001],
-                ['Space Book', 'Cruz, Ana', '', 'Space Opera', 2002],
-                ['Bad Isbn', 'Cruz, Ana', '9780000000000', 'Fiction', 2004],
-                ['No Genre', 'Cruz, Ana', '', '', 2005],
-                ['Far Future', 'Cruz, Ana', '', 'Fiction', 2999]]
+        rows = [['Title', 'Author', 'ISBN', 'Genre', 'Publication Year', 'Price'],
+                ['Good Book', 'Cruz, Ana', 'none', 'fiction', 2001, 100],
+                ['Space Book', 'Cruz, Ana', 'none', 'Space Opera', 2002, 100],
+                ['Bad Isbn', 'Cruz, Ana', '9780000000000', 'Fiction', 2004, 100],
+                ['No Genre', 'Cruz, Ana', 'none', '', 2005, 100],
+                ['Far Future', 'Cruz, Ana', 'none', 'Fiction', 2999, 100]]
         r = self.client.post('/admin-portal/import-books/', {'excel_file': _sheet(rows)}).json()
         self.assertEqual(r['imported'], 1, r)
         self.assertEqual(r['new_genres'], ['Space Opera'])
@@ -1431,6 +1433,7 @@ class StricterCataloguingTests(TestCase):
         rows = [['Donor', 'Title', 'Author', 'Genre'],
                 ['Ana Cruz', 'Ibong Adarna', 'Unknown', 'Epic Poem'],
                 ['Ana Cruz', 'El Filibusterismo', 'Rizal, Jose', 'Fiction']]
+        rows = _with_genre(rows)
         r = self.client.post('/admin-portal/import-donations/', {'excel_file': _sheet(rows)}).json()
         self.assertFalse(r['success'])
         self.assertEqual(r['new_genres'], ['Epic Poem'])
@@ -1441,7 +1444,8 @@ class StricterCataloguingTests(TestCase):
 
     def test_receiving_a_new_title_follows_the_rules(self):
         def receive(**item):
-            line = {'title': 'Ibong Adarna', 'author': 'Unknown', 'quantity': 1, 'condition': 'Good'}
+            line = {'title': 'Ibong Adarna', 'author': 'Unknown', 'quantity': 1, 'condition': 'Good',
+                    'isbn_none': True, 'year_unknown': True, 'price': '120'}
             line.update(item)
             self.client.post('/admin-portal/inventory/receive/', {'source': 'Purchase', 'items': json.dumps([line])})
             return Book.objects.filter(title='Ibong Adarna').first()
@@ -1453,3 +1457,374 @@ class StricterCataloguingTests(TestCase):
         self.client.post('/admin-portal/inventory/receive/', {'source': 'Purchase', 'items': json.dumps(
             [{'book_id': self.noli.book_id, 'quantity': 1, 'condition': 'Good'}])})
         self.assertEqual(Book.objects.filter(title='Noli Me Tangere').count(), before + 1)
+
+
+class GenreTidyTests(TestCase):
+    """584 one-off descriptions became 45 genres; the old wording lives on as the subject."""
+
+    def setUp(self):
+        self.staff = _staff(role='Admin', modules='books,inventory,donations')
+        self.client = _client(admin_id=self.staff.admin_id, admin_role='Admin')
+        self.ajax = {'HTTP_X_REQUESTED_WITH': 'XMLHttpRequest'}
+
+    def test_old_wording_lands_in_the_standard_list(self):
+        from .genres import STANDARD_GENRES, standard_genre
+        cases = {
+            'Legal Thriller': 'Thriller & Suspense',
+            "Children's Picture Book / Dinosaurs & Pop-Up": "Children's Picture Books",
+            'General Reference / Encyclopedia': 'Encyclopedias',
+            'Values Education Textbook': 'Values Education',
+            'Social Studies / Textbook (HEKASI)': 'Social Studies',
+            'Academic Literature / Poetry': 'Filipino Language & Literature',
+            'Non-Fiction / History': 'History',
+            'Politics / Non-Fiction': 'Social Sciences',
+            'Political Science & Government': 'Social Sciences',
+            'Business Statistics': 'Statistics',
+            'Auditing & Information Systems': 'Accounting',
+            'fiction': 'Fiction',
+        }
+        for old, new in cases.items():
+            self.assertEqual(standard_genre(old), new, old)
+        self.assertEqual(len(STANDARD_GENRES), 45)
+        self.assertIsNone(standard_genre('Underwater Basketweaving'))
+
+    def test_the_tidy_keeps_the_old_wording_as_the_subject(self):
+        import importlib
+        from django.apps import apps
+        from .models import SystemLog
+        legal = Book.objects.create(title='The Firm', author='Grisham, John', genre='Legal Thriller')
+        plain = Book.objects.create(title='Emma', author='Austen, Jane', genre='Fiction')
+        odd = Book.objects.create(title='Odd', author='Cruz, Ana', genre='Underwater Basketweaving')
+        importlib.import_module('library.migrations.0089_tidy_genres').tidy_genres(apps, None)
+        for book in (legal, plain, odd):
+            book.refresh_from_db()
+        self.assertEqual((legal.genre, legal.subject), ('Thriller & Suspense', 'Legal Thriller'))
+        self.assertEqual((plain.genre, plain.subject), ('Fiction', None))
+        self.assertEqual((odd.genre, odd.subject), ('Underwater Basketweaving', None))
+        self.assertTrue(SystemLog.objects.filter(detail__startswith='Tidied genres').exists())
+
+    def test_every_search_box_finds_the_subject(self):
+        Book.objects.create(title='The Firm', author='Grisham, John', genre='Thriller & Suspense',
+                            subject='Legal Thriller')
+        page = self.client.get('/admin-portal/management/', {'q': 'legal thrill'})
+        self.assertEqual([b.title for b in page.context['books']], ['The Firm'])
+
+    def test_the_import_matches_wording_and_keeps_it_as_the_subject(self):
+        Book.objects.create(title='The Firm', author='Grisham, John', genre='Thriller & Suspense')
+        rows = [['Title', 'Author', 'Genre', 'Subject', 'ISBN', 'Publication Year', 'Price'],
+                ['The Client', 'Grisham, John', 'Legal Thriller', '', 'none', 1993, 300],
+                ['The Spy', 'Le Carre, John', '', 'Spy Thriller', 'none', 1963, 300],
+                ['The Basket', 'Cruz, Ana', 'Underwater Basketweaving', '', 'none', 2001, 300]]
+        r = self.client.post('/admin-portal/import-books/', {'excel_file': _sheet(rows)}).json()
+        client = Book.objects.get(title='The Client')
+        self.assertEqual((client.genre, client.subject), ('Thriller & Suspense', 'Legal Thriller'))
+        spy = Book.objects.get(title='The Spy')
+        self.assertEqual((spy.genre, spy.subject), ('Thriller & Suspense', 'Spy Thriller'))
+        self.assertIn('kept as the subject', r['message'])
+        # Wording no rule fits is still a new genre, added only on purpose.
+        self.assertEqual(r['new_genres'], ['Underwater Basketweaving'])
+        self.assertFalse(Book.objects.filter(title='The Basket').exists())
+
+    def test_the_donation_import_matches_too(self):
+        Book.objects.create(title='The Firm', author='Grisham, John', genre='Thriller & Suspense')
+        rows = [['Donor', 'Title', 'Author', 'Genre'], ['Ana Cruz', 'The Client', 'Grisham, John', 'Legal Thriller']]
+        r = self.client.post('/admin-portal/import-donations/', {'excel_file': _sheet(_with_genre(rows))}).json()
+        self.assertTrue(r['success'], r)
+        client = Book.objects.get(title='The Client')
+        self.assertEqual((client.genre, client.subject), ('Thriller & Suspense', 'Legal Thriller'))
+
+    def test_another_copy_takes_its_titles_subject_and_editing_changes_it(self):
+        first = Book.objects.create(title='The Firm', author='Grisham, John', genre='Thriller & Suspense',
+                                    subject='Legal Thriller')
+        r = self.client.post('/admin-portal/add-book/', dict(COMPLETE_BOOK, title='The Firm', author='Grisham, John',
+                                                              genre='Thriller & Suspense'), **self.ajax).json()
+        self.assertTrue(r['success'], r)
+        self.assertEqual(set(Book.objects.filter(title='The Firm').values_list('subject', flat=True)),
+                         {'Legal Thriller'})
+        self.client.post('/admin-portal/edit-book/%d/' % first.book_id, {
+            'title': 'The Firm', 'author': 'Grisham, John', 'genre': 'Thriller & Suspense',
+            'subject': '  Courtroom   Drama '}, **self.ajax)
+        first.refresh_from_db()
+        self.assertEqual(first.subject, 'Courtroom Drama')
+
+    def test_the_edit_form_fills_in_an_apostrophe_as_typed(self):
+        book = Book.objects.create(title="Charlotte's Web", author='White, E. B.', genre="Children's Fiction")
+        page = self.client.get('/admin-portal/edit-book/%d/' % book.book_id).content.decode()
+        self.assertIn("Children\\u0027s Fiction", page)
+        self.assertNotIn("value = 'Children&#x27;s", page)
+
+    def test_editing_keeps_a_magazine_a_magazine(self):
+        book = Book.objects.create(title='Reader', author='Unknown', genre='Fiction', material_type='Magazine')
+        page = self.client.get('/admin-portal/edit-book/%d/' % book.book_id).content.decode()
+        self.assertIn('<option value="Magazine">', page)
+        self.assertIn("getElementById('editMaterial').value = 'Magazine'", page)
+
+    def test_the_picker_shows_what_each_genre_covers(self):
+        from .views import _genre_options
+        Book.objects.create(title='The Firm', author='Grisham, John', genre='Thriller & Suspense',
+                            subject='Legal Thriller')
+        option = next(o for o in _genre_options() if o['label'] == 'Thriller & Suspense')
+        self.assertIn('Legal Thriller', option['sub'])
+        self.assertIn('Legal Thriller', option['search'])
+
+
+class ShelvingLabelsAuditTests(TestCase):
+    """Books not yet ready for the floor are counted one way everywhere; a shelf can be audited whole."""
+
+    def setUp(self):
+        from .models import FloorPlan, Room, Shelf, ShelfLevel
+        plan = FloorPlan.objects.create(name='Ground', floor_number=1, is_active=True)
+        room = Room.objects.create(floor_plan=plan, name='Main', map_x=0, map_y=0)
+        self.shelf = Shelf.objects.create(room=room, name='Shelf A', map_x=0, map_y=0)
+        self.level = ShelfLevel.objects.create(shelf=self.shelf, level_number=1)
+        self.fiction = Book.objects.create(title='Noli Me Tangere', author='Rizal, Jose', genre='Fiction',
+                                           shelf_level=self.level, shelf_slot=1, call_number='FIC R49n',
+                                           qr_code='q-noli')
+        self.loose = Book.objects.create(title='El Filibusterismo', author='Rizal, Jose', genre='Fiction',
+                                         qr_code='q-fili')
+        self.donated = Book.objects.create(title='Florante at Laura', author='Balagtas', genre='Fiction',
+                                           status='Donated', qr_code='q-flor')
+        # Away or gone: not waiting for anyone to shelve them.
+        Book.objects.create(title='Out', author='Cruz, Ana', genre='Fiction', status='Borrowed', qr_code='q-out')
+        Book.objects.create(title='Gone', author='Cruz, Ana', genre='Fiction', status='Lost', qr_code='q-gone')
+        self.admin = _staff(role='Admin', modules='books,shelf,inventory')
+        self.client = _client(admin_id=self.admin.admin_id, admin_role='Admin')
+
+    def test_one_count_everywhere(self):
+        from .shelving import need_label, need_shelf
+        from .views import _inventory_stats
+        self.assertEqual(set(need_shelf().values_list('title', flat=True)), {'El Filibusterismo', 'Florante at Laura'})
+        self.assertEqual(list(need_label().values_list('title', flat=True)), ['Noli Me Tangere'])
+        self.assertEqual(self.client.get('/admin-portal/management/').context['unshelved_count'], 2)
+        self.assertEqual(self.client.get('/admin-portal/shelf-manager/').context['unshelved_count'], 2)
+        self.assertEqual(_inventory_stats()['unshelved_count'], 2)
+        listed = self.client.get('/admin-portal/board-books/', {'level': 'none'}).json()['books']
+        self.assertEqual(len(listed), 2)
+        shelving = {i['key']: i for i in self.client.get('/portal/alerts/').json()['items']}['shelving']
+        self.assertEqual((shelving['count'], shelving['quiet']), (2, True))
+        page = self.client.get('/admin-portal/dashboard/')
+        self.assertContains(page, 'books waiting for a shelf')
+
+    def test_a_waiting_book_is_shelved_on_its_suggested_board_in_one_click(self):
+        page = self.client.get('/admin-portal/shelving/')
+        rows = {r['book'].title: r for r in page.context['waiting']}
+        self.assertEqual(rows['El Filibusterismo']['level'], self.level)
+        self.assertIn('Fiction', rows['El Filibusterismo']['why'])
+        r = self.client.post('/admin-portal/shelving/place/', {
+            'placements': '%d:%d,%d:%d' % (self.loose.pk, self.level.pk, self.donated.pk, self.level.pk)}).json()
+        self.assertTrue(r['success'], r)
+        self.loose.refresh_from_db()
+        self.donated.refresh_from_db()
+        self.assertEqual(self.loose.shelf_level, self.level)
+        self.assertEqual(sorted([self.loose.shelf_slot, self.donated.shelf_slot]), [2, 3])
+        # A donated book on a shelf is released for borrowing.
+        self.assertEqual(self.donated.status, 'Available')
+        self.assertEqual(sorted(r['ids']), sorted([self.loose.pk, self.donated.pk]))
+
+    def test_add_book_hands_back_what_it_can_label(self):
+        shelved = self.client.post('/admin-portal/add-book/', dict(
+            COMPLETE_BOOK, title='Ibong Adarna', author='Unknown', genre='Fiction',
+            shelf_level=self.level.pk, copies='2'), HTTP_X_REQUESTED_WITH='XMLHttpRequest').json()
+        self.assertTrue(shelved['shelved'])
+        self.assertEqual(len(shelved['ids']), 2)
+        loose = self.client.post('/admin-portal/add-book/', dict(
+            COMPLETE_BOOK, title='Mga Ibong Mandaragit', author='Hernandez, Amado', genre='Fiction'),
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest').json()
+        self.assertFalse(loose['shelved'])
+
+    def test_the_shelf_audit_lists_what_the_records_get_wrong(self):
+        Book.objects.create(title='N/A', author='Cruz, Ana', genre='Fiction', shelf_level=self.level,
+                            shelf_slot=1, call_number='739', qr_code='q-na')
+        Book.objects.create(title='Lost One', author='Cruz, Ana', genre='Fiction', shelf_level=self.level,
+                            shelf_slot=4, status='Lost', call_number='FIC C78l', qr_code='q-lost')
+        page = self.client.get('/admin-portal/shelf-audit/%d/' % self.shelf.pk)
+        kinds = {g['kind']: [p['book'].title for p in g['items']] for g in page.context['problem_groups']}
+        self.assertIn('N/A', kinds['rules'])
+        self.assertIn('N/A', kinds['call_number'])
+        self.assertEqual(sorted(kinds['slot']), ['N/A', 'Noli Me Tangere'])
+        self.assertEqual(kinds['gone'], ['Lost One'])
+        self.assertEqual(page.context['boards'][0]['books'], 3)
+
+    def test_counting_a_board_records_its_labels(self):
+        other = Book.objects.create(title='Doctrina Christiana', author='Unknown', genre='Fiction',
+                                    shelf_level=self.level, shelf_slot=2, qr_code='q-doc')
+        r = self.client.post('/admin-portal/inventory/audit/file/', {
+            'level': self.level.pk, 'found_ids': [self.fiction.pk], 'bulk_ids': [other.pk],
+            'nolabel_ids': [other.pk]}).json()
+        self.assertTrue(r['success'], r)
+        self.fiction.refresh_from_db()
+        other.refresh_from_db()
+        self.assertIsNotNone(self.fiction.label_printed_at)
+        self.assertIsNone(other.label_printed_at)
+        self.assertEqual((r['labelled'], r['nolabel'], r['nolabel_ids']), (1, 1, [other.pk]))
+
+    def test_staff_who_shelve_can_audit_but_others_cannot(self):
+        shelver = _staff(modules='shelf')
+        staff = _client(admin_id=shelver.admin_id, admin_role='Staff')
+        self.assertEqual(staff.get('/admin-portal/shelf-audit/%d/' % self.shelf.pk).status_code, 200)
+        self.assertTrue(staff.get('/admin-portal/inventory/audit/sheet/', {'level': self.level.pk}).json()['success'])
+        self.assertEqual(staff.get('/admin-portal/shelving/').status_code, 200)
+        desk = User.objects.create(fullname='Desk Only', email='desk-only@example.invalid', role='Staff',
+                                   account_status='Active', modules='transactions')
+        other = _client(admin_id=desk.admin_id, admin_role='Staff')
+        self.assertEqual(other.get('/admin-portal/shelf-audit/%d/' % self.shelf.pk).status_code, 302)
+
+    def test_the_report_lists_both(self):
+        from .reports import build_report
+        today = timezone.localdate()
+        report = build_report('shelving', today, today)
+        needs = sorted(row[0] for row in report['rows'])
+        self.assertEqual(needs, ['No label', 'Waiting for a shelf', 'Waiting for a shelf'])
+        self.assertIn(('Waiting for a Shelf', 2), report['summary'])
+
+
+class DonorNamePartsTests(TestCase):
+    """A person who donates is named as first name, middle name (optional) and surname."""
+
+    def setUp(self):
+        self.client = _client(admin_id=_staff(role='Admin').admin_id, admin_role='Admin')
+        self.book = Book.objects.create(title='Noli', author='Rizal', genre='Fiction', qr_code='q-noli')
+
+    def _give(self, **donor):
+        data = {'source': 'Donation', 'donated_date': '2026-10-01',
+                'items': json.dumps([{'book_id': self.book.pk, 'quantity': 1, 'condition': 'Good'}])}
+        data.update(donor)
+        return self.client.post('/admin-portal/inventory/receive/', data, follow=True)
+
+    def test_a_person_is_saved_with_the_name_split(self):
+        from .models import Donor
+        self._give(donor_type='Individual', donor_first_name=' juan ', donor_middle_name='Perez',
+                   donor_last_name='Dela Cruz')
+        donor = Donor.objects.get()
+        self.assertEqual((donor.first_name, donor.middle_name, donor.last_name), ('juan', 'Perez', 'Dela Cruz'))
+        self.assertEqual(donor.name, 'juan Perez Dela Cruz')
+        self.assertEqual(InventoryRecord.objects.get().donor_name, 'juan Perez Dela Cruz')
+
+    def test_the_surname_is_required_but_the_middle_name_is_not(self):
+        from .models import Donor
+        page = self._give(donor_type='Individual', donor_first_name='Juan')
+        self.assertContains(page, 'first name and surname')
+        self.assertFalse(Donor.objects.exists())
+        self._give(donor_type='Individual', donor_first_name='Juan', donor_last_name='Cruz')
+        self.assertEqual(Donor.objects.get().middle_name, None)
+
+    def test_an_organisation_keeps_one_name(self):
+        from .models import Donor
+        self._give(donor_type='School', donor_name='Pulo National High School')
+        donor = Donor.objects.get()
+        self.assertEqual((donor.name, donor.first_name, donor.donor_type),
+                         ('Pulo National High School', None, 'School'))
+
+    def test_a_past_donor_is_matched_by_their_name_parts(self):
+        from .models import Donor
+        Donor.objects.create(name='Dela Cruz, Juan', first_name='Juan', last_name='Dela Cruz')
+        self._give(donor_type='Individual', donor_first_name='JUAN', donor_last_name='dela cruz')
+        self.assertEqual(Donor.objects.count(), 1)
+        self.assertEqual(InventoryRecord.objects.get().donor_name, 'Dela Cruz, Juan')
+
+    def test_the_donors_page_registers_and_edits_by_parts(self):
+        from .models import Donor
+        self.client.post('/admin-portal/donors/', {'action': 'add', 'donor_type': 'Individual',
+                                                   'first_name': 'Ana', 'last_name': 'Reyes', 'confirm_new': '1'})
+        donor = Donor.objects.get()
+        self.assertEqual(donor.name, 'Ana Reyes')
+        self.client.post('/admin-portal/donors/', {'donor_id': donor.pk, 'donor_type': 'Individual',
+                                                   'first_name': 'Ana', 'middle_name': 'Santos',
+                                                   'last_name': 'Reyes'})
+        donor.refresh_from_db()
+        self.assertEqual((donor.name, donor.middle_name), ('Ana Santos Reyes', 'Santos'))
+
+    def test_the_sheet_takes_name_columns(self):
+        from .models import Donor
+        rows = [['first_name', 'middle_name', 'last_name', 'donor_name', 'title', 'author', 'genre'],
+                ['Juan', '', 'Cruz', '', 'Noli', 'Rizal', 'Fiction'],
+                ['', '', '', 'Rotary Club', 'Noli', 'Rizal', 'Fiction'],
+                ['Pedro', '', '', '', 'Noli', 'Rizal', 'Fiction']]
+        r = self.client.post('/admin-portal/import-donations/', {'excel_file': _sheet(rows)}).json()
+        self.assertTrue(r['success'], r)
+        self.assertIn('Row 4: a person needs both a first name and a surname', r['message'])
+        self.assertEqual(Donor.objects.get(first_name='Juan').last_name, 'Cruz')
+        self.assertEqual(set(InventoryRecord.objects.values_list('donor_name', flat=True)),
+                         {'Juan Cruz', 'Rotary Club'})
+
+
+class CompleteBookRecordTests(TestCase):
+    """A new book has its ISBN and year, or says on purpose it has none, and always its price."""
+
+    def setUp(self):
+        Book.objects.create(title='Noli Me Tangere', author='Rizal, Jose', genre='Fiction', qr_code='q-noli')
+        self.client = _client(admin_id=_staff(role='Admin', modules='books,inventory,donations').admin_id,
+                              admin_role='Admin')
+        self.ajax = {'HTTP_X_REQUESTED_WITH': 'XMLHttpRequest'}
+
+    def _add(self, **data):
+        base = {'title': 'Florante at Laura', 'author': 'Balagtas', 'genre': 'Fiction'}
+        return self.client.post('/admin-portal/add-book/', dict(base, **data), **self.ajax).json()
+
+    def test_add_book_refuses_blanks_left_by_accident(self):
+        r = self._add()
+        self.assertFalse(r['success'])
+        self.assertEqual({p['field'] for p in r['problems']}, {'ISBN', 'publication_year', 'price'})
+        self.assertFalse(Book.objects.filter(title='Florante at Laura').exists())
+
+    def test_none_and_unknown_said_on_purpose_are_kept(self):
+        r = self._add(no_isbn='1', year_unknown='1', price='150')
+        self.assertTrue(r['success'], r)
+        book = Book.objects.get(title='Florante at Laura')
+        self.assertEqual((book.ISBN, book.isbn_none, book.publication_year, book.year_unknown),
+                         (None, True, None, True))
+
+    def test_an_edit_asks_for_what_an_old_record_lacks_and_remembers_the_answer(self):
+        old = Book.objects.get(title='Noli Me Tangere')
+        url = '/admin-portal/edit-book/%d/' % old.pk
+        form = {'title': old.title, 'author': old.author, 'genre': 'Fiction', 'ISBN': '', 'publication_year': '',
+                'price': ''}
+        r = self.client.post(url, form, **self.ajax).json()
+        self.assertEqual({p['field'] for p in r['problems']}, {'ISBN', 'publication_year', 'price'})
+        r = self.client.post(url, dict(form, no_isbn='1', publication_year='1887', price='250'), **self.ajax).json()
+        self.assertTrue(r['success'], r)
+        old.refresh_from_db()
+        self.assertTrue(old.isbn_none)
+        self.assertIn('no_isbn', '\n'.join(
+            line for line in self.client.get(url).content.decode().splitlines() if 'editNoIsbn' in line))
+
+    def test_the_import_refuses_blanks_but_takes_none_and_unknown(self):
+        rows = [['Title', 'Author', 'Genre', 'ISBN', 'Publication Year', 'Price'],
+                ['Blank Everything', 'Cruz, Ana', 'Fiction', '', '', ''],
+                ['Said None', 'Cruz, Ana', 'Fiction', 'N/A', 'unknown', 120],
+                ['Complete', 'Cruz, Ana', 'Fiction', '9780000000002', 1999, 300]]
+        r = self.client.post('/admin-portal/import-books/', {'excel_file': _sheet(rows)}).json()
+        self.assertEqual(r['imported'], 2, r)
+        problem = r['problems'][0]
+        self.assertTrue(problem.startswith('Row 2'))
+        for words in ('no ISBN', 'no publication year', 'no price'):
+            self.assertIn(words, problem)
+        said = Book.objects.get(title='Said None')
+        self.assertEqual((said.isbn_none, said.year_unknown, str(said.price)), (True, True, '120.00'))
+
+    def test_receiving_a_new_title_needs_its_price_but_a_catalogued_one_does_not(self):
+        def receive(line):
+            self.client.post('/admin-portal/inventory/receive/', {'source': 'Purchase', 'items': json.dumps([line])})
+        receive({'title': 'Ibong Adarna', 'author': 'Unknown', 'genre': 'Fiction', 'quantity': 1,
+                 'condition': 'Good', 'isbn_none': True, 'year_unknown': True})
+        self.assertFalse(Book.objects.filter(title='Ibong Adarna').exists())
+        receive({'title': 'Ibong Adarna', 'author': 'Unknown', 'genre': 'Fiction', 'quantity': 2,
+                 'condition': 'Good', 'isbn_none': True, 'year_unknown': True, 'price': '90'})
+        self.assertEqual(set(Book.objects.filter(title='Ibong Adarna').values_list('price', flat=True)),
+                         {Decimal('90.00')})
+        noli = Book.objects.get(title='Noli Me Tangere')
+        receive({'book_id': noli.pk, 'quantity': 1, 'condition': 'Good'})
+        self.assertEqual(Book.objects.filter(title='Noli Me Tangere').count(), 2)
+
+    def test_the_donation_sheet_needs_them_only_for_a_new_title(self):
+        rows = [['Donor', 'Title', 'Author', 'Genre', 'ISBN', 'Publication Year', 'Price'],
+                ['Ana Cruz', 'Noli Me Tangere', 'Rizal, Jose', '', '', '', ''],
+                ['Ana Cruz', 'Doctrina Christiana', 'Unknown', 'Fiction', 'none', 'unknown', ''],
+                ['Ana Cruz', 'Urbana at Feliza', 'Pilapil', 'Fiction', 'none', 1864, 80]]
+        r = self.client.post('/admin-portal/import-donations/', {'excel_file': _sheet(rows)}).json()
+        self.assertTrue(r['success'], r)
+        self.assertIn('Row 3', r['message'])
+        self.assertIn('no price', r['message'])
+        self.assertEqual(Book.objects.filter(title='Noli Me Tangere').count(), 2)
+        self.assertFalse(Book.objects.filter(title='Doctrina Christiana').exists())
+        self.assertEqual(Book.objects.get(title='Urbana at Feliza').price, Decimal('80.00'))

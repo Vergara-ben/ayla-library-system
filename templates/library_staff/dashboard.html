@@ -656,6 +656,18 @@
             </a>
             {% endif %}
 
+            {# Books not yet ready for the floor: no board, or no label. #}
+            {% if can_shelve %}
+            <a href="{% url 'shelving_page' %}" data-live="shelving-waiting" class="reg-waiting{% if shelving_counts.0 %} has-waiting{% endif %}">
+                <span class="reg-waiting-icon"><i class="fa-solid fa-box-archive" aria-hidden="true"></i></span>
+                <span class="reg-waiting-text">
+                    <strong><span data-alert-badge="shelving" class="reg-waiting-count">{{ shelving_counts.0 }}</span> book{{ shelving_counts.0|pluralize }} waiting for a shelf</strong>
+                    <span>{{ shelving_counts.1 }} on a shelf with no label recorded. Each waiting book has a suggested board; labels print board by board.</span>
+                </span>
+                <span class="reg-waiting-go">Open <i class="fa-solid fa-arrow-right" aria-hidden="true"></i></span>
+            </a>
+            {% endif %}
+
             <section class="stats-grid" data-live="stats-1">
                 <div class="stat-card">
                     <h4 class="stat-label">Books Available</h4>

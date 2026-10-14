@@ -53,6 +53,7 @@
     <script src="{% static 'js/genre-picker.js' %}"></script>
     <script src="{% static 'js/donor-intake.js' %}"></script>
     {{ donor_names|json_script:'donorNamesData' }}
+    {{ donor_options|json_script:'donorOptionsData' }}
 </head>
 <body class="flex h-screen overflow-hidden">
 <a href="#main-content" class="skip-link">Skip to main content</a>
@@ -130,22 +131,36 @@
                         <div id="donationFields" class="hidden space-y-4">
                             <div class="grid grid-cols-2 gap-4">
                                 <div>
-                                    <label for="rcvDonor" class="field-label">Donor name</label>
-                                    <input type="text" name="donor_name" id="rcvDonor" class="field-input" placeholder="Past donor or new name">
+                                    <label for="rcvDonorType" class="field-label">Donor type</label>
+                                    <select id="rcvDonorType" name="donor_type" class="field-input">{% for value, label in donor_types %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select>
                                 </div>
                                 <div>
                                     <label for="f_donated_date" class="field-label">Date donated</label>
                                     <input id="f_donated_date" type="date" name="donated_date" class="field-input" value="{{ today }}">
                                 </div>
                             </div>
+                            <div id="donorPersonFields" class="grid grid-cols-3 gap-3">
+                                <div>
+                                    <label for="rcvDonorFirst" class="field-label">First name</label>
+                                    <input type="text" name="donor_first_name" id="rcvDonorFirst" class="field-input" placeholder="Juan" autocomplete="off">
+                                </div>
+                                <div>
+                                    <label for="rcvDonorMiddle" class="field-label">Middle name</label>
+                                    <input type="text" name="donor_middle_name" id="rcvDonorMiddle" class="field-input" placeholder="Optional" autocomplete="off">
+                                </div>
+                                <div>
+                                    <label for="rcvDonorLast" class="field-label">Surname</label>
+                                    <input type="text" name="donor_last_name" id="rcvDonorLast" class="field-input" placeholder="Dela Cruz" autocomplete="off">
+                                </div>
+                            </div>
+                            <div id="donorOrgFields" class="hidden">
+                                <label for="rcvDonor" id="donorOrgLabel" class="field-label">Organisation name</label>
+                                <input type="text" name="donor_name" id="rcvDonor" class="field-input" placeholder="Past donor or new name" autocomplete="off">
+                            </div>
                             <p id="donorSuggest" class="hidden text-[11px] text-amber-300"></p>
                     <div id="newDonorFields" class="hidden rounded-lg border border-cyan-900/50 bg-cyan-950/10 p-3 space-y-3">
                         <p class="text-[11px] text-slate-300"><strong class="text-cyan-300">New donor.</strong> How to reach them, if they give it (optional). It is saved on their donor record for the acknowledgement and next time.</p>
                         <div class="grid grid-cols-2 gap-3">
-                            <div>
-                                <label for="rcvDonorType" class="field-label">Donor type</label>
-                                <select id="rcvDonorType" name="donor_type" class="field-input">{% for value, label in donor_types %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select>
-                            </div>
                             <div>
                                 <label for="rcvDonorContact" class="field-label">Contact number</label>
                                 <input id="rcvDonorContact" type="text" name="donor_contact_number" class="field-input" placeholder="09XX XXX XXXX">
@@ -191,12 +206,14 @@
                                     <div>
                                         <label for="rcvIsbn" class="field-label">ISBN</label>
                                         <input type="text" id="rcvIsbn" class="field-input" placeholder="978-...">
+                                        <label class="inline-flex items-center gap-1.5 text-[11px] text-slate-400 mt-1 cursor-pointer select-none"><input type="checkbox" id="rcvNoIsbn" onchange="rcvNone('rcvIsbn', this.checked)"> No ISBN</label>
                                     </div>
                                 </div>
                                 <div class="grid grid-cols-2 gap-3">
                                     <div>
                                         <label for="rcvYear" class="field-label">Publication year</label>
                                         <input type="number" id="rcvYear" class="field-input" placeholder="2024" min="1450" max="2100">
+                                        <label class="inline-flex items-center gap-1.5 text-[11px] text-slate-400 mt-1 cursor-pointer select-none"><input type="checkbox" id="rcvYearUnknown" onchange="rcvNone('rcvYear', this.checked)"> Year unknown</label>
                                     </div>
                                     <div>
                                         <label for="rcvGenre" class="field-label">Genre</label>
@@ -223,7 +240,7 @@
                             </div>
                             <div>
                                 <label for="rcvPrice" class="field-label">Price per copy (₱)</label>
-                                <input type="number" id="rcvPrice" class="field-input" min="0" step="0.01" placeholder="Optional — charged if a copy is lost">
+                                <input type="number" id="rcvPrice" class="field-input" min="0" step="0.01" placeholder="Charged if a copy is lost; needed for a new title">
                             </div>
 
                             <p id="rcvItemError" class="hidden text-[11px] text-rose-400 font-semibold"></p>
@@ -344,7 +361,10 @@
             document.getElementById('rcvSource').value = kind;
             document.getElementById('shipmentFields').classList.toggle('hidden', donation);
             document.getElementById('donationFields').classList.toggle('hidden', !donation);
-            document.getElementById('rcvDonor').required = donation;
+            // A disabled box (the naming the donor type does not use) is never checked.
+            ['rcvDonor', 'rcvDonorFirst', 'rcvDonorLast'].forEach(function (id) {
+                document.getElementById(id).required = donation;
+            });
             const active = ['bg-violet-700/30', 'text-violet-400', 'border', 'border-violet-800/50'];
             const idle = ['text-slate-400', 'hover:text-slate-200', 'hover:bg-slate-800/40'];
             const ship = document.getElementById('srcShipmentBtn');
@@ -395,6 +415,14 @@
                 note: document.getElementById('rcvGenreNote'),
             }) : null;
 
+        // A box ticked "none" is cleared and locked.
+        function rcvNone(id, on) {
+            const el = document.getElementById(id);
+            if (on) el.value = '';
+            el.disabled = on;
+            el.classList.toggle('opacity-50', on);
+        }
+
         function addIntakeItem() {
             const sel = document.getElementById('rcvBook');
             const bookId = sel.value;
@@ -420,6 +448,16 @@
                 const genreBad = rcvGenrePicker ? rcvGenrePicker.problem() : '';
                 if (genreBad) { rcvItemError(genreBad); document.getElementById('rcvGenre').focus(); return; }
                 const isbnText = document.getElementById('rcvIsbn').value.trim();
+                // A new title is complete: the ISBN and year, or their tick, and its price.
+                const noIsbn = document.getElementById('rcvNoIsbn').checked;
+                const yearUnknown = document.getElementById('rcvYearUnknown').checked;
+                if (!isbnText && !noIsbn) { rcvItemError('Type the ISBN, or tick "No ISBN".'); return; }
+                if (!document.getElementById('rcvYear').value.trim() && !yearUnknown) {
+                    rcvItemError('Type the publication year, or tick "Year unknown".'); return;
+                }
+                if (!priceText) {
+                    rcvItemError('Type the price of a new title. It is what a patron pays if a copy is lost.'); return;
+                }
                 const isbnBad = isbnText && isbnProblem(isbnText);
                 if (isbnBad) { rcvItemError(isbnBad); return; }
                 const yearText = document.getElementById('rcvYear').value.trim();
@@ -432,6 +470,8 @@
                 item.isbn = document.getElementById('rcvIsbn').value.trim();
                 item.publication_year = document.getElementById('rcvYear').value.trim();
                 item.genre = document.getElementById('rcvGenre').value.trim();
+                item.isbn_none = noIsbn;
+                item.year_unknown = yearUnknown;
                 item.new_genre = !!(rcvGenrePicker && rcvGenrePicker.isNew());
                 item.label = title;
                 item.sub = [item.author, item.isbn].filter(Boolean).join(' · ') || 'New to the catalogue';
@@ -454,6 +494,9 @@
             // Back to Good, so one damaged title does not mark the next one damaged too.
             document.getElementById('rcvCondition').value = 'Good';
             if (rcvGenrePicker) rcvGenrePicker.reset();
+            ['rcvNoIsbn', 'rcvYearUnknown'].forEach(function (id) { document.getElementById(id).checked = false; });
+            rcvNone('rcvIsbn', false);
+            rcvNone('rcvYear', false);
             onPickCatalogued();
         }
 
@@ -566,17 +609,9 @@
                     onType: function () { if (sel.value) { sel.value = ''; onPickCatalogued(); } },
                 });
             }
-            const donor = document.getElementById('rcvDonor');
-            if (window.AylaPicker && donor) {
-                const names = JSON.parse(document.getElementById('donorNamesData').textContent || '[]');
-                const donors = names.map(function (n) { return { value: n, label: n }; });
-                const intake = window.AylaDonorIntake ? AylaDonorIntake.attach(donor, names) : null;
-                AylaPicker.attach(donor, {
-                    items: donors,
-                    newLabel: function (q) { return q ? '+ New donor: \u201c' + q + '\u201d' : '+ New donor \u2014 type their name'; },
-                    onNew: function () { donor.focus(); if (intake) intake.update(); },
-                    onPick: function () { if (intake) intake.update(); },
-                });
+            // The donor: a person's three name boxes or one organisation name, with past donors suggested.
+            if (window.AylaDonorIntake) {
+                AylaDonorIntake.attach(JSON.parse(document.getElementById('donorOptionsData').textContent || '[]'));
             }
         })();
     </script>

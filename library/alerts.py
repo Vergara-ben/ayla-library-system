@@ -34,6 +34,11 @@ def may_review(user):
     return user is not None and _may(user, user.role, 'patrons')
 
 
+def may_shelve(user):
+    """Who puts books on shelves: Administrators, and Staff with Books or Shelf Manager."""
+    return user is not None and (user.role != 'Staff' or user.has_module('books') or user.has_module('shelf'))
+
+
 def portal_alerts(request):
     """Counts and the newest item of each kind this account can act on."""
     user = User.objects.filter(admin_id=request.session.get('admin_id'),
@@ -110,6 +115,15 @@ def portal_alerts(request):
                      % newest.book.title) if newest else '',
             'title': 'Check in a returned book', 'icon': 'fa-book-bookmark',
             'url': _portal_url(role, 'admin_transaction', 'staff_transaction'),
+        })
+
+    if may_shelve(user):
+        from .shelving import need_shelf
+        # A count to work through, not news: books added without a shelf are often meant to wait.
+        items.append({
+            'key': 'shelving', 'count': need_shelf().count(), 'latest': 0, 'quiet': True,
+            'text': '', 'title': 'Waiting for a shelf', 'icon': 'fa-box-archive',
+            'url': reverse('shelving_page'),
         })
 
     if _may(user, role, 'chat'):

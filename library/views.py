@@ -992,7 +992,8 @@ def _book_search_q(term):
     q = (Q(title__icontains=term)
          | Q(author__icontains=term)
          | Q(ISBN__icontains=term)
-         | Q(genre__icontains=term))
+         | Q(genre__icontains=term)
+         | Q(subject__icontains=term))
     bare = re.sub(r'[^0-9A-Za-z]', '', term)
     if bare and bare != term:
         q |= Q(ISBN__icontains=bare)
@@ -1833,7 +1834,9 @@ def _books_page(request, template):
     if level.isdigit():
         books_queryset = books_queryset.filter(shelf_level_id=int(level))
     elif shelf == 'none':
-        books_queryset = books_queryset.filter(shelf_level__isnull=True)
+        # The same books the "waiting for a shelf" count names.
+        from .shelving import need_shelf
+        books_queryset = books_queryset.filter(pk__in=need_shelf().values('pk'))
     elif shelf.isdigit():
         books_queryset = books_queryset.filter(shelf_level__shelf_id=int(shelf))
     else:
@@ -1842,7 +1845,8 @@ def _books_page(request, template):
         level = ''
 
     if label == 'missing':
-        books_queryset = books_queryset.filter(label_printed_at__isnull=True, shelf_level__isnull=False)
+        from .shelving import need_label
+        books_queryset = books_queryset.filter(pk__in=need_label().values('pk'))
     else:
         label = ''
 
@@ -1870,6 +1874,7 @@ def _books_page(request, template):
         .order_by('genre').values_list('genre', flat=True).distinct()
     )
 
+    unshelved_count, unlabelled_count = _shelving_counts()
     paginator = Paginator(books_queryset, 15)  # 15 books per page
     books = paginator.get_page(request.GET.get('page', 1))
 
@@ -1900,10 +1905,9 @@ def _books_page(request, template):
         'shelf': shelf,
         'level': level,
         'shelf_choices': _shelf_filter_choices(),
-        'unshelved_count': Book.objects.filter(shelf_level__isnull=True).count(),
-        # Shelved but never labelled: these can be printed now.
-        'unlabelled_count': Book.objects.filter(label_printed_at__isnull=True,
-                                                shelf_level__isnull=False).count(),
+        # The same two numbers every page shows; see shelving.py.
+        'unshelved_count': unshelved_count,
+        'unlabelled_count': unlabelled_count,
         'label': label,
         'querystring': urlencode(params),
         'paginator': paginator,
@@ -1913,10 +1917,27 @@ def _books_page(request, template):
     return render(request, template, context)
 
 
+def _shelving_counts():
+    """(books waiting for a shelf, books on a shelf with no label): one answer for every page."""
+    from .shelving import need_label, need_shelf
+    return need_shelf().count(), need_label().count()
+
+
 def _genre_options():
-    """The library's genres for a picker, one spelling each."""
+    """The library's genres for a picker, with the finer wording each one covers so either finds it."""
+    from collections import Counter, defaultdict
     from .catalogue import known_genres
-    return sorted(known_genres().values(), key=str.lower)
+    subjects = defaultdict(Counter)
+    for genre, subject in (Book.objects.exclude(subject__isnull=True).exclude(subject='')
+                           .values_list('genre', 'subject')):
+        subjects[(genre or '').lower()][subject] += 1
+    options = []
+    for genre in sorted(known_genres().values(), key=str.lower):
+        common = subjects[genre.lower()]
+        options.append({'label': genre,
+                        'sub': ', '.join(s for s, _n in common.most_common(3)),
+                        'search': ' '.join(common)})
+    return options
 
 
 @admin_module_required('books')
@@ -1954,6 +1975,16 @@ def _catalogue_entry(post, exclude_ids=(), editing=False):
     if 'condition' in post:
         values['condition'] = take('condition', clean_condition(post.get('condition')))
     values['copies'] = take('copies', clean_copies(post.get('copies')))
+    # No ISBN and no year are allowed only when ticked; the price is always needed.
+    from .catalogue import missing_details
+    values['isbn_none'] = post.get('no_isbn') == '1' and not values['ISBN']
+    values['year_unknown'] = post.get('year_unknown') == '1' and values['publication_year'] is None
+    flagged = {field for field, _problem in problems}
+    for field, problem in missing_details(values['ISBN'], values['isbn_none'], values['publication_year'],
+                                          values['year_unknown'], values['price']):
+        # An edit that does not send a field leaves it as it is.
+        if field not in flagged and (not editing or field in post):
+            problems.append((field, problem))
     call_number = (post.get('call_number') or '').strip() or None
     if call_number_error(call_number):
         problems.append(('call_number', call_number_error(call_number)))
@@ -1984,21 +2015,25 @@ def admin_add_book(request):
             shelf_slot = parse_shelf_slot(request.POST.get('shelf_slot'))
             cover_img_url = request.POST.get('cover_img_url', '').strip()
             copies = values['copies']
+            # Copies of a title share its call number and subject.
+            from .catalogue import same_title, tidy
+            siblings = same_title(values['title'], values['author'])
             if not values['call_number']:
-                # Copies of a title share its call number.
-                from .catalogue import same_title
-                values['call_number'] = (same_title(values['title'], values['author'])
-                                         .exclude(call_number__isnull=True).exclude(call_number='')
+                values['call_number'] = (siblings.exclude(call_number__isnull=True).exclude(call_number='')
                                          .values_list('call_number', flat=True).first())
+            subject = (tidy(request.POST.get('subject')) or siblings.exclude(subject__isnull=True)
+                       .exclude(subject='').values_list('subject', flat=True).first() or None)
 
             # Each copy is a record of its own, with its own QR label, all on the same shelf.
             first = None
+            created = []
             for n in range(copies):
                 book = Book.objects.create(
                     title=values['title'],
                     author=values['author'],
                     ISBN=values['ISBN'] or None,
                     genre=values['genre'],
+                    subject=subject,
                     material_type=values['material_type'],
                     status=(request.POST.get('status') or 'Available').strip() or 'Available',
                     shelf_level=shelf_level,
@@ -2008,9 +2043,12 @@ def admin_add_book(request):
                     publication_year=values['publication_year'],
                     cover_img_url=cover_img_url or None,
                     price=values['price'],
+                    isbn_none=values['isbn_none'],
+                    year_unknown=values['year_unknown'],
                     qr_code=str(uuid4()),
                 )
                 first = first or book
+                created.append(book.book_id)
                 _add_existing_copy(book, request)
             log_admin_action(request, 'Create', 'Book', first.book_id,
                              f'Added "{first.title}"' + (f' ({copies} copies)' if copies > 1 else ''))
@@ -2018,7 +2056,9 @@ def admin_add_book(request):
             if ajax:
                 return JsonResponse({'success': True, 'message': (
                     f'Added {copies} copies of "{first.title}".' if copies > 1
-                    else f'Added "{first.title}".'), 'call_number': first.call_number})
+                    else f'Added "{first.title}".'), 'call_number': first.call_number,
+                    # A shelved book can have its label printed straight away.
+                    'ids': created, 'shelved': shelf_level is not None})
             return portal_redirect(request, 'admin_management')
 
     # Get books list context for managebooks.html
@@ -2039,6 +2079,7 @@ def admin_add_book(request):
         'error': error,
         'genre_options': _genre_options(),
         'intake_conditions': INTAKE_CONDITION_OPTIONS,
+        'material_choices': Book.MATERIAL_TYPE_CHOICES,
     }
     return render(request, 'admin/managebooks.html', context)
 
@@ -2818,6 +2859,10 @@ def admin_edit_book(request, book_id):
         'shelf_level_id': book.shelf_level.shelf_level_id if book.shelf_level else '',
         'shelf_slot': book.shelf_slot or '',
         'condition': book.condition or 'Good',
+        'isbn_none': book.isbn_none,
+        'year_unknown': book.year_unknown,
+        'subject': book.subject or '',
+        'material_type': book.material_type or 'Book',
         'call_number': book.call_number or '',
         'price': book.price if book.price is not None else '',
     }
@@ -2847,6 +2892,10 @@ def admin_edit_book(request, book_id):
             book.title = title
             book.author = author
             book.ISBN = isbn or None
+            if 'ISBN' in request.POST:
+                book.isbn_none = values['isbn_none']
+            if 'publication_year' in request.POST:
+                book.year_unknown = values['year_unknown']
             book.publication_year = values['publication_year']
             book.genre = genre
             book.cover_img_url = cover_img_url if cover_img_url else None
@@ -2861,6 +2910,8 @@ def admin_edit_book(request, book_id):
                 book.condition = values['condition']
             if 'material_type' in request.POST:
                 book.material_type = values['material_type']
+            if 'subject' in request.POST:
+                book.subject = ' '.join(request.POST.get('subject', '').split())[:255] or None
             if 'call_number' in request.POST:
                 # Cleared deliberately means "renumber it": save() fills a blank.
                 book.call_number = (request.POST.get('call_number') or '').strip() or None
@@ -2907,6 +2958,7 @@ def admin_edit_book(request, book_id):
         'initial': initial,
         'genre_options': _genre_options(),
         'intake_conditions': INTAKE_CONDITION_OPTIONS,
+        'material_choices': Book.MATERIAL_TYPE_CHOICES,
     }
     return render(request, 'admin/managebooks.html', context)
 
@@ -4331,6 +4383,7 @@ def admin_book_details_ajax(request, book_id):
         'author': book.author,
         'ISBN': book.ISBN or 'N/A',
         'genre': book.genre or 'General',
+        'subject': book.subject or '',
         'publication_year': book.publication_year or 'N/A',
         'status': book.status,
         'condition': book.condition,
@@ -4454,7 +4507,7 @@ def book_label_picker_data(request):
     })
 
 
-@admin_or_module_required('books')
+@admin_or_any_module_required('books', 'shelf')
 def book_qr_labels(request):
     """A printable sheet of QR labels for the selected books."""
     raw_ids = request.GET.get('ids') or request.POST.get('ids') or ''
@@ -4556,6 +4609,7 @@ def _book_qr_payload(book):
         'author': book.author,
         'ISBN': book.ISBN or 'N/A',
         'genre': book.genre or 'General',
+        'subject': book.subject or '',
         'publication_year': book.publication_year or 'N/A',
         'status': book.status,
         'condition': book.condition,
@@ -4669,16 +4723,17 @@ def download_book_template(request):
         ('Title', True, 'The title as printed on the book.', 'Pride and Prejudice'),
         ('Author', True, 'Surname, First or First Surname. Several authors can share one cell.',
          'Austen, Jane'),
-        ('Publication Year', False, 'Four digits.', 1963),
-        ('ISBN', False, 'The ISBN or accession number. Leave blank if there is none.', ''),
-        ('Genre', False, 'Any wording. Its first three letters start the code label.', 'Fiction'),
+        ('Publication Year', True, 'Four digits, or "unknown" if the book does not say.', 1963),
+        ('ISBN', True, 'The ISBN or accession number, or "none" if the book has neither.', 'none'),
+        ('Genre', True, "One of the library's genres, e.g. Fiction or Science. Other wording, like Legal "
+                        "Thriller, is matched to the nearest genre and kept as the subject.", 'Fiction'),
+        ('Subject', False, 'Optional finer detail, e.g. Legal Thriller. It can be searched.', ''),
         ('Material Type', False, 'One of: %s. Blank means Book.' % materials, 'Book'),
         ('Condition', False, 'One of: %s. Blank means Good.' % conditions, 'Minor Damage'),
         ('Code Label', False, 'The call number on the spine. Leave blank to have it worked out.',
          'FIC A31p 1963'),
         ('Quantity', False, 'How many copies, 1 to 50. Blank means 1.', 1),
-        ('Price', False, 'What the book is worth in pesos, charged if it is lost. Blank means '
-                         'not set yet.', 350),
+        ('Price', True, 'What the book is worth in pesos, charged if it is lost.', 350),
         ('Location', False, 'The shelf board, long or short: Shelf A Column 1 Level 2, A C1 L2, '
                             'Table 1 Top. A board that does not exist yet is listed before '
                             'anything is saved.', 'Shelf A Column 1 Level 2'),
@@ -4769,6 +4824,11 @@ def _cell_text(value):
         value = int(value)
     text = str(value).strip()
     return '' if text.lower() in ('n/a', 'na', 'none', '-', '--') else text
+
+
+def _said_none(value, words):
+    """A cell that says on purpose there is nothing to write, like "none" or "N/A"."""
+    return value is not None and str(value).strip().lower() in words
 
 
 def _sheet_date(value):
@@ -5289,7 +5349,7 @@ def _import_books_body(request):
         'copyright': 'publication_year',
         'isbn': 'ISBN', 'isbn13': 'ISBN', 'isbn10': 'ISBN', 'barcode': 'ISBN',
         'accessionnumber': 'ISBN',
-        'genre': 'genre', 'genr': 'genre', 'category': 'genre', 'subject': 'genre',
+        'genre': 'genre', 'genr': 'genre', 'category': 'genre', 'subject': 'subject',
         'shelflevelid': 'shelf_level_id', 'shelflevel': 'shelf_level_id',
         'storagearea': 'storage_area', 'storage': 'storage_area',
         'location': 'storage_area', 'shelf': 'storage_area', 'zone': 'storage_area',
@@ -5337,14 +5397,20 @@ def _import_books_body(request):
             idx = columns.get(name)
             return clean(row[idx]) if idx is not None and idx < len(row) else ''
 
+        def raw_cell(row, name):
+            idx = columns.get(name)
+            return str(row[idx]).strip() if idx is not None and idx < len(row) and row[idx] is not None else ''
+
         imported = skipped_dup = skipped_blank = copies_created = 0
         # Rows that break the cataloguing rules are not imported; each is named with its reason.
         from .catalogue import (clean_author, clean_copies, clean_genre, clean_isbn, clean_price,
-                                clean_title, clean_year, known_genres)
+                                clean_title, clean_year, known_genres, matched_genre, tidy)
         problems = []
         genres = known_genres()
         allow_new_genres = request.POST.get('new_genres') in ('1', 'true', 'True', 'on')
         new_genres = set()
+        # A sheet's own wording, matched to one of the library's genres: wording -> genre.
+        matched_genres = {}
         # Collected so the caller can print labels for exactly this delivery.
         created_ids = []
         unmatched_areas = set()
@@ -5408,9 +5474,23 @@ def _import_books_body(request):
 
             title = rule(clean_title(title)) or title
             author = rule(clean_author(author)) or author
-            isbn = rule(clean_isbn(field(row, 'ISBN'), title)) or ''
+            from .catalogue import NO_ISBN_WORDS, UNKNOWN_YEAR_WORDS, missing_details
+            raw_isbn = field(row, 'ISBN')
+            # "none" or "N/A" in the cell is said on purpose, unlike an empty one.
+            isbn_none = not raw_isbn and raw_cell(row, 'ISBN').lower() in NO_ISBN_WORDS
+            isbn = '' if isbn_none else (rule(clean_isbn(raw_isbn, title)) or '')
             raw_genre = field(row, 'genre')
-            genre, genre_problem = clean_genre(raw_genre, allow_new=allow_new_genres, known=genres)
+            subject = tidy(field(row, 'subject')) or None
+            genre, genre_problem = clean_genre(raw_genre, allow_new=False, known=genres)
+            if genre_problem:
+                # "Legal Thriller" is a Thriller & Suspense book; the sheet's wording becomes its subject.
+                genre = matched_genre(raw_genre or subject, known=genres)
+                if genre:
+                    matched_genres[tidy(raw_genre or subject)] = genre
+                    subject = subject or tidy(raw_genre)
+                    genre_problem = None
+                else:
+                    genre, genre_problem = clean_genre(raw_genre, allow_new=allow_new_genres, known=genres)
             if genre_problem:
                 if raw_genre.strip():
                     new_genres.add(' '.join(raw_genre.split()))
@@ -5420,8 +5500,14 @@ def _import_books_body(request):
             elif genre.lower() not in genres:
                 genres[genre.lower()] = genre
                 new_genres.add(genre)
-            publication_year = rule(clean_year(field(row, 'publication_year')))
+            raw_year = field(row, 'publication_year')
+            year_unknown = raw_year.strip().lower() in UNKNOWN_YEAR_WORDS or (
+                not raw_year and raw_cell(row, 'publication_year').lower() in UNKNOWN_YEAR_WORDS)
+            publication_year = None if year_unknown else rule(clean_year(raw_year))
             price = rule(clean_price(field(row, 'price')))
+            if not row_problems:
+                row_problems.extend(problem for _field, problem in missing_details(
+                    isbn, isbn_none, publication_year, year_unknown, price, sheet=True))
             raw_condition = field(row, 'condition')
             condition = parse_condition(raw_condition) if raw_condition else 'Good'
             if condition is None:
@@ -5502,6 +5588,9 @@ def _import_books_body(request):
                     publication_year=publication_year,
                     ISBN=isbn or None,
                     genre=genre,
+                    subject=subject,
+                    isbn_none=isbn_none,
+                    year_unknown=year_unknown,
                     material_type=material_type,
                     condition=condition,
                     # Blank is the normal case: Book.save() derives it.
@@ -5544,6 +5633,11 @@ def _import_books_body(request):
             parts.append(f'{skipped_word} {skipped_example} sample row(s) left from the template')
         if problems:
             parts.append(f'{skipped_word} {len(problems)} row(s) that break the cataloguing rules')
+        if matched_genres:
+            sample = sorted(matched_genres.items())[:3]
+            parts.append('matched %d genre wording(s) to the library\'s list, e.g. %s; the sheet\'s wording is '
+                         'kept as the subject' % (len(matched_genres), ', '.join(
+                             '"%s" to %s' % (k, v) for k, v in sample)))
         if new_genres and allow_new_genres:
             parts.append(f'{"will add" if preview else "added"} {len(new_genres)} new genre(s): '
                          + ', '.join(sorted(new_genres)[:10])
@@ -5578,6 +5672,7 @@ def _import_books_body(request):
             'problems': problems[:100],
             'new_genres': sorted(new_genres),
             'new_genres_allowed': allow_new_genres,
+            'matched_genres': matched_genres,
         }
         return JsonResponse(payload)
 
@@ -5732,14 +5827,22 @@ def _import_patron_rows(request):
 def download_donation_template(request):
     materials = ', '.join(value for value, _label in Book.MATERIAL_TYPE_CHOICES)
     return _template_response('donation_import_template.xlsx', 'Donations', [
-        ('donor_name', True, 'Who gave the books.', 'Barangay Council'),
+        ('first_name', False, "A person's first name. Use these three columns for a person.", 'Juan'),
+        ('middle_name', False, 'Optional.', 'Perez'),
+        ('last_name', False, "A person's surname.", 'Dela Cruz'),
+        ('donor_name', False, 'For a school, office or organisation, its name. Leave blank for a person.',
+         ''),
         ('date_donated', False, 'An Excel date, 2026-09-01 or 09/01/2026. Blank means today.',
          '2026-09-01'),
         ('title', True, 'The title as printed on the book.', 'Noli Me Tangere'),
         ('author', False, 'Surname, First or First Surname.', 'Rizal, Jose'),
-        ('ISBN', False, 'Used to recognise a title the library already has.', ''),
-        ('genre', False, 'Any wording.', 'Classic Philippine Literature'),
-        ('publication_year', False, 'Four digits.', 1961),
+        ('ISBN', False, 'Used to recognise a title the library already has. For a new title, the ISBN or '
+                        '"none".', 'none'),
+        ('genre', False, "Needed for a title the library does not have yet: one of its genres. Other wording "
+                         "is matched to the nearest genre and kept as the subject.", 'Philippine Literature'),
+        ('subject', False, 'Optional finer detail, e.g. Classic Novel. It can be searched.', ''),
+        ('publication_year', False, 'For a new title: four digits, or "unknown".', 1961),
+        ('price', False, 'For a new title: what it is worth in pesos, charged if it is lost.', 250),
         ('material_type', False, 'One of: %s. Blank means Book.' % materials, 'Book'),
         ('quantity', False, 'How many copies of this title, 1 to 100. Blank means 1.', 2),
         ('condition', False, 'How the copies arrived: Good, Minor Damage, Damaged or Beyond Repair. '
@@ -5749,16 +5852,20 @@ def download_donation_template(request):
 
 DONATION_IMPORT_COLUMNS = {
     'donorname': 'donor_name', 'donor': 'donor_name', 'donatedby': 'donor_name',
+    'firstname': 'first_name', 'donorfirstname': 'first_name', 'givenname': 'first_name',
+    'middlename': 'middle_name', 'donormiddlename': 'middle_name',
+    'lastname': 'last_name', 'surname': 'last_name', 'donorlastname': 'last_name', 'donorsurname': 'last_name',
     'datedonated': 'date_donated', 'donationdate': 'date_donated',
     'donateddate': 'date_donated', 'date': 'date_donated',
     'title': 'title', 'booktitle': 'title',
     'author': 'author', 'authors': 'author',
     'isbn': 'isbn', 'isbn13': 'isbn', 'isbn10': 'isbn',
-    'genre': 'genre', 'category': 'genre', 'subject': 'genre',
+    'genre': 'genre', 'category': 'genre', 'subject': 'subject',
     'publicationyear': 'publication_year', 'yearpublished': 'publication_year',
     'year': 'publication_year',
     'materialtype': 'material_type', 'material': 'material_type', 'format': 'material_type',
     'quantity': 'quantity', 'qty': 'quantity', 'copies': 'quantity',
+    'price': 'price', 'cost': 'price', 'value': 'price',
     'condition': 'condition', 'conditiononarrival': 'condition', 'state': 'condition',
 }
 
@@ -5771,7 +5878,8 @@ def import_donations(request):
 def _import_donation_rows(request):
     """Receive each row the way the Receive Stock form does."""
     sheet, columns, error = _open_import_sheet(
-        request, DONATION_IMPORT_COLUMNS, [('donor_name',), ('title',)], 'donor_name and title')
+        request, DONATION_IMPORT_COLUMNS, [('donor_name', 'first_name', 'last_name'), ('title',)],
+        'the donor (first_name and last_name, or donor_name) and title')
     if error:
         return error
 
@@ -5781,11 +5889,21 @@ def _import_donation_rows(request):
     problems = []
     allow_new_genres = request.POST.get('new_genres') in ('1', 'true', 'True', 'on')
     new_genres = set()
+    from .catalogue import NO_ISBN_WORDS, UNKNOWN_YEAR_WORDS, clean_genre, known_genres, matched_genre
+    genres = known_genres()
     # Rows this sheet has already received, so a title listed twice is not a repeat.
     received_now = set()
 
     for row_no, values in _sheet_rows(sheet, columns):
+        parts = {f: ' '.join(_cell_text(values.get(f)).split()) for f in Donor.NAME_PARTS}
         donor = _cell_text(values.get('donor_name'))
+        if parts['first_name'] or parts['last_name']:
+            if not (parts['first_name'] and parts['last_name']):
+                problems.append("Row %d: a person needs both a first name and a surname" % row_no)
+                continue
+            donor = Donor.full_name(parts['first_name'], parts['middle_name'], parts['last_name'])
+            saved = Donor.find(donor, **parts)
+            donor = saved.name if saved else Donor.register(donor, **parts).name
         title = _cell_text(values.get('title'))
         if not donor:
             problems.append('Row %d: no donor name' % row_no)
@@ -5829,12 +5947,22 @@ def _import_donation_rows(request):
                             % (row_no, raw_material[:30]))
             continue
 
+        genre, subject = _cell_text(values.get('genre')), _cell_text(values.get('subject'))
+        if clean_genre(genre, known=genres)[1] and matched_genre(genre or subject, known=genres):
+            # "Legal Thriller" is a Thriller & Suspense book; the sheet's wording becomes its subject.
+            genre, subject = matched_genre(genre or subject, known=genres), subject or genre
         item = {
             'new_genre': allow_new_genres,
             'title': title,
             'author': _cell_text(values.get('author')),
             'isbn': _cell_text(values.get('isbn')),
-            'genre': _cell_text(values.get('genre')),
+            'genre': genre,
+            'subject': subject,
+            'price': _cell_text(values.get('price')),
+            # "none" or "N/A" in these cells is said on purpose, unlike an empty one.
+            'isbn_none': _said_none(values.get('isbn'), NO_ISBN_WORDS),
+            'year_unknown': _said_none(values.get('publication_year'), UNKNOWN_YEAR_WORDS),
+            'from_sheet': True,
             'material_type': material_type,
             'publication_year': _cell_text(values.get('publication_year')),
         }
@@ -7391,10 +7519,8 @@ def fix_shelf_rooms(request):
 def _shelf_page(request, template):
     """IDE-style hierarchical manager for shelves, sections, levels and books."""
     return render(request, template, {
-        # Books on no board at all.
-        'unshelved_count': (Book.objects
-                            .filter(shelf_level__isnull=True)
-                            .exclude(status__in=WRITTEN_OFF).count()),
+        # Books here that are waiting for a board.
+        'unshelved_count': _shelving_counts()[0],
         # Shelves whose recorded room disagrees with where they are drawn.
         'room_mismatches': _shelf_room_mismatches(),
     })
@@ -7454,9 +7580,8 @@ def get_board_books(request):
 
     # The books on no board at all, as a place the mover can open.
     if raw == 'none':
-        books = (Book.objects.filter(shelf_level__isnull=True)
-                 .exclude(status__in=WRITTEN_OFF)
-                 .order_by('title', 'book_id')[:MAX_BOOKS_PER_MOVE])
+        from .shelving import need_shelf
+        books = need_shelf().order_by('title', 'book_id')[:MAX_BOOKS_PER_MOVE]
         return JsonResponse({
             'success': True,
             'level': 'none',
@@ -7479,6 +7604,7 @@ def get_board_books(request):
         'success': True,
         'level': level.shelf_level_id,
         'shelf': level.shelf.name if level.shelf else '',
+        'shelf_id': level.shelf_id,
         'label': level.label,
         'books': [_board_book(b) for b in books],
     })
@@ -7672,9 +7798,8 @@ def get_shelf_tree(request):
     
     return JsonResponse({
         'tree': tree_data,
-        # Count of unshelved books.
-        'unshelved': (Book.objects.filter(shelf_level__isnull=True)
-                      .exclude(status__in=WRITTEN_OFF).count()),
+        # Books waiting for a shelf, counted as everywhere else.
+        'unshelved': _shelving_counts()[0],
     })
 
 
@@ -11703,8 +11828,7 @@ def _inventory_stats():
         'gone_count': held.filter(condition__in=['Lost', 'Withdrawn']).count(),
         'removed_count': qs.filter(status='Removed').count(),
         'missing_count': qs.filter(status='Missing').count(),
-        'unshelved_count': (held.filter(book__shelf_level__isnull=True)
-                            .exclude(condition__in=['Beyond Repair', 'Lost', 'Withdrawn']).count()),
+        'unshelved_count': _shelving_counts()[0],
         'uncatalogued': held.filter(book__isnull=True).count(),
     }
 
@@ -11730,8 +11854,8 @@ def inventory_management(request):
     elif state == 'gone':
         records = records.filter(condition__in=['Lost', 'Withdrawn']).exclude(status='Removed')
     elif state == 'unshelved':
-        records = (records.filter(book__shelf_level__isnull=True).exclude(status='Removed')
-                   .exclude(condition__in=['Beyond Repair', 'Lost', 'Withdrawn']))
+        from .shelving import need_shelf
+        records = records.filter(book__in=need_shelf()).exclude(status='Removed')
     elif state == 'removed':
         records = records.filter(status='Removed')
     else:
@@ -11785,24 +11909,10 @@ def inventory_management(request):
         shelf.last_audited = last_audited.get(shelf.shelf_id)
 
     # Every board that holds something, for the shelf-read picker.
-    audit_boards = []
-    for level in (ShelfLevel.objects.filter(is_active=True)
-                  .select_related('shelf', 'shelf__room')
-                  .annotate(n=Count('book'))
-                  .order_by('shelf__name', 'column_number', 'level_number')):
-        if not level.n or level.shelf is None:
-            continue
-        seen = level.book_set.exclude(status__in=WRITTEN_OFF).aggregate(
-            oldest=Min('last_seen'), never=Count('book_id', filter=Q(last_seen__isnull=True)))
-        audit_boards.append({
-            'id': level.shelf_level_id,
-            'shelf': level.shelf.name,
-            'room': level.shelf.room.name if level.shelf.room else '',
-            'label': level.label,
-            'books': level.n,
-            # One book never confirmed is enough to make the board unread.
-            'last_read': None if seen['never'] else seen['oldest'],
-        })
+    audit_boards = _audit_board_rows(ShelfLevel.objects.filter(is_active=True)
+                                     .select_related('shelf', 'shelf__room')
+                                     .order_by('shelf__name', 'column_number', 'level_number'))
+    audit_boards = [b for b in audit_boards if b['books']]
 
     # Each table keeps its own page and tab.
     stock_qs = urlencode({k: v for k, v in {
@@ -11829,6 +11939,7 @@ def inventory_management(request):
         'condition_notes': CONDITION_NOTES,
         'source_choices': InventoryRecord.SOURCE_CHOICES,
         'donor_names': list(Donor.objects.values_list('name', flat=True)[:500]),
+        'donor_options': _donor_options(),
         'ack_offer': _ack_offer(request),
         'donor_types': Donor.TYPE_CHOICES,
         'today': timezone.localdate().isoformat(),
@@ -11967,7 +12078,10 @@ def _resolve_intake_book(item, source):
 
     title = rule(clean_title(item.get('title')))
     author = rule(clean_author(item.get('author')))
-    isbn = rule(clean_isbn(item.get('isbn'), title))
+    from .catalogue import NO_ISBN_WORDS
+    # "none" in a sheet says the book has no ISBN; it is not a number to check.
+    isbn = ('' if str(item.get('isbn') or '').strip().lower() in NO_ISBN_WORDS
+            else rule(clean_isbn(item.get('isbn'), title)))
 
     existing = None
     if isbn:
@@ -11979,14 +12093,31 @@ def _resolve_intake_book(item, source):
     if existing is not None:
         return existing, False
 
-    # Only a title new to the catalogue needs its genre and year.
-    genre, problem = clean_genre(item.get('genre'), allow_new=bool(item.get('new_genre')))
+    # Only a title new to the catalogue needs its genre, year and the rest.
+    from .catalogue import matched_genre, tidy
+    subject = tidy(item.get('subject')) or None
+    genre, problem = clean_genre(item.get('genre'), allow_new=False)
+    if problem and not item.get('new_genre'):
+        # "Legal Thriller" is a Thriller & Suspense book; the wording is kept as its subject.
+        genre = matched_genre(item.get('genre') or subject)
+        if genre:
+            subject, problem = subject or tidy(item.get('genre')), None
+    if problem:
+        genre, problem = clean_genre(item.get('genre'), allow_new=bool(item.get('new_genre')))
     if problem:
         error = ValueError('"%s": %s' % (named, problem))
         # Named, so an import can offer to add the sheet's new genres in one go.
         error.new_genre = ' '.join(str(item.get('genre') or '').split())
         raise error
-    year = rule(clean_year(item.get('publication_year')))
+    from .catalogue import NO_ISBN_WORDS, UNKNOWN_YEAR_WORDS, clean_price, missing_details
+    raw_year = str(item.get('publication_year') or '').strip()
+    year_unknown = bool(item.get('year_unknown')) or raw_year.lower() in UNKNOWN_YEAR_WORDS
+    year = None if year_unknown else rule(clean_year(raw_year))
+    isbn_none = bool(item.get('isbn_none')) or str(item.get('isbn') or '').strip().lower() in NO_ISBN_WORDS
+    price = rule(clean_price(item.get('price')))
+    for _field, problem in missing_details(isbn, isbn_none, year, year_unknown, price,
+                                           sheet=bool(item.get('from_sheet'))):
+        raise ValueError('"%s": %s' % (named, problem))
     material_type = (item.get('material_type') or 'Book').strip()
     if material_type not in {c[0] for c in Book.MATERIAL_TYPE_CHOICES}:
         material_type = 'Book'
@@ -11995,7 +12126,11 @@ def _resolve_intake_book(item, source):
         title=title,
         author=author,
         ISBN=isbn or None,
+        isbn_none=isbn_none,
+        year_unknown=year_unknown,
+        price=price,
         genre=genre or None,
+        subject=subject,
         material_type=material_type,
         publication_year=year,
         # Donated books become available once shelved.
@@ -12028,6 +12163,10 @@ def _intake_book_for_copy(book, reuse, source, condition):
         author=book.author,
         publication_year=book.publication_year,
         genre=book.genre,
+        subject=book.subject,
+        isbn_none=book.isbn_none,
+        year_unknown=book.year_unknown,
+        price=book.price,
         material_type=book.material_type,
         call_number=book.call_number,
         cover_img_url=book.cover_img_url,
@@ -12137,10 +12276,14 @@ def receive_stock(request):
     supplier = po_number = donor_name = processing_stage = None
     donated_date = None
     if source == 'Donation':
-        donor_name = ' '.join((request.POST.get('donor_name') or '').split())
-        if not donor_name:
-            messages.error(request, 'A donation needs the donor name for the record.')
+        donor_name, donor_parts, problem = _posted_donor_name(request.POST, prefix='donor_')
+        if problem:
+            messages.error(request, 'Donor: ' + problem)
             return _receiving_redirect(request)
+        # A saved donor is recorded under the name already on file, however it was typed today.
+        saved = Donor.find(donor_name, **donor_parts)
+        if saved is not None:
+            donor_name = saved.name
         donor_details = {
             'donor_type': request.POST.get('donor_type'),
             'contact_number': request.POST.get('donor_contact_number'),
@@ -12206,7 +12349,7 @@ def receive_stock(request):
     try:
         with transaction.atomic():
             if source == 'Donation':
-                Donor.register(donor_name, **donor_details)
+                Donor.register(donor_name, **donor_details, **donor_parts)
             for item, quantity, condition, price in parsed:
                 book, was_created = _resolve_intake_book(item, source)
                 if was_created:
@@ -12278,6 +12421,7 @@ def staff_inventory_receive(request):
         'intake_conditions': INTAKE_CONDITION_OPTIONS,
         'condition_notes': CONDITION_NOTES,
         'donor_names': list(Donor.objects.values_list('name', flat=True)[:500]),
+        'donor_options': _donor_options(),
         'ack_offer': _ack_offer(request),
         'donor_types': Donor.TYPE_CHOICES,
         'today': timezone.localdate().isoformat(),
@@ -12467,7 +12611,8 @@ ACCOUNTED_ELSEWHERE = ('Borrowed', 'Overdue', 'Being Read', 'For Reshelving', 'U
 WRITTEN_OFF = ('Lost', 'Donated', 'Beyond Repair')
 
 
-@admin_only_required
+# Staff who shelve books count them too.
+@admin_or_any_module_required('books', 'shelf', 'inventory')
 def stock_audit_sheet(request):
     """The books a board should be holding, in the order they stand there."""
     raw = (request.GET.get('level') or '').strip()
@@ -12515,7 +12660,7 @@ def stock_audit_sheet(request):
     })
 
 
-@admin_only_required
+@admin_or_any_module_required('books', 'shelf', 'inventory')
 def stock_audit_file(request):
     """Save the results of a shelf count."""
     if request.method != 'POST':
@@ -12536,6 +12681,7 @@ def stock_audit_file(request):
     damaged = ids('damaged_ids')      # here, but damaged
     onshelf = ids('onshelf_ids')      # here, though the system has it out on loan
     strays = ids('stray_ids')         # here, though it belongs on another board
+    nolabel = ids('nolabel_ids')      # here, but with no label on it
 
     # A copy cannot be both.
     bulk -= found | damaged
@@ -12551,6 +12697,7 @@ def stock_audit_file(request):
     damaged &= on_board
     onshelf = set(level.book_set.filter(book_id__in=onshelf, status__in=('Borrowed', 'Overdue'))
                   .values_list('book_id', flat=True))
+    nolabel &= found | bulk | damaged | onshelf
     # Strays are read as they were, so the count can say where each belongs.
     stray_books = list(Book.objects.select_related('shelf_level', 'shelf_level__shelf')
                        .filter(book_id__in=strays - on_board).exclude(status__in=WRITTEN_OFF))
@@ -12631,6 +12778,11 @@ def stock_audit_file(request):
         # On the shelf though on loan: seen, but the loan is the desk's to close.
         Book.objects.filter(book_id__in=onshelf).update(last_seen=now)
 
+        # A book seen on its board carries its label, unless the counter marked it as having none.
+        labelled = (Book.objects.filter(book_id__in=(seen | onshelf) - nolabel, label_printed_at__isnull=True)
+                    .update(label_printed_at=now))
+        Book.objects.filter(book_id__in=nolabel).update(label_printed_at=None)
+
         # A stray is seen, comes back if it was missing, and goes to be reshelved where it belongs.
         for book in Book.objects.filter(book_id__in=strays):
             book.last_seen = now
@@ -12675,9 +12827,9 @@ def stock_audit_file(request):
     log_admin_action(
         request, 'Create', 'Inventory', audit.audit_id,
         'Shelf read of %s: %d confirmed (%d one by one, %d in bulk), '
-        '%d flagged missing, %d recovered, %d damaged, %d on loan but here, %d strays'
+        '%d flagged missing, %d recovered, %d damaged, %d on loan but here, %d strays, %d with no label'
         % (audit.shelf_name.strip(), len(seen), len(found), len(bulk), flagged, recovered,
-           len(damaged), len(onshelf), len(strays)))
+           len(damaged), len(onshelf), len(strays), len(nolabel)))
 
     return JsonResponse({
         'success': True,
@@ -12690,6 +12842,9 @@ def stock_audit_file(request):
         'damaged': len(damaged),
         'onshelf': len(onshelf),
         'strays': len(strays),
+        'labelled': labelled,
+        'nolabel': len(nolabel),
+        'nolabel_ids': sorted(nolabel),
         'message': '%s filed. %d confirmed, %d flagged missing%s.'
                    % (audit.shelf_name.strip(), len(seen), flagged,
                       ', %d recovered' % recovered if recovered else ''),
@@ -13303,6 +13458,31 @@ def serve_card_photo(request, photo_id):
     return response
 
 
+def _donor_options():
+    """Every saved donor, for the receiving form's name boxes to suggest."""
+    return [{'name': d.name, 'type': d.donor_type, 'first': d.first_name or '', 'middle': d.middle_name or '',
+             'last': d.last_name or ''}
+            for d in Donor.objects.only('name', 'donor_type', *Donor.NAME_PARTS)[:1000]]
+
+
+def _posted_donor_name(post, prefix=''):
+    """(full name, {first/middle/last}, problem) from a donor form: a person's three name boxes,
+    or one name for an organisation, school or office."""
+    def get(field):
+        return ' '.join((post.get(prefix + field) or '').split())
+    kind = (post.get(prefix + 'type') or post.get('donor_type') or 'Individual').strip()
+    first, middle, last = get('first_name'), get('middle_name'), get('last_name')
+    if kind == 'Individual' and (first or last or middle or not get('name')):
+        if not first or not last:
+            return '', {}, "Type the donor's first name and surname. The middle name can be left blank."
+        parts = {'first_name': first[:100], 'middle_name': middle[:100], 'last_name': last[:100]}
+        return Donor.full_name(first, middle, last)[:255], parts, None
+    name = get('name')
+    if not name:
+        return '', {}, 'Type the name of the %s.' % dict(Donor.TYPE_CHOICES).get(kind, 'donor').lower()
+    return name[:255], {}, None
+
+
 @admin_or_module_required('donations')
 def donors_page(request):
     """Everyone who has given books, how often, and what they gave."""
@@ -13311,19 +13491,19 @@ def donors_page(request):
     similar = []
     if request.method == 'POST' and request.POST.get('action') == 'add':
         # Registered in one go, before or with their first gift.
-        name = ' '.join((request.POST.get('name') or '').split())
+        name, parts, name_problem = _posted_donor_name(request.POST)
         details = {f: (request.POST.get(f) or '').strip() for f in Donor.DETAIL_FIELDS}
-        existing = Donor.objects.filter(name__iexact=name).first() if name else None
+        existing = Donor.find(name, **parts) if name else None
         if existing is not None:
             messages.info(request, f'{existing.name} is already registered, so their record is open below.')
             return redirect(f"{reverse('donors_page')}?d={existing.donor_id}")
-        new_error = _donor_detail_error(name, details)
+        new_error = name_problem or _donor_detail_error(name, details)
         if not new_error and request.POST.get('confirm_new') != '1':
             similar = Donor.similar_to(name)
         if new_error or similar:
-            new_form = dict(details, name=name)
+            new_form = dict(details, name=name if not parts else '', display=name, **parts)
         else:
-            donor = Donor.register(name, **details)
+            donor = Donor.register(name, **details, **parts)
             log_admin_action(request, 'Create', 'Donor', donor.donor_id, f'Registered donor "{donor.name}"')
             messages.success(request, f'{donor.name} is registered as a donor.')
             return redirect(f"{reverse('donors_page')}?d={donor.donor_id}")
@@ -13333,9 +13513,9 @@ def donors_page(request):
         if donor is None:
             messages.error(request, 'Donor not found.')
             return redirect('donors_page')
-        name = ' '.join((request.POST.get('name') or '').split())
-        if not name:
-            messages.error(request, 'A donor needs a name.')
+        name, parts, problem = _posted_donor_name(request.POST)
+        if problem:
+            messages.error(request, problem)
             return redirect(f"{reverse('donors_page')}?d={donor.donor_id}")
         if Donor.objects.exclude(donor_id=donor.donor_id).filter(name__iexact=name).exists():
             messages.error(request, f'Another donor is already called "{name}".')
@@ -13345,6 +13525,9 @@ def donors_page(request):
             messages.error(request, bad)
             return redirect(f"{reverse('donors_page')}?d={donor.donor_id}")
         donor.name = name
+        # An organisation keeps no person's name parts.
+        for field in Donor.NAME_PARTS:
+            setattr(donor, field, parts.get(field) or None)
         kind = (request.POST.get('donor_type') or '').strip()
         donor.donor_type = kind if kind in dict(Donor.TYPE_CHOICES) else donor.donor_type
         donor.contact_number = (request.POST.get('contact_number') or '').strip() or None
@@ -13471,7 +13654,7 @@ def donor_acknowledgement(request, donor_id, day):
     })
 
 
-@admin_or_module_required('books')
+@admin_or_any_module_required('books', 'shelf')
 def mark_books_labelled(request):
     """Record that the selected books already carry a label, without printing one."""
     if request.method != 'POST':
@@ -13483,6 +13666,117 @@ def mark_books_labelled(request):
               .update(label_printed_at=timezone.now()))
     log_admin_action(request, 'Update', 'Book', None, f'Marked {marked} book(s) as already labelled')
     return JsonResponse({'success': True, 'marked': marked})
+
+
+def _audit_board_rows(levels):
+    """Each board with its book count and when every book on it was last confirmed."""
+    rows = []
+    for level in levels.annotate(n=Count('book')):
+        if level.shelf is None:
+            continue
+        seen = level.book_set.exclude(status__in=WRITTEN_OFF).aggregate(
+            oldest=Min('last_seen'), never=Count('book_id', filter=Q(last_seen__isnull=True)))
+        rows.append({
+            'id': level.shelf_level_id,
+            'shelf': level.shelf.name,
+            'room': level.shelf.room.name if level.shelf.room else '',
+            'label': level.label,
+            'books': level.n,
+            # One book never confirmed is enough to make the board unread.
+            'last_read': None if seen['never'] else seen['oldest'],
+        })
+    return rows
+
+
+@admin_or_any_module_required('books', 'shelf')
+def shelving_page(request):
+    """Books waiting for a shelf, each with a suggested board, and shelved books with no label, board by board."""
+    from collections import defaultdict
+    from .shelving import BoardSuggester, board_name, need_label, need_shelf
+    suggester = BoardSuggester()
+    waiting = []
+    for book in need_shelf().order_by('title', 'book_id'):
+        level, why = suggester.suggest(book.title, book.author, book.genre)
+        waiting.append({'book': book, 'level': level, 'why': why})
+
+    def board_key(level):
+        return (level.shelf.name if level.shelf_id else '', level.column_number or 0, level.level_number or 0)
+
+    boards = [{'id': lv.shelf_level_id, 'name': board_name(lv)}
+              for lv in sorted(suggester.levels.values(), key=board_key)]
+    by_board = defaultdict(list)
+    for book_id, level_id in need_label().order_by('shelf_slot', 'title').values_list('book_id', 'shelf_level'):
+        by_board[level_id].append(book_id)
+    label_boards = [{'id': level_id, 'name': board_name(suggester.levels[level_id]),
+                     'shelf_id': suggester.levels[level_id].shelf_id,
+                     'count': len(ids), 'ids': ','.join(str(i) for i in ids)}
+                    for level_id, ids in sorted(by_board.items(), key=lambda kv: board_key(suggester.levels[kv[0]]))]
+    return render(request, 'admin/shelving.html', {
+        'waiting': waiting,
+        'boards': boards,
+        'label_boards': label_boards,
+        'unlabelled_total': sum(b['count'] for b in label_boards),
+        'is_staff_portal': request.session.get('admin_role') == 'Staff',
+    })
+
+
+@admin_or_any_module_required('books', 'shelf')
+def shelving_place(request):
+    """Put books on the boards chosen for them, each at the end of its board."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST method allowed'})
+    wanted = {}
+    for pair in (request.POST.get('placements') or '').split(','):
+        book_id, _sep, level_id = pair.partition(':')
+        if book_id.strip().isdigit() and level_id.strip().isdigit():
+            wanted[int(book_id)] = int(level_id)
+    if not wanted:
+        return JsonResponse({'success': False, 'error': 'Choose a board for at least one book.'})
+    levels = {lv.shelf_level_id: lv for lv in
+              ShelfLevel.objects.select_related('shelf').filter(shelf_level_id__in=set(wanted.values()))}
+    books = list(Book.objects.filter(book_id__in=[b for b, lv in wanted.items() if lv in levels])
+                 .order_by('title', 'book_id'))
+    if not books:
+        return JsonResponse({'success': False, 'error': 'Those books or boards no longer exist.'})
+    with transaction.atomic():
+        counter = {}
+        for book in books:
+            level = levels[wanted[book.book_id]]
+            Book.objects.filter(pk=book.pk).update(shelf_level=level, shelf_slot=_next_slot(counter, level))
+        release_shelved_donations([b.book_id for b in books])
+        log_admin_action(request, 'Moved books', 'Book',
+                         detail='%d book(s) put on their shelves from Shelving & Labels' % len(books))
+    n = len(books)
+    return JsonResponse({'success': True, 'placed': n, 'ids': [b.book_id for b in books],
+                         'message': '%d book%s shelved. %s ready to print.'
+                                    % (n, '' if n == 1 else 's', 'Its label is' if n == 1 else 'Their labels are')})
+
+
+@admin_or_any_module_required('books', 'shelf', 'inventory')
+def shelf_audit(request, shelf_id):
+    """One shelf: what its records get wrong, then a count of every board on it."""
+    from .shelving import GONE_STATUSES, PROBLEM_KINDS, shelf_problems
+    shelf = Shelf.objects.select_related('room').filter(shelf_id=shelf_id).first()
+    if shelf is None:
+        raise Http404('No such shelf')
+    books, problems = shelf_problems(shelf)
+    groups = [{'kind': kind, 'title': title, 'items': [p for p in problems if p['kind'] == kind]}
+              for kind, title in PROBLEM_KINDS]
+    groups = [g for g in groups if g['items']]
+    staff = request.session.get('admin_role') == 'Staff'
+    unlabelled = [b.book_id for b in books if not b.label_printed_at and b.status not in GONE_STATUSES]
+    return render(request, 'admin/shelfaudit.html', {
+        'shelf': shelf,
+        'book_count': len(books),
+        'problem_groups': groups,
+        'problem_count': len(problems),
+        'unlabelled_ids': ','.join(str(i) for i in unlabelled),
+        'unlabelled_count': len(unlabelled),
+        'boards': _audit_board_rows(ShelfLevel.objects.filter(shelf=shelf).select_related('shelf', 'shelf__room')
+                                    .order_by('column_number', 'level_number')),
+        'is_staff_portal': staff,
+        'back_url': reverse('staff_shelf' if staff else 'shelf_manager'),
+    })
 
 
 OPEN_LIBRARY_URL = 'https://openlibrary.org/api/books?bibkeys=ISBN:%s&format=json&jscmd=data'
@@ -13535,7 +13829,7 @@ def catalogue_assist(request):
             match = {'copies': len(copies), 'genre': first.genre or '', 'material_type': first.material_type,
                      'isbn': first.ISBN or '', 'publication_year': first.publication_year or '',
                      'price': str(first.price) if first.price is not None else '',
-                     'call_number': first.call_number or ''}
+                     'call_number': first.call_number or '', 'subject': first.subject or ''}
 
     shelf = None
     shelved = [b.shelf_level for b in (same_title(title, author).select_related('shelf_level__shelf')

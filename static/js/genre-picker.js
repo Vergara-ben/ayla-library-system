@@ -4,9 +4,10 @@
 
   function attach(input, opts) {
     opts = opts || {};
-    var genres = opts.genres || [];
+    // Each genre is a name, or {label, sub, search} with the finer wording its books use.
+    var genres = (opts.genres || []).map(function (g) { return typeof g === 'string' ? { label: g } : g; });
     var byLower = {};
-    genres.forEach(function (g) { byLower[g.toLowerCase()] = g; });
+    genres.forEach(function (g) { byLower[g.label.toLowerCase()] = g.label; });
     var flag = opts.flag || null;
     var note = opts.note || null;
     var isNew = false;
@@ -31,7 +32,7 @@
     }
 
     AylaPicker.attach(input, {
-      items: genres.map(function (g) { return { label: g }; }),
+      items: genres,
       newLabel: function (q) {
         return q ? '+ Add “' + q + '” as a new genre' : '+ New genre — type its name first';
       },

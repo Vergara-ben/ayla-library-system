@@ -183,16 +183,23 @@
                 </div>
             </div>
 
+            <div id="justAddedBar" class="hidden flex flex-wrap items-center gap-3 rounded-lg border border-emerald-800/50 bg-emerald-950/20 px-4 py-2.5 text-xs text-emerald-300">
+                <i class="fa-solid fa-circle-check"></i>
+                <span id="justAddedText" class="flex-1 min-w-[12rem]"></span>
+                <button type="button" onclick="printJustAdded()" class="font-bold px-3 py-1.5 rounded-md border border-emerald-700/60 hover:bg-emerald-900/40"><i class="fa-solid fa-print mr-1"></i> <span id="justAddedPrint">Print labels</span></button>
+                <button type="button" onclick="document.getElementById('justAddedBar').classList.add('hidden')" class="text-emerald-500 hover:text-emerald-300" aria-label="Dismiss"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+
             {# What still needs doing before a book is ready for the floor. #}
             <div data-live="bk-attention" data-live-collapse class="flex flex-wrap items-center gap-2 text-[11px]">
                 {% if unshelved_count %}
-                <a href="{{ request.path }}?shelf=none" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-amber-700/50 bg-amber-500/10 text-amber-300 font-semibold hover:bg-amber-500/20">
-                    <i class="fa-solid fa-triangle-exclamation text-[10px]"></i> {{ unshelved_count }} not on a shelf yet
+                <a href="{% url 'shelving_page' %}#shelve" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-amber-700/50 bg-amber-500/10 text-amber-300 font-semibold hover:bg-amber-500/20">
+                    <i class="fa-solid fa-triangle-exclamation text-[10px]"></i> {{ unshelved_count }} waiting for a shelf
                 </a>
                 {% endif %}
                 {% if unlabelled_count %}
                 <span class="inline-flex items-center rounded-lg border border-blue-700/50 bg-blue-500/10 text-blue-400 font-semibold overflow-hidden">
-                    <a href="{{ request.path }}?label=missing" class="px-3 py-1.5 hover:bg-blue-500/20"><i class="fa-solid fa-qrcode text-[10px] mr-1"></i> {{ unlabelled_count }} shelved, no label printed</a>
+                    <a href="{% url 'shelving_page' %}#labels" class="px-3 py-1.5 hover:bg-blue-500/20"><i class="fa-solid fa-qrcode text-[10px] mr-1"></i> {{ unlabelled_count }} on a shelf, no label</a>
                     <button type="button" onclick="printUnlabelled()" class="px-3 py-1.5 border-l border-blue-700/50 hover:bg-blue-500/20"><i class="fa-solid fa-print text-[10px] mr-1"></i> Print them</button>
                 </span>
                 {% endif %}
@@ -255,7 +262,7 @@
                             <div class="relative">
                                 <select id="shelfFilter" onchange="onShelfFilterChange()" title="Which shelf the book is on" class="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-400 focus:outline-none pr-8 appearance-none min-w-[150px]">
                                     <option value="">All shelves</option>
-                                    <option value="none" {% if shelf == 'none' %}selected{% endif %}>Not shelved{% if unshelved_count %} ({{ unshelved_count }}){% endif %}</option>
+                                    <option value="none" {% if shelf == 'none' %}selected{% endif %}>Waiting for a shelf{% if unshelved_count %} ({{ unshelved_count }}){% endif %}</option>
                                     {% for s in shelf_choices %}<option value="{{ s.id }}" {% if shelf == s.id|stringformat:"s" %}selected{% endif %}>{{ s.name }}{% if s.books %} ({{ s.books }}){% endif %}</option>{% endfor %}
                                 </select>
                                 <i class="fa-solid fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-slate-600 text-[10px] pointer-events-none"></i>
@@ -339,7 +346,7 @@
                                     <div class="w-8 h-10 rounded bg-cyan-950/40 border border-cyan-900/30 flex-shrink-0 flex items-center justify-center text-[10px] font-medium text-cyan-700 select-none"></div>
                                     <div>
                                         <div class="font-bold text-slate-200">{{ book.title }}</div>
-                                        <div class="text-[10px] text-slate-500 mt-0.5">{{ book.genre|default:"" }}</div>
+                                        <div class="text-[10px] text-slate-500 mt-0.5">{{ book.subject|default:book.genre|default:"" }}</div>
                                     </div>
                                 </td>
                                 <td class="py-4 px-6 text-slate-300">{{ book.author }}</td>
@@ -419,11 +426,12 @@
                 {% endif %}
                 {# Scan the ISBN: Enter fills in the rest, Enter again saves. #}
                 <div class="space-y-1.5">
-                    <label for="addIsbn" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">ISBN <span class="normal-case font-normal tracking-normal">(scan it, then Enter; blank if it has none)</span></label>
+                    <label for="addIsbn" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">ISBN <span class="normal-case font-normal tracking-normal">(scan it, then Enter)</span></label>
                     <div class="flex gap-2">
                         <input type="text" name="ISBN" id="addIsbn" autocomplete="off" placeholder="978-..." class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
                         <button type="button" onclick="lookupIsbn(true)" class="px-3 rounded-lg border border-slate-700 text-cyan-400 hover:bg-slate-800/40 font-bold whitespace-nowrap"><i class="fa-solid fa-magnifying-glass text-[10px]"></i> Fill in</button>
                     </div>
+                    <label class="inline-flex items-center gap-1.5 text-[11px] text-slate-400 cursor-pointer select-none"><input type="checkbox" name="no_isbn" value="1" id="addNoIsbn" onchange="toggleNone('addIsbn', this.checked)" class="accent-cyan-600"> This book has no ISBN</label>
                     <p id="addIsbnNote" class="hidden text-[10px] leading-relaxed"></p>
                     <p data-add-error="ISBN" class="hidden text-[10px] text-rose-400 leading-relaxed"></p>
                 </div>
@@ -451,6 +459,7 @@
                     <div class="space-y-1.5">
                         <label for="addPublicationYear" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Publication Year</label>
                         <input type="number" name="publication_year" id="addPublicationYear" min="1450" max="{% now 'Y' %}" placeholder="e.g. 2023" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                        <label class="inline-flex items-center gap-1.5 text-[11px] text-slate-400 cursor-pointer select-none"><input type="checkbox" name="year_unknown" value="1" id="addYearUnknown" onchange="toggleNone('addPublicationYear', this.checked)" class="accent-cyan-600"> Year unknown</label>
                         <p data-add-error="publication_year" class="hidden text-[10px] text-rose-400 leading-relaxed"></p>
                     </div>
                 </div>
@@ -480,7 +489,7 @@
                     </div>
                     <div class="space-y-1.5">
                         <label for="addPrice" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Price (₱)</label>
-                        <input type="number" name="price" id="addPrice" min="0" max="100000" step="0.01" placeholder="Charged if lost; optional" value="" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                        <input type="number" name="price" id="addPrice" min="0" max="100000" step="0.01" placeholder="Charged if it is lost" value="" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
                         <p data-add-error="price" class="hidden text-[10px] text-rose-400 leading-relaxed"></p>
                     </div>
                 </div>
@@ -546,10 +555,12 @@
                     <div class="space-y-1.5">
                         <label for="editPublicationYear" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Publication Year</label>
                         <input type="number" name="publication_year" id="editPublicationYear" min="1000" max="2099" placeholder="e.g. 2023" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                        <label class="inline-flex items-center gap-1.5 text-[11px] text-slate-400 cursor-pointer select-none"><input type="checkbox" name="year_unknown" value="1" id="editYearUnknown" onchange="toggleNone('editPublicationYear', this.checked)" class="accent-cyan-600"> Year unknown</label>
                     </div>
                     <div class="space-y-1.5">
                         <label for="editIsbn" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">ISBN</label>
                         <input type="text" name="ISBN" id="editIsbn" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                        <label class="inline-flex items-center gap-1.5 text-[11px] text-slate-400 cursor-pointer select-none"><input type="checkbox" name="no_isbn" value="1" id="editNoIsbn" onchange="toggleNone('editIsbn', this.checked)" class="accent-cyan-600"> This book has no ISBN</label>
                     </div>
                 </div>
                 <div class="space-y-1.5">
@@ -563,6 +574,8 @@
                         <input type="text" name="genre" id="editGenre" placeholder="Search the library's genres" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);" required>
                         <input type="hidden" name="new_genre" id="editNewGenre" value="">
                         <p id="editGenreNote" class="hidden text-[10px] text-cyan-400 leading-relaxed"></p>
+                        <label for="editSubject" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px] pt-2">Subject <span class="normal-case font-normal tracking-normal">(optional detail, e.g. Legal Thriller)</span></label>
+                        <input type="text" name="subject" id="editSubject" maxlength="255" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
                     </div>
                     <div class="space-y-1.5">
                         <label for="editMaterial" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Material Type</label>
@@ -748,6 +761,7 @@
                 never get the same sticker.
             </p>
             <p id="labelSheetError" class="hidden rounded-lg border border-rose-500/25 bg-rose-500/10 px-3 py-2 text-[11px] text-rose-300"></p>
+            <p id="labelUnshelved" class="hidden rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200 leading-relaxed"></p>
 
             <div class="space-y-4 text-xs">
                 <div class="grid grid-cols-2 gap-3">
@@ -884,6 +898,7 @@
                             <p id="detailAuthor" class="text-sm text-slate-400 mt-1">Author</p>
                             <div class="flex flex-wrap gap-2 mt-3">
                                 <span id="detailGenre" class="text-xs px-2 py-0.5 rounded bg-blue-950/60 text-blue-400 border border-blue-900 font-medium">Genre</span>
+                                <span id="detailSubject" class="hidden text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-medium"></span>
                                 <span id="detailShelf" class="text-xs px-2 py-0.5 rounded bg-teal-950/60 text-teal-400 border border-teal-900 font-medium">Shelf Level</span>
                                 <span id="detailYear" class="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-400 font-medium">Year</span>
                                 <span id="detailPrice" class="hidden text-xs px-2 py-0.5 rounded bg-amber-950/60 text-amber-400 border border-amber-900 font-medium"></span>
@@ -958,6 +973,7 @@
         function openAddModal() {
             // A fresh run.
             addedThisRun = 0;
+            runLabelIds = [];
             callTouched = false;
             shelfTouched = false;
             lastLookup = '';
@@ -965,6 +981,8 @@
             if (runNote) runNote.classList.add('hidden');
             document.getElementById('addBookModal').classList.remove('hidden');
             document.getElementById('addBookForm').reset();
+            toggleNone('addIsbn', false);
+            toggleNone('addPublicationYear', false);
             if (addGenrePicker) addGenrePicker.reset();
             ['addIsbnNote', 'addMatchNote', 'addShelfNote'].forEach(function (id) {
                 document.getElementById(id).classList.add('hidden');
@@ -977,6 +995,9 @@
         function closeAddModal() {
             document.getElementById('addBookModal').classList.add('hidden');
             // Show what this run added.
+            if (runLabelIds.length) {
+                rememberJustAdded(runLabelIds, addedThisRun + ' book' + (addedThisRun === 1 ? '' : 's') + ' added.');
+            }
             if (addedThisRun) window.location.reload();
         }
 
@@ -1080,6 +1101,9 @@
                         document.getElementById('detailTitleMain').textContent = data.title;
                         document.getElementById('detailAuthor').textContent = data.author;
                         document.getElementById('detailGenre').textContent = data.genre;
+                        const subjectTag = document.getElementById('detailSubject');
+                        subjectTag.textContent = data.subject || '';
+                        subjectTag.classList.toggle('hidden', !data.subject);
                         document.getElementById('detailShelf').textContent = data.shelf_level;
                         document.getElementById('detailYear').textContent = data.publication_year;
                         const priceTag = document.getElementById('detailPrice');
@@ -1256,6 +1280,15 @@
         // Keep shared fields for the next book.
         let addAnother = false;
         let addedThisRun = 0;
+        // Copies added this run that are on a shelf, so their labels can print together.
+        let runLabelIds = [];
+        window.printRunLabels = function () { if (runLabelIds.length) openLabelSheet(runLabelIds); };
+        // Remembered across the reload that follows a save, for the banner it shows.
+        function rememberJustAdded(ids, message, shelved) {
+            try { sessionStorage.setItem('ayla.justAdded', JSON.stringify({ ids: ids, message: message,
+                                                                             shelved: shelved !== false })); }
+            catch (e) { /* site data refused: the labels can still be printed from Shelving & Labels */ }
+        }
         // A call number or shelf chosen by hand is never replaced by a suggestion.
         let callTouched = false;
         let shelfTouched = false;
@@ -1311,16 +1344,43 @@
             if (!val('addAuthor')) problems.push({ field: 'author', error: 'Type the author, or "Unknown" if the book names none.' });
             const genre = addGenrePicker ? addGenrePicker.problem() : (val('addGenre') ? '' : 'Choose a genre.');
             if (genre) problems.push({ field: 'genre', error: genre });
+            missingDetails('add').forEach(function (p) { problems.push(p); });
             if (problems.length) { showAddErrors(problems); return false; }
             clearAddErrors();
             return true;
         }
 
+        // A box ticked "none" is cleared and locked, so it cannot be half-filled.
+        window.toggleNone = function (id, on) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            if (on) el.value = '';
+            el.disabled = on;
+            el.classList.toggle('opacity-50', on);
+        };
+
+        // Blank only on purpose: the ISBN and year need a value or their tick; the price always a value.
+        function missingDetails(prefix) {
+            const val = function (id) { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
+            const ticked = function (id) { const el = document.getElementById(id); return el && el.checked; };
+            const out = [];
+            if (!val(prefix + 'Isbn') && !ticked(prefix + 'NoIsbn')) {
+                out.push({ field: 'ISBN', error: 'Type or scan the ISBN, or tick "This book has no ISBN".' });
+            }
+            if (!val(prefix + 'PublicationYear') && !ticked(prefix + 'YearUnknown')) {
+                out.push({ field: 'publication_year', error: 'Type the publication year, or tick "Year unknown".' });
+            }
+            if (!val(prefix + 'Price')) {
+                out.push({ field: 'price', error: 'Type the price. It is what a patron pays if the book is lost.' });
+            }
+            return out;
+        }
+
         // The next thing to fill in; once all is filled in, the save button, so Enter saves.
         function focusNextEmpty() {
-            for (const id of ['addTitle', 'addAuthor', 'addGenre']) {
+            for (const id of ['addTitle', 'addAuthor', 'addGenre', 'addPublicationYear', 'addPrice']) {
                 const el = document.getElementById(id);
-                if (!el.value.trim()) { el.focus(); return; }
+                if (!el.disabled && !el.value.trim()) { el.focus(); return; }
             }
             if (addGenrePicker && addGenrePicker.problem()) { document.getElementById('addGenre').focus(); return; }
             document.getElementById('addAnotherBtn').focus();
@@ -1399,7 +1459,8 @@
             const isbn = document.getElementById('addIsbn').value.trim();
             const note = document.getElementById('addIsbnNote');
             const moveOn = function () { if (!quiet) focusNextEmpty(); };
-            if (!isbn || (isbn === lastLookup && force !== true)) { moveOn(); return; }
+            if (!isbn || document.getElementById('addNoIsbn').checked
+                || (isbn === lastLookup && force !== true)) { moveOn(); return; }
             lastLookup = isbn;
             note.className = 'text-[10px] leading-relaxed text-slate-500';
             note.textContent = 'Looking it up…';
@@ -1463,7 +1524,7 @@
                 e.preventDefault();
                 const missing = ['addTitle', 'addAuthor', 'addGenre'].some(function (id) {
                     return !document.getElementById(id).value.trim();
-                });
+                }) || missingDetails('add').length;
                 if (missing) focusNextEmpty();
                 else submitAndAddAnother();
             });
@@ -1494,12 +1555,16 @@
             .then(data => {
                 if (data.success && keepOpen) {
                     addedThisRun += copies;
+                    if (data.shelved) runLabelIds = runLabelIds.concat(data.ids || []);
                     // What never repeats is cleared; what a run shares stays.
                     ['addTitle', 'addAuthor', 'addIsbn', 'addPublicationYear', 'addPrice', 'addCallNumber'].forEach(function (id) {
                         const el = document.getElementById(id);
                         if (el) el.value = '';
                     });
                     document.getElementById('addCopies').value = '1';
+                    ['addNoIsbn', 'addYearUnknown'].forEach(function (id) { document.getElementById(id).checked = false; });
+                    toggleNone('addIsbn', false);
+                    toggleNone('addPublicationYear', false);
                     document.getElementById('addCondition').value = 'Good';
                     showConditionNote();
                     ['addIsbnNote', 'addMatchNote'].forEach(function (id) {
@@ -1509,13 +1574,18 @@
                     callTouched = false;
                     const runNote = document.getElementById('addRunNote');
                     if (runNote) {
-                        runNote.textContent = (data.message || 'Saved.') + ' ' + addedThisRun + ' book'
+                        runNote.innerHTML = esc(data.message || 'Saved.') + ' ' + addedThisRun + ' book'
                             + (addedThisRun === 1 ? '' : 's') + ' added this run. Genre and material are kept '
-                            + 'for the next one; change them when it differs.';
+                            + 'for the next one; change them when it differs.'
+                            + (data.shelved ? '' : ' No shelf was chosen, so it waits on Shelving &amp; Labels.')
+                            + (runLabelIds.length ? ' <button type="button" onclick="printRunLabels()" '
+                               + 'class="underline font-bold">Print labels for this run (' + runLabelIds.length
+                               + ')</button>' : '');
                         runNote.classList.remove('hidden');
                     }
                     document.getElementById('addIsbn').focus();
                 } else if (data.success) {
+                    rememberJustAdded(data.ids || [], data.message || 'Saved.', !!data.shelved);
                     window.location.href = '{% url 'admin_management' %}';
                 } else {
                     showAddErrors(data.problems && data.problems.length ? data.problems
@@ -1536,7 +1606,8 @@
 
         document.getElementById('editBookForm').addEventListener('submit', function(e) {
             e.preventDefault();
-            const genreProblem = editGenrePicker ? editGenrePicker.problem() : '';
+            const genreProblem = (editGenrePicker ? editGenrePicker.problem() : '')
+                || (missingDetails('edit')[0] || {}).error || '';
             if (genreProblem) {
                 if (window.AylaDialog) AylaDialog.toast(genreProblem, 'error'); else alert(genreProblem);
                 document.getElementById('editGenre').focus();
@@ -1566,21 +1637,49 @@
             });
         });
 
+        // Just saved with a shelf: offer its labels once.
+        let justAdded = null;
+        try {
+            justAdded = JSON.parse(sessionStorage.getItem('ayla.justAdded') || 'null');
+            sessionStorage.removeItem('ayla.justAdded');
+        } catch (e) { justAdded = null; }
+        if (justAdded && justAdded.ids && justAdded.ids.length) {
+            const n = justAdded.ids.length;
+            document.getElementById('justAddedText').textContent = (justAdded.message || 'Saved.')
+                + (justAdded.shelved ? '' : ' ' + (n === 1 ? 'It has' : 'They have') + ' no shelf yet, so the label '
+                   + 'prints once ' + (n === 1 ? 'it is' : 'they are') + ' on one.');
+            document.getElementById('justAddedPrint').textContent = justAdded.shelved
+                ? 'Print ' + (n === 1 ? 'its label' : 'their ' + n + ' labels')
+                : 'Shelve ' + (n === 1 ? 'it' : 'them');
+            document.getElementById('justAddedBar').classList.remove('hidden');
+        }
+        window.printJustAdded = function () {
+            if (!justAdded) return;
+            if (justAdded.shelved) openLabelSheet(justAdded.ids);
+            else location.href = "{% url 'shelving_page' %}?book=" + justAdded.ids[0] + '#shelve';
+        };
+
         // Show modal if editing mode is active
         {% if book %}
             document.addEventListener('DOMContentLoaded', function() {
                 document.getElementById('editBookId').value = '{{ book.book_id }}';
-                document.getElementById('editTitle').value = '{{ initial.title|default:"" }}';
-                document.getElementById('editAuthor').value = '{{ initial.author|default:"" }}';
-                document.getElementById('editPublicationYear').value = '{{ initial.publication_year|default:"" }}';
-                document.getElementById('editIsbn').value = '{{ initial.ISBN|default:"" }}';
-                document.getElementById('editGenre').value = '{{ initial.genre|default:"" }}';
-                document.getElementById('editCoverImgUrl').value = '{{ initial.cover_img_url|default:"" }}';
-                document.getElementById('editStatus').value = '{{ initial.status|default:"Available" }}';
-                document.getElementById('editShelfLevel').value = '{{ initial.shelf_level_id|default:"" }}';
-                document.getElementById('editShelfSlot').value = '{{ initial.shelf_slot|default:"" }}';
-                document.getElementById('editCondition').value = '{{ initial.condition|default:"Good" }}';
-                document.getElementById('editCallNumber').value = '{{ initial.call_number|default:"" }}';
+                document.getElementById('editTitle').value = '{{ initial.title|default:""|escapejs }}';
+                document.getElementById('editAuthor').value = '{{ initial.author|default:""|escapejs }}';
+                document.getElementById('editPublicationYear').value = '{{ initial.publication_year|default:""|escapejs }}';
+                document.getElementById('editIsbn').value = '{{ initial.ISBN|default:""|escapejs }}';
+                document.getElementById('editGenre').value = '{{ initial.genre|default:""|escapejs }}';
+                document.getElementById('editNoIsbn').checked = {{ initial.isbn_none|yesno:"true,false" }};
+                toggleNone('editIsbn', {{ initial.isbn_none|yesno:"true,false" }});
+                document.getElementById('editYearUnknown').checked = {{ initial.year_unknown|yesno:"true,false" }};
+                toggleNone('editPublicationYear', {{ initial.year_unknown|yesno:"true,false" }});
+                document.getElementById('editSubject').value = '{{ initial.subject|default:""|escapejs }}';
+                document.getElementById('editMaterial').value = '{{ initial.material_type|default:"Book"|escapejs }}';
+                document.getElementById('editCoverImgUrl').value = '{{ initial.cover_img_url|default:""|escapejs }}';
+                document.getElementById('editStatus').value = '{{ initial.status|default:"Available"|escapejs }}';
+                document.getElementById('editShelfLevel').value = '{{ initial.shelf_level_id|default:""|escapejs }}';
+                document.getElementById('editShelfSlot').value = '{{ initial.shelf_slot|default:""|escapejs }}';
+                document.getElementById('editCondition').value = '{{ initial.condition|default:"Good"|escapejs }}';
+                document.getElementById('editCallNumber').value = '{{ initial.call_number|default:""|escapejs }}';
                 document.getElementById('editBookModal').classList.remove('hidden');
             });
         {% endif %}
@@ -1886,17 +1985,29 @@
             if (window.AylaLive) AylaLive.refresh(); else location.reload();
         };
 
-        window.openLabelSheet = function (ids) {
+        window.openLabelSheet = async function (ids) {
             if (Array.isArray(ids) && ids.length) remember(new Set(ids));
             const n = chosen().size;
             // Only reachable from the toolbar with nothing ticked.
             if (!n) { alert('Tick at least one book first.'); return; }
+            // A label says where the book goes, so a book with no shelf cannot have one yet.
+            await loadPickBooks();
+            const loose = [...chosen()].filter(function (id) { return pickById[id] && pickById[id].level_id == null; });
+            const warn = document.getElementById('labelUnshelved');
+            warn.classList.toggle('hidden', !loose.length);
+            warn.innerHTML = loose.length
+                ? '<strong>' + loose.length + ' of the ' + n + '</strong> ' + (loose.length === 1 ? 'has' : 'have')
+                  + ' no shelf yet, so ' + (loose.length === 1 ? 'it does' : 'they do') + ' not print: '
+                  + loose.slice(0, 3).map(function (id) { return esc(pickById[id].title); }).join(', ')
+                  + (loose.length > 3 ? ', …' : '') + '. <a class="underline font-bold" href="' + SHELVING_URL
+                  + '?book=' + loose[0] + '#shelve">Shelve ' + (loose.length === 1 ? 'it' : 'them') + ' first</a>.'
+                : '';
             document.getElementById('labelCountNote').textContent =
                 n + ' book' + (n === 1 ? '' : 's') + ' selected.';
             const err = document.getElementById('labelSheetError');
             if (err) { err.textContent = ''; err.classList.add('hidden'); }
             const dl = document.getElementById('labelDownloadBtn');
-            if (dl) { dl.disabled = false; dl.innerHTML = '<i class="fa-solid fa-file-pdf text-xs"></i> Download PDF'; }
+            if (dl) { dl.disabled = loose.length === n; dl.innerHTML = '<i class="fa-solid fa-file-pdf text-xs"></i> Download PDF'; }
             document.getElementById('labelSheetModal').classList.remove('hidden');
             refreshLabelEstimate();
         };
@@ -2084,6 +2195,16 @@
 
         // Label picker.
         const PICKER_URL = "{% url 'book_label_picker_data' %}";
+        const SHELVING_URL = "{% url 'shelving_page' %}";
+        async function loadPickBooks(fresh) {
+            if (pickBooks.length && !fresh) return;
+            const r = await fetch(PICKER_URL, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+            const d = await r.json();
+            pickBooks = d.books || [];
+            pickMax = d.max_per_sheet || 500;
+            pickById = {};
+            pickBooks.forEach(function (b) { pickById[b.book_id] = b; });
+        }
         let pickBooks = [];        // every book, fetched once
         let pickById = {};
         let pickMax = 500;
@@ -2161,8 +2282,14 @@
                     return (b.title + ' ' + b.author + ' ' + b.isbn).toLowerCase().indexOf(q) !== -1;
                 });
                 html = rows.slice(0, 400).map(function (b) {
+                    if (b.level_id == null) {
+                        return '<div class="opacity-60">' + pickRow(esc(b.title),
+                            esc(b.author) + ' · <span class="text-amber-400 font-semibold">needs a shelf</span>',
+                            '<a class="text-[11px] font-bold text-amber-400 underline whitespace-nowrap" href="' + SHELVING_URL
+                            + '?book=' + b.book_id + '#shelve">Shelve</a>', false) + '</div>';
+                    }
                     return pickRow(esc(b.title),
-                        esc(b.author) + (b.location ? ' · ' + esc(b.location) : ' · not shelved'),
+                        esc(b.author) + ' · ' + esc(b.location),
                         '<button class="tbtn add" title="Add" onclick="addBookToCart(' + b.book_id + ')"><i class="fa-solid fa-plus"></i></button>',
                         false);
                 }).join('');
@@ -2185,6 +2312,13 @@
                            + (done ? ' · ' + done + ' already in the list' : '')
                            + bays + (g.detail ? ' · ' + esc(g.detail) : ''))
                         : ('all ' + g.ids.length + ' already in the list' + bays);
+                    if (g.key === 'none') {
+                        return '<div class="opacity-60">' + pickRow(esc(g.label),
+                            g.ids.length + ' book' + (g.ids.length === 1 ? '' : 's')
+                            + ' · <span class="text-amber-400 font-semibold">need a shelf before a label</span>',
+                            '<a class="text-[11px] font-bold text-amber-400 underline whitespace-nowrap" href="'
+                            + SHELVING_URL + '#shelve">Shelve</a>', true) + '</div>';
+                    }
                     const action = left.length
                         ? '<button class="tbtn add" title="Add all" onclick="addGroupToCart(\'' + pickMode + '\',\'' + g.key + '\')"><i class="fa-solid fa-plus"></i></button>'
                         : '<button class="tbtn del" title="Remove all" onclick="removeGroupFromCart(\'' + pickMode + '\',\'' + g.key + '\')"><i class="fa-solid fa-minus"></i></button>';
@@ -2207,7 +2341,8 @@
             document.getElementById('pickCart').innerHTML = inCart.length
                 ? inCart.map(function (b) {
                     return pickRow(esc(b.title),
-                        esc(b.author) + (b.location ? ' · ' + esc(b.location) : ' · not shelved'),
+                        esc(b.author) + (b.location ? ' · ' + esc(b.location)
+                                         : ' · <span class="text-amber-400 font-semibold">needs a shelf, will not print</span>'),
                         '<button class="tbtn del" title="Remove" onclick="removeBookFromCart(' + b.book_id + ')"><i class="fa-solid fa-minus"></i></button>',
                         false);
                   }).join('')
@@ -2267,12 +2402,7 @@
                 '<div class="text-slate-500 text-xs p-3">Loading…</div>';
             document.getElementById('labelPickerModal').classList.remove('hidden');
             try {
-                const r = await fetch(PICKER_URL, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
-                const d = await r.json();
-                pickBooks = d.books || [];
-                pickMax = d.max_per_sheet || 500;
-                pickById = {};
-                pickBooks.forEach(function (b) { pickById[b.book_id] = b; });
+                await loadPickBooks(true);
                 // Remove deleted books from the selection.
                 const live = currentCart();
                 const pruned = new Set([...live].filter(function (id) { return pickById[id]; }));
@@ -2532,9 +2662,26 @@
                 window.printLabelsForBooks(importedIds);
                 return;
             }
-            // Close the modal and say what happened.
             printAfterImport = false;
+            // The new books' labels are one click away, with the print settings.
+            if (importedIds.length) {
+                body.innerHTML += line('fa-print', 'text-amber-400',
+                    '<button type="button" onclick="printImported()" class="font-bold underline text-amber-300">'
+                    + 'Print labels for the ' + importedIds.length + ' imported book'
+                    + (importedIds.length === 1 ? '' : 's') + '</button>. Opens the print settings first: '
+                    + 'paper, label size and what each label shows.');
+                lastImport = data;
+                document.getElementById('importResultModal').classList.remove('hidden');
+                return;
+            }
             finishImport(data);
+        };
+
+        let lastImport = null;
+        window.printImported = function () {
+            document.getElementById('importResultModal').classList.add('hidden');
+            importSummaryAfterLabels = lastImport;
+            window.printLabelsForBooks(importedIds);
         };
 
         // Say what the import did, then get out of the way.

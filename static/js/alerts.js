@@ -19,7 +19,8 @@
   }
 
   function isNew(item, before) {
-    if (!item.count) return false;
+    // A quiet count keeps its badge up to date without a pop-up.
+    if (!item.count || item.quiet) return false;
     if (!before) return false;
     return item.latest > before.latest || item.count > before.count
       || (item.stamp && item.stamp > (before.stamp || ''));

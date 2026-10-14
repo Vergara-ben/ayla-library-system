@@ -594,7 +594,12 @@ class Book(Archivable):
     # What the library charges if this copy is lost; every book is worth something different.
     price = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
     ISBN = models.CharField(max_length=255, blank=True, null=True)
+    # Said on purpose when the book was catalogued, so a blank is never an oversight.
+    isbn_none = models.BooleanField(default=False)
+    year_unknown = models.BooleanField(default=False)
     genre = models.CharField(max_length=255, blank=True, null=True)
+    # Finer detail than the genre, e.g. "Legal Thriller"; optional and searchable.
+    subject = models.CharField(max_length=255, blank=True, null=True)
     material_type = models.CharField(
         max_length=20, choices=MATERIAL_TYPE_CHOICES, default='Book')
     status = models.CharField(
@@ -686,7 +691,7 @@ class Book(Archivable):
 
     # Novels of every kind share one prefix, as the library already shelves them.
     FICTION_WORDS = re.compile(r"\b(fiction|novel|thriller|suspense|mystery|romance|young adult|horror|fantasy|"
-                               r"dystopian|gothic|spy|crime|legal|adventure|sci-fi|picture book|"
+                               r"dystopian|gothic|spy|crime|legal|adventure|sci-fi|picture books?|"
                                r"children's literature|short stor|drama|satire)\b", re.I)
 
     def derive_call_number(self):
@@ -771,7 +776,11 @@ class Donor(models.Model):
     ]
 
     donor_id = models.AutoField(primary_key=True)
+    # The full name everything else uses; for a person it is built from the three parts below.
     name = models.CharField(max_length=255)
+    first_name = models.CharField(max_length=100, blank=True, null=True)
+    middle_name = models.CharField(max_length=100, blank=True, null=True)
+    last_name = models.CharField(max_length=100, blank=True, null=True)
     donor_type = models.CharField(max_length=20, choices=TYPE_CHOICES, default='Individual')
     contact_number = models.CharField(max_length=255, blank=True, null=True)
     email = models.EmailField(max_length=255, blank=True, null=True)
@@ -796,17 +805,40 @@ class Donor(models.Model):
 
     DETAIL_FIELDS = ('donor_type', 'contact_number', 'email', 'address', 'notes')
 
+    NAME_PARTS = ('first_name', 'middle_name', 'last_name')
+
+    @staticmethod
+    def full_name(first, middle, last):
+        """Juan Perez Dela Cruz: the middle name in full, so two people are not merged by an initial."""
+        return ' '.join(' '.join((p or '').split()) for p in (first, middle, last) if (p or '').strip())
+
+    @classmethod
+    def find(cls, name, first_name='', middle_name='', last_name=''):
+        """A saved donor by full name, or a person by their name parts however the full name was written."""
+        clean = ' '.join((name or '').split())
+        donor = cls.objects.filter(name__iexact=clean).first() if clean else None
+        if donor is None and first_name and last_name:
+            middle = (middle_name or '').strip().lower()
+            people = cls.objects.filter(first_name__iexact=first_name.strip(), last_name__iexact=last_name.strip())
+            donor = next((d for d in people if (d.middle_name or '').lower() == middle), None)
+        return donor
+
     @classmethod
     def register(cls, name, **details):
         """The donor with this name: a new one gets these details, a saved one only fills its blanks."""
         clean = ' '.join((name or '').split())
         if not clean:
             return None
-        donor = cls.objects.filter(name__iexact=clean).first()
+        parts = {f: ' '.join((details.get(f) or '').split()) for f in cls.NAME_PARTS}
+        donor = cls.find(clean, **parts)
         created = donor is None
         if created:
             donor = cls(name=clean)
         changed = []
+        for field, value in parts.items():
+            if value and not getattr(donor, field):
+                setattr(donor, field, value)
+                changed.append(field)
         for field in cls.DETAIL_FIELDS:
             value = (details.get(field) or '').strip()
             if not value or (field == 'donor_type' and value not in dict(cls.TYPE_CHOICES)):
