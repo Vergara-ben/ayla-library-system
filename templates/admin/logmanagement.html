@@ -838,9 +838,9 @@
                 deskScanField.value = '';
                 deskSubmitCode(code);
             });
-            // While the scan bar is open the field must keep the keystrokes.
+            // While the scan bar is open the field keeps the keystrokes, but not while a card is being handled.
             deskScanField.addEventListener('blur', function () {
-                if (!document.getElementById('deskScanBar').classList.contains('hidden')) {
+                if (!deskScanBusy && !document.getElementById('deskScanBar').classList.contains('hidden')) {
                     setTimeout(function () { deskScanField.focus(); }, 10);
                 }
             });
