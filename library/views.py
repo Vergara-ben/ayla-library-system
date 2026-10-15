@@ -2007,6 +2007,9 @@ def admin_add_book(request):
                 first = first or book
                 created.append(book.book_id)
                 _add_existing_copy(book, request)
+            if shelf_level is not None and shelf_slot is None:
+                from .shelving import place_on_board
+                place_on_board(list(Book.objects.filter(pk__in=created).order_by('copy_number')), shelf_level)
             log_admin_action(request, 'Create', 'Book', first.book_id,
                              f'Added "{first.title}"' + (f' ({copies} copies)' if copies > 1 else ''))
 
@@ -2862,6 +2865,7 @@ def admin_edit_book(request, book_id):
             book.genre = genre
             book.cover_img_url = cover_img_url if cover_img_url else None
             book.status = status or book.status
+            board_before = book.shelf_level_id
             if shelf_level_id:
                 book.shelf_level = ShelfLevel.objects.filter(shelf_level_id=shelf_level_id).first()
             # Blank clears the slot; a missing field leaves it.
@@ -2882,6 +2886,9 @@ def admin_edit_book(request, book_id):
             book.save()
             if book.condition != condition_before:
                 _copy_follows_book_condition(book, condition_before, request)
+            if book.shelf_level_id and book.shelf_level_id != board_before and book.shelf_slot is None:
+                from .shelving import place_on_board
+                place_on_board([book], book.shelf_level)
             log_admin_action(request, 'Update', 'Book', book.book_id, f'Updated "{book.title}"')
             success = 'Book details updated successfully.'
             initial.update({
@@ -5243,10 +5250,8 @@ def move_books(request):
                 shelf_level=None, shelf_slot=None)
             where = 'off the shelves'
         else:
-            counter = {}
-            for book in books:
-                Book.objects.filter(pk=book.pk).update(
-                    shelf_level=level, shelf_slot=_next_slot(counter, level))
+            from .shelving import place_on_board
+            place_on_board(books, level)
             where = '%s %s' % (level.shelf.name if level.shelf else '', level.label)
 
         release_shelved_donations([b.book_id for b in books])
@@ -5385,7 +5390,14 @@ def _import_books_body(request):
 
         # The next free position on each board this import touches.
         next_slot = {}
+        # Books given their board's next position, to join their title if it was there already.
+        sheet_placed = []
         skipped_repeat = 0
+
+        # Which titles each board held before this import.
+        titles_on_boards = {(level_id, str(t or '').strip().lower(), str(a or '').strip().lower())
+                            for level_id, t, a in Book.objects.filter(shelf_level__isnull=False)
+                            .values_list('shelf_level', 'title', 'author')}
 
         # Books already in the catalogue before this import.
         already_here = {}
@@ -5543,6 +5555,7 @@ def _import_books_body(request):
                         slot = written_slot + copy_no
                     else:
                         slot = _next_slot(next_slot, shelf_level)
+                        sheet_placed.append((shelf_level, title, author))
 
                 # Only the first copy keeps the ISBN.
                 book = Book.objects.create(
@@ -5569,6 +5582,13 @@ def _import_books_body(request):
                 created_ids.append(book.book_id)
                 if copy_no > 0:
                     copies_created += 1
+
+        # A new copy of a title already on its board stands with it, not at the end.
+        from .shelving import place_on_board
+        for level, title, author in dict.fromkeys(sheet_placed):
+            if (level.pk, title.strip().lower(), author.strip().lower()) in titles_on_boards:
+                place_on_board(list(Book.objects.filter(pk__in=created_ids, shelf_level=level, title__iexact=title,
+                                                        author__iexact=author).order_by('copy_number')), level)
 
         # A preview describes what will happen, not what has.
         if preview:
@@ -7612,9 +7632,12 @@ def assign_books_to_level(request):
     if not ids:
         return JsonResponse({'success': False, 'error': 'No books selected'})
 
-    updated = Book.objects.filter(book_id__in=ids).update(shelf_level=level)
-    release_shelved_donations(ids)
-    return JsonResponse({'success': True, 'updated': updated})
+    from .shelving import place_on_board
+    by_id = {b.book_id: b for b in Book.objects.filter(book_id__in=ids)}
+    with transaction.atomic():
+        place_on_board([by_id[i] for i in ids if i in by_id], level)
+        release_shelved_donations(ids)
+    return JsonResponse({'success': True, 'updated': len(by_id)})
 
 
 @admin_or_module_required('shelf')
@@ -13705,10 +13728,9 @@ def shelving_place(request):
     if not books:
         return JsonResponse({'success': False, 'error': 'Those books or boards no longer exist.'})
     with transaction.atomic():
-        counter = {}
-        for book in books:
-            level = levels[wanted[book.book_id]]
-            Book.objects.filter(pk=book.pk).update(shelf_level=level, shelf_slot=_next_slot(counter, level))
+        from .shelving import place_on_board
+        for level_id, level in levels.items():
+            place_on_board([b for b in books if wanted[b.book_id] == level_id], level)
         release_shelved_donations([b.book_id for b in books])
         log_admin_action(request, 'Moved books', 'Book',
                          detail='%d book(s) put on their shelves from Shelving & Labels' % len(books))

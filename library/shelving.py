@@ -126,3 +126,30 @@ def shelf_problems(shelf):
     order = {kind: i for i, (kind, _title) in enumerate(PROBLEM_KINDS)}
     problems.sort(key=lambda p: order[p['kind']])
     return books, problems
+
+
+def _title_key(book):
+    return ((book.title or '').strip().lower(), (book.author or '').strip().lower())
+
+
+def place_on_board(books, level):
+    """Put books on a board, each right after the copies of its title already there, else at the end.
+    The board is then numbered 1, 2, 3 with no gaps or repeats."""
+    moving = {b.pk for b in books}
+    order = list(Book.objects.filter(shelf_level=level).exclude(pk__in=moving)
+                 .order_by(F('shelf_slot').asc(nulls_last=True), 'title', 'copy_number', 'book_id'))
+    for book in books:
+        key = _title_key(book)
+        last = max((i for i, b in enumerate(order) if _title_key(b) == key), default=None)
+        order.insert(last + 1, book) if last is not None else order.append(book)
+    for position, book in enumerate(order, start=1):
+        changes = {}
+        if book.shelf_level_id != level.pk:
+            changes['shelf_level'] = level
+        if book.shelf_slot != position:
+            changes['shelf_slot'] = position
+        if changes:
+            Book.objects.filter(pk=book.pk).update(**changes)
+            for field, value in changes.items():
+                setattr(book, field, value)
+    return order

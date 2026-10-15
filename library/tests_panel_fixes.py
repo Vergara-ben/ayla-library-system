@@ -1890,3 +1890,67 @@ class DeskAccountIssueTests(TestCase):
         r = self.kiosk.post('/desk/scan/', {'code': 'card-ben'}).json()
         self.assertEqual(r['action'], 'entry')
         self.assertIn('1 overdue book', r['notice'])
+
+
+class PlaceBesideTitleTests(TestCase):
+    """A book put on a board stands beside the copies of its title there, not at the far end."""
+
+    def setUp(self):
+        from .models import FloorPlan, Room, Shelf, ShelfLevel
+        plan = FloorPlan.objects.create(name='Ground', floor_number=1, is_active=True)
+        room = Room.objects.create(floor_plan=plan, name='Main', map_x=0, map_y=0)
+        shelf = Shelf.objects.create(room=room, name='Shelf A', map_x=0, map_y=0)
+        self.level = ShelfLevel.objects.create(shelf=shelf, level_number=1)
+        for slot, title in enumerate(['Alamat', 'Noli Me Tangere', 'Zebra'], start=1):
+            Book.objects.create(title=title, author='Rizal, Jose', genre='Fiction', shelf_level=self.level,
+                                shelf_slot=slot, qr_code='q-%d' % slot)
+        self.client = _client(admin_id=_staff(role='Admin', modules='books,shelf').admin_id, admin_role='Admin')
+
+    def _board(self):
+        from django.db.models import F
+        return [(b.title, b.copy_number) for b in Book.objects.filter(shelf_level=self.level)
+                .order_by(F('shelf_slot').asc(nulls_last=True))]
+
+    def _loose_copy(self, title='Noli Me Tangere'):
+        return Book.objects.create(title=title, author='Rizal, Jose', genre='Fiction', qr_code='loose-%s' % title)
+
+    def test_add_book_puts_new_copies_beside_their_title(self):
+        r = self.client.post('/admin-portal/add-book/', dict(COMPLETE_BOOK, title='Noli Me Tangere',
+                                                              author='Rizal, Jose', genre='Fiction', copies='2',
+                                                              shelf_level=self.level.pk),
+                             HTTP_X_REQUESTED_WITH='XMLHttpRequest').json()
+        self.assertTrue(r['success'], r)
+        self.assertEqual(self._board(), [('Alamat', 1), ('Noli Me Tangere', 1), ('Noli Me Tangere', 2),
+                                         ('Noli Me Tangere', 3), ('Zebra', 1)])
+        slots = list(Book.objects.filter(shelf_level=self.level).values_list('shelf_slot', flat=True))
+        self.assertEqual(sorted(slots), [1, 2, 3, 4, 5])
+
+    def test_shelf_managers_add_books_and_move_books_do_the_same(self):
+        copy = self._loose_copy()
+        self.client.post('/admin-portal/assign-books-to-level/', {'shelf_level_id': self.level.pk,
+                                                                  'book_ids': str(copy.pk)})
+        self.assertEqual(self._board()[2], ('Noli Me Tangere', 2))
+        other = self._loose_copy('Alamat')
+        self.client.post('/admin-portal/move-books/', {'ids': str(other.pk), 'level': self.level.pk})
+        self.assertEqual(self._board()[:2], [('Alamat', 1), ('Alamat', 2)])
+        new_title = self._loose_copy('Bagong Aklat')
+        self.client.post('/admin-portal/move-books/', {'ids': str(new_title.pk), 'level': self.level.pk})
+        self.assertEqual(self._board()[-1], ('Bagong Aklat', 1))
+
+    def test_the_shelving_page_and_an_edit_do_the_same(self):
+        copy = self._loose_copy()
+        self.client.post('/admin-portal/shelving/place/', {'placements': '%d:%d' % (copy.pk, self.level.pk)})
+        self.assertEqual(self._board()[2], ('Noli Me Tangere', 2))
+        moved = self._loose_copy('Zebra')
+        self.client.post('/admin-portal/edit-book/%d/' % moved.pk, {
+            'title': 'Zebra', 'author': 'Rizal, Jose', 'genre': 'Fiction', 'shelf_level': self.level.pk},
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest')
+        self.assertEqual(self._board()[-2:], [('Zebra', 1), ('Zebra', 2)])
+
+    def test_an_imported_copy_joins_its_title_on_the_board(self):
+        rows = [['Title', 'Author', 'Genre', 'Location', 'ISBN', 'Publication Year', 'Price'],
+                ['Noli Me Tangere', 'Rizal, Jose', 'Fiction', 'Shelf A Level 1', 'none', 1887, 300],
+                ['Bagong Aklat', 'Cruz, Ana', 'Fiction', 'Shelf A Level 1', 'none', 2020, 300]]
+        self.client.post('/admin-portal/import-books/', {'excel_file': _sheet(rows), 'copy_rows': '2'})
+        self.assertEqual(self._board(), [('Alamat', 1), ('Noli Me Tangere', 1), ('Noli Me Tangere', 2),
+                                         ('Zebra', 1), ('Bagong Aklat', 1)])
