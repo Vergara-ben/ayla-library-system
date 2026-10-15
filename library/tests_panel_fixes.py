@@ -1954,3 +1954,48 @@ class PlaceBesideTitleTests(TestCase):
         self.client.post('/admin-portal/import-books/', {'excel_file': _sheet(rows), 'copy_rows': '2'})
         self.assertEqual(self._board(), [('Alamat', 1), ('Noli Me Tangere', 1), ('Noli Me Tangere', 2),
                                          ('Zebra', 1), ('Bagong Aklat', 1)])
+
+
+class HoldReasonTests(TestCase):
+    """An account is only put on hold with a reason, which the patron and the desk both see."""
+
+    def setUp(self):
+        self.user = _staff(role='Admin', modules='patrons,logs')
+        self.client = _client(admin_id=self.user.admin_id, admin_role='Admin', admin_fullname='Desk')
+        self.patron = Patron.objects.create(first_name='Ana', last_name='Cruz', fullname='Ana Cruz',
+                                            email='ana.hold@example.invalid', patron_type='Student',
+                                            account_status='Active', qr_code='card-hold',
+                                            password_hash=hash_password('Patron123!'))
+
+    def _edit(self, status, reason=''):
+        return self.client.post('/admin-portal/edit-patron/%d/' % self.patron.pk, {
+            'first_name': 'Ana', 'last_name': 'Cruz', 'patron_type': 'Student',
+            'email': 'ana.hold@example.invalid', 'account_status': status, 'hold_reason': reason})
+
+    def test_suspending_without_a_reason_is_refused(self):
+        page = self._edit('Suspended')
+        self.assertContains(page, 'Give the reason for putting Ana Cruz on hold')
+        self.patron.refresh_from_db()
+        self.assertEqual(self.patron.account_status, 'Active')
+
+    def test_the_reason_is_kept_logged_and_cleared_when_lifted(self):
+        from .models import SystemLog
+        self._edit('Suspended', '3 books unreturned since August')
+        self.patron.refresh_from_db()
+        self.assertEqual((self.patron.account_status, self.patron.hold_reason, self.patron.hold_set_by),
+                         ('Suspended', '3 books unreturned since August', 'Desk'))
+        self.assertTrue(SystemLog.objects.filter(detail='Put "Ana Cruz" on hold: 3 books unreturned since August').exists())
+        self._edit('Active')
+        self.patron.refresh_from_db()
+        self.assertIsNone(self.patron.hold_reason)
+        self.assertTrue(SystemLog.objects.filter(detail='Lifted the hold on "Ana Cruz"').exists())
+
+    def test_the_patron_and_the_desk_are_told_why(self):
+        self._edit('Suspended', '3 books unreturned since August')
+        page = Client().post('/patron/login/', {'email': 'ana.hold@example.invalid', 'password': 'Patron123!'})
+        self.assertContains(page, 'Your account is on hold. Reason: 3 books unreturned since August.')
+        r = self.client.post('/desk/scan/', {'code': 'card-hold'}).json()
+        self.assertTrue(r['needs_override'])
+        self.assertIn('On hold because: 3 books unreturned since August.', r['error'])
+        kiosk = _client(admin_id=self.user.admin_id, admin_role='Admin', desk_mode=True)
+        self.assertNotIn('unreturned', kiosk.post('/desk/scan/', {'code': 'card-hold'}).json()['error'])

@@ -1116,6 +1116,10 @@ class Patron(Archivable):
     # When the last code was sent, for the cooldown.
     otp_last_sent_at = models.DateTimeField(blank=True, null=True)
     otp_verified = models.BooleanField(default=False)
+    # Why the account is on hold, who put it there and when; cleared when the hold is lifted.
+    hold_reason = models.TextField(blank=True, null=True)
+    hold_set_by = models.CharField(max_length=255, blank=True, null=True)
+    hold_set_at = models.DateTimeField(blank=True, null=True)
 
     def save(self, *args, **kwargs):
         composed = compose_name(self.first_name, self.middle_name, self.last_name)
