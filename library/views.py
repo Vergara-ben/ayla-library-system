@@ -13743,17 +13743,19 @@ def shelving_page(request):
     boards = [{'id': lv.shelf_level_id, 'name': board_name(lv)}
               for lv in sorted(suggester.levels.values(), key=board_key)]
     by_board = defaultdict(list)
-    for book_id, level_id in need_label().order_by('shelf_slot', 'title').values_list('book_id', 'shelf_level'):
-        by_board[level_id].append(book_id)
+    for book in need_label().order_by('shelf_slot', 'title').only(
+            'book_id', 'title', 'author', 'copy_number', 'call_number', 'shelf_slot', 'shelf_level'):
+        by_board[book.shelf_level_id].append(book)
     label_boards = [{'id': level_id, 'name': board_name(suggester.levels[level_id]),
-                     'shelf_id': suggester.levels[level_id].shelf_id,
-                     'count': len(ids), 'ids': ','.join(str(i) for i in ids)}
-                    for level_id, ids in sorted(by_board.items(), key=lambda kv: board_key(suggester.levels[kv[0]]))]
+                     'shelf_id': suggester.levels[level_id].shelf_id, 'books': books,
+                     'count': len(books), 'ids': ','.join(str(b.book_id) for b in books)}
+                    for level_id, books in sorted(by_board.items(), key=lambda kv: board_key(suggester.levels[kv[0]]))]
     return render(request, 'admin/shelving.html', {
         'waiting': waiting,
         'boards': boards,
         'label_boards': label_boards,
         'unlabelled_total': sum(b['count'] for b in label_boards),
+        'max_labels': MAX_LABELS_PER_SHEET,
         'is_staff_portal': request.session.get('admin_role') == 'Staff',
     })
 

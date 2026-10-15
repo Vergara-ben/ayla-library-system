@@ -324,7 +324,7 @@
   };
 
   window.printCountedUnlabelled = function () {
-    if (window.AylaLabels) AylaLabels.download(URLS.labels, lastUnlabelled);
+    if (window.AylaLabels) AylaLabels.download(URLS.labels, lastUnlabelled, null, { where: 'found with no label in this count' });
   };
 
   function toast(message, kind) {

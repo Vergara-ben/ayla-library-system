@@ -82,7 +82,7 @@
     <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
     <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
     <script src="{% static 'js/ayla-dialog.js' %}"></script>
-    <script src="{% static 'js/label-print.js' %}"></script>
+    <script src="{% static 'js/label-print.js' %}?v=20261015"></script>
     <style>
         .field-input {
             width: 100%; background: var(--bg-input); border: 1px solid var(--border-modal);
@@ -182,39 +182,77 @@
                 </div>
             </section>
 
-            {# Shelved books with no label, board by board: print a board's labels, or confirm it already has them. #}
+            {# Shelved books with no label: by board, each board opening onto its books, so any mix can be printed or marked. #}
             <section id="labels" class="rounded-xl border border-slate-800/80 overflow-hidden" style="background-color: var(--bg-card);">
-                <div class="p-4 border-b border-slate-800">
-                    <h3 class="text-sm font-bold text-slate-200">On a shelf, no label ({{ unlabelled_total }})</h3>
-                    <p class="text-[11px] text-slate-500 mt-0.5">Print a board's labels and stick them on, or mark the board as already labelled if its books carry labels from before. Auditing a shelf records labels as it counts, one book at a time.</p>
+                <div class="p-4 border-b border-slate-800 flex flex-wrap items-start justify-between gap-3">
+                    <div class="min-w-0">
+                        <h3 class="text-sm font-bold text-slate-200">On a shelf, no label ({{ unlabelled_total }})</h3>
+                        <p class="text-[11px] text-slate-500 mt-0.5">Print a whole board, or open it and tick only the books you need. &ldquo;Already labelled&rdquo; is for books that carry a label from before. Auditing a shelf records labels as it counts.</p>
+                    </div>
+                    {% if label_boards %}
+                    <button type="button" onclick="printAllUnlabelled()" class="bg-{{ accent }}-700 hover:bg-{{ accent }}-600 text-white text-xs font-bold px-4 py-2 rounded-lg inline-flex items-center gap-2 whitespace-nowrap"><i class="fa-solid fa-print text-[11px]"></i> Print all ({{ unlabelled_total }})</button>
+                    {% endif %}
                 </div>
-                <div class="overflow-x-auto">
-                    <table class="w-full text-left border-collapse">
-                        <thead>
-                            <tr class="border-b border-slate-800/80 text-[10px] font-bold tracking-wider text-slate-500 uppercase">
-                                <th class="py-3 px-4">Board</th>
-                                <th class="py-3 px-4 w-24">Books</th>
-                                <th class="py-3 px-4 text-right">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody class="divide-y divide-slate-800/40 text-xs text-slate-300">
-                            {% for b in label_boards %}
-                            <tr>
-                                <td class="py-3 px-4 font-semibold text-slate-200">{{ b.name }}</td>
-                                <td class="py-3 px-4 font-mono">{{ b.count }}</td>
-                                <td class="py-3 px-4">
-                                    <div class="flex flex-wrap justify-end gap-1.5">
-                                        <button type="button" onclick="printBoard('{{ b.ids }}')" class="text-[11px] font-semibold px-2.5 py-1.5 rounded-md border border-amber-800/60 text-amber-400 hover:bg-amber-950/40"><i class="fa-solid fa-print mr-1"></i>Print labels</button>
-                                        <button type="button" onclick="markBoard('{{ b.ids }}', '{{ b.name|escapejs }}', {{ b.count }})" class="text-[11px] font-semibold px-2.5 py-1.5 rounded-md border border-slate-700 text-slate-300 hover:bg-slate-800/50">Already labelled</button>
-                                        <a href="{% url 'shelf_audit' b.shelf_id %}" class="text-[11px] font-semibold px-2.5 py-1.5 rounded-md border border-{{ accent }}-800/70 text-{{ accent }}-400 hover:bg-{{ accent }}-950/40"><i class="fa-solid fa-clipboard-check mr-1"></i>Audit shelf</a>
-                                    </div>
-                                </td>
-                            </tr>
-                            {% empty %}
-                            <tr><td colspan="3" class="py-10 text-center text-slate-500"><i class="fa-solid fa-circle-check text-emerald-500 mr-1"></i> Every shelved book has its label.</td></tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
+                {% if label_boards %}
+                <div class="px-4 py-3 border-b border-slate-800/60 flex flex-wrap items-center gap-2">
+                    <div class="relative flex-1 min-w-[14rem] max-w-md">
+                        <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-[11px]"></i>
+                        <input type="search" id="labelSearch" oninput="filterLabels()" placeholder="Find a book by title, author or code" class="field-input" style="padding-left: 32px; font-size: 13px;" aria-label="Find a book among the unlabelled">
+                    </div>
+                    <button type="button" onclick="openAllBoards(true)" class="text-[11px] font-semibold px-2.5 py-1.5 rounded-md border border-slate-700 text-slate-300 hover:bg-slate-800/50"><i class="fa-solid fa-angles-down mr-1"></i>Open all</button>
+                    <button type="button" onclick="openAllBoards(false)" class="text-[11px] font-semibold px-2.5 py-1.5 rounded-md border border-slate-700 text-slate-300 hover:bg-slate-800/50"><i class="fa-solid fa-angles-up mr-1"></i>Close all</button>
+                    <span id="labelSearchNote" class="text-[11px] text-slate-500"></span>
+                </div>
+                {# What is ticked, across boards. #}
+                <div id="labelBar" class="hidden sticky top-0 z-10 px-4 py-2.5 border-b border-{{ accent }}-800/50 flex flex-wrap items-center gap-2" style="background-color: var(--tint-accent);">
+                    <span class="text-xs font-bold text-slate-200"><span id="labelTickCount">0</span> ticked</span>
+                    <span id="labelTickWhere" class="text-[11px] text-slate-400"></span>
+                    <span class="flex-1"></span>
+                    <button type="button" onclick="printTickedLabels()" class="bg-{{ accent }}-700 hover:bg-{{ accent }}-600 text-white text-[11px] font-bold px-3 py-1.5 rounded-md"><i class="fa-solid fa-print mr-1"></i>Print labels</button>
+                    <button type="button" onclick="markTickedLabels()" class="text-[11px] font-semibold px-3 py-1.5 rounded-md border border-slate-700 text-slate-300 hover:bg-slate-800/50">Already labelled</button>
+                    <button type="button" onclick="clearLabelTicks()" class="text-[11px] font-semibold px-2 py-1.5 rounded-md text-slate-400 hover:text-slate-200">Clear</button>
+                </div>
+                {% endif %}
+                <div class="divide-y divide-slate-800/60">
+                    {% for b in label_boards %}
+                    <div class="label-board" data-board="{{ b.id }}" data-name="{{ b.name }}">
+                        <div class="px-4 py-3 flex flex-wrap items-center gap-3">
+                            <input type="checkbox" class="board-tick w-4 h-4 accent-{{ accent }}-600" onchange="tickBoard(this)" aria-label="Tick every book on {{ b.name }}">
+                            <button type="button" onclick="toggleBoard(this.closest('.label-board'))" class="flex-1 min-w-[12rem] flex items-center gap-2 text-left" aria-expanded="false">
+                                <i class="board-chevron fa-solid fa-chevron-right text-[10px] text-slate-500 transition-transform"></i>
+                                <span class="text-xs font-semibold text-slate-200">{{ b.name }}</span>
+                                <span class="board-count text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-800/60 text-slate-400">{{ b.count }} book{{ b.count|pluralize }}</span>
+                            </button>
+                            <div class="flex flex-wrap justify-end gap-1.5">
+                                <button type="button" onclick="printBoard(this.closest('.label-board'))" class="text-[11px] font-semibold px-2.5 py-1.5 rounded-md border border-amber-800/60 text-amber-400 hover:bg-amber-950/40"><i class="fa-solid fa-print mr-1"></i>Print board</button>
+                                <button type="button" onclick="markBoard(this.closest('.label-board'))" class="text-[11px] font-semibold px-2.5 py-1.5 rounded-md border border-slate-700 text-slate-300 hover:bg-slate-800/50">Already labelled</button>
+                                <a href="{% url 'shelf_audit' b.shelf_id %}" class="text-[11px] font-semibold px-2.5 py-1.5 rounded-md border border-{{ accent }}-800/70 text-{{ accent }}-400 hover:bg-{{ accent }}-950/40"><i class="fa-solid fa-clipboard-check mr-1"></i>Audit shelf</a>
+                            </div>
+                        </div>
+                        <div class="board-books hidden pb-2">
+                            <table class="w-full text-left border-collapse">
+                                <tbody class="text-xs text-slate-300">
+                                    {% for book in b.books %}
+                                    <tr class="label-row border-t border-slate-800/40" data-id="{{ book.book_id }}" data-find="{{ book.title|lower }} {{ book.author|default:''|lower }} {{ book.call_number|default:''|lower }}">
+                                        <td class="py-2 pl-4 pr-2 w-10"><input type="checkbox" class="label-tick w-4 h-4 accent-{{ accent }}-600" value="{{ book.book_id }}" onchange="paintLabelTicks()" aria-label="Tick {{ book.title }}"></td>
+                                        <td class="py-2 px-2 w-14 font-mono text-[10px] text-slate-500" title="Position on the board">{% if book.shelf_slot %}#{{ book.shelf_slot }}{% endif %}</td>
+                                        <td class="py-2 px-2">
+                                            <div class="font-semibold text-slate-200">{{ book.title }}{% if book.copy_number %} <span class="text-[10px] font-normal text-slate-500 whitespace-nowrap">&middot; Copy {{ book.copy_number }}</span>{% endif %}</div>
+                                            <div class="text-[10px] text-slate-500">{{ book.author|default:'' }}{% if book.call_number %} &middot; {{ book.call_number }}{% endif %}</div>
+                                        </td>
+                                        <td class="py-2 pl-2 pr-4 text-right whitespace-nowrap">
+                                            <button type="button" onclick="printLabels([{{ book.book_id }}], '{{ book.title|escapejs }}')" class="text-[11px] font-semibold px-2 py-1 rounded-md border border-amber-800/60 text-amber-400 hover:bg-amber-950/40" title="Print this book's label"><i class="fa-solid fa-print"></i><span class="hidden sm:inline ml-1">Print</span></button>
+                                            <button type="button" onclick="markLabels([{{ book.book_id }}], '{{ book.title|escapejs }}')" class="text-[11px] font-semibold px-2 py-1 rounded-md border border-slate-700 text-slate-300 hover:bg-slate-800/50" title="It already carries a label">Labelled</button>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    {% empty %}
+                    <p class="py-10 text-center text-xs text-slate-500"><i class="fa-solid fa-circle-check text-emerald-500 mr-1"></i> Every shelved book has its label.</p>
+                    {% endfor %}
                 </div>
             </section>
         </main>
@@ -266,30 +304,124 @@
             if (!data.success) { AylaDialog.toast(data.error || 'Those books could not be shelved.', 'error'); return; }
             const print = await AylaDialog.confirm(data.message, {
                 title: 'Shelved', confirmLabel: 'Print their labels now', cancelLabel: 'Later', danger: false });
-            if (print) await AylaLabels.download(LABELS_URL, data.ids);
+            if (print) await AylaLabels.download(LABELS_URL, data.ids, null, { where: 'just shelved' });
             location.reload();
         }
 
-        async function printBoard(ids) {
-            if (await AylaLabels.download(LABELS_URL, ids.split(',').map(Number))) {
-                setTimeout(function () { location.reload(); }, 1200);
-            }
+        // Unlabelled books: any mix of them, from any board.
+        AylaLabels.accent = '{{ is_staff_portal|yesno:"violet,cyan" }}';
+        const MAX_LABELS = {{ max_labels }};
+
+        function boardRows(board) { return Array.prototype.slice.call(board.querySelectorAll('.label-row')); }
+        function rowIds(rows) { return rows.map(function (r) { return Number(r.dataset.id); }); }
+        function labelTicked() {
+            return Array.prototype.map.call(document.querySelectorAll('.label-tick:checked'), function (b) { return Number(b.value); });
+        }
+        function plural(n, word) { return n + ' ' + word + (n === 1 ? '' : 's'); }
+
+        function paintLabelTicks() {
+            const bar = document.getElementById('labelBar');
+            if (!bar) return;
+            const ids = labelTicked();
+            bar.classList.toggle('hidden', !ids.length);
+            bar.classList.toggle('flex', !!ids.length);
+            document.getElementById('labelTickCount').textContent = ids.length;
+            const boards = [];
+            document.querySelectorAll('.label-board').forEach(function (board) {
+                const all = board.querySelectorAll('.label-tick').length;
+                const on = board.querySelectorAll('.label-tick:checked').length;
+                const box = board.querySelector('.board-tick');
+                box.checked = on > 0 && on === all;
+                box.indeterminate = on > 0 && on < all;
+                if (on) boards.push(board.dataset.name);
+            });
+            document.getElementById('labelTickWhere').textContent =
+                boards.length === 1 ? 'on ' + boards[0] : boards.length > 1 ? 'across ' + boards.length + ' boards' : '';
         }
 
-        async function markBoard(ids, name, count) {
-            const yes = await AylaDialog.confirm('Mark the ' + count + ' book' + (count === 1 ? '' : 's') + ' on '
-                + name + ' as already labelled?', {
-                title: 'Already labelled', confirmLabel: 'Mark them', danger: false,
-                detail: 'Only if each one carries a label you can scan. An audit of the shelf checks them one by one instead.' });
+        function toggleBoard(board, open) {
+            const body = board.querySelector('.board-books');
+            const show = open === undefined ? body.classList.contains('hidden') : open;
+            body.classList.toggle('hidden', !show);
+            board.querySelector('.board-chevron').classList.toggle('rotate-90', show);
+            board.querySelector('[aria-expanded]').setAttribute('aria-expanded', show ? 'true' : 'false');
+        }
+        function openAllBoards(open) {
+            document.querySelectorAll('.label-board:not(.hidden)').forEach(function (b) { toggleBoard(b, open); });
+        }
+        // Ticking a board ticks the books it shows, and opens it so you see which.
+        function tickBoard(box) {
+            const board = box.closest('.label-board');
+            board.querySelectorAll('.label-row:not(.hidden) .label-tick').forEach(function (t) { t.checked = box.checked; });
+            if (box.checked) toggleBoard(board, true);
+            paintLabelTicks();
+        }
+        function clearLabelTicks() {
+            document.querySelectorAll('.label-tick').forEach(function (t) { t.checked = false; });
+            paintLabelTicks();
+        }
+
+        // A title, author or code; a board's name shows all of that board.
+        function filterLabels() {
+            const q = document.getElementById('labelSearch').value.trim().toLowerCase();
+            let shown = 0, total = 0;
+            document.querySelectorAll('.label-board').forEach(function (board) {
+                const rows = boardRows(board);
+                const wholeBoard = q && board.dataset.name.toLowerCase().indexOf(q) >= 0;
+                let n = 0;
+                rows.forEach(function (row) {
+                    const hit = !q || wholeBoard || row.dataset.find.indexOf(q) >= 0;
+                    row.classList.toggle('hidden', !hit);
+                    if (hit) n++;
+                });
+                total += rows.length;
+                shown += n;
+                board.classList.toggle('hidden', !n);
+                if (q) toggleBoard(board, n > 0);
+            });
+            document.getElementById('labelSearchNote').textContent = q ? shown + ' of ' + total + ' books' : '';
+        }
+
+        // Each opens the print settings; once the sheet is downloaded the page shows what is left.
+        async function printLabels(ids, where) {
+            if (await AylaLabels.download(LABELS_URL, ids, null, { where: where })) {
+                setTimeout(function () { location.reload(); }, 800);
+            }
+        }
+        function printBoard(board) { printLabels(rowIds(boardRows(board)), board.dataset.name); }
+        function printTickedLabels() {
+            printLabels(labelTicked(), document.getElementById('labelTickWhere').textContent);
+        }
+        function printAllUnlabelled() {
+            const ids = rowIds(Array.prototype.slice.call(document.querySelectorAll('.label-row')));
+            if (ids.length > MAX_LABELS) {
+                AylaDialog.toast('Printing the first ' + MAX_LABELS + ' of ' + ids.length + '. Press Print all again for the rest.', 'info');
+            }
+            printLabels(ids.slice(0, MAX_LABELS), 'every book on a shelf with no label');
+        }
+
+        async function markLabels(ids, what) {
+            if (!ids.length) return;
+            const yes = await AylaDialog.confirm('Mark ' + what + ' as already labelled?', {
+                title: 'Already labelled', confirmLabel: 'Mark ' + (ids.length === 1 ? 'it' : 'them'), danger: false,
+                detail: 'Only if ' + (ids.length === 1 ? 'it carries' : 'each one carries') + ' a label you can scan. An audit of the shelf checks them one by one instead.' });
             if (!yes) return;
             const res = await fetch(MARK_URL, {
-                method: 'POST', body: new URLSearchParams({ ids: ids }),
+                method: 'POST', body: new URLSearchParams({ ids: ids.join(',') }),
                 headers: { 'X-CSRFToken': CSRF, 'X-Requested-With': 'XMLHttpRequest' },
             });
             const data = await res.json().catch(function () { return {}; });
             if (!data.success) { AylaDialog.toast(data.error || 'Could not save that.', 'error'); return; }
             AylaDialog.toast(data.marked + ' marked as labelled.', 'success');
             location.reload();
+        }
+        function markBoard(board) {
+            const ids = rowIds(boardRows(board));
+            markLabels(ids, 'the ' + plural(ids.length, 'book') + ' on ' + board.dataset.name);
+        }
+        function markTickedLabels() {
+            const ids = labelTicked();
+            markLabels(ids, ids.length === 1 ? 'the ticked book' : 'the ' + ids.length + ' ticked books');
         }
 
         // Opened from another page for one book: show it.
