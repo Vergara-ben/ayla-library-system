@@ -358,6 +358,25 @@ label{
   font-weight:700;
 }
 
+.hold-note{
+  margin-top:18px;
+  display:flex;
+  gap:12px;
+  align-items:flex-start;
+  text-align:left;
+  padding:14px 16px;
+  border-radius:14px;
+  background:rgba(245,158,11,.12);
+  border:1px solid rgba(245,158,11,.4);
+  color:var(--text);
+  font-size:13.5px;
+  line-height:1.5;
+}
+.hold-note i{color:#d97706;font-size:18px;margin-top:2px}
+.hold-note strong{display:block;color:#d97706;font-size:14px;margin-bottom:2px}
+.hold-note .why{margin:4px 0 0}
+.hold-note .next{margin:6px 0 0;color:var(--muted);font-size:12.5px}
+
 .error-text{
   color:var(--danger);
   margin-top:18px;
@@ -516,6 +535,16 @@ label{
           </button>
         </form>
 
+        {% if hold %}
+        <div class="hold-note" role="alert">
+          <i class="fa-solid fa-circle-pause"></i>
+          <div>
+            <strong>Your account is on hold</strong>
+            {% if hold.reason %}<p class="why">Reason: {{ hold.reason }}.</p>{% endif %}
+            <p class="next">Please see the librarian at the counter to sort it out{% if hold.since %}. On hold since {{ hold.since|date:"F j, Y" }}{% endif %}.</p>
+          </div>
+        </div>
+        {% endif %}
         {% if error %}
         <p class="error-text">{{ error }}</p>
         {% if show_reactivate %}

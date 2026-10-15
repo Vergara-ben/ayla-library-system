@@ -1993,9 +1993,25 @@ class HoldReasonTests(TestCase):
     def test_the_patron_and_the_desk_are_told_why(self):
         self._edit('Suspended', '3 books unreturned since August')
         page = Client().post('/patron/login/', {'email': 'ana.hold@example.invalid', 'password': 'Patron123!'})
-        self.assertContains(page, 'Your account is on hold. Reason: 3 books unreturned since August.')
+        self.assertContains(page, 'Your account is on hold')
+        self.assertContains(page, 'Reason: 3 books unreturned since August.')
         r = self.client.post('/desk/scan/', {'code': 'card-hold'}).json()
         self.assertTrue(r['needs_override'])
         self.assertIn('On hold because: 3 books unreturned since August.', r['error'])
+        self.assertEqual((r['hold_reason'], r['hold_by']), ('3 books unreturned since August', 'Desk'))
+        self.assertTrue(r['hold_on'])
         kiosk = _client(admin_id=self.user.admin_id, admin_role='Admin', desk_mode=True)
         self.assertNotIn('unreturned', kiosk.post('/desk/scan/', {'code': 'card-hold'}).json()['error'])
+
+
+class LetInLabelTests(TestCase):
+    """The log says whether a visit was let in past a hold or a closed account, and why."""
+
+    def test_the_note_is_read_back(self):
+        from .models import PatronLog
+        p = Patron.objects.create(first_name='A', last_name='B', fullname='A B', account_status='Active')
+        held = PatronLog.objects.create(patron=p, entry_note='Let in by Ben although the account is suspended: Returning books')
+        shut = PatronLog.objects.create(patron=p, entry_note='Let in by Ben although the account is inactive: Reading only')
+        self.assertEqual(held.let_in, {'kind': 'on hold', 'by': 'Ben', 'reason': 'Returning books'})
+        self.assertEqual(shut.let_in['kind'], 'closed')
+        self.assertIsNone(PatronLog.objects.create(patron=p).let_in)

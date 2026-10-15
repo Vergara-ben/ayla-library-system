@@ -1356,6 +1356,14 @@ class PatronLog(Archivable):
     # Why a member whose account is on hold was let in, and by whom.
     entry_note = models.CharField(max_length=255, blank=True, null=True)
 
+    @property
+    def let_in(self):
+        """{'kind': 'on hold' or 'closed', 'by', 'reason'} for a visit let in past a held account."""
+        m = re.match(r'Let in by (.+?) although the account is (\w+): (.*)$', self.entry_note or '', re.S)
+        if not m:
+            return None
+        return {'kind': 'closed' if m.group(2) == 'inactive' else 'on hold', 'by': m.group(1), 'reason': m.group(3)}
+
     class Meta:
         db_table = 'Patron_Logs'
         indexes = [
