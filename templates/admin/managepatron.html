@@ -516,7 +516,8 @@
                                         {% elif patron.account_status == 'Pending' %}
                                             <span class="inline-block bg-amber-500/10 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded text-[10px] font-bold tracking-wide w-16">Pending</span>
                                         {% else %}
-                                            <span class="inline-block bg-slate-800/50 text-slate-400 border border-slate-700/40 px-2 py-0.5 rounded text-[10px] font-bold tracking-wide w-16">{{ patron.account_status }}</span>
+                                            <span {% if patron.hold_reason %}title="On hold: {{ patron.hold_reason }}"{% endif %} class="inline-block bg-slate-800/50 text-slate-400 border border-slate-700/40 px-2 py-0.5 rounded text-[10px] font-bold tracking-wide w-16">{{ patron.account_status }}</span>
+                                            {% if patron.account_status == 'Suspended' and patron.hold_reason %}<div class="text-[10px] text-rose-400 mt-1 max-w-[10rem] mx-auto truncate" title="{{ patron.hold_reason }}">{{ patron.hold_reason }}</div>{% endif %}
                                         {% endif %}
                                     </td>
                                     <td class="py-4 px-6 text-center">
@@ -546,6 +547,7 @@
                                                     data-contact="{{ patron.contact_number|default:'' }}"
                                                     data-address="{{ patron.address|default:'' }}"
                                                     data-status="{{ patron.account_status }}"
+                                                    data-hold="{{ patron.hold_reason|default:'' }}"
                                                     class="w-7 h-7 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 transition-colors flex items-center justify-center" aria-label="Edit"><i class="fa-solid fa-pencil text-[10px]"></i></button>
                                             <form method="post" action="{% url 'admin_delete_patron' patron.patron_id %}" class="inline-block" data-confirm="Delete {{ patron.fullname }}? They can no longer sign in or borrow. Their history is kept." data-confirm-title="Delete patron" data-confirm-label="Delete">
                                                 {% csrf_token %}
@@ -769,6 +771,11 @@
                             </select>
                             <i class="fa-solid fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 text-[10px] pointer-events-none"></i>
                         </div>
+                    </div>
+                    <div id="holdReasonField" class="space-y-1.5 col-span-2 {% if initial.account_status != 'Suspended' %}hidden{% endif %}">
+                        <label for="holdReason" class="block uppercase font-bold tracking-wider text-rose-400 text-[10px]">Reason for the hold</label>
+                        <input type="text" id="holdReason" name="hold_reason" maxlength="300" value="{{ initial.hold_reason|default:'' }}" placeholder="e.g. 3 books unreturned since August" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-rose-900/60 focus:outline-none font-medium placeholder-slate-600" style="background-color: var(--bg-input);">
+                        <p class="text-[10px] text-slate-500">Shown to the patron when they sign in, and to the librarian at the desk.</p>
                     </div>
                 </div>
 
@@ -1050,6 +1057,21 @@
             wrap.classList.toggle('hidden', !show);
         }
 
+                // Suspended needs a reason, so its box appears with it.
+        function syncHoldReason() {
+            const status = document.getElementById('accountStatus');
+            const wrap = document.getElementById('holdReasonField');
+            if (!status || !wrap) return;
+            const on = status.value === 'Suspended';
+            wrap.classList.toggle('hidden', !on);
+            document.getElementById('holdReason').required = on;
+        }
+        document.addEventListener('DOMContentLoaded', function () {
+            const status = document.getElementById('accountStatus');
+            if (status) status.addEventListener('change', syncHoldReason);
+            syncHoldReason();
+        });
+
         function loadPatronData(patronId) {
             // Find patron data from the table rows
             const rows = document.querySelectorAll('tbody tr');
@@ -1065,6 +1087,8 @@
                     document.getElementById('contactNumber').value = editBtn.dataset.contact || '';
                     document.getElementById('school').value = editBtn.dataset.school || '';
                     document.getElementById('accountStatus').value = editBtn.dataset.status || '';
+                    document.getElementById('holdReason').value = editBtn.dataset.hold || '';
+                    syncHoldReason();
                     syncSchoolField();
                     break;
                 }
@@ -1116,6 +1140,8 @@
                 document.getElementById('address').value = '{{ initial.address|default:''|escapejs }}';
                 document.getElementById('school').value = '{{ initial.school|default:''|escapejs }}';
                 document.getElementById('accountStatus').value = '{{ initial.account_status|default:'Active'|escapejs }}';
+                document.getElementById('holdReason').value = '{{ initial.hold_reason|default:''|escapejs }}';
+                syncHoldReason();
                 syncSchoolField();
             });
         {% endif %}

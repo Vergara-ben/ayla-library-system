@@ -874,9 +874,11 @@ def _held_back(request, patron):
         return JsonResponse({
             'success': False, 'needs_override': True, 'name': patron.fullname,
             'status': patron.account_status,
-            'error': ('%s\'s membership is %s. To let them in anyway, give the reason; it is kept with '
+            'error': ('%s\'s membership is %s.%s To let them in anyway, give the reason; it is kept with '
                       'the visit.' % (patron.fullname, 'on hold (suspended)'
-                                      if patron.account_status == 'Suspended' else 'closed')),
+                                      if patron.account_status == 'Suspended' else 'closed',
+                                      (' On hold because: %s.' % patron.hold_reason.rstrip('.'))
+                                      if patron.account_status == 'Suspended' and patron.hold_reason else '')),
         })
     return JsonResponse({'success': False, 'error': problem})
 

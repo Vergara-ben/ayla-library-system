@@ -147,6 +147,10 @@ def patron_login(request):
             return render(request, 'patron/patronlogin.html',
                           {'email': email, 'error': 'Your account has been deactivated.', 'show_reactivate': True})
 
+        if patron.account_status == 'Suspended':
+            why = (' Reason: %s.' % patron.hold_reason.rstrip('.')) if patron.hold_reason else ''
+            return render(request, 'patron/patronlogin.html', {
+                'email': email, 'error': 'Your account is on hold.%s Please see the librarian.' % why})
         if patron.account_status != 'Active':
             return render(request, 'patron/patronlogin.html', {'email': email, 'error': 'Your account is suspended or inactive'})
 
@@ -2058,6 +2062,30 @@ def _patron_page_template(request):
     return 'admin/managepatron.html'
 
 
+HOLD_REASON_NEEDED = 'Give the reason for putting %s on hold. It is shown to them and at the desk.'
+
+
+def _posted_hold_reason(request):
+    return ' '.join((request.POST.get('hold_reason') or '').split())[:300]
+
+
+def _set_hold(request, patron, status_before, reason):
+    """Keep the hold's reason with the account, and log putting it on and lifting it."""
+    if patron.account_status == 'Suspended':
+        if reason and reason != patron.hold_reason:
+            actor = request.session.get('admin_fullname') or 'Staff'
+            Patron.all_objects.filter(pk=patron.pk).update(
+                hold_reason=reason, hold_set_by=actor, hold_set_at=timezone.now())
+            patron.hold_reason, patron.hold_set_by = reason, actor
+            log_admin_action(request, 'Update', 'Patron', patron.patron_id,
+                             'Put "%s" on hold: %s' % (patron.fullname, reason))
+    elif status_before == 'Suspended' or patron.hold_reason:
+        Patron.all_objects.filter(pk=patron.pk).update(hold_reason=None, hold_set_by=None, hold_set_at=None)
+        patron.hold_reason = patron.hold_set_by = None
+        log_admin_action(request, 'Update', 'Patron', patron.patron_id,
+                         'Lifted the hold on "%s"' % patron.fullname)
+
+
 @admin_or_module_required('patrons')
 def admin_add_patron(request):
     error = None
@@ -2073,6 +2101,7 @@ def admin_add_patron(request):
         school = (request.POST.get('school') or '').strip()
         password = request.POST.get('password', '').strip()
         account_status = request.POST.get('account_status', 'Active').strip()
+        hold_reason = _posted_hold_reason(request)
         # Staff check the physical ID on the spot.
         id_confirmed = request.POST.get('id_confirmed', '').strip() in ('1', 'true', 'on', 'yes')
 
@@ -2087,10 +2116,13 @@ def admin_add_patron(request):
             'contact_number': contact_number,
             'address': address,
             'account_status': account_status,
+            'hold_reason': hold_reason,
         }
 
         if name_error:
             error = name_error
+        elif account_status == 'Suspended' and not hold_reason:
+            error = HOLD_REASON_NEEDED % (fullname or 'this patron')
         elif not all([patron_type, email, password]):
             error = 'Patron type, email, and password are required.'
         elif _email_taken(email):
@@ -2119,6 +2151,7 @@ def admin_add_patron(request):
                 identity_verified_by=verifier,
                 identity_verified_at=timezone.now(),
             )
+            _set_hold(request, patron, 'Active', hold_reason)
             log_admin_action(request, 'Create', 'Patron', patron.patron_id,
                              f'Added "{patron.fullname}" — physical ID presented and '
                              f'checked at the desk')
@@ -2691,6 +2724,7 @@ def admin_edit_patron(request, patron_id):
         'contact_number': patron.contact_number,
         'address': patron.address,
         'account_status': patron.account_status,
+        'hold_reason': patron.hold_reason or '',
     }
 
     if request.method == 'POST':
@@ -2703,9 +2737,12 @@ def admin_edit_patron(request, patron_id):
         school = (request.POST.get('school') or '').strip()
         password = request.POST.get('password', '').strip()
         account_status = request.POST.get('account_status', 'Active').strip()
+        hold_reason = _posted_hold_reason(request)
 
         if name_error:
             error = name_error
+        elif account_status == 'Suspended' and not hold_reason:
+            error = HOLD_REASON_NEEDED % patron.fullname
         elif not all([patron_type, email]):
             error = 'Patron type and email are required.'
         elif Patron.all_objects.exclude(patron_id=patron_id).filter(email=email).exists():
@@ -2723,7 +2760,9 @@ def admin_edit_patron(request, patron_id):
             patron.contact_number = contact_number
             patron.address = address
             patron.school = school or None
+            status_before = patron.account_status
             patron.account_status = account_status or 'Active'
+            _set_hold(request, patron, status_before, hold_reason)
             if password:
                 patron.password_hash = hash_password(password)
             patron.save()
@@ -2739,6 +2778,7 @@ def admin_edit_patron(request, patron_id):
                 'contact_number': contact_number,
                 'address': address,
                 'account_status': account_status,
+                'hold_reason': patron.hold_reason or '',
             })
 
     # Get patron list context
@@ -5681,6 +5721,7 @@ def download_patron_template(request):
         ('address', False, 'Home address.', 'Taytay, Rizal'),
         ('school', False, 'Where they study or teach.', 'Rizal High School'),
         ('account_status', False, 'One of: %s. Blank means Active.' % statuses, 'Active'),
+        ('hold_reason', False, 'Needed when the status is Suspended: why the account is on hold.', ''),
     ], text_columns=('contact_number',))
 
 
@@ -5699,6 +5740,7 @@ PATRON_IMPORT_COLUMNS = {
     'address': 'address', 'homeaddress': 'address',
     'school': 'school', 'schoolname': 'school', 'institution': 'school',
     'accountstatus': 'account_status', 'status': 'account_status',
+    'holdreason': 'hold_reason', 'reason': 'hold_reason', 'suspensionreason': 'hold_reason',
 }
 
 PATRON_TYPE_WORDS = {
@@ -5777,6 +5819,10 @@ def _import_patron_rows(request):
             problems.append('Row %d: account status "%s" is not one of %s'
                             % (row_no, raw_status, status_names))
             continue
+        hold_reason = ' '.join(_cell_text(values.get('hold_reason')).split())[:300] or None
+        if account_status == 'Suspended' and not hold_reason:
+            problems.append('Row %d: a Suspended account needs its hold_reason' % row_no)
+            continue
 
         Patron.objects.create(
             first_name=first,
@@ -5789,6 +5835,9 @@ def _import_patron_rows(request):
             address=_cell_text(values.get('address')) or None,
             school=_cell_text(values.get('school')) or None,
             account_status=account_status,
+            hold_reason=hold_reason if account_status == 'Suspended' else None,
+            hold_set_by=(request.session.get('admin_fullname') or 'Import') if account_status == 'Suspended' else None,
+            hold_set_at=timezone.now() if account_status == 'Suspended' else None,
             registration_channel='On-site',
             qr_code=str(uuid4()),
             otp_verified=True,
