@@ -1,6 +1,33 @@
 {# Hamburger that opens and closes the portal sidebar, and no login autofill in portal forms. #}
 <style>
-    html.sidebar-closed aside.w-64 { display: none !important; }
+    @media (min-width: 768px) {
+        html.sidebar-closed aside.w-64 { display: none !important; }
+        .sidebar-backdrop { display: none; }
+    }
+    /* Phones: the sidebar slides in over the page. */
+    @media (max-width: 767.98px) {
+        html body aside.w-64 {
+            position: fixed; top: 0; bottom: 0; left: 0; height: auto;
+            max-width: 85vw; z-index: 55;
+            transform: translateX(-100%); visibility: hidden;
+            transition: transform .25s ease, visibility 0s linear .25s;
+        }
+        html body aside.w-64.open {
+            transform: none; visibility: visible;
+            transition: transform .25s ease;
+            box-shadow: 12px 0 40px -12px rgba(2, 6, 23, .45);
+        }
+        .sidebar-backdrop {
+            position: fixed; inset: 0; z-index: 54;
+            background: var(--scrim, rgba(15, 23, 42, .45));
+            opacity: 0; pointer-events: none; transition: opacity .25s ease;
+        }
+        aside.w-64.open ~ .sidebar-backdrop { opacity: 1; pointer-events: auto; }
+        .sidebar-toggle.has-page-menu { display: none; }
+    }
+    @media (max-width: 767.98px) and (prefers-reduced-motion: reduce) {
+        html body aside.w-64, .sidebar-backdrop { transition: none !important; }
+    }
     .sidebar-toggle {
         width: 36px; height: 36px; margin-right: 14px; flex-shrink: 0;
         display: inline-flex; align-items: center; justify-content: center;
@@ -10,19 +37,38 @@
     }
     .sidebar-toggle:hover { color: var(--text-main, #e2e8f0); background: rgba(148, 163, 184, .12); }
 </style>
+<div class="sidebar-backdrop" aria-hidden="true"></div>
 <script>
 (function () {
     const KEY = 'ayla.sidebar';
+    const PHONE = window.matchMedia('(max-width: 767.98px)');
     // Applied before the page paints, so a closed sidebar does not flash open.
     try { if (localStorage.getItem(KEY) === 'closed') document.documentElement.classList.add('sidebar-closed'); } catch (e) { /* open */ }
+
+    function sidebar() { return document.querySelector('aside.w-64'); }
+
+    function syncButton() {
+        const btn = document.getElementById('sidebarToggle');
+        if (!btn) return;
+        const aside = sidebar();
+        const open = PHONE.matches ? !!(aside && aside.classList.contains('open'))
+                                   : !document.documentElement.classList.contains('sidebar-closed');
+        btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    }
 
     function setOpen(open) {
         document.documentElement.classList.toggle('sidebar-closed', !open);
         try { localStorage.setItem(KEY, open ? 'open' : 'closed'); } catch (e) { /* not kept */ }
-        const btn = document.getElementById('sidebarToggle');
-        if (btn) btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+        syncButton();
         // Maps and charts measure their box, so tell them it changed.
         window.dispatchEvent(new Event('resize'));
+    }
+
+    // Phones: the sidebar slides over the page instead of taking room beside it.
+    function setDrawer(open) {
+        const aside = sidebar();
+        if (aside) aside.classList.toggle('open', open);
+        syncButton();
     }
 
     function addButton() {
@@ -46,12 +92,19 @@
         btn.className = 'sidebar-toggle';
         btn.title = 'Show or hide the menu';
         btn.setAttribute('aria-label', 'Toggle menu');
-        btn.setAttribute('aria-expanded', document.documentElement.classList.contains('sidebar-closed') ? 'false' : 'true');
         btn.innerHTML = '<i class="fa-solid fa-bars" aria-hidden="true"></i>';
+        // A page with its own phone menu button keeps that one on phones.
+        if (header.querySelector('.mobile-menu-btn')) btn.classList.add('has-page-menu');
         btn.addEventListener('click', function () {
-            setOpen(document.documentElement.classList.contains('sidebar-closed'));
+            if (PHONE.matches) {
+                const aside = sidebar();
+                setDrawer(!(aside && aside.classList.contains('open')));
+            } else {
+                setOpen(document.documentElement.classList.contains('sidebar-closed'));
+            }
         });
         left.insertBefore(btn, left.firstChild);
+        syncButton();
     }
 
     // A password box makes the browser treat the page as a login and pour the
@@ -65,6 +118,15 @@
             el.setAttribute('autocomplete', el.type === 'password' ? 'new-password' : 'off');
         });
     }
+
+    // A tap outside the open sidebar, or Escape, closes it.
+    document.addEventListener('click', function (e) {
+        if (e.target.classList && e.target.classList.contains('sidebar-backdrop')) setDrawer(false);
+    });
+    document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' && PHONE.matches) setDrawer(false);
+    });
+    PHONE.addEventListener('change', function () { setDrawer(false); });
 
     document.addEventListener('DOMContentLoaded', function () {
         addButton();
