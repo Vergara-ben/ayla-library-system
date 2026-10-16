@@ -92,6 +92,12 @@
         .board-select { width: 100%; min-width: 180px; background: var(--bg-input); border: 1px solid var(--border-modal);
                         border-radius: 8px; padding: 6px 8px; font-size: 13px; color: var(--text-primary); }
         .flash { background: var(--tint-accent); }
+        .shelf-tab { background: var(--bg-card); border: 2px solid var(--border-color); transition: border-color .15s, background .15s; }
+        .shelf-tab:hover { border-color: var(--border-modal); }
+        .shelf-tab[aria-selected="true"] { border-color: var(--accent-strong); background: var(--tint-accent); }
+        .shelf-tab[aria-selected="false"] .tab-on { visibility: hidden; }
+        /* A switch is quick; the page's own entrance stays for the first load. */
+        html body main > section[role="tabpanel"].switched { animation: neu-rise .2s ease-out backwards; }
     </style>
 </head>
 <body class="flex h-screen overflow-hidden">
@@ -117,21 +123,28 @@
                 {% if not is_staff_portal %}<a href="{% url 'admin_reports' %}?type=shelving&generate=1" class="font-bold text-{{ accent }}-400 hover:text-{{ accent }}-300 whitespace-nowrap"><i class="fa-solid fa-file-lines mr-1"></i> Report</a>{% endif %}
             </div>
 
-            <div data-live="shelving-stats" class="grid grid-cols-2 gap-4 max-w-2xl">
-                <a href="#shelve" class="p-5 rounded-xl border border-slate-800/80 hover:border-amber-700/60" style="background-color: var(--bg-card);">
-                    <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Waiting for a shelf</p>
-                    <p class="text-3xl font-bold text-amber-400 mt-2">{{ waiting|length }}</p>
-                    <p class="text-[10px] text-slate-500 mt-1">Here, but on no board yet</p>
-                </a>
-                <a href="#labels" class="p-5 rounded-xl border border-slate-800/80 hover:border-violet-700/60" style="background-color: var(--bg-card);">
-                    <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">On a shelf, no label</p>
-                    <p class="text-3xl font-bold text-violet-400 mt-2">{{ unlabelled_total }}</p>
-                    <p class="text-[10px] text-slate-500 mt-1">No label printed or confirmed</p>
-                </a>
+            {# The page's two jobs, one at a time. #}
+            <div role="tablist" aria-label="Shelving and labels" class="grid grid-cols-2 gap-3 max-w-2xl">
+                <button type="button" role="tab" id="tab-shelve" data-tab="shelve" aria-controls="panel-shelve" aria-selected="true" onclick="showTab('shelve')" class="shelf-tab text-left p-4 rounded-xl">
+                    <span class="flex items-center justify-between gap-2">
+                        <span class="text-[11px] uppercase font-bold tracking-wider text-slate-400"><i class="fa-solid fa-box-archive mr-1"></i> Shelving</span>
+                        <i class="tab-on fa-solid fa-circle-check text-{{ accent }}-400 text-xs"></i>
+                    </span>
+                    <span class="block text-3xl font-bold text-amber-400 mt-1" data-live="shelving-waiting-count">{{ waiting|length }}</span>
+                    <span class="block text-[10px] text-slate-500 mt-0.5">Waiting for a shelf</span>
+                </button>
+                <button type="button" role="tab" id="tab-labels" data-tab="labels" aria-controls="panel-labels" aria-selected="false" onclick="showTab('labels')" class="shelf-tab text-left p-4 rounded-xl">
+                    <span class="flex items-center justify-between gap-2">
+                        <span class="text-[11px] uppercase font-bold tracking-wider text-slate-400"><i class="fa-solid fa-qrcode mr-1"></i> Labels</span>
+                        <i class="tab-on fa-solid fa-circle-check text-{{ accent }}-400 text-xs"></i>
+                    </span>
+                    <span class="block text-3xl font-bold text-violet-400 mt-1" data-live="shelving-unlabelled-count">{{ unlabelled_total }}</span>
+                    <span class="block text-[10px] text-slate-500 mt-0.5">On a shelf, no label</span>
+                </button>
             </div>
 
             {# Books waiting for a board, each with the board it most likely belongs on. #}
-            <section id="shelve" class="rounded-xl border border-slate-800/80 overflow-hidden" style="background-color: var(--bg-card);">
+            <section id="panel-shelve" role="tabpanel" aria-labelledby="tab-shelve" class="rounded-xl border border-slate-800/80 overflow-hidden" style="background-color: var(--bg-card);">
                 <div class="p-4 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3">
                     <div>
                         <h3 class="text-sm font-bold text-slate-200">Waiting for a shelf ({{ waiting|length }})</h3>
@@ -183,7 +196,7 @@
             </section>
 
             {# Shelved books with no label: by board, each board opening onto its books, so any mix can be printed or marked. #}
-            <section id="labels" class="rounded-xl border border-slate-800/80 overflow-hidden" style="background-color: var(--bg-card);">
+            <section id="panel-labels" role="tabpanel" aria-labelledby="tab-labels" class="hidden rounded-xl border border-slate-800/80 overflow-hidden" style="background-color: var(--bg-card);">
                 <div class="p-4 border-b border-slate-800 flex flex-wrap items-start justify-between gap-3">
                     <div class="min-w-0">
                         <h3 class="text-sm font-bold text-slate-200">On a shelf, no label ({{ unlabelled_total }})</h3>
@@ -423,6 +436,38 @@
             const ids = labelTicked();
             markLabels(ids, ids.length === 1 ? 'the ticked book' : 'the ' + ids.length + ' ticked books');
         }
+
+        // Shelving and Labels are tabs; the address keeps the open one, so links and reloads land on it.
+        const TABS = ['shelve', 'labels'];
+        let tabsReady = false;
+        function showTab(name) {
+            TABS.forEach(function (t) {
+                const on = t === name;
+                const panel = document.getElementById('panel-' + t);
+                panel.classList.toggle('hidden', !on);
+                panel.classList.toggle('switched', tabsReady);
+                const tab = document.getElementById('tab-' + t);
+                tab.setAttribute('aria-selected', on ? 'true' : 'false');
+                tab.tabIndex = on ? 0 : -1;
+            });
+            history.replaceState(null, '', location.pathname + location.search + '#' + name);
+        }
+        document.querySelector('[role="tablist"]').addEventListener('keydown', function (e) {
+            if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+            e.preventDefault();
+            const other = document.querySelector('[role="tab"][aria-selected="false"]');
+            showTab(other.dataset.tab);
+            other.focus();
+        });
+        window.addEventListener('hashchange', function () {
+            if (TABS.indexOf(location.hash.slice(1)) >= 0) showTab(location.hash.slice(1));
+        });
+        // A link's #shelve or #labels opens that tab; otherwise the one with work in it.
+        (function () {
+            const asked = location.hash.slice(1);
+            showTab(TABS.indexOf(asked) >= 0 ? asked : ({{ waiting|length }} ? 'shelve' : 'labels'));
+            tabsReady = true;
+        })();
 
         // Opened from another page for one book: show it.
         (function () {
