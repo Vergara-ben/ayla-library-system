@@ -1,0 +1,110 @@
+{# The librarian's check before letting in a member whose account is on hold or closed. #}
+<div id="holdDialog" class="hidden fixed inset-0 bg-black/60 z-[60] items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="holdDialogName">
+    <div class="w-full max-w-md rounded-2xl border shadow-2xl overflow-hidden" style="background-color: var(--bg-modal); border-color: var(--border-color);">
+        <div class="px-6 pt-5 pb-4 flex items-start gap-3 border-b" style="border-color: var(--border-color);">
+            <div id="holdDialogIcon" class="w-11 h-11 rounded-xl border flex items-center justify-center shrink-0">
+                <i class="fa-solid fa-user-lock"></i>
+            </div>
+            <div class="min-w-0">
+                <p id="holdDialogKind" class="text-[10px] font-bold uppercase tracking-wider"></p>
+                <h3 id="holdDialogName" class="text-base font-bold text-slate-200 truncate"></h3>
+                <p id="holdDialogCard" class="text-[11px] text-slate-500 font-mono"></p>
+            </div>
+        </div>
+        <div class="px-6 py-4 space-y-3 text-xs">
+            <div id="holdDialogWhy" class="rounded-lg border border-rose-500/25 bg-rose-500/10 px-3 py-2.5">
+                <p class="text-[10px] font-bold uppercase tracking-wider text-rose-400">Why it is on hold</p>
+                <p id="holdDialogReason" class="text-slate-200 mt-1 leading-relaxed"></p>
+                <p id="holdDialogSetBy" class="text-[10px] text-slate-500 mt-1"></p>
+            </div>
+            <div id="holdDialogLoans" class="hidden rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-amber-500 font-semibold leading-relaxed">
+                <i class="fa-solid fa-book mr-1.5"></i><span></span>
+            </div>
+            <div class="space-y-2">
+                <label for="holdDialogInput" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Let them in anyway? Say why</label>
+                <div id="holdDialogChips" class="flex flex-wrap gap-1.5"></div>
+                <input id="holdDialogInput" type="text" maxlength="180" autocomplete="off" placeholder="Pick one above, or type the reason"
+                       class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium placeholder-slate-600" style="background-color: var(--bg-input);">
+                <p class="text-[10px] text-slate-500">Kept with today's visit and in Activity Logs.</p>
+            </div>
+        </div>
+        <div class="px-6 pb-5 flex justify-end gap-2">
+            <button type="button" data-hold="cancel" class="px-4 py-2 rounded-lg border border-slate-700/60 text-slate-300 text-xs font-bold hover:bg-slate-800/40 transition-colors">Keep out</button>
+            <button type="button" data-hold="ok" disabled class="px-4 py-2 rounded-lg bg-cyan-700 hover:bg-cyan-600 text-white text-xs font-bold transition-colors disabled:opacity-40 disabled:cursor-not-allowed"><i class="fa-solid fa-door-open mr-1"></i> Let them in</button>
+        </div>
+    </div>
+</div>
+<script>
+    // The usual reasons, one tap each.
+    const HOLD_QUICK_REASONS = ['Here to settle it at the desk', 'Returning the books', 'Reading only, no borrowing',
+                                "Head librarian's permission"];
+
+    // Resolves to the reason typed or picked, or null when they are kept out.
+    function deskHoldDialog(r) {
+        return new Promise(function (resolve) {
+            const box = document.getElementById('holdDialog');
+            const input = document.getElementById('holdDialogInput');
+            const ok = box.querySelector('[data-hold="ok"]');
+            const cancel = box.querySelector('[data-hold="cancel"]');
+            const chips = document.getElementById('holdDialogChips');
+            const closed = r.status !== 'Suspended';
+            const tone = closed ? ['bg-slate-500/10', 'border-slate-500/30', 'text-slate-400']
+                                : ['bg-rose-500/10', 'border-rose-500/30', 'text-rose-400'];
+            const icon = document.getElementById('holdDialogIcon');
+            icon.className = 'w-11 h-11 rounded-xl border flex items-center justify-center shrink-0 ' + tone.join(' ');
+            const kind = document.getElementById('holdDialogKind');
+            kind.className = 'text-[10px] font-bold uppercase tracking-wider ' + tone[2];
+            kind.textContent = closed ? 'Membership closed' : 'Membership on hold';
+            document.getElementById('holdDialogName').textContent = r.name || '';
+            document.getElementById('holdDialogCard').textContent = r.card ? 'Card ' + r.card : '';
+            document.getElementById('holdDialogWhy').classList.toggle('hidden', closed);
+            document.getElementById('holdDialogReason').textContent = r.hold_reason || 'No reason was recorded when the hold was set.';
+            document.getElementById('holdDialogSetBy').textContent = r.hold_by
+                ? 'Set by ' + r.hold_by + (r.hold_on ? ' on ' + r.hold_on : '') : '';
+            const loans = document.getElementById('holdDialogLoans');
+            loans.classList.toggle('hidden', !r.loans);
+            loans.querySelector('span').textContent = r.loans ? 'Also: ' + r.loans + '.' : '';
+
+            chips.innerHTML = '';
+            HOLD_QUICK_REASONS.forEach(function (text) {
+                const b = document.createElement('button');
+                b.type = 'button';
+                b.textContent = text;
+                b.className = 'px-2.5 py-1 rounded-full border border-slate-700/60 text-[11px] font-semibold text-slate-300 hover:border-cyan-700 hover:text-cyan-400 transition-colors';
+                b.addEventListener('click', function () { input.value = text; sync(); ok.focus(); });
+                chips.appendChild(b);
+            });
+            input.value = '';
+
+            function sync() {
+                ok.disabled = !input.value.trim();
+                chips.querySelectorAll('button').forEach(function (b) {
+                    const on = b.textContent === input.value.trim();
+                    b.classList.toggle('border-cyan-700', on);
+                    b.classList.toggle('text-cyan-400', on);
+                });
+            }
+            function done(answer) {
+                box.classList.add('hidden');
+                box.classList.remove('flex');
+                document.removeEventListener('keydown', onKey, true);
+                input.removeEventListener('input', sync);
+                ok.onclick = cancel.onclick = box.onmousedown = null;
+                resolve(answer);
+            }
+            function onKey(e) {
+                if (e.key === 'Escape') { e.preventDefault(); done(null); }
+                else if (e.key === 'Enter' && input.value.trim()) { e.preventDefault(); done(input.value.trim()); }
+            }
+            input.addEventListener('input', sync);
+            ok.onclick = function () { if (input.value.trim()) done(input.value.trim()); };
+            cancel.onclick = function () { done(null); };
+            box.onmousedown = function (e) { if (e.target === box) done(null); };
+            document.addEventListener('keydown', onKey, true);
+            sync();
+            box.classList.remove('hidden');
+            box.classList.add('flex');
+            input.focus();
+        });
+    }
+</script>

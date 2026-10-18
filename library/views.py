@@ -148,9 +148,9 @@ def patron_login(request):
                           {'email': email, 'error': 'Your account has been deactivated.', 'show_reactivate': True})
 
         if patron.account_status == 'Suspended':
-            why = (' Reason: %s.' % patron.hold_reason.rstrip('.')) if patron.hold_reason else ''
-            return render(request, 'patron/patronlogin.html', {
-                'email': email, 'error': 'Your account is on hold.%s Please see the librarian.' % why})
+            return render(request, 'patron/patronlogin.html', {'email': email, 'hold': {
+                'reason': (patron.hold_reason or '').rstrip('.'),
+                'since': timezone.localtime(patron.hold_set_at) if patron.hold_set_at else None}})
         if patron.account_status != 'Active':
             return render(request, 'patron/patronlogin.html', {'email': email, 'error': 'Your account is suspended or inactive'})
 
@@ -2073,15 +2073,14 @@ def _set_hold(request, patron, status_before, reason):
     """Keep the hold's reason with the account, and log putting it on and lifting it."""
     if patron.account_status == 'Suspended':
         if reason and reason != patron.hold_reason:
-            actor = request.session.get('admin_fullname') or 'Staff'
-            Patron.all_objects.filter(pk=patron.pk).update(
-                hold_reason=reason, hold_set_by=actor, hold_set_at=timezone.now())
-            patron.hold_reason, patron.hold_set_by = reason, actor
+            actor, now = request.session.get('admin_fullname') or 'Staff', timezone.now()
+            Patron.all_objects.filter(pk=patron.pk).update(hold_reason=reason, hold_set_by=actor, hold_set_at=now)
+            patron.hold_reason, patron.hold_set_by, patron.hold_set_at = reason, actor, now
             log_admin_action(request, 'Update', 'Patron', patron.patron_id,
                              'Put "%s" on hold: %s' % (patron.fullname, reason))
     elif status_before == 'Suspended' or patron.hold_reason:
         Patron.all_objects.filter(pk=patron.pk).update(hold_reason=None, hold_set_by=None, hold_set_at=None)
-        patron.hold_reason = patron.hold_set_by = None
+        patron.hold_reason = patron.hold_set_by = patron.hold_set_at = None
         log_admin_action(request, 'Update', 'Patron', patron.patron_id,
                          'Lifted the hold on "%s"' % patron.fullname)
 

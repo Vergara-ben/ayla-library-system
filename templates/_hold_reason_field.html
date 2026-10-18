@@ -1,0 +1,55 @@
+{# Shown with Suspended: why the account is on hold, with the usual reasons one tap away. #}
+<div id="holdReasonField" class="space-y-1.5 col-span-2 rounded-xl border border-rose-500/25 bg-rose-500/5 p-3 {% if initial.account_status != 'Suspended' %}hidden{% endif %}">
+    <label for="holdReason" class="flex items-center gap-1.5 uppercase font-bold tracking-wider text-rose-400 text-[10px]">
+        <i class="fa-solid fa-user-lock text-[10px]"></i> Reason for the hold
+    </label>
+    <div id="holdReasonChips" class="flex flex-wrap gap-1.5"></div>
+    <textarea id="holdReason" name="hold_reason" rows="2" maxlength="300" placeholder="Pick one above, or type the reason"
+              class="w-full rounded-lg px-3 py-2 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-rose-700 font-medium placeholder-slate-600 resize-none leading-relaxed" style="background-color: var(--bg-input);">{{ initial.hold_reason|default:'' }}</textarea>
+    <p id="holdReasonSetBy" class="text-[10px] text-slate-500"></p>
+    <p class="text-[10px] text-slate-500">Shown to the patron when they sign in, and to the librarian at the desk.</p>
+</div>
+<script>
+    const HOLD_REASONS = ['Unpaid lost-book charge', 'Damaged a borrowed book', 'Repeated late returns',
+                         'Misconduct in the library'];
+    let holdContext = {};
+
+    // What the form knows about the patron being edited: overdue books, and who set the current hold.
+    function setHoldContext(ctx) { holdContext = ctx || {}; }
+
+    function syncHoldReason() {
+        const status = document.getElementById('accountStatus');
+        const wrap = document.getElementById('holdReasonField');
+        if (!status || !wrap) return;
+        const on = status.value === 'Suspended';
+        const box = document.getElementById('holdReason');
+        wrap.classList.toggle('hidden', !on);
+        box.required = on;
+
+        const overdue = parseInt(holdContext.overdue || '0', 10);
+        const reasons = (overdue > 0 ? [overdue + ' overdue book' + (overdue === 1 ? '' : 's') + ' not returned'] : [])
+            .concat(HOLD_REASONS);
+        const chips = document.getElementById('holdReasonChips');
+        chips.innerHTML = '';
+        reasons.forEach(function (text) {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.textContent = '+ ' + text;
+            b.className = 'px-2.5 py-1 rounded-full border border-slate-700/60 text-[11px] font-semibold text-slate-300 hover:border-rose-700 hover:text-rose-400 transition-colors';
+            b.addEventListener('click', function () {
+                const now = box.value.trim();
+                if (now.toLowerCase().indexOf(text.toLowerCase()) < 0) box.value = now ? now.replace(/[;.]\s*$/, '') + '; ' + text : text;
+                box.focus();
+            });
+            chips.appendChild(b);
+        });
+        document.getElementById('holdReasonSetBy').textContent = holdContext.by
+            ? 'On hold since ' + (holdContext.on || '?') + ', set by ' + holdContext.by + '.' : '';
+    }
+
+    document.addEventListener('DOMContentLoaded', function () {
+        const status = document.getElementById('accountStatus');
+        if (status) status.addEventListener('change', syncHoldReason);
+        syncHoldReason();
+    });
+</script>

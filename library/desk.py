@@ -874,6 +874,12 @@ def _held_back(request, patron):
         return JsonResponse({
             'success': False, 'needs_override': True, 'name': patron.fullname,
             'status': patron.account_status,
+            'card': patron.card_display,
+            'hold_reason': patron.hold_reason or '' if patron.account_status == 'Suspended' else '',
+            'hold_by': patron.hold_set_by or '' if patron.account_status == 'Suspended' else '',
+            'hold_on': (timezone.localtime(patron.hold_set_at).strftime('%b %d, %Y')
+                        if patron.account_status == 'Suspended' and patron.hold_set_at else ''),
+            'loans': '; '.join(_loan_problems(patron)),
             'error': ('%s\'s membership is %s.%s To let them in anyway, give the reason; it is kept with '
                       'the visit.' % (patron.fullname, 'on hold (suspended)'
                                       if patron.account_status == 'Suspended' else 'closed',
@@ -901,6 +907,14 @@ def _override_note(request, patron):
 
 def _loan_notice(patron):
     """Overdue books and unpaid lost-book charges, said at the door without stopping anyone."""
+    parts = _loan_problems(patron)
+    if not parts:
+        return ''
+    return 'You have ' + ' and '.join(parts) + '. Please see the desk.'
+
+
+def _loan_problems(patron):
+    """['1 overdue book (₱20.00 in fines so far)', '₱350.00 unpaid for a lost book'], or []."""
     from .models import BorrowingRule, Transaction
     today = timezone.localdate()
     open_loans = Transaction.objects.filter(patron=patron, transaction_type='Borrow', return_date__isnull=True)
@@ -915,9 +929,7 @@ def _loan_notice(patron):
     if lost.exists():
         owed = sum(t.fine_amount for t in lost)
         parts.append('₱%s unpaid for a lost book' % f'{owed:,.2f}')
-    if not parts:
-        return ''
-    return 'You have ' + ' and '.join(parts) + '. Please see the desk.'
+    return parts
 
 
 def _identify(value):

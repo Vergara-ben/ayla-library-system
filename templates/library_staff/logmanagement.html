@@ -348,7 +348,7 @@
                                     <td class="py-4 px-6 text-slate-400">{{ log.patron.patron_type|default:"—" }}</td>
                                     <td class="py-4 px-6 text-slate-400">{{ log.school|default:"—" }}</td>
                                     <td class="py-4 px-6 text-slate-400">{{ log.purpose_of_visit|default:"—" }}</td>
-                                    <td class="py-4 px-6 text-slate-300 font-medium">{{ log.entry_time|date:"M j, Y" }} · {{ log.entry_time|time:"h:i A" }}{% if log.entry_note %}<span class="block text-[9px] font-bold text-amber-500" title="{{ log.entry_note }}">LET IN ON HOLD</span>{% endif %}</td>
+                                    <td class="py-4 px-6 text-slate-300 font-medium">{{ log.entry_time|date:"M j, Y" }} · {{ log.entry_time|time:"h:i A" }}{% with li=log.let_in %}{% if li %}<div class="mt-1"><span class="inline-flex items-center gap-1 rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-500" title="{{ log.entry_note }}"><i class="fa-solid fa-unlock text-[8px]"></i> Let in &middot; {{ li.kind }}</span><span class="block text-[10px] font-normal text-slate-400 mt-0.5 max-w-[14rem] truncate" title="{{ log.entry_note }}">&ldquo;{{ li.reason }}&rdquo;</span><span class="block text-[9px] font-normal text-slate-500">by {{ li.by }}</span></div>{% elif log.entry_note %}<span class="block text-[10px] text-amber-500" title="{{ log.entry_note }}">{{ log.entry_note|truncatechars:40 }}</span>{% endif %}{% endwith %}</td>
                                     <td class="py-4 px-6 text-slate-300 font-medium">{% if log.exit_time %}{{ log.exit_time|date:"M j, Y" }} · {{ log.exit_time|time:"h:i A" }}{% if log.auto_closed %}<span class="block text-[9px] font-bold text-amber-500" title="Nobody signed this visit out. It was closed at the library's closing time, so the exit is an assumption rather than a record.">ASSUMED</span>{% endif %}{% else %}<span class="text-slate-600">—</span>{% endif %}</td>
                                     <td class="py-4 px-6 text-center">
                                         {% if log.exit_time %}
@@ -643,14 +643,9 @@
         async function deskWithOverride(url, data) {
             let r = await deskPost(url, data);
             if (r.success || !r.needs_override) return r;
-            const reason = await AylaDialog.prompt(r.error, '', {
-                title: 'Membership ' + (r.status === 'Suspended' ? 'on hold' : 'closed'),
-                confirmLabel: 'Let them in' });
+            const reason = await deskHoldDialog(r);
             if (reason === null || reason === undefined) {
                 return { success: false, error: r.name + ' was not signed in.' };
-            }
-            if (!String(reason).trim()) {
-                return { success: false, error: 'A reason is needed to let ' + r.name + ' in.' };
             }
             return deskPost(url, Object.assign({}, data, { override_reason: String(reason).trim() }));
         }
@@ -1202,6 +1197,7 @@
     <datalist id="knownSchools">
         {% for s in known_schools %}<option value="{{ s }}"></option>{% endfor %}
     </datalist>
+    {% include '_desk_hold_dialog.html' %}
     {% include '_live.html' with topics='visits patrons transactions chat' %}
 </body>
 </html>
