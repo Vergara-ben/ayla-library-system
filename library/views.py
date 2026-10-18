@@ -2073,16 +2073,88 @@ def _set_hold(request, patron, status_before, reason):
     """Keep the hold's reason with the account, and log putting it on and lifting it."""
     if patron.account_status == 'Suspended':
         if reason and reason != patron.hold_reason:
+            changed = status_before == 'Suspended' and bool(patron.hold_reason)
             actor, now = request.session.get('admin_fullname') or 'Staff', timezone.now()
             Patron.all_objects.filter(pk=patron.pk).update(hold_reason=reason, hold_set_by=actor, hold_set_at=now)
             patron.hold_reason, patron.hold_set_by, patron.hold_set_at = reason, actor, now
             log_admin_action(request, 'Update', 'Patron', patron.patron_id,
-                             'Put "%s" on hold: %s' % (patron.fullname, reason))
+                             ('Changed why "%s" is on hold: %s' if changed else 'Put "%s" on hold: %s')
+                             % (patron.fullname, reason))
     elif status_before == 'Suspended' or patron.hold_reason:
         Patron.all_objects.filter(pk=patron.pk).update(hold_reason=None, hold_set_by=None, hold_set_at=None)
         patron.hold_reason = patron.hold_set_by = patron.hold_set_at = None
         log_admin_action(request, 'Update', 'Patron', patron.patron_id,
                          'Lifted the hold on "%s"' % patron.fullname)
+
+
+PANEL_STATUS = {
+    'Active': ('Active', 'emerald'), 'Suspended': ('On hold', 'rose'), 'Inactive': ('Closed', 'slate'),
+    'Pending': ('Pending approval', 'amber'), 'Visitor': ('Walk-in visitor', 'amber'),
+}
+
+
+@admin_or_any_module_required('logs', 'patrons', 'transactions')
+def patron_panel(request, patron_id):
+    """Everything the desk needs about one patron, for the side panel."""
+    from .models import DoorRequest
+    patron = (Patron.all_objects.select_related('identity_verified_by')
+              .filter(patron_id=patron_id).first())
+    if patron is None:
+        return HttpResponse('<p class="p-6 text-sm text-slate-400">That patron is no longer on file.</p>',
+                            status=404)
+    today = timezone.localdate()
+    rule = BorrowingRule.current()
+    loans, owed = [], Decimal('0')
+    for t in (Transaction.objects.filter(patron=patron, transaction_type='Borrow', return_date__isnull=True)
+              .select_related('book').order_by('due_date')):
+        row = {'t': t, 'state': 'out', 'days': 0, 'fine': Decimal('0')}
+        if t.marked_lost:
+            row.update(state='lost', fine=Decimal(t.fine_amount or 0))
+        elif t.due_date and t.due_date < today:
+            row.update(state='overdue', days=(today - t.due_date).days,
+                       fine=Decimal(rule.compute_fine(t.due_date, today)))
+        elif t.due_date:
+            row['days'] = (t.due_date - today).days
+        owed += row['fine']
+        loans.append(row)
+    user = User.objects.filter(admin_id=request.session.get('admin_id')).first()
+    label, tone = PANEL_STATUS.get(patron.account_status, (patron.account_status, 'slate'))
+    return render(request, '_patron_panel_body.html', {
+        'p': patron,
+        'initials': ''.join(w[0] for w in (patron.fullname or '?').split()[:2]).upper(),
+        'status_label': label, 'status_tone': tone,
+        'loans': loans, 'owed': owed, 'max_books': rule.max_books_per_patron,
+        'visits': PatronLog.objects.filter(patron=patron).order_by('-entry_time')[:5],
+        'asking': DoorRequest.waiting().filter(patron=patron).first(),
+        # Holds are changed by whoever may edit patrons.
+        'may_hold': request.session.get('admin_role') != 'Staff' or (user is not None and user.has_module('patrons')),
+    })
+
+
+@admin_or_module_required('patrons')
+def patron_hold_action(request, patron_id):
+    """From the panel: lift a hold, or change why it is on."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST is allowed.'})
+    patron = Patron.objects.filter(patron_id=patron_id).first()
+    if patron is None:
+        return JsonResponse({'success': False, 'error': 'That patron is no longer on file.'}, status=404)
+    if patron.account_status != 'Suspended':
+        return JsonResponse({'success': False, 'error': '%s is not on hold.' % patron.fullname})
+    action = (request.POST.get('action') or '').strip()
+    if action == 'lift':
+        patron.account_status = 'Active'
+        patron.save(update_fields=['account_status'])
+        _set_hold(request, patron, 'Suspended', '')
+        return JsonResponse({'success': True, 'message': 'The hold on %s is lifted. They can sign in and '
+                                                         'borrow again.' % patron.fullname})
+    if action == 'change':
+        reason = _posted_hold_reason(request)
+        if not reason:
+            return JsonResponse({'success': False, 'error': HOLD_REASON_NEEDED % patron.fullname})
+        _set_hold(request, patron, 'Suspended', reason)
+        return JsonResponse({'success': True, 'message': 'The reason for the hold is saved.'})
+    return JsonResponse({'success': False, 'error': 'Choose what to do with the hold.'})
 
 
 @admin_or_module_required('patrons')

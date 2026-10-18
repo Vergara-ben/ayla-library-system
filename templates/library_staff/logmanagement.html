@@ -344,7 +344,7 @@
                             {% for log in logs %}
                                 <tr class="hover:bg-slate-800/10 transition-colors">
                                     <td class="py-4 px-6 font-mono text-slate-500">#LOG-{{ log.log_id }}</td>
-                                    <td class="py-4 px-6 font-bold text-slate-200">{{ log.patron.fullname }}{% if log.patron.account_status == 'Visitor' %}<span class="ml-1.5 text-[9px] font-bold text-amber-400 border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 rounded align-middle">VISITOR</span>{% endif %}</td>
+                                    <td class="py-4 px-6 font-bold text-slate-200"><button type="button" data-patron-panel="{{ log.patron_id }}" class="font-bold text-left hover:underline decoration-dotted underline-offset-2" title="View details">{{ log.patron.fullname }}</button>{% if log.patron.account_status == 'Visitor' %}<span class="ml-1.5 text-[9px] font-bold text-amber-400 border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 rounded align-middle">VISITOR</span>{% endif %}</td>
                                     <td class="py-4 px-6 font-mono text-slate-500">{{ log.display_email|default:"—" }}</td>
                                     <td class="py-4 px-6 text-slate-400">{{ log.patron.patron_type|default:"—" }}</td>
                                     <td class="py-4 px-6 text-slate-400">{{ log.school|default:"—" }}</td>
@@ -1199,6 +1199,7 @@
         {% for s in known_schools %}<option value="{{ s }}"></option>{% endfor %}
     </datalist>
     {% include '_desk_hold_dialog.html' %}
+    <script src="{% static 'js/patron-panel.js' %}?v=20261018b" data-url="{% url 'patron_panel' 0 %}" defer></script>
     {% include '_live.html' with topics='visits door patrons transactions chat' %}
 </body>
 </html>

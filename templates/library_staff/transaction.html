@@ -1135,7 +1135,8 @@
                 +   row('Email', p.email) + row('Contact', p.contact_number)
                 +   row('School', p.school) + row('Books out', loans)
                 + '</div>'
-                + footer;
+                + footer
+                + (p.patron_id && !loading ? '<button type="button" data-patron-panel="' + esc(p.patron_id) + '" class="mt-2 text-[11px] font-semibold text-sky-400 hover:underline"><i class="fa-solid fa-eye mr-1"></i>View details</button>' : '');
         }
 
         function showPatronCard(p, loading) {
@@ -1705,6 +1706,7 @@
         function setTxStatus(s) { __txStatus = s; applyTxFilters(); }
     </script>
     <script src="{% static 'js/admin-enhance.js' %}" defer></script>
+    <script src="{% static 'js/patron-panel.js' %}?v=20261018b" data-url="{% url 'patron_panel' 0 %}" defer></script>
     {% include '_live.html' with topics='transactions books patrons chat' %}
 </body>
 </html>

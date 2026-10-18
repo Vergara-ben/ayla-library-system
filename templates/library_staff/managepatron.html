@@ -534,6 +534,7 @@
                                                 <i class="fa-solid fa-id-card text-[9px]"></i> Review ID
                                             </button>
                                             {% else %}
+                                            <button type="button" title="View details" aria-label="View details of {{ patron.fullname }}" data-patron-panel="{{ patron.patron_id }}" class="w-7 h-7 rounded border border-slate-800 text-sky-400 hover:text-sky-300 hover:bg-slate-800/40 transition-colors flex items-center justify-center"><i class="fa-solid fa-eye text-[10px]"></i></button>
                                             <a title="Library card" href="{% url 'patron_library_card' patron.patron_id %}" target="_blank" class="w-7 h-7 rounded border border-slate-800 text-emerald-500 hover:text-emerald-300 hover:bg-slate-800/40 transition-colors flex items-center justify-center"><i class="fa-solid fa-id-card text-[10px]"></i></a>
                                             {% endif %}
                                         </div>
@@ -1063,6 +1064,7 @@
         }
     </script>
     <script src="{% static 'js/admin-enhance.js' %}" defer></script>
+    <script src="{% static 'js/patron-panel.js' %}?v=20261018b" data-url="{% url 'patron_panel' 0 %}" defer></script>
     {% include '_live.html' with topics='patrons transactions visits chat' %}
 </body>
 </html>

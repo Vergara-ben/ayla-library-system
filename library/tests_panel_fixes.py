@@ -2112,3 +2112,73 @@ class DoorRequestTests(TestCase):
         r = self.kiosk.post('/desk/door/', {'request_id': ask.pk, 'override_reason': 'x'})
         self.assertEqual(r.status_code, 403)
         self.assertFalse(self.PatronLog.objects.filter(patron=self.held).exists())
+
+
+class PatronPanelTests(TestCase):
+    """The side panel: who a patron is, what they hold and owe, and why they are on hold."""
+
+    def setUp(self):
+        from .models import PatronLog, SystemLog
+        self.PatronLog, self.SystemLog = PatronLog, SystemLog
+        rule = BorrowingRule.current()
+        rule.fine_per_day = Decimal('5')
+        rule.save()
+        self.admin = _staff(role='Admin', modules='logs,patrons,transactions')
+        self.client = _client(admin_id=self.admin.admin_id, admin_role='Admin', admin_fullname='Desk')
+        self.p = Patron.objects.create(first_name='Ana', last_name='Cruz', fullname='Ana Cruz',
+                                       email='ana.panel@example.invalid', contact_number='09171234567',
+                                       patron_type='Student', account_status='Suspended', qr_code='card-panel',
+                                       hold_reason='2 books unreturned', hold_set_by='Desk',
+                                       hold_set_at=timezone.now())
+        today = timezone.localdate()
+        late = Book.objects.create(title='Late Book', author='A', genre='Fiction', status='Overdue', qr_code='q-late')
+        lost = Book.objects.create(title='Lost Book', author='A', genre='Fiction', status='Lost', qr_code='q-lost')
+        Transaction.objects.create(patron=self.p, book=late, transaction_type='Borrow', due_date=today - timedelta(days=3))
+        Transaction.objects.create(patron=self.p, book=lost, transaction_type='Borrow', due_date=today - timedelta(days=9),
+                                   marked_lost=True, fine_amount=Decimal('350'))
+        self.PatronLog.objects.create(patron=self.p, purpose_of_visit='Study', exit_time=timezone.now(),
+                                      entry_note='Let in by Desk although the account is suspended: Returning books')
+
+    def test_the_panel_shows_the_hold_the_books_and_what_is_owed(self):
+        page = self.client.get('/admin-portal/patron-panel/%d/' % self.p.pk)
+        self.assertEqual(page.status_code, 200)
+        for text in ('Why it is on hold', '2 books unreturned', 'Set by Desk', 'Late Book', '3 days late',
+                     '15.00 in fines so far', 'Lost Book', '350.00 unpaid charge', 'Owes in all', '365.00',
+                     'ana.panel@example.invalid', 'Let in &middot; on hold', 'Lift the hold', 'Change reason'):
+            self.assertContains(page, text)
+
+    def test_staff_see_it_but_only_those_with_patrons_change_the_hold(self):
+        desk = _staff(role='Staff', modules='logs')
+        staff = _client(admin_id=desk.admin_id, admin_role='Staff')
+        page = staff.get('/admin-portal/patron-panel/%d/' % self.p.pk)
+        self.assertContains(page, '2 books unreturned')
+        self.assertNotContains(page, 'Lift the hold')
+        r = staff.post('/admin-portal/patron-panel/%d/hold/' % self.p.pk, {'action': 'lift'})
+        self.p.refresh_from_db()
+        self.assertEqual(self.p.account_status, 'Suspended')
+        self.assertNotEqual(r.status_code, 200)
+
+    def test_lifting_and_changing_the_hold(self):
+        url = '/admin-portal/patron-panel/%d/hold/' % self.p.pk
+        self.assertFalse(self.client.post(url, {'action': 'change', 'hold_reason': ' '}).json()['success'])
+        r = self.client.post(url, {'action': 'change', 'hold_reason': 'Lost-book charge unpaid'}).json()
+        self.assertTrue(r['success'], r)
+        self.p.refresh_from_db()
+        self.assertEqual(self.p.hold_reason, 'Lost-book charge unpaid')
+        self.assertTrue(self.SystemLog.objects.filter(detail='Changed why "Ana Cruz" is on hold: Lost-book charge unpaid').exists())
+        r = self.client.post(url, {'action': 'lift'}).json()
+        self.assertTrue(r['success'], r)
+        self.p.refresh_from_db()
+        self.assertEqual((self.p.account_status, self.p.hold_reason, self.p.hold_set_at), ('Active', None, None))
+        self.assertTrue(self.SystemLog.objects.filter(detail='Lifted the hold on "Ana Cruz"').exists())
+        self.assertFalse(self.client.post(url, {'action': 'lift'}).json()['success'])
+
+    def test_the_pages_link_to_it(self):
+        from .models import DoorRequest
+        DoorRequest.objects.create(patron=self.p)
+        link = 'data-patron-panel="%d"' % self.p.pk
+        self.assertContains(self.client.get('/admin-portal/log-management/'), link)
+        self.assertContains(self.client.get('/admin-portal/manage-patron/'), link)
+        self.assertContains(self.client.get('/admin-portal/transaction/'), 'patron-panel.js')
+        r = self.client.post('/desk/scan/', {'code': 'card-panel'}).json()
+        self.assertEqual(r['patron_id'], self.p.pk)

@@ -874,6 +874,7 @@ def _held_back(request, patron):
         return JsonResponse({
             'success': False, 'needs_override': True, 'name': patron.fullname,
             'status': patron.account_status,
+            'patron_id': patron.patron_id,
             'card': patron.card_display,
             'hold_reason': patron.hold_reason or '' if patron.account_status == 'Suspended' else '',
             'hold_by': patron.hold_set_by or '' if patron.account_status == 'Suspended' else '',
