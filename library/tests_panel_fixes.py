@@ -1605,6 +1605,19 @@ class ShelvingLabelsAuditTests(TestCase):
         page = self.client.get('/admin-portal/dashboard/')
         self.assertContains(page, 'books waiting for a shelf')
 
+    def test_unlabelled_books_are_listed_one_by_one_and_print_alone(self):
+        second = Book.objects.create(title='Ibong Adarna', author='Anon', genre='Fiction', qr_code='q-ib',
+                                     shelf_level=self.level, shelf_slot=5)
+        page = self.client.get('/admin-portal/shelving/')
+        board = page.context['label_boards'][0]
+        self.assertEqual([b.title for b in board['books']], ['Noli Me Tangere', 'Ibong Adarna'])
+        self.assertContains(page, 'data-id="%d"' % second.pk)
+        self.assertContains(page, 'Print board')
+        sheet = self.client.get('/admin-portal/book-qr-labels/', {'ids': str(second.pk)})
+        self.assertEqual(sheet['Content-Type'], 'application/pdf')
+        from .shelving import need_label
+        self.assertEqual(list(need_label().values_list('title', flat=True)), ['Noli Me Tangere'])
+
     def test_a_waiting_book_is_shelved_on_its_suggested_board_in_one_click(self):
         page = self.client.get('/admin-portal/shelving/')
         rows = {r['book'].title: r for r in page.context['waiting']}
