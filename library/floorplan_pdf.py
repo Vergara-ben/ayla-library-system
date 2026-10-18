@@ -164,8 +164,8 @@ def render_floorplan_pdf(sheets, printed_on):
                                'Printed %s · Page %d' % (printed, canvas.getPageNumber()))
         canvas.restoreState()
 
-    headers = ['Level', 'Position', 'Title', 'Author', 'Call number', 'Status']
-    shares = [0.15, 0.07, 0.33, 0.20, 0.14, 0.11]
+    headers = ['Level', 'Position', 'Title', 'Copy', 'Author', 'Call number', 'Status']
+    shares = [0.14, 0.07, 0.29, 0.07, 0.19, 0.14, 0.10]
     col_widths = [(doc.width - 12) * s for s in shares]
 
     def cell(text):
@@ -204,7 +204,7 @@ def render_floorplan_pdf(sheets, printed_on):
                 continue
             rows = [[Paragraph(h, head_style) for h in headers]]
             for b in sh['books']:
-                rows.append([cell(b['level']), cell(b['position']), cell(b['title']),
+                rows.append([cell(b['level']), cell(b['position']), cell(b['title']), cell(b.get('copy', '')),
                              cell(b['author']), cell(b['call_number']), cell(b['status'])])
             table = Table(rows, colWidths=col_widths, repeatRows=1)
             table.setStyle(TableStyle([

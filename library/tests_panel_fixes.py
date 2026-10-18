@@ -2182,3 +2182,44 @@ class PatronPanelTests(TestCase):
         self.assertContains(self.client.get('/admin-portal/transaction/'), 'patron-panel.js')
         r = self.client.post('/desk/scan/', {'code': 'card-panel'}).json()
         self.assertEqual(r['patron_id'], self.p.pk)
+
+
+class CopyNumbersOnShelvesTests(TestCase):
+    """Two copies of one title on one board are told apart in Shelf Manager and Inventory."""
+
+    def setUp(self):
+        from .models import FloorPlan, Room, Shelf, ShelfLevel
+        plan = FloorPlan.objects.create(name='Ground', floor_number=1, is_active=True)
+        room = Room.objects.create(floor_plan=plan, name='Main', map_x=0, map_y=0)
+        shelf = Shelf.objects.create(room=room, name='Shelf A', map_x=0, map_y=0)
+        self.level = ShelfLevel.objects.create(shelf=shelf, level_number=1)
+        self.one = Book.objects.create(title='Noli Me Tangere', author='Rizal', genre='Fiction', qr_code='q-n1',
+                                       shelf_level=self.level, shelf_slot=1)
+        self.two = Book.objects.create(title='Noli Me Tangere', author='Rizal', genre='Fiction', qr_code='q-n2',
+                                       shelf_level=self.level, shelf_slot=2)
+        for b in (self.one, self.two):
+            InventoryRecord.objects.create(book=b, source='Existing', qr_label=b.qr_code)
+        self.admin = _staff(role='Admin', modules='books,shelf,inventory')
+        self.client = _client(admin_id=self.admin.admin_id, admin_role='Admin')
+
+    def test_the_board_and_the_count_sheet_carry_the_copy_number(self):
+        board = self.client.get('/admin-portal/board-books/', {'level': self.level.pk}).json()['books']
+        self.assertEqual([(b['title'], b['copy_number']) for b in board],
+                         [('Noli Me Tangere', 1), ('Noli Me Tangere', 2)])
+        sheet = self.client.get('/admin-portal/inventory/audit/sheet/', {'level': self.level.pk}).json()
+        self.assertEqual(sorted(r['copy_number'] for r in sheet['books']), [1, 2])
+
+    def test_inventory_names_the_copy_not_the_record(self):
+        page = self.client.get('/admin-portal/inventory/')
+        self.assertContains(page, '&middot; Copy 1')
+        self.assertContains(page, '&middot; Copy 2')
+        self.assertContains(page, 'Position 2')
+        record = InventoryRecord.objects.get(book=self.two)
+        self.assertNotContains(page, 'Copy #%d' % record.inventory_id)
+
+    def test_the_printed_floor_plan_has_a_copy_column(self):
+        from .models import FloorPlan
+        from .views import _floorplan_sheet
+        sheet = _floorplan_sheet(FloorPlan.objects.get())
+        books = [b for sh in sheet['shelves'] for b in sh['books']]
+        self.assertEqual(sorted(b['copy'] for b in books), ['Copy 1', 'Copy 2'])

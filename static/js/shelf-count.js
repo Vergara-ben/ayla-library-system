@@ -13,6 +13,13 @@
   let auditStream = null, auditInterval = null, lastAuditCode = '';
   let lastUnlabelled = [];
 
+  // Copies of one title on one board are told apart by their number.
+  function copyOf(b) {
+    return b && b.copy_number ? ' <span class="text-[10px] font-normal text-slate-500 whitespace-nowrap">&middot; Copy '
+      + b.copy_number + '</span>' : '';
+  }
+  function copyWords(b) { return b && b.copy_number ? ' (Copy ' + b.copy_number + ')' : ''; }
+
   function esc(t) {
     return String(t == null ? '' : t).replace(/[&<>"']/g, function (c) {
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
@@ -71,7 +78,7 @@
               + (mark === 'here' || mark === 'bulk' || mark === 'onshelf' ? '<i class="fa-solid fa-check"></i>'
                  : mark === 'gone' ? '<i class="fa-solid fa-xmark"></i>'
                  : mark === 'damaged' ? '<i class="fa-solid fa-exclamation"></i>' : '') + '</span>'
-           + '<span class="atitle">' + esc(b.title) + '</span>'
+           + '<span class="atitle">' + esc(b.title) + copyOf(b) + '</span>'
            + '<span class="ameta">' + esc(b.call_number || b.author || '') + '</span>'
            + '<span class="anote">' + statusNote(b) + '</span>'
            + (onLoan
@@ -176,7 +183,7 @@
     if (hit) {
       sheet.marks[hit.book_id] = 'here';
       renderSheet();
-      status.innerHTML = '<span class="text-emerald-400">Ticked ' + esc(hit.title) + '.</span>';
+      status.innerHTML = '<span class="text-emerald-400">Ticked ' + esc(hit.title) + copyWords(hit) + '.</span>';
       return;
     }
     const r = await fetch(URLS.qr + '?qr_code=' + encodeURIComponent(label),
@@ -187,12 +194,12 @@
     if (owner) {
       sheet.marks[owner.book_id] = 'here';
       renderSheet();
-      status.innerHTML = '<span class="text-emerald-400">Ticked ' + esc(owner.title) + '.</span>';
+      status.innerHTML = '<span class="text-emerald-400">Ticked ' + esc(owner.title) + copyWords(owner) + '.</span>';
       return;
     }
     if (d.success) {
       if (!sheet.strays.some(function (st) { return st.book_id === d.book.book_id; })) {
-        sheet.strays.push({ book_id: d.book.book_id, title: d.book.title,
+        sheet.strays.push({ book_id: d.book.book_id, title: d.book.title, copy_number: d.book.copy_number,
                             belongs: (d.book.category && d.book.category !== 'N/A' ? d.book.category + ', ' : '')
                                      + d.book.shelf_level });
         renderStrays();

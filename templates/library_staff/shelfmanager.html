@@ -1181,7 +1181,7 @@
                          + ' data-id="' + b.book_id + '" data-i="' + i + '">'
                          // A book on no board has no position along one, and a number here would invent one.
                          + '<span class="pos">' + (loose ? '·' : (b.slot || (i + 1))) + '</span>'
-                         + '<span class="btitle">' + esc(b.title) + '</span>'
+                         + '<span class="btitle">' + esc(b.title) + copyTag(b) + '</span>'
                          + '<span class="bmeta">' + esc(b.call_number || b.author || '') + '</span>'
                          + statusBadge(b.status) + '</div>';
                 }).join('');
@@ -1387,7 +1387,7 @@
                     return '<div class="brow" draggable="true" data-id="' + b.book_id + '">'
                          + '<span class="pos">' + (i + 1) + '</span>'
                          + '<i class="fa-solid fa-grip-vertical text-slate-600 text-[9px]"></i>'
-                         + '<span class="btitle">' + esc(b.title) + '</span>'
+                         + '<span class="btitle">' + esc(b.title) + copyTag(b) + '</span>'
                          + '<span class="bmeta">' + esc(b.call_number || b.author || '') + '</span>'
                          + '</div>';
                 }).join('');
@@ -1740,6 +1740,12 @@
             if (r.success !== false) { loadTree(); } else alert(r.error || 'Failed to delete');
         }
 
+        // "· Copy 2" after a title, as Manage Books and Transactions show it.
+        function copyTag(b) {
+            return b && b.copy_number
+                ? ' <span class="text-[10px] font-normal text-slate-500 whitespace-nowrap">&middot; Copy ' + b.copy_number + '</span>' : '';
+        }
+
         async function viewBook(id) {
             const body = document.getElementById('bookBody');
             body.innerHTML = '<div class="text-slate-500">Loading…</div>';
@@ -1748,10 +1754,11 @@
             if (!d.success) { body.innerHTML = '<div class="text-rose-400">' + esc(d.error || 'Not found') + '</div>'; return; }
             function row(k, v) { return '<div class="flex justify-between gap-3"><span class="text-slate-500">' + k + '</span><span class="text-slate-200 text-right">' + esc(v) + '</span></div>'; }
             body.innerHTML =
-                '<div class="text-sm font-bold text-slate-100 mb-2">' + esc(d.title) + '</div>'
+                '<div class="text-sm font-bold text-slate-100 mb-2">' + esc(d.title) + copyTag(d) + '</div>'
                 + row('Author', d.author) + row('Status', d.status) + row('Category', d.category)
                 + row('Shelf Level', d.shelf_level) + row('ISBN', d.ISBN) + row('Genre', d.genre)
-                + row('Year', d.publication_year) + row('Copies', d.copies);
+                + row('Year', d.publication_year)
+                + row('Copy', d.copy_number ? 'Copy ' + d.copy_number + (d.copies > 1 ? ' (the title has ' + d.copies + ')' : '') : '—');
         }
 
         // Book placement, read-only.
@@ -1816,7 +1823,7 @@
                     return '<button type="button" onclick="viewBook(' + b.book_id + ')" class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg border border-slate-800/70 hover:bg-slate-800/40" style="background-color: var(--bg-input);">'
                         + '<span class="w-7 flex-shrink-0 text-center font-mono text-[10px] text-slate-500">#' + esc(pos) + '</span>'
                         + '<span class="min-w-0 flex-1">'
-                        + '<span class="block text-[11px] font-semibold text-slate-200 truncate">' + esc(b.title) + '</span>'
+                        + '<span class="block text-[11px] font-semibold text-slate-200 truncate">' + esc(b.title) + copyTag(b) + '</span>'
                         + '<span class="block text-[10px] text-slate-500 truncate">' + esc(b.author || '—')
                         + (b.call_number ? ' · <span class="font-mono">' + esc(b.call_number) + '</span>' : '') + '</span>'
                         + '</span>' + statusBadge(b.status) + '</button>';
@@ -1922,7 +1929,7 @@
                 : '<button class="tbtn add" title="Add" onclick="addToCart(' + b.book_id + ')"><i class="fa-solid fa-plus"></i></button>';
             var sub = esc(b.author) + (b.location ? ' · ' + esc(b.location) : '');
             return '<div class="flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg border border-slate-800 hover:border-slate-700 bg-slate-950/40">'
-                + '<div class="min-w-0"><span class="block text-xs font-medium text-slate-200 truncate">' + esc(b.title) + '</span>'
+                + '<div class="min-w-0"><span class="block text-xs font-medium text-slate-200 truncate">' + esc(b.title) + copyTag(b) + '</span>'
                 + '<span class="block text-[10px] text-slate-500 truncate">' + sub + '</span></div>'
                 + btn + '</div>';
         }
