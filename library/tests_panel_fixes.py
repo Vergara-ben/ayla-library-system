@@ -2015,3 +2015,87 @@ class LetInLabelTests(TestCase):
         self.assertEqual(held.let_in, {'kind': 'on hold', 'by': 'Ben', 'reason': 'Returning books'})
         self.assertEqual(shut.let_in['kind'], 'closed')
         self.assertIsNone(PatronLog.objects.create(patron=p).let_in)
+
+
+class DoorRequestTests(TestCase):
+    """A member on hold asks at the kiosk; the librarian lets them in, with a reason, or keeps them out."""
+
+    def setUp(self):
+        from .models import DoorRequest, PatronLog
+        self.DoorRequest, self.PatronLog = DoorRequest, PatronLog
+        self.held = Patron.objects.create(first_name='Ana', last_name='Cruz', fullname='Ana Cruz',
+                                          email='ana.door@example.invalid', account_status='Suspended',
+                                          qr_code='card-door', hold_reason='2 books unreturned')
+        self.user = _staff(role='Admin', modules='logs')
+        self.staff = _client(admin_id=self.user.admin_id, admin_role='Admin', admin_fullname='Desk')
+        self.kiosk = _client(admin_id=self.user.admin_id, admin_role='Admin', desk_mode=True)
+
+    def _ask(self):
+        r = self.kiosk.post('/desk/identify/', {'value': 'ana.door@example.invalid'}).json()
+        self.assertTrue(r['can_ask'], r)
+        return self.kiosk.post('/desk/ask/').json()
+
+    def test_the_kiosk_offers_to_ask_and_the_librarian_is_told(self):
+        r = self._ask()
+        self.assertTrue(r['success'], r)
+        self.assertIn('wait at the counter', r['message'])
+        self.assertEqual(self.DoorRequest.waiting().count(), 1)
+        # Asking twice is one request, not two.
+        self._ask()
+        self.assertEqual(self.DoorRequest.objects.count(), 1)
+        page = self.staff.get('/admin-portal/log-management/')
+        self.assertContains(page, 'Asking to come in (1)')
+        self.assertContains(page, 'On hold: 2 books unreturned')
+        door = {i['key']: i for i in self.staff.get('/portal/alerts/').json()['items']}['door']
+        self.assertEqual(door['count'], 1)
+        self.assertIn('Ana Cruz', door['text'])
+        # The visitor form offers the same.
+        r = self.kiosk.post('/desk/visitor/', {'name': 'Ana Cruz', 'contact': 'ana.door@example.invalid',
+                                               'purpose': 'Study'}).json()
+        self.assertTrue(r.get('can_ask'), r)
+
+    def test_letting_in_needs_a_reason_and_makes_the_visit(self):
+        ask = self.DoorRequest.objects.create(patron=self.held, purpose='Study')
+        r = self.staff.post('/desk/door/', {'request_id': ask.pk}).json()
+        self.assertFalse(r['success'])
+        self.assertFalse(self.PatronLog.objects.filter(patron=self.held).exists())
+        r = self.staff.post('/desk/door/', {'request_id': ask.pk, 'override_reason': 'Returning the books'}).json()
+        self.assertTrue(r['success'], r)
+        visit = self.PatronLog.objects.get(patron=self.held)
+        self.assertIsNone(visit.exit_time)
+        self.assertEqual(visit.let_in['reason'], 'Returning the books')
+        ask.refresh_from_db()
+        self.assertEqual((ask.status, ask.visit, ask.decided_by), ('Let in', visit, self.user))
+        again = self.staff.post('/desk/door/', {'request_id': ask.pk, 'override_reason': 'x'}).json()
+        self.assertIn('already let in', again['error'])
+
+    def test_keeping_out_records_it_and_signs_no_one_in(self):
+        ask = self.DoorRequest.objects.create(patron=self.held)
+        r = self.staff.post('/desk/door/', {'request_id': ask.pk, 'decision': 'keep_out'}).json()
+        self.assertTrue(r['success'], r)
+        ask.refresh_from_db()
+        self.assertEqual(ask.status, 'Kept out')
+        self.assertFalse(self.PatronLog.objects.filter(patron=self.held).exists())
+        self.assertFalse(self.DoorRequest.waiting().exists())
+
+    def test_a_closed_account_cannot_ask(self):
+        Patron.objects.create(first_name='Bea', last_name='Lim', fullname='Bea Lim', email='bea.door@example.invalid',
+                              account_status='Inactive', qr_code='card-shut')
+        r = self.kiosk.post('/desk/identify/', {'value': 'bea.door@example.invalid'}).json()
+        self.assertNotIn('can_ask', r)
+        self.assertTrue(self.kiosk.post('/desk/ask/').json()['expired'])
+        self.assertFalse(self.DoorRequest.objects.exists())
+
+    def test_an_old_request_lapses(self):
+        ask = self.DoorRequest.objects.create(patron=self.held)
+        self.DoorRequest.objects.filter(pk=ask.pk).update(asked_at=timezone.now() - timedelta(minutes=31))
+        self.assertFalse(self.DoorRequest.waiting().exists())
+        r = self.staff.post('/desk/door/', {'request_id': ask.pk, 'override_reason': 'x'}).json()
+        self.assertFalse(r['success'])
+        self.assertIn('tap in again', r['error'])
+
+    def test_the_kiosk_cannot_let_anyone_in(self):
+        ask = self.DoorRequest.objects.create(patron=self.held)
+        r = self.kiosk.post('/desk/door/', {'request_id': ask.pk, 'override_reason': 'x'})
+        self.assertEqual(r.status_code, 403)
+        self.assertFalse(self.PatronLog.objects.filter(patron=self.held).exists())

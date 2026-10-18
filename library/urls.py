@@ -93,6 +93,8 @@ urlpatterns = [
     path('desk/identify/', desk.desk_identify, name='desk_identify'),
     path('desk/visit/', desk.desk_visit, name='desk_visit'),
     path('desk/visitor/', desk.desk_visitor, name='desk_visitor'),
+    path('desk/ask/', desk.desk_ask, name='desk_ask'),
+    path('desk/door/', desk.desk_door_decide, name='desk_door_decide'),
     path('admin-portal/close-open-visits/', desk.close_open_visits_now, name='close_open_visits'),
     # Inventory Management (Administrator-only)
     path('admin-portal/inventory/', views.inventory_management, name='inventory_management'),

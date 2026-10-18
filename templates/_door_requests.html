@@ -1,0 +1,69 @@
+{# Members on hold asking at the kiosk to come in; the librarian lets them in or keeps them out. #}
+<div data-live="door-requests" data-live-collapse class="mb-6">
+    {% if door_requests %}
+    <section class="rounded-xl border-2 border-rose-500/40 overflow-hidden" style="background-color: var(--bg-card);" aria-labelledby="doorTitle">
+        <div class="px-5 py-3 border-b border-rose-500/20 bg-rose-500/10 flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span class="relative flex w-2.5 h-2.5" aria-hidden="true">
+                <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-60"></span>
+                <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-500"></span>
+            </span>
+            <h4 id="doorTitle" class="text-sm font-bold text-slate-200">Asking to come in ({{ door_requests|length }})</h4>
+            <span class="text-[11px] text-slate-500">Their membership is on hold. They are waiting at the counter.</span>
+        </div>
+        <div class="divide-y divide-slate-800/60">
+            {% for ask in door_requests %}
+            <div class="px-5 py-3 flex flex-wrap items-center gap-3" data-door="{{ ask.request_id }}"
+                 data-name="{{ ask.patron.fullname }}" data-card="{{ ask.patron.card_display }}"
+                 data-hold-reason="{{ ask.patron.hold_reason|default:'' }}" data-hold-by="{{ ask.patron.hold_set_by|default:'' }}"
+                 data-hold-on="{{ ask.patron.hold_set_at|date:'M d, Y' }}" data-loans="{{ ask.loans }}">
+                <div class="w-10 h-10 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 flex items-center justify-center shrink-0"><i class="fa-solid fa-user-lock"></i></div>
+                <div class="flex-1 min-w-[14rem]">
+                    <p class="text-sm font-bold text-slate-200">{{ ask.patron.fullname }}{% if ask.patron.card_display %} <span class="text-[11px] font-mono font-normal text-slate-500">Card {{ ask.patron.card_display }}</span>{% endif %}</p>
+                    <p class="text-[11px] text-rose-400">On hold: {{ ask.patron.hold_reason|default:'no reason on file' }}</p>
+                    <p class="text-[10px] text-slate-500">Asked at {{ ask.asked_at|time:"g:i A" }}{% if ask.purpose %} &middot; {{ ask.purpose }}{% endif %}{% if ask.loans %} &middot; {{ ask.loans }}{% endif %}</p>
+                </div>
+                <div class="flex gap-2">
+                    <button type="button" onclick="doorKeepOut(this)" class="px-3 py-2 rounded-lg border border-slate-700/60 text-slate-300 text-xs font-bold hover:bg-slate-800/40 transition-colors">Keep out</button>
+                    <button type="button" onclick="doorLetIn(this)" class="px-3 py-2 rounded-lg bg-{{ accent }}-700 hover:bg-{{ accent }}-600 text-white text-xs font-bold transition-colors"><i class="fa-solid fa-door-open mr-1"></i> Let in</button>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+</div>
+<script>
+    const DOOR_URL = "{% url 'desk_door_decide' %}";
+
+    async function doorPost(data) {
+        try {
+            const r = await fetch(DOOR_URL, {
+                method: 'POST', body: new URLSearchParams(data),
+                headers: { 'X-CSRFToken': '{{ csrf_token }}', 'X-Requested-With': 'XMLHttpRequest' },
+            });
+            return await r.json();
+        } catch (e) {
+            return { success: false, error: 'The server did not answer. Nothing was changed.' };
+        }
+    }
+    function doorDone(r, text) {
+        AylaDialog.toast(text, r.success ? 'success' : 'error');
+        // The log below shows the visit just made.
+        if (r.success) setTimeout(function () { window.location.reload(); }, 1500);
+    }
+    async function doorLetIn(btn) {
+        const d = btn.closest('[data-door]').dataset;
+        const reason = await deskHoldDialog({ name: d.name, card: d.card, status: 'Suspended', hold_reason: d.holdReason,
+                                              hold_by: d.holdBy, hold_on: d.holdOn, loans: d.loans });
+        if (reason === null || reason === undefined) return;
+        const r = await doorPost({ request_id: d.door, override_reason: reason });
+        doorDone(r, r.success ? r.message + (r.notice ? ' ' + r.notice : '') : r.error);
+    }
+    async function doorKeepOut(btn) {
+        const d = btn.closest('[data-door]').dataset;
+        if (!await AylaDialog.confirm('Keep ' + d.name + ' out today? Let them know at the counter.', {
+            title: 'Keep out', confirmLabel: 'Keep out', danger: false })) return;
+        const r = await doorPost({ request_id: d.door, decision: 'keep_out' });
+        doorDone(r, r.success ? r.message : r.error);
+    }
+</script>

@@ -31,7 +31,14 @@ def staff_modules(request):
         # Badged on Shelving & Labels and shown on the dashboard.
         'can_shelve': may_shelve(user),
         'shelving_counts': _shelving_counts() if may_shelve(user) else (0, 0),
+        # Badged on Log Management: members on hold asking at the kiosk.
+        'door_waiting': _door_waiting() if user.has_module('logs') else 0,
     }
+
+
+def _door_waiting():
+    from .models import DoorRequest
+    return DoorRequest.waiting().count()
 
 
 def _shelving_counts():

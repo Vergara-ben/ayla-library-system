@@ -3879,8 +3879,16 @@ def _logs_page(request, template):
     if date_str:
         params['date'] = date_str
 
+    # Members on hold asking at the kiosk, with what the librarian needs to decide.
+    from .desk import _loan_problems
+    from .models import DoorRequest
+    door_requests = list(DoorRequest.waiting().select_related('patron'))
+    for ask in door_requests:
+        ask.loans = '; '.join(_loan_problems(ask.patron))
+
     context = {
         'logs': logs,
+        'door_requests': door_requests,
         # Known schools for the input suggestions.
         'known_schools': known_schools(),
         'paginator': paginator,
