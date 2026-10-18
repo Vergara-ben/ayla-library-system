@@ -149,7 +149,7 @@
                         {% for p in group.items %}
                         <div class="px-4 py-2.5 flex flex-wrap items-center gap-x-4 gap-y-1">
                             <div class="min-w-[14rem] flex-1">
-                                <p class="font-semibold text-slate-200">{{ p.book.title }}</p>
+                                <p class="font-semibold text-slate-200">{{ p.book.title }}{% if p.book.copy_number %} <span class="text-[10px] font-normal text-slate-500 whitespace-nowrap">&middot; Copy {{ p.book.copy_number }}</span>{% endif %}</p>
                                 <p class="text-[10px] text-slate-500">{{ p.board }}{% if p.book.shelf_slot %}, position {{ p.book.shelf_slot }}{% endif %}{% if p.book.call_number %} &middot; {{ p.book.call_number }}{% endif %}</p>
                             </div>
                             <p class="flex-[2] min-w-[14rem] text-slate-400">{{ p.text }}</p>

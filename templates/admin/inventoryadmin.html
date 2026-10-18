@@ -213,8 +213,8 @@
                                     {% for copy in missing_copies %}
                                     <tr class="hover:bg-slate-800/10">
                                         <td class="py-3 px-4"><input type="checkbox" name="inventory_ids" value="{{ copy.inventory_id }}" class="missing-writeoff"></td>
-                                        <td class="py-3 px-4 font-bold text-slate-200">{{ copy.display_title }}<span class="block text-[10px] font-normal text-slate-600">copy #{{ copy.inventory_id }} · {{ copy.condition }}</span></td>
-                                        <td class="py-3 px-4 text-slate-400">{{ copy.shelf_location|default:"Not shelved" }}</td>
+                                        <td class="py-3 px-4 font-bold text-slate-200">{{ copy.display_title }}{% if copy.book.copy_number %} <span class="text-[10px] font-normal text-slate-500 whitespace-nowrap">&middot; Copy {{ copy.book.copy_number }}</span>{% endif %}<span class="block text-[10px] font-normal text-slate-600">{{ copy.condition }}</span></td>
+                                        <td class="py-3 px-4 text-slate-400">{{ copy.shelf_location|default:"Not shelved" }}{% if copy.shelf_location and copy.book.shelf_slot %}<span class="block text-[10px] text-slate-500">Position {{ copy.book.shelf_slot }}</span>{% endif %}</td>
                                         <td class="py-3 px-4 text-slate-400">
                                             {% if copy.missing_since %}{{ copy.missing_since|date:"M j, Y" }}
                                                 {# How long it has been gone is the whole basis for writing it off. #}
@@ -317,7 +317,7 @@
                             <tr class="hover:bg-slate-800/10 transition-colors">
                                 <td class="py-3 px-6 font-mono text-slate-500">{{ m.movement_id }}</td>
                                 <td class="py-3 px-6 text-slate-400 whitespace-nowrap">{{ m.timestamp|date:"M d, Y H:i" }}</td>
-                                <td class="py-3 px-6 font-medium text-slate-200">{{ m.inventory_record.display_title }}</td>
+                                <td class="py-3 px-6 font-medium text-slate-200">{{ m.inventory_record.display_title }}{% if m.inventory_record.book.copy_number %} <span class="text-[10px] font-normal text-slate-500 whitespace-nowrap">&middot; Copy {{ m.inventory_record.book.copy_number }}</span>{% endif %}</td>
                                 <td class="py-3 px-6">
                                     <span class="text-[10px] font-bold px-2 py-1 rounded-full
                                         {% if m.action == 'Received' %}bg-emerald-950/50 text-emerald-300 border border-emerald-800/50
@@ -395,10 +395,9 @@
                             {% for r in records %}
                             <tr class="hover:bg-slate-800/10 transition-colors {% if r.status == 'Removed' %}opacity-50{% endif %}">
                                 <td class="py-4 px-6">
-                                    <div class="font-bold text-slate-200">{{ r.display_title }}</div>
+                                    <div class="font-bold text-slate-200">{{ r.display_title }}{% if r.book.copy_number %} <span class="text-[10px] font-normal text-slate-500 whitespace-nowrap">&middot; Copy {{ r.book.copy_number }}</span>{% endif %}</div>
                                     <div class="text-[10px] text-slate-500">
-                                        Copy #{{ r.inventory_id }}
-                                        {% if not r.book %}<span class="text-purple-400">· not catalogued</span>{% endif %}
+                                        {% if not r.book %}<span class="text-purple-400">Not catalogued</span>{% endif %}
                                         {% if r.status == 'Removed' %}<span class="text-rose-400">· removed</span>{% endif %}
                                     </div>
                                     {% if r.notes %}<div class="text-[10px] text-slate-500 italic mt-0.5 line-clamp-2" title="{{ r.notes }}">{{ r.notes }}</div>{% endif %}
@@ -416,25 +415,25 @@
                                         {% elif r.condition == 'Beyond Repair' or r.condition == 'Lost' %}bg-rose-950/50 text-rose-300 border border-rose-800/50
                                         {% else %}bg-slate-800/60 text-slate-400 border border-slate-700/50{% endif %}" title="{{ r.condition_note }}">{{ r.condition }}</span>
                                 </td>
-                                <td class="py-4 px-6 {% if r.shelf_location %}text-slate-400{% else %}text-purple-400{% endif %}">{{ r.shelf_location|default:"No shelf yet" }}</td>
+                                <td class="py-4 px-6 {% if r.shelf_location %}text-slate-400{% else %}text-purple-400{% endif %}">{{ r.shelf_location|default:"No shelf yet" }}{% if r.shelf_location and r.book.shelf_slot %}<span class="block text-[10px] text-slate-500">Position {{ r.book.shelf_slot }}</span>{% endif %}</td>
                                 <td class="py-4 px-6 text-slate-400">{{ r.received_date|date:"M d, Y" }}{% if r.received_by %}<span class="block text-[10px] text-slate-500">by {{ r.received_by.fullname }}</span>{% endif %}</td>
                                 <td class="py-4 px-6">
                                     <div class="grid grid-cols-2 gap-1.5">
                                         <button title="QR label"
-                                            data-id="{{ r.inventory_id }}" data-title="{{ r.display_title }}" data-label="{{ r.qr_label }}"
+                                            data-id="{{ r.inventory_id }}" data-title="{{ r.display_title }}{% if r.book.copy_number %} · Copy {{ r.book.copy_number }}{% endif %}" data-label="{{ r.qr_label }}"
                                             onclick="openLabel(this)" class="text-[10px] font-semibold px-2 py-1 rounded-md border border-slate-800 text-slate-400 hover:text-cyan-400 hover:border-cyan-800/60 whitespace-nowrap"><i class="fa-solid fa-qrcode mr-1"></i>Label</button>
                                         <button title="Record condition"
-                                            data-id="{{ r.inventory_id }}" data-title="{{ r.display_title }}" data-condition="{{ r.condition }}"
+                                            data-id="{{ r.inventory_id }}" data-title="{{ r.display_title }}{% if r.book.copy_number %} · Copy {{ r.book.copy_number }}{% endif %}" data-condition="{{ r.condition }}"
                                             onclick="openCondition(this)" class="text-[10px] font-semibold px-2 py-1 rounded-md border border-slate-800 text-slate-400 hover:text-amber-400 hover:border-amber-800/60 whitespace-nowrap"><i class="fa-solid fa-clipboard-check mr-1"></i>Condition</button>
                                         <button title="Edit details"
-                                            data-id="{{ r.inventory_id }}" data-title="{{ r.display_title }}"
+                                            data-id="{{ r.inventory_id }}" data-title="{{ r.display_title }}{% if r.book.copy_number %} · Copy {{ r.book.copy_number }}{% endif %}"
                                             data-book="{{ r.book.book_id|default:'' }}" data-hint="{{ r.title_hint|default:'' }}"
                                             data-source="{{ r.source }}" data-supplier="{{ r.supplier|default:'' }}" data-po="{{ r.po_number|default:'' }}"
                                             data-donor="{{ r.donor_name|default:'' }}" data-notes="{{ r.notes|default:'' }}"
                                             onclick="openEdit(this)" class="text-[10px] font-semibold px-2 py-1 rounded-md border border-slate-800 text-slate-400 hover:text-cyan-400 hover:border-cyan-800/60 whitespace-nowrap"><i class="fa-solid fa-pen-to-square mr-1"></i>Edit</button>
                                         {% if r.status != 'Removed' %}
                                         <button title="Remove this copy from the records (data-entry mistake)"
-                                            data-id="{{ r.inventory_id }}" data-title="{{ r.display_title }}"
+                                            data-id="{{ r.inventory_id }}" data-title="{{ r.display_title }}{% if r.book.copy_number %} · Copy {{ r.book.copy_number }}{% endif %}"
                                             onclick="openDeaccession(this)" class="text-[10px] font-semibold px-2 py-1 rounded-md border border-slate-800 text-slate-400 hover:text-rose-400 hover:border-rose-800/60 whitespace-nowrap"><i class="fa-solid fa-eraser mr-1"></i>Remove</button>
                                         {% endif %}
                                     </div>
@@ -706,7 +705,7 @@
                     <label for="editBook" class="field-label">Catalogued title</label>
                     <select name="book_id" id="editBook" class="field-input">
                         <option value="">— Not catalogued yet —</option>
-                        {% for b in books %}<option value="{{ b.book_id }}">{{ b.title }} — {{ b.author }}</option>{% endfor %}
+                        {% for b in books %}<option value="{{ b.book_id }}">{{ b.title }}{% if b.copy_number %} · Copy {{ b.copy_number }}{% endif %} — {{ b.author }}</option>{% endfor %}
                     </select>
                 </div>
                 <div id="editHintWrap">
@@ -867,7 +866,8 @@
                 const follow = l.outcome
                     ? '<span class="font-semibold ' + (l.open ? 'text-amber-300' : 'text-emerald-400') + '">' + esc(l.outcome) + '</span>'
                     : '<span class="text-slate-600">\u2014</span>';
-                return '<tr class="align-top"><td class="py-2.5 px-4 font-semibold text-slate-200">' + esc(l.title) + '</td>'
+                return '<tr class="align-top"><td class="py-2.5 px-4 font-semibold text-slate-200">' + esc(l.title)
+                    + (l.copy_number ? ' <span class="text-[10px] font-normal text-slate-500 whitespace-nowrap">&middot; Copy ' + l.copy_number + '</span>' : '') + '</td>'
                     + '<td class="py-2.5 px-4 ' + (tone[l.kind] || 'text-blue-400') + '">' + esc(l.result)
                     + (l.detail ? '<span class="block text-[10px] text-slate-500">' + esc(l.detail) + '</span>' : '') + '</td>'
                     + '<td class="py-2.5 px-4 text-slate-400">' + state(l.then) + '</td>'

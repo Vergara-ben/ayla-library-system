@@ -103,6 +103,7 @@ def audit_rows(audit):
         rows.append({
             'line': line,
             'title': line.title,
+            'copy_number': line.book.copy_number if line.book else None,
             'result': line.get_result_display(),
             'kind': line.result,
             'detail': line.detail,

@@ -312,16 +312,15 @@
                         {% for r in recent %}
                         <div class="px-5 py-3 flex items-center justify-between gap-3">
                             <div class="min-w-0">
-                                <p class="text-xs font-bold text-slate-200 truncate">{{ r.display_title }}</p>
+                                <p class="text-xs font-bold text-slate-200 truncate">{{ r.display_title }}{% if r.book.copy_number %} <span class="text-[10px] font-normal text-slate-500 whitespace-nowrap">&middot; Copy {{ r.book.copy_number }}</span>{% endif %}</p>
                                 <p class="text-[10px] text-slate-500">
-                                    Copy #{{ r.inventory_id }} ·
                                     {{ r.get_source_display }}
                                     {% if r.source_detail %} · {{ r.source_detail }}{% endif %}
                                     {% if r.book.status == 'Donated' %} · <span class="text-purple-400">hidden until shelved</span>{% endif %}
                                 </p>
                             </div>
                             <button type="button"
-                                data-id="{{ r.inventory_id }}" data-title="{{ r.display_title }}" data-label="{{ r.qr_label }}"
+                                data-id="{{ r.inventory_id }}" data-title="{{ r.display_title }}{% if r.book.copy_number %} · Copy {{ r.book.copy_number }}{% endif %}" data-label="{{ r.qr_label }}"
                                 onclick="openLabel(this)" title="QR label"
                                 class="text-slate-400 hover:text-violet-400 p-1.5 flex-shrink-0"><i class="fa-solid fa-qrcode"></i></button>
                         </div>

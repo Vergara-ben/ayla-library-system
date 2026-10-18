@@ -4080,6 +4080,7 @@ def _floorplan_sheet(floor_plan):
             'level': b.shelf_level.label,
             'position': b.shelf_slot or '',
             'title': b.title,
+            'copy': ('Copy %d' % b.copy_number) if b.copy_number else '',
             'author': b.author,
             'call_number': b.call_number or '',
             'status': b.get_status_display(),
@@ -7680,6 +7681,7 @@ def _board_book(book):
     return {
         'book_id': book.book_id,
         'title': book.title,
+        'copy_number': book.copy_number,
         'author': book.author or '',
         'status': book.status,
         'call_number': book.call_number or '',
@@ -12751,6 +12753,7 @@ def stock_audit_sheet(request):
             # QR code, so scans can tick the row.
             'qr_code': b.qr_code or '',
             'title': b.title,
+            'copy_number': b.copy_number,
             'author': b.author or '',
             'call_number': b.call_number or '',
             'slot': b.shelf_slot,
@@ -13037,7 +13040,8 @@ def stock_audit_detail(request, audit_id):
         'by': audit.audited_by.fullname if audit.audited_by else '',
         'summary': summary_words(summary(rows)),
         'lines': [{
-            'title': r['title'], 'result': r['result'], 'kind': r['kind'], 'detail': r['detail'],
+            'title': r['title'], 'copy_number': r['copy_number'],
+            'result': r['result'], 'kind': r['kind'], 'detail': r['detail'],
             'then': r['then'], 'now': r['now'], 'changed': r['changed'],
             'trail': [{'when': d.strftime('%b %d, %Y') if d else '', 'text': t} for d, t in r['trail']],
             'outcome': r['outcome'], 'open': r['open'],
