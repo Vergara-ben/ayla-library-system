@@ -77,6 +77,20 @@ def portal_alerts(request):
                 count, ' is' if count == 1 else 's are',
                 ', the newest from %s' % newest.fullname if newest else '')
 
+    if _may(user, role, 'logs'):
+        from .models import DoorRequest
+        asking = DoorRequest.waiting().select_related('patron').order_by('-asked_at')
+        newest = asking.first()
+        items.append({
+            'key': 'door', 'count': asking.count(),
+            'latest': newest.request_id if newest else 0,
+            'stamp': newest.asked_at.isoformat() if newest else '',
+            'text': ('%s is asking at the kiosk to come in. Their membership is on hold.'
+                     % newest.patron.fullname) if newest else '',
+            'title': 'Asking to come in', 'icon': 'fa-door-open',
+            'url': _portal_url(role, 'admin_log_management', 'staff_logs'),
+        })
+
     if _may(user, role, 'transactions'):
         requests = (DueDateExtension.objects.filter(status='Pending')
                     .select_related('transaction__book', 'transaction__patron')

@@ -30,6 +30,7 @@ MODEL_TOPICS = {
     'PatronPhoto': ('patrons',),
     'ReactivationRequest': ('patrons',),
     'PatronLog': ('visits',),
+    'DoorRequest': ('visits', 'door'),
     'Conversation': ('chat',),
     'ChatMessage': ('chat',),
     'Announcement': ('announcements',),

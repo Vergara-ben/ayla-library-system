@@ -7,7 +7,7 @@
   if (!url) return;
 
   var STORE = 'ayla.alerts';
-  var TOPICS = ['patrons', 'transactions', 'chat', 'books'];
+  var TOPICS = ['patrons', 'transactions', 'chat', 'books', 'door'];
   var stack = null;
   var busy = false;
 

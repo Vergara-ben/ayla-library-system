@@ -508,6 +508,27 @@
         </div>
     </div>
 
+    <!-- A membership on hold: ask the librarian, and the screen is free again for the next person. -->
+    <div id="askModal" class="kiosk-modal hidden fixed inset-0 z-50 items-center justify-center bg-black/75 p-5">
+        <div class="kiosk-pop w-full max-w-lg rounded-2xl border shadow-2xl text-center px-8 py-10"
+             style="background-color: var(--bg-modal); border-color: var(--border-color);">
+            <div id="askIcon" class="w-20 h-20 mx-auto rounded-full flex items-center justify-center text-4xl bg-amber-500/15 text-amber-300"><i class="fa-solid fa-user-lock"></i></div>
+            <p id="askWay" class="mt-6 text-[11px] font-bold uppercase tracking-[0.2em] text-amber-300">Membership on hold</p>
+            <h3 id="askName" class="text-3xl font-bold text-slate-100 mt-2 leading-tight"></h3>
+            <p id="askCard" class="text-sm text-slate-500 mt-1 font-mono"></p>
+            <p id="askMessage" class="text-[14px] text-slate-300 mt-5 leading-relaxed max-w-sm mx-auto"></p>
+            <div id="askButtons" class="mt-8 grid grid-cols-2 gap-3">
+                <button type="button" onclick="kioskAskClose()"
+                        class="w-full border border-slate-600 text-slate-200 hover:bg-slate-800/50 font-bold text-base px-6 py-4 rounded-xl">Not now</button>
+                <button type="button" id="askSendBtn" onclick="kioskAskSend()"
+                        class="w-full bg-amber-600 hover:bg-amber-500 text-white font-bold text-base px-6 py-4 rounded-xl"><i class="fa-solid fa-bell-concierge mr-2"></i>Ask the librarian</button>
+            </div>
+            <button type="button" id="askDoneBtn" onclick="kioskAskClose()"
+                    class="hidden mt-8 w-full bg-cyan-700 hover:bg-cyan-600 text-white font-bold text-base px-6 py-4 rounded-xl">Done</button>
+            <p class="text-[11px] text-slate-600 mt-4">This closes on its own in <span id="askCountdown">20</span>s</p>
+        </div>
+    </div>
+
     <!-- Exit desk mode -->
     <div id="deskUnlockOverlay" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/70 p-4">
         <div class="rounded-2xl border border-slate-700/60 shadow-2xl w-full max-w-sm" style="background-color: var(--bg-card);">
@@ -563,6 +584,7 @@
         identify: "{% url 'desk_identify' %}",
         visit: "{% url 'desk_visit' %}",
         visitor: "{% url 'desk_visitor' %}",
+        ask: "{% url 'desk_ask' %}",
         unlock: "{% url 'desk_unlock' %}",
         unlockCode: "{% url 'desk_unlock_code' %}",
         findBook: "{% url 'desk_find_book' %}",
@@ -1219,6 +1241,7 @@
         try {
             const r = await deskPost(DESK_URLS.identify, { value: typed });
             if (!r.success) {
+                if (r.can_ask) { kioskAskOffer(r); return; }
                 kioskGo('member');
                 show('memberError', r.error);
                 return;
@@ -1280,6 +1303,7 @@
                 purpose_other: document.getElementById('wayPurposeOther').value.trim(),
             });
             if (!r.success) {
+                if (r.can_ask) { kioskAskOffer(r); return; }
                 if (r.expired) { kioskGo('member'); show('memberError', r.error); return; }
                 show('wayError', r.error);
                 return;
@@ -1390,7 +1414,11 @@
             const f = kioskVisitorFields();
             const r = await deskPost(DESK_URLS.visitor, f);
             kioskCloseReview();
-            if (!r.success) { show('visitorError', r.error); return; }
+            if (!r.success) {
+                if (r.can_ask) { kioskAskOffer(r); return; }
+                show('visitorError', r.error);
+                return;
+            }
             kioskShowResult(r, f.direction);
         } catch (err) {
             kioskCloseReview();
@@ -1442,6 +1470,61 @@
         }, 1000);
     }
 
+    // A membership on hold: they may ask the librarian, then the screen goes back for the next person.
+    let askTimer = null;
+    function kioskAskOffer(r) {
+        document.getElementById('askName').textContent = r.name || '';
+        document.getElementById('askCard').textContent = r.card ? 'Card ' + r.card : '';
+        document.getElementById('askMessage').textContent = r.asked
+            ? 'You have already asked. The librarian will sign you in at the counter. Ask again if it is taking a while.'
+            : 'You cannot sign yourself in today. Ask the librarian, then wait at the counter; they can let you in.';
+        askState(false);
+        const m = document.getElementById('askModal');
+        m.classList.remove('hidden');
+        m.classList.add('flex');
+        askCountdown(20);
+    }
+    function askState(sent) {
+        document.getElementById('askButtons').classList.toggle('hidden', sent);
+        document.getElementById('askDoneBtn').classList.toggle('hidden', !sent);
+        document.getElementById('askIcon').innerHTML = '<i class="fa-solid ' + (sent ? 'fa-bell-concierge' : 'fa-user-lock') + '"></i>';
+        document.getElementById('askWay').textContent = sent ? 'Request sent' : 'Membership on hold';
+    }
+    function askCountdown(seconds) {
+        let left = seconds;
+        document.getElementById('askCountdown').textContent = left;
+        clearInterval(askTimer);
+        askTimer = setInterval(function () {
+            left -= 1;
+            document.getElementById('askCountdown').textContent = Math.max(left, 0);
+            if (left <= 0) kioskAskClose();
+        }, 1000);
+    }
+    async function kioskAskSend() {
+        const btn = document.getElementById('askSendBtn');
+        btn.disabled = true;
+        try {
+            const r = await deskPost(DESK_URLS.ask, {});
+            if (!r.success) { kioskAskClose(); kioskGo('member'); show('memberError', r.error); return; }
+            document.getElementById('askMessage').textContent = r.message;
+            askState(true);
+            askCountdown(8);
+        } catch (err) {
+            kioskAskClose();
+            kioskGo('member');
+            show('memberError', 'The screen could not reach the library system. Please see the librarian.');
+        } finally {
+            btn.disabled = false;
+        }
+    }
+    function kioskAskClose() {
+        clearInterval(askTimer);
+        const m = document.getElementById('askModal');
+        m.classList.add('hidden');
+        m.classList.remove('flex');
+        kioskGo('choose');
+    }
+
     function kioskFinish() {
         clearInterval(resultTimer);
         const modal = document.getElementById('resultModal');
@@ -1456,6 +1539,7 @@
     let scanLast = 0;
     document.addEventListener('keydown', function (e) {
         if (!document.getElementById('resultModal').classList.contains('hidden')) return;
+        if (!document.getElementById('askModal').classList.contains('hidden')) return;
         if (!document.getElementById('deskUnlockOverlay').classList.contains('hidden')) return;
         // Typing in a box is typing, never scanning.
         const tag = (e.target.tagName || '').toLowerCase();

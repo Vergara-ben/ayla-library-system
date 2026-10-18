@@ -36,6 +36,7 @@
                 <a href="{% url 'staff_logs' %}" class="flex items-center gap-3 px-3 py-2 rounded-lg {% if active == 'logs' %}bg-slate-800/50 text-violet-400 font-medium border border-slate-700/50{% else %}text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition-colors{% endif %}">
                     <i class="fa-solid fa-clipboard-list w-5 text-sm"></i>
                     <span class="text-sm {% if active != 'logs' %}font-medium{% endif %}">Log Management</span>
+                    <span data-alert-badge="door" class="ml-auto bg-rose-500/20 text-rose-400 text-xs px-2 py-0.5 rounded-full font-semibold" title="Members on hold asking to come in"{% if not door_waiting %} hidden{% endif %}>{{ door_waiting }}</span>
                 </a>
                 {% endif %}
                 {% if 'books' in allowed_modules %}

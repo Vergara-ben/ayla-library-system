@@ -23,7 +23,7 @@ from .auth_utils import (
 )
 from .audit import log_admin_action, log_patron_action, log_system_action
 from .emails import account_action_otp_email
-from .models import (Book, FloorPlan, LibraryStatus, Patron, PatronLog, Shelf,
+from .models import (Book, DoorRequest, FloorPlan, LibraryStatus, Patron, PatronLog, Shelf,
                      ShelfLevel, User)
 from .names import name_matches, parse_name, tokenise
 
@@ -886,7 +886,117 @@ def _held_back(request, patron):
                                       (' On hold because: %s.' % patron.hold_reason.rstrip('.'))
                                       if patron.account_status == 'Suspended' and patron.hold_reason else '')),
         })
-    return JsonResponse({'success': False, 'error': problem})
+    return _kiosk_refusal(request, patron, problem)
+
+
+# Who just asked at the kiosk, for the Ask the librarian button that follows.
+DESK_ASK_KEY = 'desk_ask_patron'
+DESK_ASK_AT = 'desk_ask_at'
+DESK_ASK_WINDOW = timedelta(minutes=3)
+
+
+def _kiosk_refusal(request, patron, problem):
+    """At the kiosk: a closed account is turned away; one on hold may ask the librarian."""
+    if patron.account_status != 'Suspended':
+        return JsonResponse({'success': False, 'error': problem})
+    purpose = (request.POST.get('purpose') or '').strip()
+    if purpose == 'Other':
+        purpose = (request.POST.get('purpose_other') or '').strip() or 'Other'
+    request.session[DESK_ASK_KEY] = [patron.patron_id, purpose]
+    request.session[DESK_ASK_AT] = timezone.now().isoformat()
+    return JsonResponse({
+        'success': False, 'can_ask': True, 'error': problem,
+        'name': patron.fullname, 'first_name': _first_name(patron), 'card': patron.card_display,
+        'asked': DoorRequest.waiting().filter(patron=patron).exists(),
+    })
+
+
+def _asking_patron(request):
+    """(patron, purpose) of whoever was just turned away at the kiosk, or (None, '')."""
+    held = request.session.pop(DESK_ASK_KEY, None)
+    stamp = request.session.pop(DESK_ASK_AT, None)
+    if not held or not stamp:
+        return None, ''
+    try:
+        seen = datetime.fromisoformat(stamp)
+    except (TypeError, ValueError):
+        return None, ''
+    if timezone.is_naive(seen):
+        seen = timezone.make_aware(seen)
+    if timezone.now() - seen > DESK_ASK_WINDOW:
+        return None, ''
+    return Patron.objects.filter(patron_id=held[0]).first(), held[1]
+
+
+def desk_ask(request):
+    """The kiosk: a member whose account is on hold asks the librarian to let them in."""
+    if request.method != 'POST' or not desk_is_armed(request):
+        return JsonResponse({'success': False, 'error': 'Please see the librarian at the counter.'})
+    patron, purpose = _asking_patron(request)
+    if patron is None:
+        return JsonResponse({'success': False, 'expired': True,
+                             'error': 'That took a while. Please scan or type your details again.'})
+    if patron.account_status != 'Suspended' or _open_visit_for(patron) is not None:
+        return JsonResponse({'success': False, 'error': 'Please see the librarian at the counter.'})
+    ask = DoorRequest.waiting().filter(patron=patron).first()
+    if ask is None:
+        ask = DoorRequest.objects.create(patron=patron, purpose=purpose)
+    else:
+        # Asked again: it moves back to the top of the librarian's mind.
+        ask.asked_at = timezone.now()
+        ask.purpose = purpose or ask.purpose
+        ask.save(update_fields=['asked_at', 'purpose'])
+    log_patron_action(request, 'Create', 'Patron', patron.patron_id,
+                      'Asked at the kiosk to be let in (membership on hold)', patron=patron)
+    return JsonResponse({
+        'success': True, 'name': patron.fullname,
+        'message': ('%s, the librarian has your request. Please wait at the counter; '
+                    'they will sign you in.' % _first_name(patron)),
+    })
+
+
+def desk_door_decide(request):
+    """The log page: let in, or keep out, a member asking at the kiosk."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Only POST is allowed.'})
+    staff = User.objects.filter(admin_id=request.session.get('admin_id'), account_status='Active').first()
+    if staff is None or desk_is_armed(request) or not staff.has_module('logs'):
+        return JsonResponse({'success': False, 'error': 'Only the librarian can answer this.'}, status=403)
+    raw = (request.POST.get('request_id') or '').strip()
+    ask = (DoorRequest.objects.select_related('patron', 'decided_by').filter(request_id=raw).first()
+           if raw.isdigit() else None)
+    if ask is None:
+        return JsonResponse({'success': False, 'error': 'That request is no longer there.'})
+    patron = ask.patron
+    if ask.status != 'Waiting':
+        return JsonResponse({'success': False, 'error': '%s was already %s by %s.' % (
+            patron.fullname, ask.status.lower(), ask.decided_by.fullname if ask.decided_by else 'staff')})
+    if not ask.is_open:
+        return JsonResponse({'success': False, 'error': ('%s asked over %d minutes ago. If they are still here, '
+                                                         'ask them to tap in again.' % (
+                                                             patron.fullname, DoorRequest.WAIT_FOR.seconds // 60))})
+
+    ask.decided_by, ask.decided_at = staff, timezone.now()
+    if (request.POST.get('decision') or '') == 'keep_out':
+        ask.status = 'Kept out'
+        ask.save(update_fields=['status', 'decided_by', 'decided_at'])
+        log_admin_action(request, 'Update', 'Patron', patron.patron_id,
+                         'Kept "%s" out at the door (membership on hold)' % patron.fullname)
+        return JsonResponse({'success': True, 'message': '%s was not let in. Let them know at the counter.'
+                                                         % patron.fullname})
+
+    if not _override_reason(request):
+        return JsonResponse({'success': False, 'error': 'Give the reason for letting %s in.' % patron.fullname})
+    ask.reason = _override_reason(request)
+    if _open_visit_for(patron) is None:
+        result = _sign_in(patron, ask.purpose, note=_override_note(request, patron))
+    else:
+        result = {'success': True, 'action': 'already_in', 'name': patron.fullname,
+                  'message': '%s is already signed in.' % patron.fullname}
+    ask.status = 'Let in'
+    ask.visit = _open_visit_for(patron)
+    ask.save(update_fields=['status', 'decided_by', 'decided_at', 'reason', 'visit'])
+    return JsonResponse(result)
 
 
 def _override_reason(request):
@@ -984,6 +1094,8 @@ def desk_identify(request):
     # Someone already inside may always leave; a held account may not come in.
     problem = _account_problem(patron)
     if problem and open_visit is None:
+        if desk_is_armed(request):
+            return _kiosk_refusal(request, patron, problem)
         return JsonResponse({'success': False, 'error': problem})
     _remember_pending(request, patron)
 

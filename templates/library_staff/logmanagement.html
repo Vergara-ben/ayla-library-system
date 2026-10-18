@@ -215,6 +215,7 @@
                     </div>
                 </div>
 
+            {% include '_door_requests.html' with accent='violet' %}
                             <div class="rounded-xl border border-slate-800/80 overflow-hidden shadow-2xl flex flex-col" style="background-color: var(--bg-card);">
                 
                 <div class="p-5 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -1198,6 +1199,6 @@
         {% for s in known_schools %}<option value="{{ s }}"></option>{% endfor %}
     </datalist>
     {% include '_desk_hold_dialog.html' %}
-    {% include '_live.html' with topics='visits patrons transactions chat' %}
+    {% include '_live.html' with topics='visits door patrons transactions chat' %}
 </body>
 </html>

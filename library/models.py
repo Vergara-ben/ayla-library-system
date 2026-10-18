@@ -1377,6 +1377,40 @@ class PatronLog(Archivable):
         return f"{self.patron} — entry {self.entry_time}"
 
 
+
+class DoorRequest(models.Model):
+    """A member whose account is on hold, asking at the kiosk to be let in."""
+
+    STATUS_CHOICES = [('Waiting', 'Waiting'), ('Let in', 'Let in'), ('Kept out', 'Kept out')]
+    # Unanswered for this long, they have most likely gone.
+    WAIT_FOR = timedelta(minutes=30)
+
+    request_id = models.AutoField(primary_key=True)
+    patron = models.ForeignKey(Patron, on_delete=models.CASCADE, db_column='patron_id', related_name='door_requests')
+    purpose = models.CharField(max_length=255, blank=True, default='')
+    asked_at = models.DateTimeField(default=timezone.now)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Waiting')
+    decided_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    decided_at = models.DateTimeField(blank=True, null=True)
+    # The librarian's reason for letting them in.
+    reason = models.CharField(max_length=255, blank=True, default='')
+    visit = models.ForeignKey(PatronLog, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+
+    class Meta:
+        db_table = 'Door_Requests'
+        ordering = ['asked_at']
+
+    def __str__(self):
+        return f'{self.patron} at the door ({self.status})'
+
+    @classmethod
+    def waiting(cls):
+        return cls.objects.filter(status='Waiting', asked_at__gte=timezone.now() - cls.WAIT_FOR)
+
+    @property
+    def is_open(self):
+        return self.status == 'Waiting' and self.asked_at >= timezone.now() - self.WAIT_FOR
+
 class StockAudit(models.Model):
     """One stock-take of one shelf."""
 
