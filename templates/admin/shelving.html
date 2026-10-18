@@ -315,6 +315,7 @@
             });
             const data = await res.json().catch(function () { return {}; });
             if (!data.success) { AylaDialog.toast(data.error || 'Those books could not be shelved.', 'error'); return; }
+            if (!data.ids || !data.ids.length) { AylaDialog.toast(data.message, 'success'); location.reload(); return; }
             const print = await AylaDialog.confirm(data.message, {
                 title: 'Shelved', confirmLabel: 'Print their labels now', cancelLabel: 'Later', danger: false });
             if (print) await AylaLabels.download(LABELS_URL, data.ids, null, { where: 'just shelved' });

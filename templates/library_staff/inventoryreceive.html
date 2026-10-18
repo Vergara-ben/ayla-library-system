@@ -591,5 +591,18 @@
         })();
     </script>
     {% include '_live.html' with topics='books transactions chat' %}
+    <script src="{% static 'js/label-print.js' %}?v=20261018"></script>
+
+    {% if print_next_ids %}{{ print_next_ids|json_script:'printNextData' }}
+    <script>
+        // The copies just received: their labels, printed as they arrive.
+        window.addEventListener('load', function () {
+            const ids = JSON.parse(document.getElementById('printNextData').textContent || '[]');
+            if (window.AylaLabels && ids.length) {
+                AylaLabels.accent = 'violet';
+                AylaLabels.download("{% url 'book_qr_labels' %}", ids, null, { where: 'just received' });
+            }
+        });
+    </script>{% endif %}
 </body>
 </html>
