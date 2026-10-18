@@ -2223,3 +2223,53 @@ class CopyNumbersOnShelvesTests(TestCase):
         sheet = _floorplan_sheet(FloorPlan.objects.get())
         books = [b for sh in sheet['shelves'] for b in sh['books']]
         self.assertEqual(sorted(b['copy'] for b in books), ['Copy 1', 'Copy 2'])
+
+
+class DonorToggleTests(TestCase):
+    """A donation's donor is either picked from those on file or typed in full as someone new."""
+
+    def setUp(self):
+        from .models import Donation, Donor
+        self.Donation, self.Donor = Donation, Donor
+        self.client = _client(admin_id=_staff(role='Admin').admin_id, admin_role='Admin')
+        self.rosario = Donor.objects.create(name='Rosario Mendoza Villanueva', first_name='Rosario',
+                                            middle_name='Mendoza', last_name='Villanueva',
+                                            donor_type='Individual', contact_number='09175550142')
+
+    def _give(self, **donor):
+        data = {'source': 'Donation', 'donated_date': '2026-10-01',
+                'items': json.dumps(_with_genre_items([{'title': 'Ibong Adarna', 'author': 'Anon'}]))}
+        data.update(donor)
+        return self.client.post('/admin-portal/inventory/receive/', data)
+
+    def test_a_saved_donor_is_used_as_is(self):
+        # Boxes left over from the other side of the toggle change nothing.
+        self._give(donor_id=str(self.rosario.pk), donor_first_name='Someone', donor_last_name='Else',
+                   donor_contact_number='09990000000')
+        gift = self.Donation.objects.get()
+        self.assertEqual((gift.donor, gift.donor_name), (self.rosario, 'Rosario Mendoza Villanueva'))
+        self.rosario.refresh_from_db()
+        self.assertEqual(self.rosario.contact_number, '09175550142')
+        self.assertEqual(self.Donor.objects.count(), 1)
+
+    def test_a_donor_no_longer_on_file_is_refused(self):
+        self._give(donor_id='99999')
+        self.assertFalse(self.Donation.objects.exists())
+
+    def test_a_new_donor_is_typed_in_full(self):
+        self._give(donor_type='Individual', donor_first_name='Carlo', donor_middle_name='Bautista',
+                   donor_last_name='Dimaculangan', donor_contact_number='09565550288')
+        carlo = self.Donor.objects.get(first_name='Carlo')
+        self.assertEqual((carlo.name, carlo.contact_number), ('Carlo Bautista Dimaculangan', '09565550288'))
+
+    def test_both_receiving_pages_offer_the_toggle(self):
+        from .views import _donor_options
+        self._give(donor_id=str(self.rosario.pk))
+        saved = {d['name']: d for d in _donor_options()}['Rosario Mendoza Villanueva']
+        self.assertEqual((saved['id'], saved['contact'], saved['gifts'], saved['last']),
+                         (self.rosario.pk, '09175550142', 1, 'Oct 01, 2026'))
+        staff = _client(admin_id=_staff(role='Staff', modules='inventory').admin_id, admin_role='Staff')
+        for page in (self.client.get('/admin-portal/inventory/'), staff.get('/library-staff/receiving/')):
+            self.assertContains(page, 'data-donor-mode="new"')
+            self.assertContains(page, 'Existing donor <span class="opacity-70">(1)</span>', html=False)
+            self.assertContains(page, 'name="donor_id"')

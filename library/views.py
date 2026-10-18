@@ -12395,20 +12395,29 @@ def receive_stock(request):
     supplier = po_number = donor_name = processing_stage = None
     donated_date = None
     if source == 'Donation':
-        donor_name, donor_parts, problem = _posted_donor_name(request.POST, prefix='donor_')
-        if problem:
-            messages.error(request, 'Donor: ' + problem)
+        picked = (request.POST.get('donor_id') or '').strip()
+        chosen = Donor.objects.filter(donor_id=picked).first() if picked.isdigit() else None
+        if picked and chosen is None:
+            messages.error(request, 'Donor: that donor is no longer on file. Choose them again, '
+                                    'or enter them as a new donor.')
             return _receiving_redirect(request)
-        # A saved donor is recorded under the name already on file, however it was typed today.
-        saved = Donor.find(donor_name, **donor_parts)
-        if saved is not None:
-            donor_name = saved.name
-        donor_details = {
-            'donor_type': request.POST.get('donor_type'),
-            'contact_number': request.POST.get('donor_contact_number'),
-            'email': request.POST.get('donor_email'),
-            'address': request.POST.get('donor_address'),
-        }
+        if chosen is not None:
+            donor_name, donor_parts, donor_details = chosen.name, {}, {}
+        else:
+            donor_name, donor_parts, problem = _posted_donor_name(request.POST, prefix='donor_')
+            if problem:
+                messages.error(request, 'Donor: ' + problem)
+                return _receiving_redirect(request)
+            # A saved donor is recorded under the name already on file, however it was typed today.
+            saved = Donor.find(donor_name, **donor_parts)
+            if saved is not None:
+                donor_name = saved.name
+            donor_details = {
+                'donor_type': request.POST.get('donor_type'),
+                'contact_number': request.POST.get('donor_contact_number'),
+                'email': request.POST.get('donor_email'),
+                'address': request.POST.get('donor_address'),
+            }
         bad = _donor_detail_error(donor_name, donor_details)
         if bad:
             messages.error(request, 'Donor: ' + bad)
@@ -13580,10 +13589,14 @@ def serve_card_photo(request, photo_id):
 
 
 def _donor_options():
-    """Every saved donor, for the receiving form's name boxes to suggest."""
-    return [{'name': d.name, 'type': d.donor_type, 'first': d.first_name or '', 'middle': d.middle_name or '',
-             'last': d.last_name or ''}
-            for d in Donor.objects.only('name', 'donor_type', *Donor.NAME_PARTS)[:1000]]
+    """Every saved donor, for the receiving form: to pick an existing one, or catch a new one typed twice."""
+    donors = (Donor.objects.annotate(gifts=Count('donations'), last_gift=Max('donations__date_donated'))
+              .order_by('name')[:1000])
+    return [{'id': d.donor_id, 'name': d.name, 'type': d.donor_type, 'first': d.first_name or '',
+             'middle': d.middle_name or '', 'last': d.last_name or '', 'contact': d.contact_number or '',
+             'email': d.email or '', 'address': d.address or '', 'gifts': d.gifts,
+             'last': d.last_gift.strftime('%b %d, %Y') if d.last_gift else ''}
+            for d in donors]
 
 
 def _posted_donor_name(post, prefix=''):
