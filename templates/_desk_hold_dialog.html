@@ -9,6 +9,7 @@
                 <p id="holdDialogKind" class="text-[10px] font-bold uppercase tracking-wider"></p>
                 <h3 id="holdDialogName" class="text-base font-bold text-slate-200 truncate"></h3>
                 <p id="holdDialogCard" class="text-[11px] text-slate-500 font-mono"></p>
+                <button type="button" id="holdDialogView" class="hidden mt-1 text-[11px] font-semibold text-sky-400 hover:underline"><i class="fa-solid fa-eye mr-1"></i>View details: books, fines, visits</button>
             </div>
         </div>
         <div class="px-6 py-4 space-y-3 text-xs">
@@ -57,6 +58,10 @@
             kind.textContent = closed ? 'Membership closed' : 'Membership on hold';
             document.getElementById('holdDialogName').textContent = r.name || '';
             document.getElementById('holdDialogCard').textContent = r.card ? 'Card ' + r.card : '';
+            // The panel opens over this check; the librarian comes back to it to decide.
+            const view = document.getElementById('holdDialogView');
+            view.classList.toggle('hidden', !(r.patron_id && window.AylaPatron));
+            if (r.patron_id) view.setAttribute('data-patron-panel', r.patron_id);
             document.getElementById('holdDialogWhy').classList.toggle('hidden', closed);
             document.getElementById('holdDialogReason').textContent = r.hold_reason || 'No reason was recorded when the hold was set.';
             document.getElementById('holdDialogSetBy').textContent = r.hold_by

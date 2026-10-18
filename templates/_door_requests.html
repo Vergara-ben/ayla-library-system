@@ -12,17 +12,19 @@
         </div>
         <div class="divide-y divide-slate-800/60">
             {% for ask in door_requests %}
-            <div class="px-5 py-3 flex flex-wrap items-center gap-3" data-door="{{ ask.request_id }}"
+            <div class="px-5 py-3 flex flex-wrap items-center gap-3" data-door="{{ ask.request_id }}" data-patron="{{ ask.patron.patron_id }}"
                  data-name="{{ ask.patron.fullname }}" data-card="{{ ask.patron.card_display }}"
                  data-hold-reason="{{ ask.patron.hold_reason|default:'' }}" data-hold-by="{{ ask.patron.hold_set_by|default:'' }}"
                  data-hold-on="{{ ask.patron.hold_set_at|date:'M d, Y' }}" data-loans="{{ ask.loans }}">
                 <div class="w-10 h-10 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 flex items-center justify-center shrink-0"><i class="fa-solid fa-user-lock"></i></div>
                 <div class="flex-1 min-w-[14rem]">
                     <p class="text-sm font-bold text-slate-200">{{ ask.patron.fullname }}{% if ask.patron.card_display %} <span class="text-[11px] font-mono font-normal text-slate-500">Card {{ ask.patron.card_display }}</span>{% endif %}</p>
-                    <p class="text-[11px] text-rose-400">On hold: {{ ask.patron.hold_reason|default:'no reason on file' }}</p>
+                    {% if ask.patron.account_status == 'Suspended' %}<p class="text-[11px] text-rose-400">On hold: {{ ask.patron.hold_reason|default:'no reason on file' }}</p>
+                    {% else %}<p class="text-[11px] text-emerald-400 font-semibold">Hold lifted: let them in.</p>{% endif %}
                     <p class="text-[10px] text-slate-500">Asked at {{ ask.asked_at|time:"g:i A" }}{% if ask.purpose %} &middot; {{ ask.purpose }}{% endif %}{% if ask.loans %} &middot; {{ ask.loans }}{% endif %}</p>
                 </div>
-                <div class="flex gap-2">
+                <div class="flex flex-wrap gap-2">
+                    <button type="button" data-patron-panel="{{ ask.patron.patron_id }}" class="px-3 py-2 rounded-lg border border-slate-700/60 text-sky-400 text-xs font-bold hover:bg-slate-800/40 transition-colors"><i class="fa-solid fa-eye mr-1"></i> View details</button>
                     <button type="button" onclick="doorKeepOut(this)" class="px-3 py-2 rounded-lg border border-slate-700/60 text-slate-300 text-xs font-bold hover:bg-slate-800/40 transition-colors">Keep out</button>
                     <button type="button" onclick="doorLetIn(this)" class="px-3 py-2 rounded-lg bg-{{ accent }}-700 hover:bg-{{ accent }}-600 text-white text-xs font-bold transition-colors"><i class="fa-solid fa-door-open mr-1"></i> Let in</button>
                 </div>
@@ -53,7 +55,7 @@
     }
     async function doorLetIn(btn) {
         const d = btn.closest('[data-door]').dataset;
-        const reason = await deskHoldDialog({ name: d.name, card: d.card, status: 'Suspended', hold_reason: d.holdReason,
+        const reason = await deskHoldDialog({ patron_id: d.patron, name: d.name, card: d.card, status: 'Suspended', hold_reason: d.holdReason,
                                               hold_by: d.holdBy, hold_on: d.holdOn, loans: d.loans });
         if (reason === null || reason === undefined) return;
         const r = await doorPost({ request_id: d.door, override_reason: reason });

@@ -1,0 +1,101 @@
+{# One patron, for the side panel opened from Log Management, Manage Patrons and Transactions. #}
+<div class="flex flex-col h-full" data-panel-patron="{{ p.patron_id }}">
+    {% csrf_token %}
+    <div class="px-5 pt-5 pb-4 border-b flex items-start gap-3" style="border-color: var(--border-color);">
+        <div class="w-12 h-12 rounded-xl flex items-center justify-center text-base font-bold shrink-0 border bg-{{ status_tone }}-500/10 text-{{ status_tone }}-400 border-{{ status_tone }}-500/30">{{ initials }}</div>
+        <div class="min-w-0 flex-1">
+            <h3 id="patronPanelTitle" class="text-base font-bold text-slate-100 leading-tight">{{ p.fullname }}</h3>
+            <p class="text-[11px] text-slate-500 mt-0.5">{{ p.patron_type }}{% if p.card_display %} &middot; <span class="font-mono">Card {{ p.card_display }}</span>{% endif %}</p>
+            <span class="inline-block mt-1.5 text-[10px] font-bold px-2 py-0.5 rounded border bg-{{ status_tone }}-500/10 text-{{ status_tone }}-400 border-{{ status_tone }}-500/30">{{ status_label }}</span>
+        </div>
+        <button type="button" data-panel-close class="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+
+    <div class="flex-1 overflow-y-auto px-5 py-4 space-y-5 text-xs">
+        {% if asking %}
+        <div class="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-amber-500 font-semibold leading-relaxed">
+            <i class="fa-solid fa-bell-concierge mr-1.5"></i>Waiting at the counter to come in, asked at {{ asking.asked_at|time:"g:i A" }}. Let them in from Log Management.
+        </div>
+        {% endif %}
+
+        {% if p.account_status == 'Suspended' %}
+        <section class="rounded-xl border border-rose-500/25 bg-rose-500/10 px-4 py-3">
+            <p class="text-[10px] font-bold uppercase tracking-wider text-rose-400"><i class="fa-solid fa-user-lock mr-1"></i>Why it is on hold</p>
+            <p class="text-sm text-slate-200 mt-1 leading-relaxed">{{ p.hold_reason|default:"No reason was recorded when the hold was set." }}</p>
+            {% if p.hold_set_by %}<p class="text-[10px] text-slate-500 mt-1">Set by {{ p.hold_set_by }}{% if p.hold_set_at %} on {{ p.hold_set_at|date:"M j, Y" }}{% endif %}</p>{% endif %}
+            {% if may_hold %}
+            <div class="flex flex-wrap gap-2 mt-3" data-hold-buttons>
+                <button type="button" data-hold-change class="px-3 py-1.5 rounded-lg border border-slate-700/60 text-slate-300 text-[11px] font-bold hover:bg-slate-800/40">Change reason</button>
+                <button type="button" data-hold-lift class="px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white text-[11px] font-bold"><i class="fa-solid fa-lock-open mr-1"></i>Lift the hold</button>
+            </div>
+            <form data-hold-form class="hidden mt-3 space-y-2">
+                <label for="panelHoldReason" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">New reason</label>
+                <textarea id="panelHoldReason" name="hold_reason" rows="2" maxlength="300" class="w-full rounded-lg px-3 py-2 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-rose-700 font-medium resize-none leading-relaxed" style="background-color: var(--bg-input);">{{ p.hold_reason|default:'' }}</textarea>
+                <div class="flex justify-end gap-2">
+                    <button type="button" data-hold-cancel class="px-3 py-1.5 rounded-lg border border-slate-700/60 text-slate-300 text-[11px] font-bold">Cancel</button>
+                    <button type="submit" class="px-3 py-1.5 rounded-lg bg-rose-700 hover:bg-rose-600 text-white text-[11px] font-bold">Save reason</button>
+                </div>
+            </form>
+            {% endif %}
+        </section>
+        {% endif %}
+
+        <section>
+            <div class="flex items-center justify-between mb-2">
+                <h4 class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Books with them</h4>
+                <span class="text-[10px] text-slate-500">{{ loans|length }} of {{ max_books }}</span>
+            </div>
+            <div class="space-y-2">
+                {% for row in loans %}
+                <div class="rounded-lg border px-3 py-2.5 {% if row.state == 'overdue' %}border-rose-500/30{% elif row.state == 'lost' %}border-amber-500/30{% else %}border-slate-700/50{% endif %}">
+                    <div class="flex items-start justify-between gap-2">
+                        <p class="font-semibold text-slate-200 leading-snug">{{ row.t.book.title }}{% if row.t.book.copy_number %} <span class="text-[10px] font-normal text-slate-500 whitespace-nowrap">&middot; Copy {{ row.t.book.copy_number }}</span>{% endif %}</p>
+                        {% if row.state == 'overdue' %}<span class="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-400 border border-rose-500/30">{{ row.days }} day{{ row.days|pluralize }} late</span>
+                        {% elif row.state == 'lost' %}<span class="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-500 border border-amber-500/30">Lost</span>
+                        {% elif row.days == 0 %}<span class="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-500 border border-amber-500/30">Due today</span>
+                        {% else %}<span class="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">Due in {{ row.days }} day{{ row.days|pluralize }}</span>{% endif %}
+                    </div>
+                    <p class="text-[10px] text-slate-500 mt-1">Borrowed {{ row.t.transaction_date|date:"M j" }}{% if row.t.due_date %} &middot; due {{ row.t.due_date|date:"M j" }}{% endif %}{% if row.fine %} &middot; <span class="{% if row.state == 'lost' %}text-amber-500{% else %}text-rose-400{% endif %} font-semibold">&#8369;{{ row.fine|floatformat:2 }}{% if row.state == 'lost' %} unpaid charge{% else %} in fines so far{% endif %}</span>{% endif %}</p>
+                </div>
+                {% empty %}
+                <p class="text-slate-500">No books out.</p>
+                {% endfor %}
+            </div>
+            {% if owed %}
+            <div class="mt-2 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 flex items-center justify-between">
+                <span class="text-slate-300 font-semibold">Owes in all</span>
+                <span class="text-sm font-bold text-rose-400">&#8369;{{ owed|floatformat:2 }}</span>
+            </div>
+            {% endif %}
+        </section>
+
+        <section>
+            <h4 class="text-[10px] uppercase font-bold tracking-wider text-slate-500 mb-2">Contact and account</h4>
+            <dl class="grid grid-cols-[6.5rem_1fr] gap-x-3 gap-y-1.5">
+                <dt class="text-slate-500">Email</dt><dd class="text-slate-300 break-all">{{ p.email|default:"—" }}</dd>
+                <dt class="text-slate-500">Mobile</dt><dd class="text-slate-300">{{ p.contact_number|default:"—" }}</dd>
+                <dt class="text-slate-500">Address</dt><dd class="text-slate-300">{{ p.address|default:"—" }}</dd>
+                {% if p.school %}<dt class="text-slate-500">School</dt><dd class="text-slate-300">{{ p.school }}</dd>{% endif %}
+                <dt class="text-slate-500">Registered</dt><dd class="text-slate-300">{{ p.registration_date|date:"M j, Y" }}{% if p.registration_channel %} &middot; {{ p.registration_channel|lower }}{% endif %}</dd>
+                <dt class="text-slate-500">ID checked</dt><dd class="text-slate-300">{% if p.identity_verified_at %}{{ p.identity_verified_by.fullname|default:"Staff" }}, {{ p.identity_verified_at|date:"M j, Y" }}{% else %}Not yet{% endif %}</dd>
+            </dl>
+        </section>
+
+        <section>
+            <h4 class="text-[10px] uppercase font-bold tracking-wider text-slate-500 mb-2">Recent visits</h4>
+            <div class="space-y-1.5">
+                {% for v in visits %}
+                <div class="flex items-start justify-between gap-2 border-b border-slate-800/50 pb-1.5">
+                    <div>
+                        <p class="text-slate-300">{{ v.entry_time|date:"M j" }} &middot; {{ v.entry_time|time:"g:i A" }}{% if v.exit_time %} &ndash; {{ v.exit_time|time:"g:i A" }}{% else %} &middot; <span class="text-emerald-400 font-semibold">inside now</span>{% endif %}</p>
+                        {% if v.purpose_of_visit %}<p class="text-[10px] text-slate-500">{{ v.purpose_of_visit }}</p>{% endif %}
+                    </div>
+                    {% with li=v.let_in %}{% if li %}<span class="shrink-0 text-[9px] font-bold uppercase px-1.5 py-0.5 rounded border border-amber-500/30 bg-amber-500/10 text-amber-500" title="{{ v.entry_note }}">Let in &middot; {{ li.kind }}</span>{% endif %}{% endwith %}
+                </div>
+                {% empty %}
+                <p class="text-slate-500">No visits yet.</p>
+                {% endfor %}
+            </div>
+        </section>
+    </div>
+</div>
