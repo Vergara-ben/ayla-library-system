@@ -1549,7 +1549,7 @@
             .then(data => {
                 if (data.success && keepOpen) {
                     addedThisRun += copies;
-                    if (data.shelved) runLabelIds = runLabelIds.concat(data.ids || []);
+                    runLabelIds = runLabelIds.concat(data.ids || []);
                     // What never repeats is cleared; what a run shares stays.
                     ['addTitle', 'addAuthor', 'addIsbn', 'addPublicationYear', 'addPrice', 'addCallNumber'].forEach(function (id) {
                         const el = document.getElementById(id);
@@ -1640,17 +1640,14 @@
         if (justAdded && justAdded.ids && justAdded.ids.length) {
             const n = justAdded.ids.length;
             document.getElementById('justAddedText').textContent = (justAdded.message || 'Saved.')
-                + (justAdded.shelved ? '' : ' ' + (n === 1 ? 'It has' : 'They have') + ' no shelf yet, so the label '
-                   + 'prints once ' + (n === 1 ? 'it is' : 'they are') + ' on one.');
-            document.getElementById('justAddedPrint').textContent = justAdded.shelved
-                ? 'Print ' + (n === 1 ? 'its label' : 'their ' + n + ' labels')
-                : 'Shelve ' + (n === 1 ? 'it' : 'them');
+                + (justAdded.shelved ? '' : ' ' + (n === 1 ? 'It waits' : 'They wait') + ' on Shelving & Labels for a shelf.');
+            document.getElementById('justAddedPrint').textContent = 'Print ' + (n === 1 ? 'its label' : 'their ' + n + ' labels');
             document.getElementById('justAddedBar').classList.remove('hidden');
+            // Straight to the print settings for the new copies; Cancel leaves the button above.
+            document.addEventListener('DOMContentLoaded', function () { openLabelSheet(justAdded.ids); });
         }
         window.printJustAdded = function () {
-            if (!justAdded) return;
-            if (justAdded.shelved) openLabelSheet(justAdded.ids);
-            else location.href = "{% url 'shelving_page' %}?book=" + justAdded.ids[0] + '#shelve';
+            if (justAdded) openLabelSheet(justAdded.ids);
         };
 
         // Show modal if editing mode is active
@@ -1987,19 +1984,20 @@
             const loose = [...chosen()].filter(function (id) { return pickById[id] && pickById[id].level_id == null; });
             const warn = document.getElementById('labelUnshelved');
             warn.classList.toggle('hidden', !loose.length);
+            const one = loose.length === 1;
             warn.innerHTML = loose.length
-                ? '<strong>' + loose.length + ' of the ' + n + '</strong> ' + (loose.length === 1 ? 'has' : 'have')
-                  + ' no shelf yet, so ' + (loose.length === 1 ? 'it does' : 'they do') + ' not print: '
-                  + loose.slice(0, 3).map(function (id) { return esc(pickById[id].title); }).join(', ')
-                  + (loose.length > 3 ? ', …' : '') + '. <a class="underline font-bold" href="' + SHELVING_URL
-                  + '?book=' + loose[0] + '#shelve">Shelve ' + (loose.length === 1 ? 'it' : 'them') + ' first</a>.'
+                ? (n === 1 ? '<strong>No shelf yet:</strong> its label'
+                           : '<strong>' + loose.length + ' of the ' + n + '</strong> ' + (one ? 'has' : 'have')
+                             + ' no shelf yet, so ' + (one ? 'its label' : 'their labels'))
+                  + (one ? ' prints' : ' print') + ' without the shelf line. ' + (one ? 'It still waits' : 'They still wait')
+                  + ' on <a class="underline font-bold" href="' + SHELVING_URL + '#shelve">Shelving &amp; Labels</a> for a shelf.'
                 : '';
             document.getElementById('labelCountNote').textContent =
                 n + ' book' + (n === 1 ? '' : 's') + ' selected.';
             const err = document.getElementById('labelSheetError');
             if (err) { err.textContent = ''; err.classList.add('hidden'); }
             const dl = document.getElementById('labelDownloadBtn');
-            if (dl) { dl.disabled = loose.length === n; dl.innerHTML = '<i class="fa-solid fa-file-pdf text-xs"></i> Download PDF'; }
+            if (dl) { dl.disabled = false; dl.innerHTML = '<i class="fa-solid fa-file-pdf text-xs"></i> Download PDF'; }
             document.getElementById('labelSheetModal').classList.remove('hidden');
             refreshLabelEstimate();
         };
@@ -2639,7 +2637,7 @@
             if (data.preview) {
                 // Show confirm buttons only if there is something to import.
                 showButtons(data.imported || clashes.length
-                    ? ['importConfirmBtn', 'importConfirmLabelsBtn'] : [], 'Cancel');
+                    ? ['importConfirmBtn'] : [], 'Cancel');
                 document.getElementById('importResultModal').classList.remove('hidden');
                 return;
             }
@@ -2647,7 +2645,7 @@
             showButtons([], 'Done');
 
             // Go straight to the label sheet.
-            if (printAfterImport && importedIds.length) {
+            if (importedIds.length) {
                 printAfterImport = false;
                 importSummaryAfterLabels = data;
                 document.getElementById('importResultModal').classList.add('hidden');

@@ -225,19 +225,18 @@ class LabelTests(TestCase):
         return self.client.get('/admin-portal/book-qr-labels/',
                                {'ids': ','.join(str(b.book_id) for b in books)})
 
-    def test_only_shelved_books_are_printed_and_marked(self):
+    def test_shelved_and_unshelved_books_are_printed_and_marked(self):
+        # Labelled as they arrive: no shelf yet only leaves out the shelf line.
         response = self._print(self.shelved, self.loose)
         self.assertEqual(response['Content-Type'], 'application/pdf')
-        self.assertEqual(response['X-Labels-Skipped'], '1')
+        self.assertEqual(response['X-Labels-Skipped'], '0')
         self.shelved.refresh_from_db()
         self.loose.refresh_from_db()
         self.assertIsNotNone(self.shelved.label_printed_at)
-        self.assertIsNone(self.loose.label_printed_at)
+        self.assertIsNotNone(self.loose.label_printed_at)
 
-    def test_a_sheet_of_only_unshelved_books_is_refused(self):
-        result = self._print(self.loose).json()
-        self.assertFalse(result['success'])
-        self.assertIn('Shelf Manager', result['error'])
+    def test_a_sheet_of_only_unshelved_books_prints(self):
+        self.assertEqual(self._print(self.loose)['Content-Type'], 'application/pdf')
 
     def test_books_needing_a_label_are_counted_and_listed(self):
         page = self.client.get('/library-staff/books/')
@@ -2273,3 +2272,50 @@ class DonorToggleTests(TestCase):
             self.assertContains(page, 'data-donor-mode="new"')
             self.assertContains(page, 'Existing donor <span class="opacity-70">(1)</span>', html=False)
             self.assertContains(page, 'name="donor_id"')
+
+
+
+class DirectPrintTests(TestCase):
+    """New copies go straight to the print settings, from receiving as from cataloguing."""
+
+    def setUp(self):
+        self.client = _client(admin_id=_staff(role='Admin').admin_id, admin_role='Admin')
+
+    def test_received_copies_open_for_printing_once(self):
+        self.client.post('/admin-portal/inventory/receive/', {
+            'source': 'Purchase', 'supplier': 'Shop',
+            'items': json.dumps(_with_genre_items([{'title': 'Ibong Adarna', 'author': 'Anon', 'quantity': 2}]))})
+        new = sorted(Book.objects.filter(title='Ibong Adarna').values_list('book_id', flat=True))
+        self.assertEqual(len(new), 2)
+        page = self.client.get('/admin-portal/inventory/')
+        self.assertEqual(sorted(page.context['print_next_ids']), new)
+        self.assertContains(page, 'printNextData')
+        self.assertFalse(self.client.get('/admin-portal/inventory/').context['print_next_ids'])
+
+    def test_receiving_staff_may_print_and_get_the_same(self):
+        staff = _client(admin_id=_staff(role='Staff', modules='inventory').admin_id, admin_role='Staff')
+        staff.post('/admin-portal/inventory/receive/', {
+            'source': 'Purchase', 'supplier': 'Shop',
+            'items': json.dumps(_with_genre_items([{'title': 'Florante', 'author': 'Balagtas'}]))})
+        book = Book.objects.get(title='Florante')
+        page = staff.get('/library-staff/receiving/')
+        self.assertEqual(page.context['print_next_ids'], [book.book_id])
+        self.assertContains(page, 'label-print.js')
+        sheet = staff.get('/admin-portal/book-qr-labels/', {'ids': str(book.book_id)})
+        self.assertEqual(sheet['Content-Type'], 'application/pdf')
+
+    def test_shelving_offers_only_books_still_without_a_label(self):
+        from .models import FloorPlan, Room, Shelf, ShelfLevel
+        plan = FloorPlan.objects.create(name='G', floor_number=1, is_active=True)
+        shelf = Shelf.objects.create(room=Room.objects.create(floor_plan=plan, name='R', map_x=0, map_y=0),
+                                     name='Shelf A', map_x=0, map_y=0)
+        level = ShelfLevel.objects.create(shelf=shelf, level_number=1)
+        done = Book.objects.create(title='Done', author='A', genre='Fiction', qr_code='q-done',
+                                   label_printed_at=timezone.now())
+        fresh = Book.objects.create(title='Fresh', author='A', genre='Fiction', qr_code='q-fresh')
+        r = self.client.post('/admin-portal/shelving/place/', {
+            'placements': '%d:%d,%d:%d' % (done.pk, level.pk, fresh.pk, level.pk)}).json()
+        self.assertEqual(r['ids'], [fresh.pk])
+        r = self.client.post('/admin-portal/shelving/place/', {'placements': '%d:%d' % (done.pk, level.pk)}).json()
+        self.assertEqual(r['ids'], [])
+        self.assertIn('label already', r['message'])

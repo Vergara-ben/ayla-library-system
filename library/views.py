@@ -4597,7 +4597,7 @@ def book_label_picker_data(request):
     })
 
 
-@admin_or_any_module_required('books', 'shelf')
+@admin_or_any_module_required('books', 'shelf', 'inventory')
 def book_qr_labels(request):
     """A printable sheet of QR labels for the selected books."""
     raw_ids = request.GET.get('ids') or request.POST.get('ids') or ''
@@ -4627,13 +4627,8 @@ def book_qr_labels(request):
     if not books:
         return JsonResponse({'success': False, 'error': 'None of those books exist.'})
 
-    # The label says where the book goes, so a book with no shelf waits for one.
-    unshelved = [b for b in books if b.shelf_level_id is None]
-    books = [b for b in books if b.shelf_level_id is not None]
-    if not books:
-        return JsonResponse({'success': False, 'error': (
-            'None of these books has a shelf yet. Put them on a shelf in Shelf Manager first, '
-            'so the label shows where each one goes.')})
+    # Labelled as they arrive: a book with no shelf yet prints without the shelf line.
+    unshelved = []
 
     # A book with no QR cannot be labelled, and the label sheet is exactly when anyone notices.
     missing = [b for b in books if not b.qr_code]
@@ -5999,6 +5994,7 @@ def _import_donation_rows(request):
     admin = User.objects.filter(admin_id=request.session.get('admin_id')).first()
     today = timezone.localdate()
     titles = copies = new_titles = already = 0
+    received_ids = []
     problems = []
     allow_new_genres = request.POST.get('new_genres') in ('1', 'true', 'True', 'on')
     new_genres = set()
@@ -6101,6 +6097,7 @@ def _import_donation_rows(request):
         donation_row = None
         for copy_no in range(quantity):
             copy_book = _intake_book_for_copy(book, is_new and copy_no == 0, 'Donation', condition)
+            received_ids.append(copy_book.book_id)
             record = InventoryRecord.objects.create(
                 book=copy_book,
                 source='Donation',
@@ -6134,6 +6131,7 @@ def _import_donation_rows(request):
     summary = 'Received %d donated copy(ies) across %d title(s)' % (copies, titles)
     if new_titles:
         summary += ' (%d new to the catalogue)' % new_titles
+    _print_next(request, received_ids)
     notes = [
         ('Skipped %d row(s) already imported for the same donor, date and title' % already
          if already else ''),
@@ -12058,6 +12056,7 @@ def inventory_management(request):
         'condition_notes': CONDITION_NOTES,
         'source_choices': InventoryRecord.SOURCE_CHOICES,
         'donor_names': list(Donor.objects.values_list('name', flat=True)[:500]),
+        'print_next_ids': _take_print_next(request),
         'donor_options': _donor_options(),
         'ack_offer': _ack_offer(request),
         'donor_types': Donor.TYPE_CHOICES,
@@ -12097,6 +12096,15 @@ def _sync_donation_row(record):
         if fields:
             record.donation.save(update_fields=fields)
     return record.donation
+
+
+def _print_next(request, book_ids):
+    """Copies just received: the page the desk returns to opens the print settings for their labels."""
+    request.session['print_next'] = list(book_ids)[:MAX_LABELS_PER_SHEET]
+
+
+def _take_print_next(request):
+    return request.session.pop('print_next', None) or []
 
 
 def _receiving_redirect(request, ack=None):
@@ -12474,6 +12482,7 @@ def receive_stock(request):
     admin = User.objects.filter(admin_id=request.session.get('admin_id')).first()
     titles_received = []
     new_titles = 0
+    received_ids = []
     try:
         with transaction.atomic():
             if source == 'Donation':
@@ -12491,6 +12500,7 @@ def receive_stock(request):
                     if price is not None:
                         copy_book.price = price
                         copy_book.save(update_fields=['price'])
+                    received_ids.append(copy_book.book_id)
                     record = InventoryRecord.objects.create(
                         book=copy_book,
                         source=source,
@@ -12524,7 +12534,8 @@ def receive_stock(request):
                      summary + ': ' + ', '.join(t + ' x' + str(q) for t, q in titles_received))
     if new_titles:
         summary += ' (' + str(new_titles) + ' new to the catalogue)'
-    messages.success(request, summary + '. Print the QR labels from the list.')
+    _print_next(request, received_ids)
+    messages.success(request, summary + '. Their labels are ready to print.')
     if source == 'Donation':
         donor = Donor.objects.filter(name__iexact=donor_name).first()
         if donor is not None:
@@ -12549,6 +12560,7 @@ def staff_inventory_receive(request):
         'intake_conditions': INTAKE_CONDITION_OPTIONS,
         'condition_notes': CONDITION_NOTES,
         'donor_names': list(Donor.objects.values_list('name', flat=True)[:500]),
+        'print_next_ids': _take_print_next(request),
         'donor_options': _donor_options(),
         'ack_offer': _ack_offer(request),
         'donor_types': Donor.TYPE_CHOICES,
@@ -13882,9 +13894,15 @@ def shelving_place(request):
         log_admin_action(request, 'Moved books', 'Book',
                          detail='%d book(s) put on their shelves from Shelving & Labels' % len(books))
     n = len(books)
-    return JsonResponse({'success': True, 'placed': n, 'ids': [b.book_id for b in books],
-                         'message': '%d book%s shelved. %s ready to print.'
-                                    % (n, '' if n == 1 else 's', 'Its label is' if n == 1 else 'Their labels are')})
+    unlabelled = [b.book_id for b in books if b.label_printed_at is None]
+    if not unlabelled:
+        message = '%d book%s shelved. %s its label already.' % (
+            n, '' if n == 1 else 's', 'It has' if n == 1 else 'Each has')
+    else:
+        message = '%d book%s shelved. %s ready to print.' % (
+            n, '' if n == 1 else 's', 'Its label is' if len(unlabelled) == 1 else
+            ('Their labels are' if len(unlabelled) == n else '%d labels are' % len(unlabelled)))
+    return JsonResponse({'success': True, 'placed': n, 'ids': unlabelled, 'message': message})
 
 
 @admin_or_any_module_required('books', 'shelf', 'inventory')
