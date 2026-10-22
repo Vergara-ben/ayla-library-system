@@ -486,13 +486,20 @@ def from_text(text, known=None):
 def from_boxes(data):
     """The name boxes: each author's first, middle and surname."""
     from .catalogue import PLACEHOLDER, UNREADABLE
+    from .models import Author
     data = data if isinstance(data, dict) else {}
+    rows = [r for r in (data.get('credits') or [])[:30] if isinstance(r, dict)]
+    picked = {a.pk: a for a in Author.objects.filter(pk__in=[int(r['id']) for r in rows
+                                                               if str(r.get('id') or '').isdigit()])}
     credits = []
-    for row in (data.get('credits') or [])[:30]:
-        if not isinstance(row, dict):
-            continue
-        entry = credit(row.get('first'), row.get('middle'), row.get('last'))
-        del entry['role']
+    for row in rows:
+        author = picked.get(int(row['id'])) if str(row.get('id') or '').isdigit() else None
+        if author is not None:
+            entry = {'id': author.pk, 'first': author.first_name, 'middle': author.middle_name,
+                     'last': author.last_name}
+        else:
+            entry = credit(row.get('first'), row.get('middle'), row.get('last'))
+            del entry['role']
         parts = [p for p in (entry['first'], entry['middle'], entry['last']) if p]
         if not parts:
             continue                            # an empty row is left out
@@ -548,8 +555,11 @@ def attach(book, entry):
     """Give a saved book these names, and the author line built from them."""
     from .models import Book, BookAuthor
     BookAuthor.objects.filter(book=book).delete()
+    from .models import Author
     for position, c in enumerate(entry['credits']):
-        BookAuthor.objects.get_or_create(book=book, author=find_or_create(c), defaults={'position': position})
+        author = Author.objects.filter(pk=c['id']).first() if c.get('id') else None
+        BookAuthor.objects.get_or_create(book=book, author=author or find_or_create(c),
+                                         defaults={'position': position})
     fields = {'author': entry['display'], 'author_unknown': entry['unknown'],
               'authors_and_others': entry['others'], 'authors_unsure': not entry['sure']}
     if entry['original'] and entry['original'] != entry['display']:
@@ -589,13 +599,35 @@ def copy_credits(source, book):
 
 def entry_of(book):
     """A book's names as the boxes show them, split from its author line if never saved as names."""
-    credits = [{'first': c.author.first_name, 'middle': c.author.middle_name, 'last': c.author.last_name}
+    credits = [{'id': c.author_id, 'first': c.author.first_name, 'middle': c.author.middle_name,
+                'last': c.author.last_name}
                for c in book.credits.select_related('author')]
     if credits or book.author_unknown:
         return make_entry(credits, book.author_unknown, book.authors_and_others, not book.authors_unsure,
                           book.author_original)
     reading = split(book.author)
-    return make_entry(reading['credits'], reading['unknown'], reading['others'], reading['sure'], book.author)
+    return make_entry(with_ids(reading['credits']), reading['unknown'], reading['others'], reading['sure'],
+                      book.author)
+
+
+def with_ids(credits):
+    """Names read from a line or a lookup, each matched to the author on file with that name."""
+    from .models import Author
+    on_file = dict(Author.objects.filter(name_key__in=[name_key(c) for c in credits])
+                   .values_list('name_key', 'author_id'))
+    for c in credits:
+        if name_key(c) in on_file:
+            c['id'] = on_file[name_key(c)]
+    return credits
+
+
+def on_file():
+    """Every author of a book here, for the picker: [id, first, middle, last, books]."""
+    from django.db.models import Count, Q
+    from .models import Author
+    return [[a.author_id, a.first_name, a.middle_name, a.last_name, a.books]
+            for a in (Author.objects.annotate(books=Count('credits', filter=Q(credits__book__archived_at__isnull=True)))
+                      .filter(books__gt=0).order_by('sort_name'))]
 
 
 def boxes_json(book=None):

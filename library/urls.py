@@ -125,6 +125,7 @@ urlpatterns = [
     path('admin-portal/isbn-lookup/', views.isbn_lookup, name='isbn_lookup'),
     path('admin-portal/catalogue-assist/', views.catalogue_assist, name='catalogue_assist'),
     path('admin-portal/books/check-authors/', views.check_authors, name='check_authors'),
+    path('admin-portal/authors/', views.author_choices, name='author_choices'),
     path('admin-portal/books/check-authors/save/', views.check_authors_save, name='check_authors_save'),
     path('admin-portal/add-patron/', views.admin_add_patron, name='admin_add_patron'),
     path('admin-portal/manage-patron/', views.admin_manage_patron, name='admin_manage_patron'),
