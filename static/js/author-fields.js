@@ -1,6 +1,5 @@
-/* The author boxes: one row per name, a person's first, middle and surname or an organization's
-   name, and what they did on the book. Two hidden inputs carry them: the names as JSON, and the
-   author line built from them. */
+/* The author boxes: one row per author, first, middle and surname. Two hidden inputs carry them:
+   the names as JSON, and the author line built from them. */
 (function () {
   'use strict';
 
@@ -35,27 +34,23 @@
   }
 
   function shown(c) {
-    return c.kind === 'Organization' ? c.name : [c.first, c.middle, c.last].filter(Boolean).join(' ');
+    return [c.first, c.middle, c.last].filter(Boolean).join(' ');
   }
 
   // The same author line the server builds: "A & B", "A, B & C", "A, B et al.".
-  function join(names, others) {
-    if (others) return names.join(', ') + ' et al.';
-    if (names.length > 1) return names.slice(0, -1).join(', ') + ' & ' + names[names.length - 1];
-    return names[0] || '';
-  }
   function line(data) {
-    var authors = data.credits.filter(function (c) { return c.role === 'Author'; }).map(shown);
-    if (authors.length) return join(authors, data.others);
-    if (data.unknown || !data.credits.length) return data.unknown ? (data.others ? 'Various Authors' : 'Unknown') : '';
-    var role = data.credits[0].role;
-    return join(data.credits.filter(function (c) { return c.role === role; }).map(shown), data.others) + ' (' + role + ')';
+    var names = data.credits.map(shown);
+    if (!names.length) return data.unknown ? (data.others ? 'Various Authors' : 'Unknown') : '';
+    if (data.others) return names.join(', ') + ' et al.';
+    if (names.length > 1) return names.slice(0, -1).join(', ') + ' & ' + names[names.length - 1];
+    return names[0];
   }
 
   function attach(root) {
     if (!root || root.aylaAuthors) return root && root.aylaAuthors;
     var rows = root.querySelector('[data-af-rows]');
     var template = root.querySelector('[data-af-template]');
+    var addButton = root.querySelector('[data-af-add]');
     var unknownBox = root.querySelector('[data-af-unknown]');
     var othersBox = root.querySelector('[data-af-others]');
     var textInput = root.querySelector('[data-af-text]');
@@ -64,45 +59,31 @@
     function rowEls() { return Array.prototype.slice.call(rows.querySelectorAll('[data-af-row]')); }
     function box(row, name) { return row.querySelector('[data-af="' + name + '"]'); }
 
-    function setKind(row, kind) {
-      row.dataset.kind = kind;
-      row.querySelectorAll('[data-af-kind]').forEach(function (b) {
-        var on = b.dataset.afKind === kind;
-        b.classList.toggle('is-on', on);
-        b.setAttribute('aria-pressed', on ? 'true' : 'false');
-      });
-      row.querySelector('[data-af-person]').classList.toggle('hidden', kind === 'Organization');
-      row.querySelector('[data-af-org]').classList.toggle('hidden', kind !== 'Organization');
-    }
-
     function addRow(c, focus) {
       c = c || {};
       var row = template.content.firstElementChild.cloneNode(true);
-      row.querySelector('[data-af-role]').value = c.role || 'Author';
-      ['first', 'middle', 'last', 'name'].forEach(function (k) { box(row, k).value = c[k] || ''; });
-      setKind(row, c.kind === 'Organization' ? 'Organization' : 'Person');
+      ['first', 'middle', 'last'].forEach(function (k) { box(row, k).value = c[k] || ''; });
       rows.appendChild(row);
-      if (focus) (row.dataset.kind === 'Organization' ? box(row, 'name') : box(row, 'first')).focus();
+      if (focus) box(row, 'first').focus();
       return row;
     }
 
     function read() {
       var credits = [];
-      rowEls().forEach(function (row) {
-        var role = row.querySelector('[data-af-role]').value;
-        if (unknownBox.checked && role === 'Author') return;    // set aside while "unknown" is ticked
-        var org = row.dataset.kind === 'Organization';
-        var c = { kind: org ? 'Organization' : 'Person', role: role,
-                  first: org ? '' : tidy(box(row, 'first').value), middle: org ? '' : tidy(box(row, 'middle').value),
-                  last: org ? '' : tidy(box(row, 'last').value), name: org ? tidy(box(row, 'name').value) : '' };
-        if (c.first || c.middle || c.last || c.name) credits.push(c);
-      });
+      // The names are set aside while "Author unknown" is ticked.
+      if (!unknownBox.checked) {
+        rowEls().forEach(function (row) {
+          var c = { first: tidy(box(row, 'first').value), middle: tidy(box(row, 'middle').value),
+                    last: tidy(box(row, 'last').value) };
+          if (c.first || c.middle || c.last) credits.push(c);
+        });
+      }
       return { credits: credits, unknown: unknownBox.checked, others: othersBox.checked };
     }
 
     function problem() {
       var data = read();
-      var half = data.credits.filter(function (c) { return c.kind === 'Person' && !c.last; })[0];
+      var half = data.credits.filter(function (c) { return !c.last; })[0];
       if (half) return 'Type the surname of ' + shown(half) + '. A writer known by one name goes in Surname.';
       if (!data.credits.length && !data.unknown) return 'Type the author, or tick "Author unknown" if the book names none.';
       return '';
@@ -110,12 +91,13 @@
 
     function sync(quiet) {
       var data = read();
+      var off = unknownBox.checked;
       rowEls().forEach(function (row) {
-        var off = unknownBox.checked && row.querySelector('[data-af-role]').value === 'Author';
         row.classList.toggle('is-off', off);
         row.querySelectorAll('input').forEach(function (i) { i.disabled = off; });
         row.querySelector('[data-af-remove]').classList.toggle('invisible', rowEls().length < 2);
       });
+      addButton.classList.toggle('hidden', off);
       var text = problem() && !data.unknown ? '' : line(data);
       var changed = textInput.value !== text || jsonInput.value !== JSON.stringify(data);
       textInput.value = text;
@@ -132,7 +114,7 @@
     rows.addEventListener('paste', function (e) {
       var input = e.target.closest('[data-af]');
       var row = e.target.closest('[data-af-row]');
-      if (!input || !row || row.dataset.kind === 'Organization') return;
+      if (!input || !row) return;
       var text = tidy((e.clipboardData || window.clipboardData).getData('text'));
       var names = text.split(/\s*(?:;|&|\band\b|\/)\s*/).filter(Boolean);
       var empty = ['first', 'middle', 'last'].every(function (k) { return k === input.dataset.af || !box(row, k).value.trim(); });
@@ -140,7 +122,7 @@
       e.preventDefault();
       names.forEach(function (n, i) {
         var parts = splitName(n);
-        var target = i === 0 ? row : addRow({ role: row.querySelector('[data-af-role]').value });
+        var target = i === 0 ? row : addRow();
         ['first', 'middle', 'last'].forEach(function (k) { box(target, k).value = parts[k]; });
       });
       changed();
@@ -148,21 +130,15 @@
     rows.addEventListener('input', function () { sync(); });
     rows.addEventListener('change', changed);
     rows.addEventListener('click', function (e) {
-      var kind = e.target.closest('[data-af-kind]');
       var remove = e.target.closest('[data-af-remove]');
       var row = e.target.closest('[data-af-row]');
-      if (kind && row) {
-        setKind(row, kind.dataset.afKind);
-        (kind.dataset.afKind === 'Organization' ? box(row, 'name') : box(row, 'first')).focus();
-        changed();
-      } else if (remove && row && rowEls().length > 1) {
+      if (remove && row && rowEls().length > 1) {
         row.remove();
         changed();
       }
     });
-    root.querySelector('[data-af-add]').addEventListener('click', function () {
-      // A second name is most often a co-author; after an author line is set aside, an illustrator.
-      addRow({ role: unknownBox.checked ? 'Illustrator' : 'Author' }, true);
+    addButton.addEventListener('click', function () {
+      addRow({}, true);
       sync(true);
     });
     unknownBox.addEventListener('change', changed);
@@ -177,13 +153,11 @@
       othersBox.checked = !!data.others;
       sync(true);
     }
-    // The first box still to fill: an organization's name, or a person's first name or surname.
+    // The first box still to fill: a first name or a surname.
     function focus() {
       var boxes = [];
       rowEls().forEach(function (r) {
-        if (r.classList.contains('is-off')) return;
-        if (r.dataset.kind === 'Organization') boxes.push(box(r, 'name'));
-        else boxes.push(box(r, 'first'), box(r, 'last'));
+        if (!r.classList.contains('is-off')) boxes.push(box(r, 'first'), box(r, 'last'));
       });
       var target = boxes.filter(function (i) { return !i.value.trim(); })[0] || boxes[0] || unknownBox;
       target.focus();

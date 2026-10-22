@@ -1110,11 +1110,7 @@
                     if (data.success) {
                         document.getElementById('detailTitle').textContent = data.title;
                         document.getElementById('detailTitleMain').textContent = data.title;
-                        // The illustrator, editor and the rest after the author line.
-                        const helpers = (data.credits || []).filter(function (c) { return c.role !== 'Author'; });
-                        document.getElementById('detailAuthor').textContent = data.author + helpers.map(function (c) {
-                            return ' · ' + c.role + ': ' + c.name;
-                        }).join('');
+                        document.getElementById('detailAuthor').textContent = data.author;
                         document.getElementById('detailGenre').textContent = data.genre;
                         const subjectTag = document.getElementById('detailSubject');
                         subjectTag.textContent = data.subject || '';
