@@ -1,11 +1,24 @@
 {# Who wrote the book: each author's first, middle and surname in their own boxes. #}
 <style>
     .af { display: flex; flex-direction: column; gap: 8px; }
+    .af .hidden { display: none !important; }
     .af-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); }
     .af-hint { font-size: 10px; color: var(--text-muted); }
     .af-rows { display: flex; flex-direction: column; gap: 8px; }
-    .af-row { display: flex; align-items: center; gap: 6px; }
-    .af-row .af-boxes { flex: 1; }
+    .af-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 6px; }
+    /* Narrow: the switch on its own line, the name and its remove button below. */
+    @media (max-width: 640px) {
+        .af-row { grid-template-columns: minmax(0, 1fr) auto; }
+        .af-mode { grid-column: 1 / -1; justify-self: start; }
+    }
+    .af-mode { display: inline-flex; gap: 2px; padding: 2px; border-radius: 8px; border: 1px solid var(--border-modal, var(--border-color)); }
+    .af-mode button { font-size: 11px; font-weight: 700; padding: 5px 8px; border-radius: 6px; color: var(--text-muted); white-space: nowrap; }
+    .af-mode button.is-on { background: var(--tint-accent); color: var(--accent); }
+    .af-card { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--accent-border, var(--border-color)); background: var(--tint-accent); }
+    .af-card > i { color: var(--accent); font-size: 12px; }
+    .af-card strong { display: block; font-size: 13px; color: var(--text-primary); }
+    .af-card small { display: block; font-size: 10.5px; color: var(--text-muted); }
+    .af-card button { font-size: 11px; font-weight: 700; padding: 4px 8px; border-radius: 6px; border: 1px solid var(--border-modal, var(--border-color)); color: var(--text-primary); }
     .af-row.is-off { opacity: .45; }
     .af-remove { flex-shrink: 0; width: 28px; height: 28px; border-radius: 6px; color: var(--text-muted); }
     .af-remove:hover { color: var(--danger); background: var(--tint-danger); }
@@ -20,10 +33,10 @@
     .af-tick { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
     .af-tick input { accent-color: var(--accent); }
 </style>
-<div class="af" data-author-fields id="{{ prefix }}Authors"{% if initial %} data-initial="{{ initial }}"{% endif %}>
+<div class="af" data-author-fields id="{{ prefix }}Authors" data-list-url="{% url 'author_choices' %}"{% if initial %} data-initial="{{ initial }}"{% endif %}>
     <div class="flex flex-wrap items-baseline justify-between gap-x-3">
         <span class="af-label">{{ label|default:"Author" }}</span>
-        <span class="af-hint">A writer known by one name goes in Surname.</span>
+        <span class="af-hint">Pick one on file, or New for an author not yet here.</span>
     </div>
     <div class="af-rows" data-af-rows></div>
     <div class="af-foot">
@@ -35,10 +48,24 @@
     <input type="hidden" name="authors_json" id="{{ prefix }}AuthorsJson" data-af-json>
     <template data-af-template>
         <div class="af-row" data-af-row>
-            <div class="af-boxes" data-af-person>
-                <input type="text" class="af-input" data-af="first" placeholder="First name" aria-label="First name" autocomplete="off">
-                <input type="text" class="af-input" data-af="middle" placeholder="Middle (optional)" aria-label="Middle name" autocomplete="off">
-                <input type="text" class="af-input" data-af="last" placeholder="Surname" aria-label="Surname" autocomplete="off">
+            <div class="af-mode" role="tablist" aria-label="An author on file, or a new one">
+                <button type="button" role="tab" data-af-mode="saved"><i class="fa-solid fa-address-book text-[9px] mr-0.5"></i> Existing</button>
+                <button type="button" role="tab" data-af-mode="new"><i class="fa-solid fa-user-plus text-[9px] mr-0.5"></i> New</button>
+            </div>
+            <div class="af-body">
+                <div data-af-saved>
+                    <input type="text" class="af-input" data-af-search placeholder="Find an author on file: surname or name" aria-label="Find an author on file" autocomplete="off">
+                    <div class="af-card hidden" data-af-card>
+                        <i class="fa-solid fa-user"></i>
+                        <div class="min-w-0 flex-1"><strong data-af-card-name></strong><small data-af-card-sub></small></div>
+                        <button type="button" data-af-change>Change</button>
+                    </div>
+                </div>
+                <div class="af-boxes hidden" data-af-person>
+                    <input type="text" class="af-input" data-af="first" placeholder="First name" aria-label="First name" autocomplete="off">
+                    <input type="text" class="af-input" data-af="middle" placeholder="Middle (optional)" aria-label="Middle name" autocomplete="off">
+                    <input type="text" class="af-input" data-af="last" placeholder="Surname" aria-label="Surname" autocomplete="off">
+                </div>
             </div>
             <button type="button" class="af-remove" data-af-remove title="Remove this author" aria-label="Remove this author"><i class="fa-solid fa-xmark"></i></button>
         </div>

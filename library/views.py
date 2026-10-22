@@ -13998,8 +13998,8 @@ def _open_library(isbn):
     year = re.search(r'\b(1[0-9]{3}|20[0-9]{2})\b', entry.get('publish_date') or '')
     from . import authors
     # Open Library lists each author on their own, so each is one name for the boxes; a publisher is left out.
-    credits = [c for a in entry.get('authors') or [] if a.get('name')
-               for c in authors.split(a['name'])['credits'][:1]]
+    credits = authors.with_ids([c for a in entry.get('authors') or [] if a.get('name')
+                                for c in authors.split(a['name'])['credits'][:1]])
     names = authors.make_entry(credits)
     return {
         'title': entry.get('title') or '',
@@ -14067,6 +14067,13 @@ def catalogue_assist(request):
 
 
 CHECK_AUTHORS_PAGE = 10
+
+
+@admin_or_any_module_required('books', 'inventory', 'donations')
+def author_choices(request):
+    """The authors on file, for picking an existing one when a book is added."""
+    from .authors import on_file
+    return JsonResponse({'authors': on_file()}, json_dumps_params={'separators': (',', ':')})
 
 
 def _unsure_author_lines():

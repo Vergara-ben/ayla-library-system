@@ -2713,3 +2713,38 @@ class LightPagesTests(TestCase):
         self.assertEqual(len(page.context['book_list']), 40)
         self.assertContains(page, 'id="bookListData"')
         self.assertNotContains(page, 'data-title="Book 00"')
+
+
+class PickExistingAuthorTests(TestCase):
+    """An author already on file is picked, not typed again."""
+
+    def setUp(self):
+        from .authors import attach, make_entry
+        self.client = _client(admin_id=_staff(role='Admin', modules='books,inventory,donations').admin_id,
+                              admin_role='Admin')
+        self.ajax = {'HTTP_X_REQUESTED_WITH': 'XMLHttpRequest'}
+        self.matilda = Book.objects.create(title='Matilda', author='Roald Dahl', genre='Fiction', qr_code='q-m')
+        attach(self.matilda, make_entry([{'first': 'Roald', 'middle': '', 'last': 'Dahl'}]))
+        self.dahl = self.matilda.credits.get().author
+
+    def test_the_list_of_authors_on_file(self):
+        rows = self.client.get('/admin-portal/authors/', **self.ajax).json()['authors']
+        self.assertEqual(rows, [[self.dahl.pk, 'Roald', '', 'Dahl', 1]])
+        staff = _client(admin_id=_staff(role='Staff', modules='inventory').admin_id, admin_role='Staff')
+        self.assertEqual(staff.get('/admin-portal/authors/', **self.ajax).status_code, 200)
+
+    def test_a_picked_author_is_the_one_on_file(self):
+        r = self.client.post('/admin-portal/add-book/', dict(
+            COMPLETE_BOOK, title='The BFG', genre='Fiction', new_genre='1',
+            # The boxes may say anything; the id is who was picked.
+            authors_json=json.dumps({'credits': [{'id': self.dahl.pk, 'first': 'R.', 'middle': '', 'last': 'D.'}]})),
+            **self.ajax).json()
+        self.assertTrue(r['success'], r)
+        bfg = Book.objects.get(title='The BFG')
+        self.assertEqual((bfg.author, bfg.credits.get().author), ('Roald Dahl', self.dahl))
+
+    def test_the_edit_form_shows_authors_on_file_as_picked(self):
+        data = self.client.get('/admin-portal/edit-book/%d/' % self.matilda.pk, **self.ajax).json()
+        self.assertEqual(data['book']['authors']['credits'][0]['id'], self.dahl.pk)
+        from .authors import split, with_ids
+        self.assertEqual(with_ids(split('Dahl, Roald')['credits'])[0]['id'], self.dahl.pk)
