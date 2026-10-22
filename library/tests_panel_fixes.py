@@ -2435,3 +2435,52 @@ class AuditTrailStateTests(TestCase):
         trail = events_since(line)
         self.assertEqual(trail[-1][0], None)
         self.assertIn('moved since the count', trail[-1][1])
+
+
+class TransactionAlertTests(TestCase):
+    """Overdue loans and extension requests are hard to miss: counted live, bannered and popped up."""
+
+    def setUp(self):
+        from . import transaction_alerts
+        transaction_alerts._last_flagged = 0.0
+        self.user = _staff(role='Staff', modules='transactions')
+        self.client = _client(admin_id=self.user.admin_id, admin_role='Staff')
+        reader = Patron.objects.create(first_name='Ana', last_name='Cruz', fullname='Ana Cruz', account_status='Active')
+        self.book = Book.objects.create(title='Late Book', author='A', genre='Fiction', status='Borrowed', qr_code='q-l')
+        self.tx = Transaction.objects.create(patron=reader, book=self.book, transaction_type='Borrow',
+                                             due_date=timezone.localdate() - timedelta(days=1))
+
+    def _items(self):
+        return {i['key']: i for i in self.client.get('/portal/alerts/').json()['items']}
+
+    def test_a_loan_is_overdue_the_day_after_it_is_due_without_waiting_for_the_daily_run(self):
+        items = self._items()
+        self.assertEqual(items['overdue']['count'], 1)
+        self.assertTrue(items['overdue']['urgent'])
+        self.tx.refresh_from_db()
+        self.book.refresh_from_db()
+        self.assertTrue(self.tx.overdue_flag)
+        self.assertEqual(self.book.status, 'Overdue')
+
+    def test_the_sidebar_counts_overdue_loans_and_extension_requests_together(self):
+        DueDateExtension.objects.create(transaction=self.tx, previous_due_date=self.tx.due_date,
+                                        requested_due_date=self.tx.due_date + timedelta(days=2), status='Pending')
+        items = self._items()
+        self.assertEqual(items['transactions']['count'], 2)
+        self.assertTrue(items['transactions']['quiet'])
+        page = self.client.get('/library-staff/transactions/')
+        self.assertContains(page, 'data-alert-badge="transactions"')
+        self.assertContains(page, '1 overdue loan')
+        self.assertContains(page, '1 extension request waiting')
+        self.assertContains(page, 'id="extensions"')
+
+    def test_what_is_waiting_is_said_once_at_sign_in(self):
+        first = self._items()['overdue']
+        self.assertEqual(first['notice_title'], 'At the circulation desk')
+        self.assertIn('1 overdue loan needs you', first['notice'])
+        self.assertNotIn('notice', self._items()['overdue'])
+
+    def test_no_banner_when_nothing_is_waiting(self):
+        self.tx.return_date = timezone.localdate()
+        self.tx.save()
+        self.assertNotContains(self.client.get('/library-staff/transactions/'), 'class="tx-attn"')

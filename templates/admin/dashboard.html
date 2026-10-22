@@ -667,6 +667,8 @@
             </a>
             {% endif %}
 
+            {% url 'admin_transaction' as tx_url %}{% include '_tx_attention.html' %}
+
             <section class="stats-grid" data-live="stats-1">
                 <div class="stat-card">
                     <h4 class="stat-label">Books Available</h4>

@@ -40,8 +40,8 @@
           // The first look in this tab sets the baseline instead of raising old news,
           // except the once-per-sign-in notice of what is already waiting.
           if (before && isNew(item, before[item.key])) show(item);
-          else if (item.notice) show({ key: item.key, icon: item.icon, url: item.url,
-                                       title: 'Waiting for review', text: item.notice });
+          else if (item.notice) show({ key: item.key, icon: item.icon, url: item.url, urgent: item.urgent,
+                                       title: item.notice_title || 'Waiting for review', text: item.notice });
           paintBadges(item);
         });
         remember(now);
@@ -74,7 +74,7 @@
     var old = stack.querySelector('[data-key="' + item.key + '"]');
     if (old) old.remove();
     var card = document.createElement('div');
-    card.className = 'ayla-alert ayla-alert-' + item.key;
+    card.className = 'ayla-alert ayla-alert-' + item.key + (item.urgent ? ' is-urgent' : '');
     card.setAttribute('data-key', item.key);
     card.setAttribute('role', 'status');
     card.innerHTML = '<i class="fa-solid ' + esc(item.icon) + ' ayla-alert-icon" aria-hidden="true"></i>'
@@ -85,6 +85,44 @@
     card.querySelector('button').onclick = function () { card.remove(); };
     stack.insertBefore(card, stack.firstChild);
     while (stack.children.length > 4) stack.lastChild.remove();
+    if (item.urgent) { chime(); flashTitle(item.title); }
+  }
+
+  // A short two-note chime; browsers allow sound only after the page has been clicked once.
+  var audio = null;
+  document.addEventListener('pointerdown', function () {
+    try {
+      audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+      if (audio.state === 'suspended') audio.resume();
+    } catch (e) { audio = null; }
+  }, { once: true });
+  function chime() {
+    if (!audio || audio.state !== 'running') return;
+    [[880, 0], [1320, 0.16]].forEach(function (n) {
+      var osc = audio.createOscillator(), gain = audio.createGain(), t = audio.currentTime + n[1];
+      osc.frequency.value = n[0];
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(0.18, t + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.3);
+      osc.connect(gain).connect(audio.destination);
+      osc.start(t);
+      osc.stop(t + 0.32);
+    });
+  }
+
+  // The tab title flashes until the page is looked at, so it is noticed from another tab.
+  var baseTitle = document.title, flashing = null;
+  function flashTitle(text) {
+    if (flashing) clearInterval(flashing);
+    var on = false, ticks = 0;
+    flashing = setInterval(function () {
+      on = !on;
+      document.title = on ? '\u25cf ' + text : baseTitle;
+      ticks += 1;
+      if ((ticks > 6 && !document.hidden) || ticks > 600) {
+        clearInterval(flashing); flashing = null; document.title = baseTitle;
+      }
+    }, 1000);
   }
 
   document.addEventListener('ayla:live-any', function (e) {

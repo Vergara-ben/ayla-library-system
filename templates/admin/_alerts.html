@@ -1,11 +1,21 @@
 {% load static %}{# Pop-up alerts for new work, on every portal page except one handed to the public. #}
 {% if not desk_mode %}
 <style>
-    .ayla-alerts { position: fixed; right: 16px; bottom: 16px; z-index: 90; display: flex; flex-direction: column; gap: 10px; width: min(360px, calc(100vw - 32px)); }
+    .ayla-alerts { position: fixed; right: 16px; bottom: 16px; z-index: 90; display: flex; flex-direction: column; gap: 10px; width: min(400px, calc(100vw - 32px)); }
     .ayla-alert { display: flex; align-items: flex-start; gap: 12px; padding: 12px 12px 12px 14px; border-radius: 12px;
                   background: var(--bg-modal); color: var(--text-main); border: 1px solid var(--border-modal);
                   border-left: 4px solid var(--accent); box-shadow: 0 10px 30px rgba(0,0,0,.3); animation: aylaAlertIn .25s ease; }
     .ayla-alert-overdue { border-left-color: var(--danger); }
+    /* The desk's alerts: bigger, outlined, and pulsing until seen. */
+    .ayla-alert.is-urgent { padding: 16px 14px 16px 16px; border: 2px solid var(--danger); border-left-width: 6px;
+                            animation: aylaAlertIn .25s ease, aylaAlertPulse 1.6s ease-in-out 3; }
+    .ayla-alert-extensions.is-urgent { border-color: var(--warning); }
+    .ayla-alert.is-urgent .ayla-alert-icon { font-size: 22px; }
+    .ayla-alert.is-urgent .ayla-alert-body strong { font-size: 15px; }
+    .ayla-alert.is-urgent .ayla-alert-body span { font-size: 13px; color: var(--text-main); }
+    .ayla-alert.is-urgent .ayla-alert-body a { padding: 6px 12px; border-radius: 8px; background: var(--danger); color: #fff; }
+    .ayla-alert-extensions.is-urgent .ayla-alert-body a { background: var(--warning); }
+    @keyframes aylaAlertPulse { 0%, 100% { box-shadow: 0 10px 30px rgba(0,0,0,.3); } 50% { box-shadow: 0 0 0 6px rgba(225,29,72,.25), 0 10px 30px rgba(0,0,0,.3); } }
     .ayla-alert-extensions { border-left-color: var(--warning); }
     .ayla-alert-icon { margin-top: 2px; font-size: 15px; color: var(--accent); }
     .ayla-alert-overdue .ayla-alert-icon { color: var(--danger); }
@@ -18,5 +28,5 @@
     @keyframes aylaAlertIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
     @media (prefers-reduced-motion: reduce) { .ayla-alert { animation: none; } }
 </style>
-<script src="{% static 'js/alerts.js' %}?v=20261018" data-url="{% url 'portal_alerts' %}" defer></script>
+<script src="{% static 'js/alerts.js' %}?v=20261022" data-url="{% url 'portal_alerts' %}" defer></script>
 {% endif %}
