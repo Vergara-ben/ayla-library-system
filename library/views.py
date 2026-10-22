@@ -14095,15 +14095,17 @@ def _open_library(isbn):
 def catalogue_assist(request):
     """While a book is typed in: is it already here, which shelf suits it, and its call number."""
     from collections import Counter
-    from .catalogue import clean_author, clean_genre, clean_title, known_genres, same_title, tidy
+    from .catalogue import clean_genre, clean_title, known_genres, same_title, tidy
 
     def label(level):
         return ('%s · %s' % (level.shelf.name, level.label)) if level.shelf_id else level.label
 
-    from .authors import backfill
+    from .authors import backfill, from_text
     backfill()
     title = clean_title(request.GET.get('title'))[0] or tidy(request.GET.get('title'))
-    author = clean_author(request.GET.get('author'))[0] or tidy(request.GET.get('author'))
+    # "Rizal, Jose" typed is the "Jose Rizal" the catalogue keeps.
+    names = from_text(request.GET.get('author'))[0]
+    author = names['display'] if names else tidy(request.GET.get('author'))
     genres = known_genres()
     genre = clean_genre(request.GET.get('genre'), known=genres)[0] or tidy(request.GET.get('genre'))
     year = (request.GET.get('publication_year') or '').strip()
