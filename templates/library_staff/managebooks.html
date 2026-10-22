@@ -375,7 +375,7 @@
                                 <td class="py-4 px-6 text-center">
                                     <div class="flex items-center justify-center gap-1.5">
                                         <button onclick="viewBookDetails({{ book.book_id }})" class="w-7 h-7 rounded border border-slate-800 text-violet-400 hover:text-violet-200 hover:bg-slate-800/40 transition-colors" aria-label="View book details"><i class="fa-solid fa-eye text-[10px]"></i></button>
-                                        <a href="{% url 'admin_edit_book' book.book_id %}" class="w-7 h-7 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 transition-colors"><i class="fa-solid fa-pencil text-[10px]"></i></a>
+                                        <a href="{% url 'admin_edit_book' book.book_id %}" onclick="openEditBook({{ book.book_id }}); return false;" aria-label="Edit book" class="w-7 h-7 rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 transition-colors"><i class="fa-solid fa-pencil text-[10px]"></i></a>
                                         <form method="post" action="{% url 'admin_delete_book' book.book_id %}" class="inline"
                                               data-confirm="Delete &quot;{{ book.title }}&quot;? It is hidden from the catalogue, and its loan history is kept." data-confirm-title="Delete book" data-confirm-label="Delete">
                                             {% csrf_token %}
@@ -1013,7 +1013,49 @@
         }
 
         function closeEditModal() {
-            window.location.href = '{% url 'staff_manage_books' %}';
+            document.getElementById('editBookModal').classList.add('hidden');
+            // Opened from its own link elsewhere: the address goes back to the list, which live updates read.
+            if (location.pathname.indexOf('/edit-book/') !== -1) history.replaceState(null, '', '{% url 'staff_manage_books' %}');
+        }
+
+        // The Edit form opens over the list, filled from the book's saved details.
+        async function openEditBook(bookId) {
+            let data = null;
+            try {
+                const res = await fetch('/admin-portal/edit-book/' + bookId + '/', { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+                data = await res.json();
+            } catch (e) { data = null; }
+            if (!data || !data.success) {
+                const msg = (data && data.error) || 'Could not open that book. Try again.';
+                if (window.AylaDialog) AylaDialog.toast(msg, 'error'); else alert(msg);
+                return;
+            }
+            fillEditForm(bookId, data.book);
+        }
+
+        function fillEditForm(bookId, b) {
+            const set = function (id, v) { const el = document.getElementById(id); if (el) el.value = v == null ? '' : v; };
+            set('editBookId', bookId);
+            set('editTitle', b.title);
+            set('editPublicationYear', b.publication_year);
+            set('editIsbn', b.ISBN);
+            if (editGenrePicker) editGenrePicker.set(b.genre || ''); else set('editGenre', b.genre);
+            document.getElementById('editNoIsbn').checked = !!b.isbn_none;
+            toggleNone('editIsbn', !!b.isbn_none);
+            document.getElementById('editYearUnknown').checked = !!b.year_unknown;
+            toggleNone('editPublicationYear', !!b.year_unknown);
+            set('editSubject', b.subject);
+            set('editMaterial', b.material_type || 'Book');
+            set('editCoverImgUrl', b.cover_img_url);
+            set('editStatus', b.status || 'Available');
+            set('editShelfLevel', b.shelf_level_id);
+            set('editShelfSlot', b.shelf_slot);
+            set('editCondition', b.condition || 'Good');
+            set('editCallNumber', b.call_number);
+            set('editPrice', b.price);
+            AylaAuthors.get('editAuthors').set(b.authors);
+            document.getElementById('editBookModal').classList.remove('hidden');
+            document.getElementById('editTitle').focus();
         }
 
         // Shared by the level strip and the loan table below.
@@ -1128,7 +1170,13 @@
                         document.getElementById('detailExact').textContent = data.location || 'Not recorded';
                         renderLevelStrip(data);
                         renderBookHistory(data);
-                        document.getElementById('detailEditLink').href = `/admin-portal/edit-book/${bookId}/`;
+                        const editLink = document.getElementById('detailEditLink');
+                        editLink.href = `/admin-portal/edit-book/${bookId}/`;
+                        editLink.onclick = function (e) {
+                            e.preventDefault();
+                            closeBookDetailsModal();
+                            openEditBook(bookId);
+                        };
 
                         const locateLink = document.getElementById('detailLocateLink');
                         if (data.shelf_id) {
@@ -1646,7 +1694,11 @@
             .then(response => response.json())
             .then(data => {
                 if (data.success) {
-                    window.location.href = '{% url 'staff_manage_books' %}';
+                    closeEditModal();
+                    if (window.AylaDialog) AylaDialog.toast(data.message || 'Book details updated.', 'success');
+                    if (window.AylaLive) AylaLive.refresh(); else location.reload();
+                } else if (window.AylaDialog) {
+                    AylaDialog.toast(data.error || 'An error occurred', 'error');
                 } else {
                     alert(data.error || 'An error occurred');
                 }
@@ -1678,25 +1730,9 @@
 
         // Show modal if editing mode is active
         {% if book %}
+            // Opened from an Edit link on another page: the same form, filled the same way.
             document.addEventListener('DOMContentLoaded', function() {
-                document.getElementById('editBookId').value = '{{ book.book_id }}';
-                document.getElementById('editTitle').value = '{{ initial.title|default:""|escapejs }}';
-                document.getElementById('editPublicationYear').value = '{{ initial.publication_year|default:""|escapejs }}';
-                document.getElementById('editIsbn').value = '{{ initial.ISBN|default:""|escapejs }}';
-                document.getElementById('editGenre').value = '{{ initial.genre|default:""|escapejs }}';
-                document.getElementById('editNoIsbn').checked = {{ initial.isbn_none|yesno:"true,false" }};
-                toggleNone('editIsbn', {{ initial.isbn_none|yesno:"true,false" }});
-                document.getElementById('editYearUnknown').checked = {{ initial.year_unknown|yesno:"true,false" }};
-                toggleNone('editPublicationYear', {{ initial.year_unknown|yesno:"true,false" }});
-                document.getElementById('editSubject').value = '{{ initial.subject|default:""|escapejs }}';
-                document.getElementById('editMaterial').value = '{{ initial.material_type|default:"Book"|escapejs }}';
-                document.getElementById('editCoverImgUrl').value = '{{ initial.cover_img_url|default:""|escapejs }}';
-                document.getElementById('editStatus').value = '{{ initial.status|default:"Available"|escapejs }}';
-                document.getElementById('editShelfLevel').value = '{{ initial.shelf_level_id|default:""|escapejs }}';
-                document.getElementById('editShelfSlot').value = '{{ initial.shelf_slot|default:""|escapejs }}';
-                document.getElementById('editCondition').value = '{{ initial.condition|default:"Good"|escapejs }}';
-                document.getElementById('editCallNumber').value = '{{ initial.call_number|default:""|escapejs }}';
-                document.getElementById('editBookModal').classList.remove('hidden');
+                openEditBook({{ book.book_id }});
             });
         {% endif %}
 
