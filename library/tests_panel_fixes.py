@@ -2485,3 +2485,184 @@ class TransactionAlertTests(TestCase):
         self.tx.return_date = timezone.localdate()
         self.tx.save()
         self.assertNotContains(self.client.get('/library-staff/transactions/'), 'class="tx-attn"')
+
+
+class AuthorNameTests(TestCase):
+    """Authors are names of their own: a person's first, middle and surname, or an organization."""
+
+    def setUp(self):
+        self.client = _client(admin_id=_staff(role='Admin', modules='books,inventory,donations').admin_id,
+                              admin_role='Admin')
+        self.ajax = {'HTTP_X_REQUESTED_WITH': 'XMLHttpRequest'}
+
+    @staticmethod
+    def _person(first, last, middle='', role='Author'):
+        return {'kind': 'Person', 'role': role, 'first': first, 'middle': middle, 'last': last, 'name': ''}
+
+    def _add(self, credits, unknown=False, others=False, **data):
+        base = dict(COMPLETE_BOOK, title='Accounting', genre='Fiction', new_genre='1',
+                    authors_json=json.dumps({'credits': credits, 'unknown': unknown, 'others': others}))
+        return self.client.post('/admin-portal/add-book/', dict(base, **data), **self.ajax).json()
+
+    def test_split_reads_the_ways_the_catalogue_writes_authors(self):
+        from .authors import display, filing_surname, split
+
+        def line(text):
+            r = split(text)
+            return display(r['credits'], r['unknown'], r['others'])
+        self.assertEqual(line('Dahl, Roald'), 'Roald Dahl')
+        self.assertEqual(line('Koontz, Harold & Weihrich, Heinz'), 'Harold Koontz & Heinz Weihrich')
+        self.assertEqual(line('Anderson, David R., Sweeney, Dennis J. & Williams, Thomas A.'),
+                         'David R. Anderson, Dennis J. Sweeney & Thomas A. Williams')
+        self.assertEqual(line('Ailene B. Dayag et al.'), 'Ailene B. Dayag et al.')
+        self.assertEqual(line('Various Authors'), 'Various Authors')
+        self.assertEqual(line('Arrogante, Caberio, Belleza'), 'Arrogante, Caberio & Belleza')
+        drawn = split('Astrid Lindgren (Ill. Ingrid Nyman)')
+        self.assertEqual([(c['role'], c['last']) for c in drawn['credits']],
+                         [('Author', 'Lindgren'), ('Illustrator', 'Nyman')])
+        self.assertTrue(drawn['sure'])
+        self.assertEqual(split('Department of Education')['credits'][0]['kind'], 'Organization')
+        self.assertFalse(split('Collier / P.F. Collier')['sure'])
+        self.assertFalse(split('Dr. Jose P. Rizal (Florante at Laura)')['sure'])
+        self.assertEqual(filing_surname('Juan Dela Cruz Jr.'), 'Dela Cruz')
+        self.assertEqual(filing_surname("Harold Koontz, Cyril O'Donnell & Heinz Weihrich"), 'Koontz')
+        self.assertEqual(filing_surname('Austen, Jane'), 'Austen')
+
+    def test_add_book_keeps_each_name_with_its_role_and_files_under_the_first_author(self):
+        from .models import BookAuthor
+        r = self._add([self._person('Walter', 'Meigs', 'B.'), self._person('Robert', 'Meigs', 'F.'),
+                       self._person('Ann', 'Lee', role='Illustrator')], copies='2')
+        self.assertTrue(r['success'], r)
+        books = Book.objects.filter(title='Accounting')
+        self.assertEqual(books.count(), 2)
+        for book in books:
+            self.assertEqual(book.author, 'Walter B. Meigs & Robert F. Meigs')
+            self.assertEqual(list(book.credits.values_list('role', 'author__name')),
+                             [('Author', 'Walter B. Meigs'), ('Author', 'Robert F. Meigs'),
+                              ('Illustrator', 'Ann Lee')])
+            self.assertIn(' M', book.call_number)
+        # Two copies, one record per person.
+        self.assertEqual(BookAuthor.objects.filter(author__name='Walter B. Meigs').count(), 2)
+        self.assertEqual(set(BookAuthor.objects.values_list('author__sort_name', flat=True)),
+                         {'Meigs, Walter B.', 'Meigs, Robert F.', 'Lee, Ann'})
+
+    def test_the_boxes_need_a_surname_and_unknown_means_no_author_names(self):
+        r = self._add([self._person('Roald', '')])
+        self.assertFalse(r['success'])
+        self.assertEqual(r['field'], 'author')
+        self.assertIn('surname', r['error'])
+        r = self._add([self._person('Roald', 'Dahl')], unknown=True)
+        self.assertIn('Untick', r['error'])
+        r = self._add([], unknown=True, others=True, title='Folk Tales')
+        self.assertTrue(r['success'], r)
+        book = Book.objects.get(title='Folk Tales')
+        self.assertEqual((book.author, book.author_unknown, book.authors_and_others),
+                         ('Various Authors', True, True))
+        r = self._add([{'kind': 'Organization', 'role': 'Author', 'name': 'Department of Education'}],
+                      title='Araling Panlipunan')
+        self.assertTrue(r['success'], r)
+        self.assertEqual(Book.objects.get(title='Araling Panlipunan').credits.get().author.kind, 'Organization')
+
+    def test_a_typed_line_from_an_older_page_is_split_too(self):
+        r = self.client.post('/admin-portal/add-book/', dict(COMPLETE_BOOK, title='Noli', author='Rizal, Jose',
+                                                             genre='Fiction', new_genre='1'), **self.ajax).json()
+        self.assertTrue(r['success'], r)
+        book = Book.objects.get(title='Noli')
+        self.assertEqual(book.author, 'Jose Rizal')
+        self.assertEqual(book.author_original, 'Rizal, Jose')
+        self.assertEqual(book.credits.get().author.last_name, 'Rizal')
+
+    def test_edit_book_shows_and_saves_the_names_and_search_finds_the_illustrator(self):
+        from .views import _book_search_q
+        self._add([self._person('Roald', 'Dahl')], title='Matilda')
+        book = Book.objects.get(title='Matilda')
+        page = self.client.get('/admin-portal/edit-book/%d/' % book.pk).content.decode()
+        self.assertIn('data-initial=', page)
+        self.assertIn('Roald', page)
+        form = dict(COMPLETE_BOOK, title='Matilda', genre='Fiction', new_genre='1', authors_json=json.dumps(
+            {'credits': [self._person('Roald', 'Dahl'), self._person('Quentin', 'Blake', role='Illustrator')]}))
+        r = self.client.post('/admin-portal/edit-book/%d/' % book.pk, form, **self.ajax).json()
+        self.assertTrue(r['success'], r)
+        self.assertEqual(list(book.credits.values_list('role', flat=True)), ['Author', 'Illustrator'])
+        self.assertEqual(list(Book.objects.filter(_book_search_q('Blake'))), [book])
+        self.assertEqual(list(Book.objects.filter(_book_search_q('Dahl, Roald'))), [book])
+
+    def test_received_copies_carry_the_names(self):
+        line = {'title': 'Ibong Adarna', 'quantity': 2, 'condition': 'Good', 'genre': 'Fiction', 'new_genre': True,
+                'isbn_none': True, 'year_unknown': True, 'price': '90', 'author': 'Jose Corazon de Jesus',
+                'authors': {'credits': [self._person('Jose', 'Corazon de Jesus')], 'unknown': False,
+                            'others': False}}
+        self.client.post('/admin-portal/inventory/receive/', {'source': 'Purchase', 'supplier': 'Test Supplier',
+                                                              'items': json.dumps([line])})
+        copies = Book.objects.filter(title='Ibong Adarna')
+        self.assertEqual(copies.count(), 2)
+        for book in copies:
+            self.assertEqual(book.author, 'Jose Corazon de Jesus')
+            self.assertEqual(book.credits.get().author.last_name, 'Corazon de Jesus')
+
+    def test_splitting_the_catalogue_backs_up_and_lists_the_unsure(self):
+        import os
+        import tempfile
+        from django.core.management import call_command
+        for n, text in enumerate(['Koontz, Harold & Weihrich, Heinz', 'Collier / P.F. Collier',
+                                  'Collier / P.F. Collier']):
+            Book.objects.create(title='Book %d' % n, author=text, qr_code='q-%d' % n)
+        # Two editions that end up under one author line: the labelled copy keeps its number.
+        plain = Book.objects.create(title='Moby Dick', author='Herman Melville', qr_code='q-m1')
+        adapted = Book.objects.create(title='Moby Dick', author='Herman Melville (Adap. Felix Sutton)',
+                                      qr_code='q-m2', label_printed_at=timezone.now())
+        with tempfile.TemporaryDirectory() as folder:
+            call_command('split_authors', backup_dir=folder, stdout=io.StringIO())
+            backups = os.listdir(folder)
+            self.assertEqual(len(backups), 1)
+            with open(os.path.join(folder, backups[0]), encoding='utf-8') as f:
+                self.assertIn('Collier / P.F. Collier', f.read())
+        self.assertEqual(Book.objects.get(title='Book 0').author, 'Harold Koontz & Heinz Weihrich')
+        self.assertEqual(Book.objects.filter(authors_unsure=True).count(), 2)
+        plain.refresh_from_db()
+        adapted.refresh_from_db()
+        self.assertEqual((adapted.author, adapted.copy_number), ('Herman Melville', 1))
+        self.assertEqual((plain.author, plain.copy_number), ('Herman Melville', 2))
+        self.assertEqual(adapted.credits.get(role='Adapter').author.name, 'Felix Sutton')
+
+        # Check authors lists the line once, and saving fixes both its books.
+        r = self.client.get('/admin-portal/books/check-authors/?count=1', **self.ajax).json()
+        self.assertEqual((r['lines'], r['books']), (1, 2))
+        self.assertContains(self.client.get('/admin-portal/books/check-authors/'), 'Collier / P.F. Collier')
+        r = self.client.post('/admin-portal/books/check-authors/save/', {
+            'key': 'Collier / P.F. Collier', 'authors_json': json.dumps(
+                {'credits': [{'kind': 'Organization', 'role': 'Author', 'name': 'P.F. Collier'}]})},
+            **self.ajax).json()
+        self.assertTrue(r['success'], r)
+        self.assertEqual((r['books'], r['lines']), (2, 0))
+        for book in Book.objects.filter(title__in=['Book 1', 'Book 2']):
+            self.assertEqual((book.author, book.authors_unsure, book.author_original),
+                             ('P.F. Collier', False, 'Collier / P.F. Collier'))
+
+    def test_the_author_reports(self):
+        from .models import Author
+        from .reports import build_report
+        self._add([self._person('Walter', 'Meigs'), self._person('Robert', 'Meigs')], title='Accounting')
+        self._add([self._person('Roald', 'Dahl')], title='Matilda', copies='2')
+        self._add([{'kind': 'Organization', 'role': 'Author', 'name': 'Department of Education'}], title='EsP 7')
+        reader = Patron.objects.create(first_name='Ana', last_name='Cruz', email='ana@example.invalid',
+                                       account_status='Active')
+        for title in ('Accounting', 'Matilda', 'Matilda'):
+            Transaction.objects.create(book=Book.objects.filter(title=title).first(), patron=reader,
+                                       transaction_type='Borrow', due_date=timezone.localdate())
+        today = timezone.localdate()
+        listed = build_report('authors', today, today)
+        self.assertEqual([r[0] for r in listed['rows']],
+                         ['Dahl, Roald', 'Department of Education', 'Meigs, Robert', 'Meigs, Walter'])
+        self.assertEqual(listed['rows'][0][3:], [1, 2])
+        borrowed = build_report('author_borrowing', today - timedelta(days=1), today)
+        self.assertEqual([(r[1], r[3]) for r in borrowed['rows']],
+                         [('Dahl, Roald', 2), ('Meigs, Robert', 1), ('Meigs, Walter', 1)])
+        dahl = Author.objects.get(name='Roald Dahl')
+        books = build_report('author_books', today, today, {'author': str(dahl.author_id)})
+        self.assertEqual(books['title'], 'Books by Roald Dahl')
+        self.assertEqual([(r[0], r[3]) for r in books['rows']], [('Matilda', 2)])
+        page = self.client.get('/admin-portal/reports/?type=author_books&generate=1&author=%d' % dahl.author_id)
+        self.assertContains(page, 'Books by Roald Dahl')
+        pdf = self.client.get('/admin-portal/reports/pdf/?type=author_books&author=%d' % dahl.author_id)
+        self.assertEqual(pdf.status_code, 200)

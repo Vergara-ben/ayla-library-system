@@ -1,0 +1,66 @@
+{# Who is credited on the book: each person's names in their own boxes, or an organization's name. #}
+<style>
+    .af { display: flex; flex-direction: column; gap: 8px; }
+    .af-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); }
+    .af-hint { font-size: 10px; color: var(--text-muted); }
+    .af-rows { display: flex; flex-direction: column; gap: 8px; }
+    .af-row { border: 1px solid var(--border-modal, var(--border-color)); border-radius: 10px; padding: 8px; display: flex; flex-direction: column; gap: 6px; background: var(--bg-subtle, transparent); }
+    .af-row.is-off { opacity: .45; }
+    .af-top { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .af-role { font-size: 11px; font-weight: 700; padding: 4px 6px; border-radius: 6px; background: var(--bg-input); color: var(--text-primary); border: 1px solid var(--border-modal, var(--border-color)); }
+    .af-kind { display: inline-flex; gap: 2px; padding: 2px; border-radius: 7px; border: 1px solid var(--border-modal, var(--border-color)); }
+    .af-kind button { font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 5px; color: var(--text-muted); }
+    .af-kind button.is-on { background: var(--tint-accent); color: var(--accent); }
+    .af-remove { margin-left: auto; width: 24px; height: 24px; border-radius: 6px; color: var(--text-muted); }
+    .af-remove:hover { color: var(--danger); background: var(--tint-danger); }
+    .af-boxes { display: grid; gap: 6px; grid-template-columns: repeat(auto-fit, minmax(7.5rem, 1fr)); }
+    .af-input { width: 100%; background: var(--bg-input); border: 1px solid var(--border-modal, var(--border-color)); border-radius: 8px; padding: 8px 10px; font-size: 14px; font-weight: 500; color: var(--text-primary); outline: none; }
+    .af-input:focus { border-color: var(--accent-strong, var(--accent)); }
+    .af-input:disabled { cursor: not-allowed; }
+    .af-input.is-wrong { border-color: var(--danger); }
+    .af-foot { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; font-size: 11px; color: var(--text-muted); }
+    .af-add { font-weight: 700; color: var(--accent); }
+    .af-add:hover { text-decoration: underline; }
+    .af-tick { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
+    .af-tick input { accent-color: var(--accent); }
+</style>
+<div class="af" data-author-fields id="{{ prefix }}Authors"{% if initial %} data-initial="{{ initial }}"{% endif %}>
+    <div class="flex flex-wrap items-baseline justify-between gap-x-3">
+        <span class="af-label">{{ label|default:"Author" }}</span>
+        <span class="af-hint">A writer known by one name goes in Surname.</span>
+    </div>
+    <div class="af-rows" data-af-rows></div>
+    <div class="af-foot">
+        <button type="button" class="af-add" data-af-add><i class="fa-solid fa-plus text-[10px]"></i> Add another name</button>
+        <label class="af-tick"><input type="checkbox" data-af-unknown> Author unknown</label>
+        <label class="af-tick" title="The book names more people than are typed here"><input type="checkbox" data-af-others> And others (et al.)</label>
+    </div>
+    <input type="hidden" name="author" id="{{ prefix }}Author" data-af-text>
+    <input type="hidden" name="authors_json" id="{{ prefix }}AuthorsJson" data-af-json>
+    <template data-af-template>
+        <div class="af-row" data-af-row>
+            <div class="af-top">
+                <select class="af-role" data-af-role aria-label="What they did on the book">
+                    <option value="Author">Author</option>
+                    <option value="Illustrator">Illustrator</option>
+                    <option value="Editor">Editor</option>
+                    <option value="Adapter">Adapter</option>
+                    <option value="Translator">Translator</option>
+                </select>
+                <div class="af-kind" role="group" aria-label="Person or organization">
+                    <button type="button" data-af-kind="Person"><i class="fa-solid fa-user text-[9px] mr-0.5"></i> Person</button>
+                    <button type="button" data-af-kind="Organization"><i class="fa-solid fa-building text-[9px] mr-0.5"></i> Organization</button>
+                </div>
+                <button type="button" class="af-remove" data-af-remove title="Remove this name" aria-label="Remove this name"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="af-boxes" data-af-person>
+                <input type="text" class="af-input" data-af="first" placeholder="First name" aria-label="First name" autocomplete="off">
+                <input type="text" class="af-input" data-af="middle" placeholder="Middle (optional)" aria-label="Middle name" autocomplete="off">
+                <input type="text" class="af-input" data-af="last" placeholder="Surname" aria-label="Surname" autocomplete="off">
+            </div>
+            <div class="hidden" data-af-org>
+                <input type="text" class="af-input" data-af="name" placeholder="Organization, e.g. Department of Education" aria-label="Organization name" autocomplete="off">
+            </div>
+        </div>
+    </template>
+</div>

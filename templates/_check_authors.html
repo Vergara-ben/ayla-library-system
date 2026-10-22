@@ -1,0 +1,23 @@
+{# Author lines split by a guess: each shown with its best reading in the name boxes, saved once for all its books. #}
+<div data-check-authors data-lines="{{ lines }}" class="space-y-3">
+    {% for g in groups %}
+    <form data-check-line class="rounded-xl border p-4 space-y-3" style="border-color: var(--border-color); background-color: var(--bg-card);">
+        <input type="hidden" name="key" value="{{ g.key }}">
+        <div class="flex flex-wrap items-start justify-between gap-3">
+            <div class="min-w-0 flex-1">
+                <p class="text-[10px] uppercase font-bold tracking-wider text-slate-500">Written as</p>
+                <p class="text-sm font-semibold text-slate-200 break-words">{{ g.key }}</p>
+                <p class="text-[11px] text-slate-500 mt-0.5">On {{ g.books|length }} book{{ g.books|length|pluralize }}: {{ g.titles|slice:":3"|join:", " }}{% if g.titles|length > 3 %} and {{ g.titles|length|add:"-3" }} more{% endif %}</p>
+            </div>
+            <button type="submit" class="text-[11px] font-bold px-3 py-1.5 rounded-lg border transition-colors whitespace-nowrap" style="color: var(--accent); border-color: var(--accent-border, var(--border-color)); background-color: var(--tint-accent);"><i class="fa-solid fa-check mr-1"></i> Save</button>
+        </div>
+        {% include '_author_fields.html' with prefix=g.prefix initial=g.initial label="Read as" %}
+        <p data-check-error class="hidden text-[11px] text-rose-400"></p>
+    </form>
+    {% empty %}
+    <p class="rounded-xl border px-4 py-6 text-center text-sm text-slate-400" style="border-color: var(--border-color);"><i class="fa-solid fa-circle-check text-emerald-500 mr-1"></i> Every author line has been checked.</p>
+    {% endfor %}
+    {% if next_page %}
+    <button type="button" data-check-more="{{ next_page }}" class="w-full text-[11px] font-bold py-2 rounded-lg border text-slate-300 hover:bg-slate-800/40" style="border-color: var(--border-color);">Show the next {{ groups|length }}</button>
+    {% endif %}
+</div>

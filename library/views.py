@@ -994,8 +994,12 @@ def _book_search_q(term):
     term = (term or '').strip()
     if not term:
         return Q()
+    from .models import BookAuthor
+    # Any name on the book, an illustrator's too, written either way round.
+    named = BookAuthor.objects.filter(Q(author__name__icontains=term) | Q(author__sort_name__icontains=term))
     q = (Q(title__icontains=term)
          | Q(author__icontains=term)
+         | Q(book_id__in=named.values('book_id'))
          | Q(ISBN__icontains=term)
          | Q(genre__icontains=term)
          | Q(subject__icontains=term))
@@ -1916,8 +1920,9 @@ def _catalogue_entry(post, exclude_ids=(), editing=False):
     """The cataloguing rules on a typed book: (clean values, [(field, problem)]).
 
     editing: a genre that is not sent is left as it is, like the edit form's other fields."""
-    from .catalogue import (clean_author, clean_condition, clean_copies, clean_genre, clean_isbn,
-                            clean_price, clean_title, clean_year)
+    from . import authors
+    from .catalogue import (clean_condition, clean_copies, clean_genre, clean_isbn, clean_price, clean_title,
+                            clean_year)
     problems = []
 
     def take(field, result):
@@ -1927,8 +1932,10 @@ def _catalogue_entry(post, exclude_ids=(), editing=False):
         return value
 
     values = {}
+    authors.backfill()
     values['title'] = take('title', clean_title(post.get('title')))
-    values['author'] = take('author', clean_author(post.get('author')))
+    values['authors'] = take('author', authors.from_post(post))
+    values['author'] = values['authors']['display'] if values['authors'] else None
     values['ISBN'] = take('ISBN', clean_isbn(post.get('ISBN'), values['title'] or '', exclude_ids))
     if 'genre' in post or not editing:
         values['genre'] = take('genre', clean_genre(post.get('genre'), allow_new=post.get('new_genre') == '1'))
@@ -1978,6 +1985,7 @@ def admin_add_book(request):
             cover_img_url = request.POST.get('cover_img_url', '').strip()
             copies = values['copies']
             # Copies of a title share its call number and subject.
+            from . import authors
             from .catalogue import same_title, tidy
             siblings = same_title(values['title'], values['author'])
             if not values['call_number']:
@@ -2009,6 +2017,7 @@ def admin_add_book(request):
                     year_unknown=values['year_unknown'],
                     qr_code=str(uuid4()),
                 )
+                authors.attach(book, values['authors'])
                 first = first or book
                 created.append(book.book_id)
                 _add_existing_copy(book, request)
@@ -2915,6 +2924,7 @@ def admin_delete_patron(request, patron_id):
 
 @granted_module_required('books')
 def admin_edit_book(request, book_id):
+    from . import authors
     book = Book.objects.filter(book_id=book_id).first()
     if book is None:
         return portal_redirect(request, 'admin_management')
@@ -2938,6 +2948,7 @@ def admin_edit_book(request, book_id):
         'material_type': book.material_type or 'Book',
         'call_number': book.call_number or '',
         'price': book.price if book.price is not None else '',
+        'authors_json': authors.boxes_json(book),
     }
 
     if request.method == 'POST':
@@ -2996,6 +3007,7 @@ def admin_edit_book(request, book_id):
             if 'price' in request.POST:
                 book.price = price
             book.save()
+            authors.attach(book, values['authors'])
             if book.condition != condition_before:
                 _copy_follows_book_condition(book, condition_before, request)
             if book.shelf_level_id and book.shelf_level_id != board_before and book.shelf_slot is None:
@@ -4471,6 +4483,7 @@ def admin_book_details_ajax(request, book_id):
         'book_id': book.book_id,
         'title': book.title,
         'author': book.author,
+        'credits': [{'name': c.author.name, 'role': c.role} for c in book.credits.select_related('author')],
         'ISBN': book.ISBN or 'N/A',
         'genre': book.genre or 'General',
         'subject': book.subject or '',
@@ -4808,8 +4821,9 @@ def download_book_template(request):
     # Matched by name, so order does not matter and extra columns are ignored.
     return _template_response('book_import_template.xlsx', 'Books', [
         ('Title', True, 'The title as printed on the book.', 'Pride and Prejudice'),
-        ('Author', True, 'Surname, First or First Surname. Several authors can share one cell.',
-         'Austen, Jane'),
+        ('Author', True, 'First Surname, or Surname, First. Join several authors with &, and add an '
+                         'illustrator as (Ill. Name). Each is saved as a name of its own.',
+         'Jane Austen'),
         ('Publication Year', True, 'Four digits, or "unknown" if the book does not say.', 1963),
         ('ISBN', True, 'The ISBN or accession number, or "none" if the book has neither.', 'none'),
         ('Genre', True, "One of the library's genres, e.g. Fiction or Science. Other wording, like Legal "
@@ -5488,10 +5502,13 @@ def _import_books_body(request):
 
         imported = skipped_dup = skipped_blank = copies_created = 0
         # Rows that break the cataloguing rules are not imported; each is named with its reason.
-        from .catalogue import (clean_author, clean_copies, clean_genre, clean_isbn, clean_price,
-                                clean_title, clean_year, known_genres, matched_genre, tidy)
+        from . import authors
+        from .catalogue import (clean_copies, clean_genre, clean_isbn, clean_price, clean_title, clean_year,
+                                known_genres, matched_genre, tidy)
         problems = []
         genres = known_genres()
+        authors.backfill()
+        known_names = authors.known_names()
         allow_new_genres = request.POST.get('new_genres') in ('1', 'true', 'True', 'on')
         new_genres = set()
         # A sheet's own wording, matched to one of the library's genres: wording -> genre.
@@ -5565,7 +5582,8 @@ def _import_books_body(request):
                 return value
 
             title = rule(clean_title(title)) or title
-            author = rule(clean_author(author)) or author
+            names = rule(authors.from_text(author, known_names))
+            author = names['display'] if names else author
             from .catalogue import NO_ISBN_WORDS, UNKNOWN_YEAR_WORDS, missing_details
             raw_isbn = field(row, 'ISBN')
             # "none" or "N/A" in the cell is said on purpose, unlike an empty one.
@@ -5693,6 +5711,7 @@ def _import_books_body(request):
                     price=price,
                     qr_code=str(uuid4()),
                 )
+                authors.attach(book, names)
                 _add_existing_copy(book, request, reason='Imported from the existing collection')
                 imported += 1
                 created_ids.append(book.book_id)
@@ -5944,7 +5963,7 @@ def download_donation_template(request):
         ('date_donated', False, 'An Excel date, 2026-09-01 or 09/01/2026. Blank means today.',
          '2026-09-01'),
         ('title', True, 'The title as printed on the book.', 'Noli Me Tangere'),
-        ('author', False, 'Surname, First or First Surname.', 'Rizal, Jose'),
+        ('author', False, 'First Surname, or Surname, First. Join several authors with &.', 'Jose Rizal'),
         ('ISBN', False, 'Used to recognise a title the library already has. For a new title, the ISBN or '
                         '"none".', 'none'),
         ('genre', False, "Needed for a title the library does not have yet: one of its genres. Other wording "
@@ -6234,6 +6253,7 @@ def get_book_by_id(request):
         'book_id': book.book_id,
         'title': book.title,
         'author': book.author,
+        'credits': [{'name': c.author.name, 'role': c.role} for c in book.credits.select_related('author')],
         'status': book.status,
     }
     return JsonResponse(book_data)
@@ -7439,8 +7459,11 @@ def admin_reports(request):
 
     # The form carries generate=1; a bare visit to the page does not.
     generated = bool(request.GET.get('generate'))
-    report = build_report(report_type, start, end) if generated else None
-
+    report = build_report(report_type, start, end, _report_options(request)) if generated else None
+    from .models import Author
+    from .reports import author_choices
+    picked = _query_id(request, 'author')
+    picked_author = Author.objects.filter(author_id=picked).first() if picked else None
 
     context = {
         'report': report,
@@ -7452,8 +7475,16 @@ def admin_reports(request):
         # Reports that use a date range.
         'is_snapshot': report_type in SNAPSHOT_REPORTS,
         'snapshot_types_json': json.dumps(sorted(SNAPSHOT_REPORTS)),
+        # Books by an Author is run for one author, picked by name.
+        'author_choices': author_choices(),
+        'picked_author': picked_author,
     }
     return render(request, 'admin/reports.html', context)
+
+
+def _report_options(request):
+    """What a report is run for, beyond its dates: the author, for Books by an Author."""
+    return {'author': request.GET.get('author', '')}
 
 
 def _posted_id(request, key):
@@ -7485,7 +7516,7 @@ def admin_report_pdf(request):
     if report_type not in dict(REPORT_TYPES):
         report_type = 'transactions'
     start, end = parse_date_range(request.GET.get('start'), request.GET.get('end'))
-    report = build_report(report_type, start, end)
+    report = build_report(report_type, start, end, _report_options(request))
 
     buf = render_report_pdf(report)
     log_admin_action(request, 'Export', 'Report',
@@ -7504,7 +7535,7 @@ def admin_report_excel(request):
     if report_type not in dict(REPORT_TYPES):
         report_type = 'transactions'
     start, end = parse_date_range(request.GET.get('start'), request.GET.get('end'))
-    report = build_report(report_type, start, end)
+    report = build_report(report_type, start, end, _report_options(request))
 
     buf = render_report_excel(report)
     log_admin_action(request, 'Export', 'Report',
@@ -12257,7 +12288,8 @@ def _resolve_intake_book(item, source):
         return book, False
 
     # A new title follows the same cataloguing rules as Add Book.
-    from .catalogue import clean_author, clean_genre, clean_isbn, clean_title, clean_year
+    from . import authors
+    from .catalogue import clean_genre, clean_isbn, clean_title, clean_year
     if not (item.get('title') or '').strip():
         raise ValueError('Every line needs either a catalogued title or a new title.')
     named = (item.get('title') or '').strip()[:60]
@@ -12269,7 +12301,9 @@ def _resolve_intake_book(item, source):
         return value
 
     title = rule(clean_title(item.get('title')))
-    author = rule(clean_author(item.get('author')))
+    authors.backfill()
+    names = rule(authors.from_item(item, authors.known_names()))
+    author = names['display']
     from .catalogue import NO_ISBN_WORDS
     # "none" in a sheet says the book has no ISBN; it is not a number to check.
     isbn = ('' if str(item.get('isbn') or '').strip().lower() in NO_ISBN_WORDS
@@ -12330,6 +12364,7 @@ def _resolve_intake_book(item, source):
         qr_code=str(uuid4()),
         shelf_level=None,           # shelving is a separate, deliberate step
     )
+    authors.attach(book, names)
     return book, True
 
 
@@ -12350,7 +12385,8 @@ def _intake_book_for_copy(book, reuse, source, condition):
             book.condition = condition
             book.save(update_fields=['condition'])
         return book
-    return Book.objects.create(
+    from .authors import copy_credits
+    copy = Book.objects.create(
         title=book.title,
         author=book.author,
         publication_year=book.publication_year,
@@ -12367,6 +12403,8 @@ def _intake_book_for_copy(book, reuse, source, condition):
         qr_code=str(uuid4()),
         shelf_level=None,
     )
+    copy_credits(book, copy)
+    return copy
 
 
 def _add_existing_copy(book, request, reason='Catalogued from the existing collection'):
@@ -14039,9 +14077,15 @@ def _open_library(isbn):
     if not entry:
         return None
     year = re.search(r'\b(1[0-9]{3}|20[0-9]{2})\b', entry.get('publish_date') or '')
+    from . import authors
+    # Open Library lists each author on their own, so each is one name for the boxes.
+    credits = [c for a in entry.get('authors') or [] if a.get('name')
+               for c in authors.split(a['name'])['credits'][:1]]
+    names = authors.make_entry(credits)
     return {
         'title': entry.get('title') or '',
-        'author': ', '.join(a.get('name', '') for a in entry.get('authors') or [] if a.get('name')),
+        'author': names['display'] if credits else '',
+        'authors': {'credits': credits, 'unknown': False, 'others': False},
         'publication_year': year.group(1) if year else '',
         'cover_img_url': (entry.get('cover') or {}).get('medium', ''),
     }
@@ -14056,6 +14100,8 @@ def catalogue_assist(request):
     def label(level):
         return ('%s · %s' % (level.shelf.name, level.label)) if level.shelf_id else level.label
 
+    from .authors import backfill
+    backfill()
     title = clean_title(request.GET.get('title'))[0] or tidy(request.GET.get('title'))
     author = clean_author(request.GET.get('author'))[0] or tidy(request.GET.get('author'))
     genres = known_genres()
@@ -14099,6 +14145,68 @@ def catalogue_assist(request):
                          'genre': genre, 'genre_known': bool(genre) and genre.lower() in genres})
 
 
+CHECK_AUTHORS_PAGE = 10
+
+
+def _unsure_author_lines():
+    """Books whose names were split by a guess, one group per author line as first written."""
+    groups = {}
+    for b in (Book.objects.filter(authors_unsure=True).order_by('title', 'copy_number')
+              .only('book_id', 'title', 'author', 'author_original', 'author_unknown', 'authors_and_others',
+                    'authors_unsure')):
+        key = b.author_original or b.author
+        groups.setdefault(key, {'key': key, 'books': []})['books'].append(b)
+    return sorted(groups.values(), key=lambda g: (-len(g['books']), g['key'].lower()))
+
+
+@granted_module_required('books')
+def check_authors(request):
+    """Manage Books' list of author lines the system split by a guess, to look over and save."""
+    from . import authors
+    authors.backfill()
+    groups = _unsure_author_lines()
+    if request.GET.get('count'):
+        return JsonResponse({'lines': len(groups), 'books': sum(len(g['books']) for g in groups)})
+    try:
+        page = max(1, int(request.GET.get('page') or 1))
+    except ValueError:
+        page = 1
+    shown = groups[(page - 1) * CHECK_AUTHORS_PAGE:page * CHECK_AUTHORS_PAGE]
+    for n, g in enumerate(shown):
+        g['prefix'] = 'chk%d' % ((page - 1) * CHECK_AUTHORS_PAGE + n)
+        g['initial'] = authors.boxes_json(g['books'][0])
+        g['titles'] = list(dict.fromkeys(b.title for b in g['books']))
+    return render(request, '_check_authors.html', {
+        'groups': shown, 'lines': len(groups), 'books': sum(len(g['books']) for g in groups),
+        'next_page': page + 1 if page * CHECK_AUTHORS_PAGE < len(groups) else None,
+    })
+
+
+@granted_module_required('books')
+def check_authors_save(request):
+    """Save the checked names on every book that had this author line."""
+    from . import authors
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Use the Save button.'}, status=405)
+    key = ' '.join((request.POST.get('key') or '').split())
+    entry, problem = authors.from_post(request.POST)
+    if problem:
+        return JsonResponse({'success': False, 'error': problem})
+    books = list(Book.all_objects.filter(authors_unsure=True)
+                 .filter(Q(author_original=key) | Q(author_original='', author=key)))
+    if not books:
+        return JsonResponse({'success': False, 'error': 'Those books were already checked.'})
+    entry['original'] = key
+    with transaction.atomic():
+        # Labelled copies first, so a copy whose number is already printed keeps it.
+        for book in sorted(books, key=lambda b: (b.label_printed_at is None, b.pk)):
+            authors.attach(book, entry)
+    log_admin_action(request, 'Update', 'Book', books[0].book_id,
+                     'Checked the author "%s" on %d book(s): %s' % (key[:80], len(books), entry['display'][:120]))
+    return JsonResponse({'success': True, 'books': len(books), 'display': entry['display'],
+                         'lines': len(_unsure_author_lines())})
+
+
 @admin_or_module_required('books')
 def isbn_lookup(request):
     """Fill in a book from its ISBN: from our own catalogue first, then Open Library."""
@@ -14112,8 +14220,9 @@ def isbn_lookup(request):
     known = list(books_with_isbn(digits).order_by('book_id'))
     if known:
         book = known[0]
+        from .authors import boxes_json
         return JsonResponse({'success': True, 'source': 'catalogue', 'copies': len(known), 'book': {
-            'title': book.title, 'author': book.author,
+            'title': book.title, 'author': book.author, 'authors': json.loads(boxes_json(book)),
             'publication_year': book.publication_year or '', 'genre': book.genre or '',
             'material_type': book.material_type, 'price': str(book.price) if book.price is not None else '',
             'cover_img_url': book.cover_img_url or '',
