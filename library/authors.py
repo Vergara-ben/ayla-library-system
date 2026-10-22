@@ -72,6 +72,12 @@ def _is_particle(word):
         '-' in word and word.rsplit('-', 1)[1].rstrip('.') in PARTICLES)
 
 
+def _leads_surname(word):
+    """The Spanish and Filipino particles that never stand as a first name: de, dela, san, sta."""
+    word = word.lower()
+    return any(w.rstrip('.') in NAME_PARTICLES - {'van', 'von'} for w in (word, word.rsplit('-', 1)[-1]))
+
+
 def _surname_like(chunk):
     """One surname, as a "Surname, Given" line starts: Dahl, Dela Cruz, de Lara-Topacio, Moral Jr."""
     words = chunk.split()
@@ -113,8 +119,9 @@ def person(text):
     if not tokens:
         return '', '', '', False
     sure = sure and not INITIAL.match(tokens[-1])     # "E. Bragado and A.": a cut-off name
-    if len(tokens) == 1:
-        return '', '', ' '.join(p for p in (tokens[0], suffix) if p), sure
+    # "De Vega" or "San Andres" alone is a surname; "Al Spicer" and "Van Morrison" are not.
+    if len(tokens) == 1 or all(_leads_surname(t) for t in tokens[:-1]):
+        return '', '', ' '.join(tokens + ([suffix] if suffix else [])), sure
     cut = len(tokens) - 1
     while cut > 1 and _is_particle(tokens[cut - 1]):
         cut -= 1

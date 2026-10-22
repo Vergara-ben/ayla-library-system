@@ -2517,6 +2517,10 @@ class AuthorNameTests(TestCase):
         self.assertEqual(line('Ailene B. Dayag et al.'), 'Ailene B. Dayag et al.')
         self.assertEqual(line('Various Authors'), 'Various Authors')
         self.assertEqual(line('Arrogante, Caberio, Belleza'), 'Arrogante, Caberio & Belleza')
+        # A surname with its particle, alone in a list, is one surname.
+        listed = split('Arrogante, De Vega, San Andres')['credits']
+        self.assertEqual([(c['first'], c['last']) for c in listed],
+                         [('', 'Arrogante'), ('', 'De Vega'), ('', 'San Andres')])
         drawn = split('Astrid Lindgren (Ill. Ingrid Nyman)')
         self.assertEqual([(c['role'], c['last']) for c in drawn['credits']],
                          [('Author', 'Lindgren'), ('Illustrator', 'Nyman')])

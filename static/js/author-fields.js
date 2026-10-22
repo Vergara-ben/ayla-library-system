@@ -6,6 +6,9 @@
 
   var PARTICLES = ['de', 'dela', 'del', 'delos', 'delas', 'della', 'di', 'da', 'das', 'dos', 'la', 'las', 'los',
                    'le', 'du', 'san', 'santa', 'santo', 'sta', 'sto', 'st', 'van', 'von', 'der', 'den', 'y'];
+  // The Spanish and Filipino ones never stand as a first name.
+  var SURNAME_LEADS = ['de', 'dela', 'del', 'delos', 'delas', 'della', 'di', 'da', 'das', 'dos', 'la', 'las', 'los',
+                       'san', 'santa', 'santo', 'sta', 'sto', 'y', 'ng'];
   var SUFFIX = /^(jr\.?|sr\.?|ii|iii|iv)$/i;
 
   function tidy(text) { return String(text == null ? '' : text).split(/\s+/).filter(Boolean).join(' '); }
@@ -20,7 +23,11 @@
     }
     var words = text.split(' ').filter(Boolean);
     var suffix = words.length > 1 && SUFFIX.test(words[words.length - 1]) ? words.pop() : '';
-    if (words.length < 2) return { first: '', middle: '', last: tidy(words.join(' ') + ' ' + suffix) };
+    // "De Vega" alone is a surname; "Van Morrison" is not.
+    var leads = function (w) { return SURNAME_LEADS.indexOf(w.toLowerCase().split('-').pop().replace(/\.$/, '')) !== -1; };
+    if (words.length < 2 || words.slice(0, -1).every(leads)) {
+      return { first: '', middle: '', last: tidy(words.join(' ') + ' ' + suffix) };
+    }
     var cut = words.length - 1;
     while (cut > 1 && PARTICLES.indexOf(words[cut - 1].toLowerCase().replace(/\.$/, '')) !== -1) cut -= 1;
     return { first: words[0], middle: words.slice(1, cut).join(' '),
