@@ -2526,6 +2526,8 @@ class AuthorNameTests(TestCase):
                          [('Author', 'Lindgren'), ('Illustrator', 'Nyman')])
         self.assertTrue(drawn['sure'])
         self.assertEqual(split('Department of Education')['credits'][0]['kind'], 'Organization')
+        self.assertEqual(split('Johnson, H. Webster')['credits'][0]['kind'], 'Person')
+        self.assertEqual(split('Merriam-Webster')['credits'][0]['kind'], 'Organization')
         self.assertFalse(split('Collier / P.F. Collier')['sure'])
         self.assertFalse(split('Dr. Jose P. Rizal (Florante at Laura)')['sure'])
         self.assertEqual(filing_surname('Juan Dela Cruz Jr.'), 'Dela Cruz')

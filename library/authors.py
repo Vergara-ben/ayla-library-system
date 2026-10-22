@@ -21,7 +21,7 @@ ORG_WORDS = re.compile(
     r"|bureau|office|ministry|commission|committee|agency|library|editors|editorial|staff|editorial board"
     r"|academy|fund|federation|alliance|organi[sz]ation|services|surgeons|nurses|teachers"
     r"|group|center|centre|magazine|kitchen|task force|international|united nations|philippines?"
-    r"|deped|decs|nhcp|fape|diwa|grolier|macmillan|scholastic|merriam|webster|hammond|hmh|harcourt"
+    r"|deped|decs|nhcp|fape|diwa|grolier|macmillan|scholastic|merriam|hammond|hmh|harcourt"
     r"|mcgraw|pearson|vibal|abiva|disney|britannica|encyclopa?edia|parragon|usborne|ladybird|kindersley"
     r"|time-life|reader's digest|grandreams|mouse works|vatican)(?!\w)", re.I)
 
