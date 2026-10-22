@@ -94,7 +94,7 @@ class ReceivingConditionTests(TestCase):
         self.client = _client(admin_id=_staff(role='Admin').admin_id)
 
     def _receive(self, items, source='Purchase', **extra):
-        data = {'source': source, 'items': json.dumps(_with_genre_items(items))}
+        data = {'source': source, 'supplier': 'Test Supplier', 'items': json.dumps(_with_genre_items(items))}
         data.update(extra)
         return self.client.post('/admin-portal/inventory/receive/', data, follow=True)
 
@@ -1059,7 +1059,7 @@ class ConditionScaleTests(TestCase):
         self.client = _client(admin_id=self.staff.admin_id)
 
     def _receive(self, condition, source='Purchase', **extra):
-        data = {'source': source, 'items': json.dumps(_with_genre_items([
+        data = {'source': source, 'supplier': 'Test Supplier', 'items': json.dumps(_with_genre_items([
             {'title': 'Ibong Adarna', 'author': 'Anon', 'quantity': 1, 'condition': condition}]))}
         data.update(extra)
         self.client.post('/admin-portal/inventory/receive/', data)
@@ -1112,7 +1112,7 @@ class ConditionScaleTests(TestCase):
         book.refresh_from_db()
         self.assertEqual((book.condition, book.status), ('Damaged', 'Under Repair'))
         self.client.post(url, {'inventory_id': record.inventory_id, 'condition': 'Good',
-                               'reason': 'Repaired', 'admin_password': 'DeskTest123'})
+                               'reason': 'Repaired and back in use', 'admin_password': 'DeskTest123'})
         book.refresh_from_db()
         self.assertEqual((book.condition, book.status), ('Good', 'Available'))
 
@@ -1446,14 +1446,14 @@ class StricterCataloguingTests(TestCase):
             line = {'title': 'Ibong Adarna', 'author': 'Unknown', 'quantity': 1, 'condition': 'Good',
                     'isbn_none': True, 'year_unknown': True, 'price': '120'}
             line.update(item)
-            self.client.post('/admin-portal/inventory/receive/', {'source': 'Purchase', 'items': json.dumps([line])})
+            self.client.post('/admin-portal/inventory/receive/', {'source': 'Purchase', 'supplier': 'Test Supplier', 'items': json.dumps([line])})
             return Book.objects.filter(title='Ibong Adarna').first()
         self.assertIsNone(receive(genre='Epic Poem'))
         self.assertIsNone(receive(genre='Fiction', author='n/a'))
         self.assertEqual(receive(genre='Epic Poem', new_genre=True).genre, 'Epic Poem')
         # A title already catalogued needs nothing more.
         before = Book.objects.filter(title='Noli Me Tangere').count()
-        self.client.post('/admin-portal/inventory/receive/', {'source': 'Purchase', 'items': json.dumps(
+        self.client.post('/admin-portal/inventory/receive/', {'source': 'Purchase', 'supplier': 'Test Supplier', 'items': json.dumps(
             [{'book_id': self.noli.book_id, 'quantity': 1, 'condition': 'Good'}])})
         self.assertEqual(Book.objects.filter(title='Noli Me Tangere').count(), before + 1)
 
@@ -1816,7 +1816,7 @@ class CompleteBookRecordTests(TestCase):
 
     def test_receiving_a_new_title_needs_its_price_but_a_catalogued_one_does_not(self):
         def receive(line):
-            self.client.post('/admin-portal/inventory/receive/', {'source': 'Purchase', 'items': json.dumps([line])})
+            self.client.post('/admin-portal/inventory/receive/', {'source': 'Purchase', 'supplier': 'Test Supplier', 'items': json.dumps([line])})
         receive({'title': 'Ibong Adarna', 'author': 'Unknown', 'genre': 'Fiction', 'quantity': 1,
                  'condition': 'Good', 'isbn_none': True, 'year_unknown': True})
         self.assertFalse(Book.objects.filter(title='Ibong Adarna').exists())
@@ -2319,3 +2319,64 @@ class DirectPrintTests(TestCase):
         r = self.client.post('/admin-portal/shelving/place/', {'placements': '%d:%d' % (done.pk, level.pk)}).json()
         self.assertEqual(r['ids'], [])
         self.assertIn('label already', r['message'])
+
+
+class InventoryValidationTests(TestCase):
+    """The inventory's rules, checked on the server as well as in the browser."""
+
+    def setUp(self):
+        self.client = _client(admin_id=_staff(role='Admin').admin_id, admin_role='Admin')
+
+    def _receive(self, **data):
+        base = {'source': 'Purchase', 'supplier': 'National Book Store',
+                'items': json.dumps(_with_genre_items([{'title': 'Ibong Adarna', 'author': 'Anon', 'quantity': 2}]))}
+        base.update(data)
+        return self.client.post('/admin-portal/inventory/receive/', base)
+
+    def test_reasons_need_real_words(self):
+        from .inventory_rules import reason_problem
+        for bad in ('', 'x', 'asdasd', 'aaaaaaa', '12345678', 'Damaged'):
+            self.assertTrue(reason_problem(bad), bad)
+        self.assertIsNone(reason_problem('Water damage found during shelving'))
+
+    def test_a_shipment_needs_its_supplier(self):
+        self._receive(supplier=' ')
+        self.assertFalse(InventoryRecord.objects.exists())
+        self._receive()
+        self.assertEqual(InventoryRecord.objects.count(), 2)
+
+    def test_a_donation_cannot_be_dated_in_the_future(self):
+        tomorrow = (timezone.localdate() + timedelta(days=1)).isoformat()
+        self._receive(source='Donation', donor_type='Individual', donor_first_name='Ana', donor_last_name='Cruz',
+                      donated_date=tomorrow)
+        self.assertFalse(InventoryRecord.objects.exists())
+
+    def test_a_price_is_at_least_one_peso(self):
+        self._receive(items=json.dumps(_with_genre_items([{'title': 'Florante', 'author': 'Balagtas', 'price': '0'}])))
+        self.assertFalse(InventoryRecord.objects.exists())
+
+    def test_a_delivery_received_twice_needs_confirming(self):
+        self._receive()
+        again = self.client.post('/admin-portal/inventory/receive/check/', {
+            'source': 'Purchase', 'supplier': 'national book store',
+            'items': json.dumps([{'title': 'Ibong Adarna', 'author': 'Anon', 'quantity': 1}])}).json()
+        self.assertEqual(len(again['duplicates']), 1)
+        self.assertIn('2 copies already received', again['duplicates'][0])
+        self._receive()
+        self.assertEqual(InventoryRecord.objects.count(), 2, 'not received twice without confirming')
+        self._receive(confirm_duplicate='1')
+        self.assertEqual(InventoryRecord.objects.count(), 4)
+
+    def test_a_condition_change_with_a_throwaway_reason_is_refused(self):
+        self._receive()
+        record = InventoryRecord.objects.first()
+        self.client.post('/admin-portal/inventory/condition/', {
+            'inventory_id': record.pk, 'condition': 'Damaged', 'reason': 'x', 'admin_password': 'DeskTest123'})
+        record.refresh_from_db()
+        self.assertEqual(record.condition, 'Good')
+
+    def test_the_forms_check_as_you_type(self):
+        page = self.client.get('/admin-portal/inventory/')
+        for marker in ('inventory-checks.js', 'data-check="reason"', 'data-check="supplier"', 'data-check="donated"',
+                       'data-check="price"', 'data-checked-form', "url 'receive_check'" if False else 'receive/check/'):
+            self.assertContains(page, marker)

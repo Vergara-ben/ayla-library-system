@@ -49,9 +49,10 @@
     <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
     <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
     <script src="{% static 'js/ayla-dialog.js' %}"></script>
+    <script src="{% static 'js/inventory-checks.js' %}?v=20261022"></script>
     <script src="{% static 'js/picker.js' %}"></script>
     <script src="{% static 'js/genre-picker.js' %}"></script>
-    <script src="{% static 'js/donor-intake.js' %}?v=20261018"></script>
+    <script src="{% static 'js/donor-intake.js' %}?v=20261022"></script>
     {{ donor_names|json_script:'donorNamesData' }}
     {{ donor_options|json_script:'donorOptionsData' }}
 </head>
@@ -100,7 +101,7 @@
                     <div class="px-5 py-3 border-b border-slate-800/60">
                         <h4 class="text-sm font-bold text-slate-200 tracking-wide">Receive Stock</h4>
                     </div>
-                    <form onsubmit="return packIntake()" method="post" action="{% url 'receive_stock' %}" class="px-5 py-5 space-y-4">
+                    <form onsubmit="return packIntake(this)" data-checked-form method="post" action="{% url 'receive_stock' %}" class="px-5 py-5 space-y-4">
                         {% csrf_token %}
 
                         <div>
@@ -120,7 +121,7 @@
                         <div id="shipmentFields" class="grid grid-cols-2 gap-4">
                             <div>
                                 <label for="f_supplier" class="field-label">Supplier</label>
-                                <input id="f_supplier" type="text" name="supplier" class="field-input" placeholder="Who shipped it">
+                                <input id="f_supplier" type="text" name="supplier" class="field-input" placeholder="Who shipped it" data-check="supplier">
                             </div>
                             <div>
                                 <label for="f_po_number" class="field-label">PO number</label>
@@ -193,7 +194,7 @@
                             </div>
                             <div>
                                 <label for="rcvPrice" class="field-label">Price per copy (₱)</label>
-                                <input type="number" id="rcvPrice" class="field-input" min="0" step="0.01" placeholder="Charged if a copy is lost; needed for a new title">
+                                <input type="number" id="rcvPrice" class="field-input" min="1" step="0.01" data-check="price" placeholder="Charged if a copy is lost; needed for a new title">
                             </div>
 
                             <p id="rcvItemError" class="hidden text-[11px] text-rose-400 font-semibold"></p>
@@ -383,7 +384,8 @@
 
             const condition = document.getElementById('rcvCondition').value || 'Good';
             const priceText = document.getElementById('rcvPrice').value.trim();
-            if (priceText && !(parseFloat(priceText) >= 0)) { rcvItemError('The price must be zero or more.'); return; }
+            const priceBad = window.AylaChecks ? AylaChecks.rules.price(priceText) : '';
+            if (priceBad) { rcvItemError(priceBad); document.getElementById('rcvPrice').focus(); return; }
             const item = { quantity: qty, condition: condition, price: priceText };
             if (bookId) {
                 const opt = sel.options[sel.selectedIndex];
@@ -489,7 +491,7 @@
             });
         }
 
-        function packIntake() {
+        function packIntake(form) {
             // A donation needs its donor: typed in full, or picked from those on file.
             if (document.getElementById('rcvSource').value === 'Donation' && window.AylaDonorIntake && AylaDonorIntake.current) {
                 const why = AylaDonorIntake.current.problem();
@@ -500,7 +502,43 @@
                 return false;
             }
             document.getElementById('rcvItemsField').value = JSON.stringify(rcvItems);
-            return true;
+            if (form.dataset.confirmed === '1') return true;
+            confirmIntake(form);
+            return false;
+        }
+
+        // What is about to be received, said back once, with anything already received from them that day.
+        async function confirmIntake(form) {
+            const donation = document.getElementById('rcvSource').value === 'Donation';
+            const copies = rcvItems.reduce(function (n, it) { return n + (parseInt(it.quantity, 10) || 1); }, 0);
+            const who = donation
+                ? ((window.AylaDonorIntake && AylaDonorIntake.current && AylaDonorIntake.current.label()) || 'the donor')
+                : document.getElementById('f_supplier').value.trim();
+            const day = donation ? document.getElementById('f_donated_date').value : '';
+            let again = [];
+            try {
+                const r = await fetch("{% url 'receive_check' %}", {
+                    method: 'POST', body: new FormData(form), headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+                again = (await r.json()).duplicates || [];
+            } catch (e) { /* the server checks again when it receives */ }
+            const when = day ? ' on ' + new Date(day + 'T00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+            const ok = await AylaDialog.confirm(
+                'Receive ' + copies + ' cop' + (copies === 1 ? 'y' : 'ies') + ' of ' + rcvItems.length + ' title'
+                + (rcvItems.length === 1 ? '' : 's') + (donation ? ' donated by ' : ' from ') + who + when + '?', {
+                    title: again.length ? 'Received before?' : 'Receive this delivery?',
+                    confirmLabel: again.length ? 'Receive again' : 'Receive', danger: false,
+                    detail: rcvItems.map(function (it) { return '\u2022 ' + it.label + ' \u00d7' + it.quantity; }).join('\n')
+                        + (again.length ? '\n\nAlready received:\n' + again.map(function (d) { return '\u2022 ' + d; }).join('\n')
+                                          + '\nReceive again only if this is a second delivery.' : ''),
+                });
+            if (!ok) return;
+            if (again.length) {
+                const flag = document.createElement('input');
+                flag.type = 'hidden'; flag.name = 'confirm_duplicate'; flag.value = '1';
+                form.appendChild(flag);
+            }
+            form.dataset.confirmed = '1';
+            form.submit();
         }
 
         // Label QR images are made by our own server.

@@ -7740,9 +7740,9 @@ class InventoryPasswordTests(TestCase):
 
     def test_each_change_is_refused_without_the_password(self):
         posts = [
-            ('/admin-portal/inventory/condition/', {'condition': 'Damaged', 'reason': 'Torn'}),
+            ('/admin-portal/inventory/condition/', {'condition': 'Damaged', 'reason': 'Torn cover found'}),
             ('/admin-portal/inventory/update/', {'book_id': self.book.book_id, 'source': 'Existing',
-                                                 'reason': 'Typo'}),
+                                                 'reason': 'Typo in the record'}),
             ('/admin-portal/inventory/deaccession/', {'reason': 'Entered twice'}),
         ]
         before = (self.record.condition, self.record.status)
@@ -7756,7 +7756,7 @@ class InventoryPasswordTests(TestCase):
 
     def test_the_right_password_lets_it_through(self):
         self.client.post('/admin-portal/inventory/condition/', {
-            'inventory_id': self.record.inventory_id, 'condition': 'Damaged', 'reason': 'Torn',
+            'inventory_id': self.record.inventory_id, 'condition': 'Damaged', 'reason': 'Torn cover found',
             'admin_password': 'SmokeTest123'})
         self.record.refresh_from_db()
         self.assertEqual(self.record.condition, 'Damaged')
@@ -8945,7 +8945,7 @@ class OneCopyPerBookTests(TestCase):
     def _receive(self, items, source='Purchase', **extra):
         # The condition on arrival is required; these tests are about something else.
         items = _with_genre_items([dict({'condition': 'Good'}, **item) for item in items])
-        data = {'source': source, 'items': json.dumps(items)}
+        data = {'source': source, 'supplier': 'Test Supplier', 'items': json.dumps(items)}
         data.update(extra)
         return self.client.post('/admin-portal/inventory/receive/', data)
 
@@ -9081,7 +9081,7 @@ class OneCopyPerBookTests(TestCase):
 
         def mark(condition):
             self.client.post('/admin-portal/inventory/condition/', {
-                'inventory_id': record.inventory_id, 'condition': condition, 'reason': 'Checked',
+                'inventory_id': record.inventory_id, 'condition': condition, 'reason': 'Checked at the desk',
                 'admin_password': 'SmokeTest123'})
 
         mark('Damaged')

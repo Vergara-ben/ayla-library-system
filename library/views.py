@@ -98,6 +98,7 @@ from .reports import (REPORT_TYPES, SNAPSHOT_REPORTS, parse_date_range, build_re
                       render_report_pdf, render_report_excel)
 from .models import CONDITION_NOTES, StockAuditLine
 from .accession import release_shelved_donations
+from . import inventory_rules
 from .models import Book, Patron, PatronLog, Transaction, User, ShelfLevel, Donation, Donor, Announcement, FloorPlan, Shelf, Room, Door, Waypoint, BLEBeacon, WaypointConnection, SystemLog, BorrowingRule, Obstacle, Stairway, PasswordResetOTP, InventoryRecord, StockMovement, StockAudit, DueDateExtension, ReactivationRequest, PatronPhoto
 
 # Patron views
@@ -12098,6 +12099,70 @@ def _sync_donation_row(record):
     return record.donation
 
 
+def _already_received(source, party, day, po_number, items):
+    """Lines of a delivery already received from the same donor or supplier on the same day."""
+    party = ' '.join((party or '').split())
+    if not party or source not in ('Donation', 'Purchase'):
+        return []
+    found = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get('book_id') or '').strip():
+            book = Book.objects.filter(book_id=str(item['book_id']).strip()).first()
+            if book is None:
+                continue
+            title = book.title
+        else:
+            title = ' '.join(str(item.get('title') or '').split())
+        if not title:
+            continue
+        # By title: the catalogue tidies an author's name as it saves it.
+        copies = InventoryRecord.objects.filter(source=source, book__title__iexact=title)
+        if source == 'Donation':
+            copies = copies.filter(donor_name__iexact=party, donated_date=day)
+        else:
+            copies = copies.filter(supplier__iexact=party, received_date=day)
+            if po_number:
+                copies = copies.filter(po_number__iexact=po_number)
+        n = copies.count()
+        if n:
+            found.append('"%s": %d cop%s already received from %s on %s'
+                         % (title, n, 'y' if n == 1 else 'ies', party, day.strftime('%b %d, %Y')))
+    return found
+
+
+@admin_or_module_required('inventory')
+def receive_check(request):
+    """Before receiving: has this delivery, or part of it, been received already?"""
+    if request.method != 'POST':
+        return JsonResponse({'duplicates': []})
+    source = (request.POST.get('source') or 'Purchase').strip()
+    try:
+        items = json.loads(request.POST.get('items') or '[]')
+    except ValueError:
+        items = []
+    day, po_number = timezone.localdate(), None
+    if source == 'Donation':
+        picked = (request.POST.get('donor_id') or '').strip()
+        chosen = Donor.objects.filter(donor_id=picked).first() if picked.isdigit() else None
+        if chosen is not None:
+            party = chosen.name
+        else:
+            party, parts, _problem = _posted_donor_name(request.POST, prefix='donor_')
+            saved = Donor.find(party, **parts) if party else None
+            party = saved.name if saved is not None else party
+        try:
+            day = datetime.strptime((request.POST.get('donated_date') or '').strip(), '%Y-%m-%d').date()
+        except ValueError:
+            pass
+    else:
+        party = request.POST.get('supplier')
+        po_number = (request.POST.get('po_number') or '').strip() or None
+    return JsonResponse({'duplicates': _already_received(source, party, day, po_number,
+                                                         items if isinstance(items, list) else [])})
+
+
 def _print_next(request, book_ids):
     """Copies just received: the page the desk returns to opens the print settings for their labels."""
     request.session['print_next'] = list(book_ids)[:MAX_LABELS_PER_SHEET]
@@ -12439,11 +12504,18 @@ def receive_stock(request):
                 return _receiving_redirect(request)
         else:
             donated_date = timezone.localdate()
+        bad = inventory_rules.donated_date_problem(donated_date)
+        if bad:
+            messages.error(request, bad)
+            return _receiving_redirect(request)
         # Held back from patrons until it is put on a shelf.
         processing_stage = 'Received'
     else:
-        supplier = (request.POST.get('supplier') or '').strip() or None
+        supplier = ' '.join((request.POST.get('supplier') or '').split()) or None
         po_number = (request.POST.get('po_number') or '').strip() or None
+        if source == 'Purchase' and inventory_rules.supplier_problem(supplier):
+            messages.error(request, inventory_rules.supplier_problem(supplier))
+            return _receiving_redirect(request)
 
     # Validate everything before saving.
     parsed = []
@@ -12468,6 +12540,7 @@ def receive_stock(request):
             return _receiving_redirect(request)
         from .catalogue import clean_price
         price, price_error = clean_price(item.get('price'))
+        price_error = price_error or inventory_rules.price_problem(price)
         if price_error:
             messages.error(request, 'Line ' + str(index) + ': ' + price_error)
             return _receiving_redirect(request)
@@ -12477,6 +12550,15 @@ def receive_stock(request):
     if total_copies > 500:
         messages.error(request, 'That is ' + str(total_copies) + ' copies in one go — '
                                 'split it into smaller deliveries.')
+        return _receiving_redirect(request)
+
+    # The same titles from the same donor or supplier on the same day: received again only on purpose.
+    again = _already_received(source, donor_name if source == 'Donation' else supplier,
+                              donated_date if source == 'Donation' else timezone.localdate(),
+                              po_number, [p[0] for p in parsed])
+    if again and request.POST.get('confirm_duplicate') != '1':
+        messages.error(request, 'Already received: ' + '; '.join(again[:5]) + '. Nothing was saved. '
+                                'If this really is a second delivery, receive it again and confirm.')
         return _receiving_redirect(request)
 
     admin = User.objects.filter(admin_id=request.session.get('admin_id')).first()
@@ -12591,8 +12673,8 @@ def update_copy_condition(request):
     if new_condition not in dict(InventoryRecord.CONDITION_CHOICES):
         messages.error(request, 'Pick a valid condition.')
         return redirect('inventory_management')
-    if not reason:
-        messages.error(request, 'A reason is required so the movement history stays meaningful.')
+    if inventory_rules.reason_problem(reason):
+        messages.error(request, inventory_rules.reason_problem(reason))
         return redirect('inventory_management')
 
     before = record.condition
@@ -12656,12 +12738,18 @@ def update_inventory_record(request):
             return redirect('inventory_management')
         record.supplier = record.po_number = None
     else:
-        record.supplier = (request.POST.get('supplier') or '').strip() or None
+        record.supplier = ' '.join((request.POST.get('supplier') or '').split()) or None
         record.po_number = (request.POST.get('po_number') or '').strip() or None
+        if record.source == 'Purchase' and inventory_rules.supplier_problem(record.supplier):
+            messages.error(request, inventory_rules.supplier_problem(record.supplier))
+            return redirect('inventory_management')
         record.donor_name = None
         record.donated_date = None
         record.processing_stage = None
-    record.notes = (request.POST.get('notes') or '').strip() or None
+    if inventory_rules.reason_problem(request.POST.get('reason'), 'reason for the change'):
+        messages.error(request, inventory_rules.reason_problem(request.POST.get('reason'), 'reason for the change'))
+        return redirect('inventory_management')
+    record.notes = (request.POST.get('notes') or '').strip()[:500] or None
     record.save(update_fields=['book', 'title_hint', 'source', 'supplier', 'po_number',
                                'donor_name', 'donated_date', 'processing_stage', 'notes'])
     # Keep inventory and donations in sync.
@@ -12694,8 +12782,8 @@ def deaccession_copy(request):
         return redirect('inventory_management')
 
     reason = (request.POST.get('reason') or '').strip()
-    if not reason:
-        messages.error(request, 'Deaccession needs a reason — it is an audited correction.')
+    if inventory_rules.reason_problem(reason, 'reason for removing it'):
+        messages.error(request, inventory_rules.reason_problem(reason, 'reason for removing it'))
         return redirect('inventory_management')
     if record.status == 'Removed':
         messages.warning(request, 'That copy has already been removed.')
@@ -13342,8 +13430,8 @@ def write_off_missing(request):
     if not ids:
         messages.error(request, 'Select at least one missing copy to write off.')
         return redirect('/admin-portal/inventory/?tab=missing')
-    if not reason:
-        messages.error(request, 'A write-off needs a reason — it is a permanent correction.')
+    if inventory_rules.reason_problem(reason, 'reason for the write-off'):
+        messages.error(request, inventory_rules.reason_problem(reason, 'reason for the write-off'))
         return redirect('/admin-portal/inventory/?tab=missing')
     refusal = admin_password_error(request, 'a write-off')
     if refusal:
