@@ -295,7 +295,8 @@ class AlertTests(TestCase):
     def test_staff_get_alerts_for_their_modules_only(self):
         desk = _staff(modules='transactions')
         items = self._alerts(desk)
-        self.assertEqual(set(items), {'extensions', 'overdue', 'loan_on_shelf'})
+        # 'transactions' is the sidebar's count of both, kept up to date without a pop-up.
+        self.assertEqual(set(items), {'extensions', 'overdue', 'transactions', 'loan_on_shelf'})
 
     def test_a_new_registration_is_reported_but_not_one_waiting_on_the_applicant(self):
         admin = _staff(role='Admin', modules='')
