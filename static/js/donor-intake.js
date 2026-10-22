@@ -173,6 +173,8 @@
       update: update,
       setMode: setMode,
       // What stops the donation from being received, or null.
+      // Who the donation is from, for the confirmation.
+      label: function () { return mode === 'saved' ? (picked ? picked.name : '') : fullName(); },
       problem: function () {
         return mode === 'saved' && !picked ? 'Choose the donor from the list, or switch to New donor.' : null;
       },

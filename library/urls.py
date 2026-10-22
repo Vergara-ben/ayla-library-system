@@ -99,6 +99,7 @@ urlpatterns = [
     # Inventory Management (Administrator-only)
     path('admin-portal/inventory/', views.inventory_management, name='inventory_management'),
     path('admin-portal/inventory/receive/', views.receive_stock, name='receive_stock'),
+    path('admin-portal/inventory/receive/check/', views.receive_check, name='receive_check'),
     path('admin-portal/inventory/condition/', views.update_copy_condition, name='update_copy_condition'),
     path('admin-portal/inventory/update/', views.update_inventory_record, name='update_inventory_record'),
     path('admin-portal/inventory/deaccession/', views.deaccession_copy, name='deaccession_copy'),
