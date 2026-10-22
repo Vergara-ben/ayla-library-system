@@ -2,7 +2,7 @@
 
 from django.utils import timezone
 
-from .models import StockAuditLine, StockMovement, Transaction
+from .models import StockAuditLine, StockMovement, SystemLog, Transaction
 
 # What a count's finding asks of the library, and how to tell it has been done.
 FOLLOW_UP = ('Missing', 'Damaged', 'Here on loan', 'Stray')
@@ -17,6 +17,17 @@ def state(book):
         'condition': book.condition or '',
         'location': book.location_short or 'Not shelved',
     }
+
+
+def _gone(book):
+    """How a book left the collection after the count, or None while it is still the library's."""
+    if book.is_archived:
+        return 'Removed from the records'
+    if book.status == 'Lost' or book.condition == 'Lost':
+        return 'Reported lost'
+    if book.condition == 'Withdrawn':
+        return 'Withdrawn'
+    return None
 
 
 def _who(name):
@@ -52,6 +63,14 @@ def events_since(line):
             out.append((tx.transaction_date, 'Borrowed by %s' % who))
         if tx.return_date and (tx.return_date > day0 or (tx.return_date == day0 and was_out)):
             out.append((tx.return_date, 'Returned by %s' % who))
+        if tx.marked_lost:
+            # The loan keeps no date for it; the log of the desk's action does.
+            logged = (SystemLog.objects.filter(entity_type='Transaction', entity_id=str(tx.transaction_id),
+                                               timestamp__gt=t0).order_by('timestamp').first())
+            if logged is not None or tx.transaction_date > day0:
+                when = timezone.localtime(logged.timestamp).date() if logged else tx.transaction_date
+                out.append((when, 'Reported lost by %s' % who
+                            + (' (₱%s charged)' % f'{tx.fine_amount:,.2f}' if tx.fine_amount else '')))
 
     for later in (StockAuditLine.objects.filter(book=book, audit__audited_at__gt=t0)
                   .select_related('audit').order_by('audit__audited_at')):
@@ -60,6 +79,11 @@ def events_since(line):
                                                  later.get_result_display().lower())))
 
     out.sort(key=lambda e: e[0])
+    # Moved by shelving, which keeps no per-book history: the move is still said, so 'now' is explained.
+    now = state(book)
+    if line.location_then and now and now['location'] != line.location_then:
+        out.append((None, 'Now %s (moved since the count)' % (
+            'on ' + now['location'] if now['location'] != 'Not shelved' else 'off its shelf')))
     return out
 
 
@@ -70,12 +94,16 @@ def outcome(line):
         return '', False
     if book is None:
         return 'Removed from the records', False
+    gone = _gone(book)
     if line.result == 'Missing':
-        if book.status == 'Missing':
+        if book.status == 'Missing' and not book.is_archived:
             return 'Still missing', True
-        if book.status == 'Lost' or book.is_archived:
+        if gone:
             return 'Written off', False
         return 'Found again', False
+    # Whatever the finding, a book no longer in the collection settles it.
+    if gone:
+        return gone, False
     if line.result == 'Here on loan':
         if book.status in ('Borrowed', 'Overdue'):
             return 'Still recorded on loan: check it in', True
