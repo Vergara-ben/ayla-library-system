@@ -1778,7 +1778,7 @@ def _shelf_filter_choices():
     return out
 
 
-def _books_page(request, template):
+def _books_page(request, template, extra=None):
     from urllib.parse import urlencode
     q = (request.GET.get('q') or '').strip()
     status = (request.GET.get('status') or '').strip()
@@ -1880,7 +1880,15 @@ def _books_page(request, template):
         'genre_options': _genre_options(),
         'intake_conditions': INTAKE_CONDITION_OPTIONS,
     }
+    context.update(extra or {})
     return render(request, template, context)
+
+
+def _books_template(request):
+    """The Manage Books page for whoever is signed in."""
+    if request.session.get('admin_role') == 'Staff':
+        return 'library_staff/managebooks.html'
+    return 'admin/managebooks.html'
 
 
 def _shelving_counts():
@@ -2036,27 +2044,7 @@ def admin_add_book(request):
                     'ids': created, 'shelved': shelf_level is not None})
             return portal_redirect(request, 'admin_management')
 
-    # Get books list context for managebooks.html
-    books = Book.objects.select_related('shelf_level', 'shelf_level__shelf').order_by('title')
-    total_books = books.count()
-    total_copies = total_books
-    available_count = books.filter(status='Available').count()
-    borrowed_count = books.filter(status='Borrowed').count()
-    shelf_levels = ShelfLevel.objects.select_related('shelf').all()
-
-    context = {
-        'books': books,
-        'total_books': total_books,
-        'total_copies': total_copies,
-        'available_count': available_count,
-        'borrowed_count': borrowed_count,
-        'shelf_levels': shelf_levels,
-        'error': error,
-        'genre_options': _genre_options(),
-        'intake_conditions': INTAKE_CONDITION_OPTIONS,
-        'material_choices': Book.MATERIAL_TYPE_CHOICES,
-    }
-    return render(request, 'admin/managebooks.html', context)
+    return _books_page(request, _books_template(request), {'error': error})
 
 
 def _patron_page_redirect(request):
@@ -2238,40 +2226,9 @@ def admin_add_patron(request):
                              f'checked at the desk')
             return _patron_page_redirect(request)
 
-    # Get patron list context
-    patrons = Patron.objects.annotate(
-        active_borrows=Count(
-            'transaction',
-            filter=Q(transaction__transaction_type='Borrow', transaction__return_date__isnull=True)
-        ),
-        overdue_count=Count(
-            'transaction',
-            filter=Q(transaction__transaction_type='Borrow',
-                     transaction__return_date__isnull=True,
-                     transaction__due_date__lt=timezone.localdate())
-        ),
-        borrow_count=Count(
-            'transaction',
-            filter=Q(transaction__transaction_type='Borrow')
-        ),
-    ).order_by('-registration_date')
-
-    total_patrons = patrons.count()
-    active_patrons = Patron.objects.filter(account_status='Active').count()
-    patrons_with_borrows = patrons.filter(active_borrows__gt=0).count()
-    patrons_overdue = patrons.filter(overdue_count__gt=0).count()
-
-    context = {
-        'patrons': patrons,
-        'total_patrons': total_patrons,
-        'active_patrons': active_patrons,
-        'patrons_with_borrows': patrons_with_borrows,
-        'patrons_overdue': patrons_overdue,
-        'add_mode': True,
-        'error': error,
-        'initial': initial,
-    }
-    return render(request, _patron_page_template(request), context)
+    # One page of patrons behind the form, not every patron on record.
+    return _patrons_page(request, _patron_page_template(request),
+                         {'add_mode': True, 'error': error, 'initial': initial})
 
 
 @admin_or_module_required('patrons')
@@ -2681,7 +2638,7 @@ def staff_manage_patron(request):
     return _patrons_page(request, 'library_staff/managepatron.html')
 
 
-def _patrons_page(request, template):
+def _patrons_page(request, template, extra=None):
     # Close visits left open from earlier days first.
     close_stale_visits()
     search_query = request.GET.get('search', '').strip()
@@ -2784,6 +2741,7 @@ def _patrons_page(request, template):
         'search_query': search_query,
         'querystring': urlencode({'search': search_query}) if search_query else '',
     }
+    context.update(extra or {})
     return render(request, template, context)
 
 
@@ -2862,42 +2820,9 @@ def admin_edit_patron(request, patron_id):
                 'hold_reason': patron.hold_reason or '',
             })
 
-    # Get patron list context
-    patrons = Patron.objects.annotate(
-        active_borrows=Count(
-            'transaction',
-            filter=Q(transaction__transaction_type='Borrow', transaction__return_date__isnull=True)
-        ),
-        overdue_count=Count(
-            'transaction',
-            filter=Q(transaction__transaction_type='Borrow',
-                     transaction__return_date__isnull=True,
-                     transaction__due_date__lt=timezone.localdate())
-        ),
-        borrow_count=Count(
-            'transaction',
-            filter=Q(transaction__transaction_type='Borrow')
-        ),
-    ).order_by('-registration_date')
-
-    total_patrons = patrons.count()
-    active_patrons = Patron.objects.filter(account_status='Active').count()
-    patrons_with_borrows = patrons.filter(active_borrows__gt=0).count()
-    patrons_overdue = patrons.filter(overdue_count__gt=0).count()
-
-    context = {
-        'patrons': patrons,
-        'total_patrons': total_patrons,
-        'active_patrons': active_patrons,
-        'patrons_with_borrows': patrons_with_borrows,
-        'patrons_overdue': patrons_overdue,
-        'edit_mode': True,
-        'patron': patron,
-        'error': error,
-        'success': success,
-        'initial': initial,
-    }
-    return render(request, 'admin/managepatron.html', context)
+    return _patrons_page(request, _patron_page_template(request),
+                         {'edit_mode': True, 'patron': patron, 'error': error, 'success': success,
+                          'initial': initial})
 
 
 @admin_module_required('patrons')
@@ -2950,6 +2875,12 @@ def admin_edit_book(request, book_id):
         'price': book.price if book.price is not None else '',
         'authors_json': authors.boxes_json(book),
     }
+    if request.method == 'GET' and request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        from django.http import JsonResponse
+        data = dict(initial, authors=json.loads(initial['authors_json']),
+                    price=str(book.price) if book.price is not None else '')
+        del data['authors_json']
+        return JsonResponse({'success': True, 'book_id': book.book_id, 'book': data})
 
     if request.method == 'POST':
         title = request.POST.get('title', '').strip()
@@ -3030,30 +2961,8 @@ def admin_edit_book(request, book_id):
                 from django.http import JsonResponse
                 return JsonResponse({'success': True, 'message': success})
 
-    # Get books list context for managebooks.html
-    books = Book.objects.select_related('shelf_level', 'shelf_level__shelf').order_by('title')
-    total_books = books.count()
-    total_copies = total_books
-    available_count = books.filter(status='Available').count()
-    borrowed_count = books.filter(status='Borrowed').count()
-    shelf_levels = ShelfLevel.objects.select_related('shelf').all()
-
-    context = {
-        'books': books,
-        'total_books': total_books,
-        'total_copies': total_copies,
-        'available_count': available_count,
-        'borrowed_count': borrowed_count,
-        'shelf_levels': shelf_levels,
-        'book': book,
-        'error': error,
-        'success': success,
-        'initial': initial,
-        'genre_options': _genre_options(),
-        'intake_conditions': INTAKE_CONDITION_OPTIONS,
-        'material_choices': Book.MATERIAL_TYPE_CHOICES,
-    }
-    return render(request, 'admin/managebooks.html', context)
+    return _books_page(request, _books_template(request),
+                       {'book': book, 'error': error, 'success': success, 'initial': initial})
 
 
 @granted_module_required('books')
@@ -12091,7 +12000,9 @@ def inventory_management(request):
         'ack_offer': _ack_offer(request),
         'donor_types': Donor.TYPE_CHOICES,
         'today': timezone.localdate().isoformat(),
-        'books': Book.objects.order_by('title'),
+        # The catalogue for the book pickers, as a short list the page turns into options.
+        'book_list': list(Book.objects.order_by('title', 'copy_number')
+                          .values_list('book_id', 'title', 'copy_number', 'author', 'ISBN')),
         'shelves': shelf_list,
         'genre_options': _genre_options(),
     }
@@ -12671,7 +12582,9 @@ def staff_inventory_receive(request):
     return render(request, 'library_staff/inventoryreceive.html', {
         'recent': mine,
         'shelf_levels_available': _shelf_capacity(),
-        'books': Book.objects.order_by('title'),
+        # The catalogue for the book pickers, as a short list the page turns into options.
+        'book_list': list(Book.objects.order_by('title', 'copy_number')
+                          .values_list('book_id', 'title', 'copy_number', 'author', 'ISBN')),
         'condition_choices': InventoryRecord.CONDITION_CHOICES,
         'condition_options': CONDITION_OPTIONS,
         'condition_options': CONDITION_OPTIONS,
@@ -13941,11 +13854,15 @@ def mark_books_labelled(request):
 def _audit_board_rows(levels):
     """Each board with its book count and when every book on it was last confirmed."""
     rows = []
-    for level in levels.annotate(n=Count('book')):
+    levels = list(levels.select_related('shelf', 'shelf__room').annotate(n=Count('book')))
+    seen_on = {r['shelf_level']: r for r in (
+        Book.objects.filter(shelf_level__in=[lv.pk for lv in levels]).exclude(status__in=WRITTEN_OFF)
+        .values('shelf_level').annotate(oldest=Min('last_seen'),
+                                        never=Count('book_id', filter=Q(last_seen__isnull=True))))}
+    for level in levels:
         if level.shelf is None:
             continue
-        seen = level.book_set.exclude(status__in=WRITTEN_OFF).aggregate(
-            oldest=Min('last_seen'), never=Count('book_id', filter=Q(last_seen__isnull=True)))
+        seen = seen_on.get(level.pk, {'oldest': None, 'never': 0})
         rows.append({
             'id': level.shelf_level_id,
             'shelf': level.shelf.name,
@@ -13979,13 +13896,17 @@ def shelving_page(request):
             'book_id', 'title', 'author', 'copy_number', 'call_number', 'shelf_slot', 'shelf_level'):
         by_board[book.shelf_level_id].append(book)
     label_boards = [{'id': level_id, 'name': board_name(suggester.levels[level_id]),
-                     'shelf_id': suggester.levels[level_id].shelf_id, 'books': books,
-                     'count': len(books), 'ids': ','.join(str(b.book_id) for b in books)}
+                     'shelf_id': suggester.levels[level_id].shelf_id,
+                     'count': len(books)}
                     for level_id, books in sorted(by_board.items(), key=lambda kv: board_key(suggester.levels[kv[0]]))]
+    label_rows = {str(level_id): [[b.book_id, b.shelf_slot or '', b.title, b.copy_number or '', b.author or '',
+                                   b.call_number or ''] for b in books]
+                  for level_id, books in by_board.items()}
     return render(request, 'admin/shelving.html', {
         'waiting': waiting,
         'boards': boards,
         'label_boards': label_boards,
+        'label_rows': label_rows,
         'unlabelled_total': sum(b['count'] for b in label_boards),
         'max_labels': MAX_LABELS_PER_SHEET,
         'is_staff_portal': request.session.get('admin_role') == 'Staff',

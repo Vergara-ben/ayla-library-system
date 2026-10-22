@@ -53,6 +53,7 @@
     <script src="{% static 'js/picker.js' %}"></script>
     <script src="{% static 'js/genre-picker.js' %}"></script>
     <script src="{% static 'js/author-fields.js' %}"></script>
+    <script src="{% static 'js/book-options.js' %}"></script>
     <script src="{% static 'js/donor-intake.js' %}?v=20261022"></script>
     {{ donor_names|json_script:'donorNamesData' }}
     {{ donor_options|json_script:'donorOptionsData' }}
@@ -144,8 +145,9 @@
                                 <input type="text" id="rcvBookSearch" class="field-input" placeholder="Type a title, author or ISBN; pick it, or choose New title">
                                 <select id="rcvBook" class="hidden" aria-hidden="true" tabindex="-1" onchange="onPickCatalogued()">
                                     <option value="">&mdash; New title, enter its details below &mdash;</option>
-                                    {% for b in books %}<option value="{{ b.book_id }}" data-title="{{ b.title }}" data-author="{{ b.author }}" data-isbn="{{ b.ISBN|default:'' }}">{{ b.title }} &mdash; {{ b.author }}</option>{% endfor %}
                                 </select>
+                                {{ book_list|json_script:"bookListData" }}
+                                <script>AylaBookOptions.titles(document.getElementById('rcvBook'));</script>
                             </div>
 
                             <div id="newTitleFields" class="space-y-3">

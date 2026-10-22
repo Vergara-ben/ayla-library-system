@@ -177,9 +177,8 @@
                                     {% if row.book.status == 'Donated' %}<span class="text-[10px] font-bold text-violet-400" title="Shelving it makes it available to borrow">Donated</span>{% else %}<span class="text-[10px] text-slate-400">{{ row.book.status }}</span>{% endif %}
                                 </td>
                                 <td class="py-3 px-4">
-                                    <select class="board-select" id="board-{{ row.book.book_id }}" aria-label="Board for {{ row.book.title }}">
+                                    <select class="board-select" id="board-{{ row.book.book_id }}" data-pick="{% if row.level %}{{ row.level.shelf_level_id }}{% endif %}" aria-label="Board for {{ row.book.title }}">
                                         <option value="">Choose a board&hellip;</option>
-                                        {% for b in boards %}<option value="{{ b.id }}"{% if row.level and row.level.shelf_level_id == b.id %} selected{% endif %}>{{ b.name }}</option>{% endfor %}
                                     </select>
                                     {% if row.why %}<p class="text-[10px] text-slate-500 mt-1">Suggested: {{ row.why }}</p>{% endif %}
                                 </td>
@@ -244,22 +243,8 @@
                         </div>
                         <div class="board-books hidden pb-2">
                             <table class="w-full text-left border-collapse">
-                                <tbody class="text-xs text-slate-300">
-                                    {% for book in b.books %}
-                                    <tr class="label-row border-t border-slate-800/40" data-id="{{ book.book_id }}" data-find="{{ book.title|lower }} {{ book.author|default:''|lower }} {{ book.call_number|default:''|lower }}">
-                                        <td class="py-2 pl-4 pr-2 w-10"><input type="checkbox" class="label-tick w-4 h-4 accent-{{ accent }}-600" value="{{ book.book_id }}" onchange="paintLabelTicks()" aria-label="Tick {{ book.title }}"></td>
-                                        <td class="py-2 px-2 w-14 font-mono text-[10px] text-slate-500" title="Position on the board">{% if book.shelf_slot %}#{{ book.shelf_slot }}{% endif %}</td>
-                                        <td class="py-2 px-2">
-                                            <div class="font-semibold text-slate-200">{{ book.title }}{% if book.copy_number %} <span class="text-[10px] font-normal text-slate-500 whitespace-nowrap">&middot; Copy {{ book.copy_number }}</span>{% endif %}</div>
-                                            <div class="text-[10px] text-slate-500">{{ book.author|default:'' }}{% if book.call_number %} &middot; {{ book.call_number }}{% endif %}</div>
-                                        </td>
-                                        <td class="py-2 pl-2 pr-4 text-right whitespace-nowrap">
-                                            <button type="button" onclick="printLabels([{{ book.book_id }}], '{{ book.title|escapejs }}')" class="text-[11px] font-semibold px-2 py-1 rounded-md border border-amber-800/60 text-amber-400 hover:bg-amber-950/40" title="Print this book's label"><i class="fa-solid fa-print"></i><span class="hidden sm:inline ml-1">Print</span></button>
-                                            <button type="button" onclick="markLabels([{{ book.book_id }}], '{{ book.title|escapejs }}')" class="text-[11px] font-semibold px-2 py-1 rounded-md border border-slate-700 text-slate-300 hover:bg-slate-800/50" title="It already carries a label">Labelled</button>
-                                        </td>
-                                    </tr>
-                                    {% endfor %}
-                                </tbody>
+                                {# Drawn from the list below when the board is first opened, searched or printed. #}
+                                <tbody class="text-xs text-slate-300"></tbody>
                             </table>
                         </div>
                     </div>
@@ -272,6 +257,8 @@
     </div>
 {% endwith %}
 
+    {{ boards|json_script:"boardOptionsData" }}
+    {{ label_rows|json_script:"labelRowsData" }}
     <script>
         function toggleSidebar() { document.querySelector('aside').classList.toggle('open'); }
         const PLACE_URL = "{% url 'shelving_place' %}";
@@ -295,6 +282,16 @@
             if (!ids.length) { AylaDialog.toast('Tick the books to shelve first.', 'warning'); return; }
             shelve(ids);
         }
+
+        (function () {
+            const boards = JSON.parse(document.getElementById('boardOptionsData').textContent || '[]');
+            const options = document.createDocumentFragment();
+            boards.forEach(function (b) { options.appendChild(new Option(b.name, b.id)); });
+            document.querySelectorAll('.board-select').forEach(function (sel) {
+                sel.appendChild(options.cloneNode(true));
+                sel.value = sel.dataset.pick || '';
+            });
+        })();
 
         // Each book goes to the board chosen beside it.
         async function shelve(ids) {
@@ -326,7 +323,58 @@
         AylaLabels.accent = '{{ is_staff_portal|yesno:"violet,cyan" }}';
         const MAX_LABELS = {{ max_labels }};
 
-        function boardRows(board) { return Array.prototype.slice.call(board.querySelectorAll('.label-row')); }
+        // Each board's unlabelled books: [id, slot, title, copy, author, call number].
+        const LABEL_ROWS = JSON.parse(document.getElementById('labelRowsData').textContent || '{}');
+        const ACCENT = '{{ accent }}';
+        function cell(v) {
+            return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) {
+                return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+            });
+        }
+        function rowHtml(r) {
+            const id = r[0], title = cell(r[2]);
+            return '<tr class="label-row border-t border-slate-800/40" data-id="' + id + '" data-find="'
+                + cell((r[2] + ' ' + r[4] + ' ' + r[5]).toLowerCase()) + '">'
+                + '<td class="py-2 pl-4 pr-2 w-10"><input type="checkbox" class="label-tick w-4 h-4 accent-' + ACCENT + '-600" value="' + id + '" onchange="paintLabelTicks()" aria-label="Tick ' + title + '"></td>'
+                + '<td class="py-2 px-2 w-14 font-mono text-[10px] text-slate-500" title="Position on the board">' + (r[1] ? '#' + r[1] : '') + '</td>'
+                + '<td class="py-2 px-2"><div class="font-semibold text-slate-200">' + title
+                + (r[3] ? ' <span class="text-[10px] font-normal text-slate-500 whitespace-nowrap">&middot; Copy ' + r[3] + '</span>' : '') + '</div>'
+                + '<div class="text-[10px] text-slate-500">' + cell(r[4]) + (r[5] ? ' &middot; ' + cell(r[5]) : '') + '</div></td>'
+                + '<td class="py-2 pl-2 pr-4 text-right whitespace-nowrap">'
+                + '<button type="button" data-row-print class="text-[11px] font-semibold px-2 py-1 rounded-md border border-amber-800/60 text-amber-400 hover:bg-amber-950/40" title="Print this book\'s label"><i class="fa-solid fa-print"></i><span class="hidden sm:inline ml-1">Print</span></button> '
+                + '<button type="button" data-row-mark class="text-[11px] font-semibold px-2 py-1 rounded-md border border-slate-700 text-slate-300 hover:bg-slate-800/50" title="It already carries a label">Labelled</button>'
+                + '</td></tr>';
+        }
+        function fillBoard(board) {
+            if (board.dataset.filled) return;
+            board.dataset.filled = '1';
+            board.querySelector('.board-books tbody').innerHTML = (LABEL_ROWS[board.dataset.board] || []).map(rowHtml).join('');
+        }
+        function fillAllBoards() { document.querySelectorAll('.label-board').forEach(fillBoard); }
+        // One listener for every row's Print and Labelled buttons.
+        document.addEventListener('click', function (e) {
+            const btn = e.target.closest('[data-row-print], [data-row-mark]');
+            if (!btn) return;
+            const row = btn.closest('.label-row');
+            const title = row.querySelector('.font-semibold').firstChild.textContent;
+            if (btn.hasAttribute('data-row-print')) printLabels([Number(row.dataset.id)], title);
+            else markLabels([Number(row.dataset.id)], title);
+        });
+        // Printed or marked: those books leave the list here, without reloading the page.
+        function dropLabelled(ids) {
+            const gone = new Set(ids.map(Number));
+            document.querySelectorAll('.label-board').forEach(function (board) {
+                const key = board.dataset.board;
+                LABEL_ROWS[key] = (LABEL_ROWS[key] || []).filter(function (r) { return !gone.has(r[0]); });
+                board.querySelectorAll('.label-row').forEach(function (row) { if (gone.has(Number(row.dataset.id))) row.remove(); });
+                const n = LABEL_ROWS[key].length;
+                board.querySelector('.board-count').textContent = n + ' book' + (n === 1 ? '' : 's');
+                if (!n) board.remove();
+            });
+            paintLabelTicks();
+            if (window.AylaLive) AylaLive.refresh();
+        }
+        function boardRows(board) { fillBoard(board); return Array.prototype.slice.call(board.querySelectorAll('.label-row')); }
         function rowIds(rows) { return rows.map(function (r) { return Number(r.dataset.id); }); }
         function labelTicked() {
             return Array.prototype.map.call(document.querySelectorAll('.label-tick:checked'), function (b) { return Number(b.value); });
@@ -356,6 +404,7 @@
         function toggleBoard(board, open) {
             const body = board.querySelector('.board-books');
             const show = open === undefined ? body.classList.contains('hidden') : open;
+            if (show) fillBoard(board);
             body.classList.toggle('hidden', !show);
             board.querySelector('.board-chevron').classList.toggle('rotate-90', show);
             board.querySelector('[aria-expanded]').setAttribute('aria-expanded', show ? 'true' : 'false');
@@ -366,6 +415,7 @@
         // Ticking a board ticks the books it shows, and opens it so you see which.
         function tickBoard(box) {
             const board = box.closest('.label-board');
+            fillBoard(board);
             board.querySelectorAll('.label-row:not(.hidden) .label-tick').forEach(function (t) { t.checked = box.checked; });
             if (box.checked) toggleBoard(board, true);
             paintLabelTicks();
@@ -378,6 +428,7 @@
         // A title, author or code; a board's name shows all of that board.
         function filterLabels() {
             const q = document.getElementById('labelSearch').value.trim().toLowerCase();
+            if (q) fillAllBoards();
             let shown = 0, total = 0;
             document.querySelectorAll('.label-board').forEach(function (board) {
                 const rows = boardRows(board);
@@ -398,16 +449,17 @@
 
         // Each opens the print settings; once the sheet is downloaded the page shows what is left.
         async function printLabels(ids, where) {
-            if (await AylaLabels.download(LABELS_URL, ids, null, { where: where })) {
-                setTimeout(function () { location.reload(); }, 800);
-            }
+            if (await AylaLabels.download(LABELS_URL, ids, null, { where: where })) dropLabelled(ids);
         }
         function printBoard(board) { printLabels(rowIds(boardRows(board)), board.dataset.name); }
         function printTickedLabels() {
             printLabels(labelTicked(), document.getElementById('labelTickWhere').textContent);
         }
         function printAllUnlabelled() {
-            const ids = rowIds(Array.prototype.slice.call(document.querySelectorAll('.label-row')));
+            const ids = [];
+            document.querySelectorAll('.label-board').forEach(function (board) {
+                (LABEL_ROWS[board.dataset.board] || []).forEach(function (r) { ids.push(r[0]); });
+            });
             if (ids.length > MAX_LABELS) {
                 AylaDialog.toast('Printing the first ' + MAX_LABELS + ' of ' + ids.length + '. Press Print all again for the rest.', 'info');
             }
@@ -427,7 +479,7 @@
             const data = await res.json().catch(function () { return {}; });
             if (!data.success) { AylaDialog.toast(data.error || 'Could not save that.', 'error'); return; }
             AylaDialog.toast(data.marked + ' marked as labelled.', 'success');
-            location.reload();
+            dropLabelled(ids);
         }
         function markBoard(board) {
             const ids = rowIds(boardRows(board));

@@ -1549,15 +1549,20 @@ class GenreTidyTests(TestCase):
 
     def test_the_edit_form_fills_in_an_apostrophe_as_typed(self):
         book = Book.objects.create(title="Charlotte's Web", author='White, E. B.', genre="Children's Fiction")
+        # The form is filled from the book's details as JSON, so the apostrophe arrives as typed.
+        data = self.client.get('/admin-portal/edit-book/%d/' % book.book_id,
+                               HTTP_X_REQUESTED_WITH='XMLHttpRequest').json()
+        self.assertEqual((data['book']['title'], data['book']['genre']), ("Charlotte's Web", "Children's Fiction"))
         page = self.client.get('/admin-portal/edit-book/%d/' % book.book_id).content.decode()
-        self.assertIn("Children\\u0027s Fiction", page)
-        self.assertNotIn("value = 'Children&#x27;s", page)
+        self.assertIn('openEditBook(%d)' % book.book_id, page)
 
     def test_editing_keeps_a_magazine_a_magazine(self):
         book = Book.objects.create(title='Reader', author='Unknown', genre='Fiction', material_type='Magazine')
         page = self.client.get('/admin-portal/edit-book/%d/' % book.book_id).content.decode()
         self.assertIn('<option value="Magazine">', page)
-        self.assertIn("getElementById('editMaterial').value = 'Magazine'", page)
+        data = self.client.get('/admin-portal/edit-book/%d/' % book.book_id,
+                               HTTP_X_REQUESTED_WITH='XMLHttpRequest').json()
+        self.assertEqual(data['book']['material_type'], 'Magazine')
 
     def test_the_picker_shows_what_each_genre_covers(self):
         from .views import _genre_options
@@ -1610,8 +1615,11 @@ class ShelvingLabelsAuditTests(TestCase):
                                      shelf_level=self.level, shelf_slot=5)
         page = self.client.get('/admin-portal/shelving/')
         board = page.context['label_boards'][0]
-        self.assertEqual([b.title for b in board['books']], ['Noli Me Tangere', 'Ibong Adarna'])
-        self.assertContains(page, 'data-id="%d"' % second.pk)
+        rows = page.context['label_rows'][str(board['id'])]
+        self.assertEqual([r[2] for r in rows], ['Noli Me Tangere', 'Ibong Adarna'])
+        # The rows go as a short list the page draws, not as markup for every book.
+        self.assertContains(page, 'id="labelRowsData"')
+        self.assertIn(second.pk, [r[0] for r in rows])
         self.assertContains(page, 'Print board')
         sheet = self.client.get('/admin-portal/book-qr-labels/', {'ids': str(second.pk)})
         self.assertEqual(sheet['Content-Type'], 'application/pdf')
@@ -2682,3 +2690,26 @@ class AuthorsOnlyMigrationTests(TestCase):
         self.assertEqual(migration._join(['A', 'B', 'C'], False), 'A, B & C')
         self.assertTrue(migration.EDITORIAL.search('Family Circle Editorial Staff'))
         self.assertFalse(migration.EDITORIAL.search('Department of Education'))
+
+
+class LightPagesTests(TestCase):
+    """Edit opens over one page of books; lists send short data, not markup for every book."""
+
+    def setUp(self):
+        self.client = _client(admin_id=_staff(role='Admin', modules='books,inventory,donations,patrons').admin_id,
+                              admin_role='Admin')
+        for n in range(40):
+            Book.objects.create(title='Book %02d' % n, author='Ana Cruz', genre='Fiction', qr_code='q-%d' % n)
+
+    def test_the_edit_page_shows_one_page_of_books_not_the_catalogue(self):
+        book = Book.objects.get(title='Book 39')
+        page = self.client.get('/admin-portal/edit-book/%d/' % book.pk)
+        self.assertEqual(len(page.context['books']), 15)
+        self.assertContains(page, 'openEditBook(%d)' % book.pk)
+        self.assertEqual(len(self.client.get('/admin-portal/add-book/').context['books']), 15)
+
+    def test_the_receiving_pickers_get_one_short_list(self):
+        page = self.client.get('/admin-portal/inventory/')
+        self.assertEqual(len(page.context['book_list']), 40)
+        self.assertContains(page, 'id="bookListData"')
+        self.assertNotContains(page, 'data-title="Book 00"')
