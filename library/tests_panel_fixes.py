@@ -2488,7 +2488,7 @@ class TransactionAlertTests(TestCase):
 
 
 class AuthorNameTests(TestCase):
-    """Authors are names of their own: a person's first, middle and surname, or an organization."""
+    """Authors are names of their own: each person's first, middle and surname, and nobody else."""
 
     def setUp(self):
         self.client = _client(admin_id=_staff(role='Admin', modules='books,inventory,donations').admin_id,
@@ -2496,8 +2496,8 @@ class AuthorNameTests(TestCase):
         self.ajax = {'HTTP_X_REQUESTED_WITH': 'XMLHttpRequest'}
 
     @staticmethod
-    def _person(first, last, middle='', role='Author'):
-        return {'kind': 'Person', 'role': role, 'first': first, 'middle': middle, 'last': last, 'name': ''}
+    def _person(first, last, middle=''):
+        return {'first': first, 'middle': middle, 'last': last}
 
     def _add(self, credits, unknown=False, others=False, **data):
         base = dict(COMPLETE_BOOK, title='Accounting', genre='Fiction', new_genre='1',
@@ -2517,36 +2517,43 @@ class AuthorNameTests(TestCase):
         self.assertEqual(line('Ailene B. Dayag et al.'), 'Ailene B. Dayag et al.')
         self.assertEqual(line('Various Authors'), 'Various Authors')
         self.assertEqual(line('Arrogante, Caberio, Belleza'), 'Arrogante, Caberio & Belleza')
+        # A surname with its particle, alone in a list, is one surname.
+        listed = split('Arrogante, De Vega, San Andres')['credits']
+        self.assertEqual([(c['first'], c['last']) for c in listed],
+                         [('', 'Arrogante'), ('', 'De Vega'), ('', 'San Andres')])
+        self.assertEqual(split('Johnson, H. Webster')['credits'], [self._person('H.', 'Johnson', 'Webster')])
+        # Only authors: an illustrator is left out, and a book naming only its editor is by its editor.
         drawn = split('Astrid Lindgren (Ill. Ingrid Nyman)')
-        self.assertEqual([(c['role'], c['last']) for c in drawn['credits']],
-                         [('Author', 'Lindgren'), ('Illustrator', 'Nyman')])
-        self.assertTrue(drawn['sure'])
-        self.assertEqual(split('Department of Education')['credits'][0]['kind'], 'Organization')
+        self.assertEqual((drawn['credits'], drawn['sure']), ([self._person('Astrid', 'Lindgren')], True))
+        self.assertEqual(line('Mary Higgins Clark (Ed.)'), 'Mary Higgins Clark')
+        # A publisher is never an author; the line is looked over in case it was a person.
+        self.assertEqual(line('Grolier'), 'Various Authors')
+        self.assertEqual(line('Department of Education'), 'Unknown')
+        self.assertFalse(split('Department of Education')['sure'])
+        self.assertEqual(line('Jose Rizal / Diwa'), 'Jose Rizal')
         self.assertFalse(split('Collier / P.F. Collier')['sure'])
         self.assertFalse(split('Dr. Jose P. Rizal (Florante at Laura)')['sure'])
         self.assertEqual(filing_surname('Juan Dela Cruz Jr.'), 'Dela Cruz')
         self.assertEqual(filing_surname("Harold Koontz, Cyril O'Donnell & Heinz Weihrich"), 'Koontz')
         self.assertEqual(filing_surname('Austen, Jane'), 'Austen')
 
-    def test_add_book_keeps_each_name_with_its_role_and_files_under_the_first_author(self):
+    def test_add_book_keeps_each_author_and_files_under_the_first(self):
         from .models import BookAuthor
-        r = self._add([self._person('Walter', 'Meigs', 'B.'), self._person('Robert', 'Meigs', 'F.'),
-                       self._person('Ann', 'Lee', role='Illustrator')], copies='2')
+        r = self._add([self._person('Walter', 'Meigs', 'B.'), self._person('Robert', 'Meigs', 'F.')], copies='2')
         self.assertTrue(r['success'], r)
         books = Book.objects.filter(title='Accounting')
         self.assertEqual(books.count(), 2)
         for book in books:
             self.assertEqual(book.author, 'Walter B. Meigs & Robert F. Meigs')
-            self.assertEqual(list(book.credits.values_list('role', 'author__name')),
-                             [('Author', 'Walter B. Meigs'), ('Author', 'Robert F. Meigs'),
-                              ('Illustrator', 'Ann Lee')])
+            self.assertEqual(list(book.credits.values_list('author__name', flat=True)),
+                             ['Walter B. Meigs', 'Robert F. Meigs'])
             self.assertIn(' M', book.call_number)
         # Two copies, one record per person.
         self.assertEqual(BookAuthor.objects.filter(author__name='Walter B. Meigs').count(), 2)
         self.assertEqual(set(BookAuthor.objects.values_list('author__sort_name', flat=True)),
-                         {'Meigs, Walter B.', 'Meigs, Robert F.', 'Lee, Ann'})
+                         {'Meigs, Walter B.', 'Meigs, Robert F.'})
 
-    def test_the_boxes_need_a_surname_and_unknown_means_no_author_names(self):
+    def test_the_boxes_need_a_surname_and_unknown_means_no_names(self):
         r = self._add([self._person('Roald', '')])
         self.assertFalse(r['success'])
         self.assertEqual(r['field'], 'author')
@@ -2558,10 +2565,7 @@ class AuthorNameTests(TestCase):
         book = Book.objects.get(title='Folk Tales')
         self.assertEqual((book.author, book.author_unknown, book.authors_and_others),
                          ('Various Authors', True, True))
-        r = self._add([{'kind': 'Organization', 'role': 'Author', 'name': 'Department of Education'}],
-                      title='Araling Panlipunan')
-        self.assertTrue(r['success'], r)
-        self.assertEqual(Book.objects.get(title='Araling Panlipunan').credits.get().author.kind, 'Organization')
+        self.assertFalse(book.credits.exists())
 
     def test_a_typed_line_from_an_older_page_is_split_too(self):
         r = self.client.post('/admin-portal/add-book/', dict(COMPLETE_BOOK, title='Noli', author='Rizal, Jose',
@@ -2572,7 +2576,7 @@ class AuthorNameTests(TestCase):
         self.assertEqual(book.author_original, 'Rizal, Jose')
         self.assertEqual(book.credits.get().author.last_name, 'Rizal')
 
-    def test_edit_book_shows_and_saves_the_names_and_search_finds_the_illustrator(self):
+    def test_edit_book_shows_and_saves_the_names_and_search_finds_a_co_author(self):
         from .views import _book_search_q
         self._add([self._person('Roald', 'Dahl')], title='Matilda')
         book = Book.objects.get(title='Matilda')
@@ -2580,10 +2584,11 @@ class AuthorNameTests(TestCase):
         self.assertIn('data-initial=', page)
         self.assertIn('Roald', page)
         form = dict(COMPLETE_BOOK, title='Matilda', genre='Fiction', new_genre='1', authors_json=json.dumps(
-            {'credits': [self._person('Roald', 'Dahl'), self._person('Quentin', 'Blake', role='Illustrator')]}))
+            {'credits': [self._person('Roald', 'Dahl'), self._person('Quentin', 'Blake')]}))
         r = self.client.post('/admin-portal/edit-book/%d/' % book.pk, form, **self.ajax).json()
         self.assertTrue(r['success'], r)
-        self.assertEqual(list(book.credits.values_list('role', flat=True)), ['Author', 'Illustrator'])
+        book.refresh_from_db()
+        self.assertEqual(book.author, 'Roald Dahl & Quentin Blake')
         self.assertEqual(list(Book.objects.filter(_book_search_q('Blake'))), [book])
         self.assertEqual(list(Book.objects.filter(_book_search_q('Dahl, Roald'))), [book])
 
@@ -2623,28 +2628,27 @@ class AuthorNameTests(TestCase):
         adapted.refresh_from_db()
         self.assertEqual((adapted.author, adapted.copy_number), ('Herman Melville', 1))
         self.assertEqual((plain.author, plain.copy_number), ('Herman Melville', 2))
-        self.assertEqual(adapted.credits.get(role='Adapter').author.name, 'Felix Sutton')
+        self.assertEqual(list(adapted.credits.values_list('author__name', flat=True)), ['Herman Melville'])
 
         # Check authors lists the line once, and saving fixes both its books.
         r = self.client.get('/admin-portal/books/check-authors/?count=1', **self.ajax).json()
         self.assertEqual((r['lines'], r['books']), (1, 2))
         self.assertContains(self.client.get('/admin-portal/books/check-authors/'), 'Collier / P.F. Collier')
         r = self.client.post('/admin-portal/books/check-authors/save/', {
-            'key': 'Collier / P.F. Collier', 'authors_json': json.dumps(
-                {'credits': [{'kind': 'Organization', 'role': 'Author', 'name': 'P.F. Collier'}]})},
-            **self.ajax).json()
+            'key': 'Collier / P.F. Collier',
+            'authors_json': json.dumps({'credits': [], 'unknown': True, 'others': True})}, **self.ajax).json()
         self.assertTrue(r['success'], r)
         self.assertEqual((r['books'], r['lines']), (2, 0))
         for book in Book.objects.filter(title__in=['Book 1', 'Book 2']):
             self.assertEqual((book.author, book.authors_unsure, book.author_original),
-                             ('P.F. Collier', False, 'Collier / P.F. Collier'))
+                             ('Various Authors', False, 'Collier / P.F. Collier'))
 
     def test_the_author_reports(self):
         from .models import Author
         from .reports import build_report
         self._add([self._person('Walter', 'Meigs'), self._person('Robert', 'Meigs')], title='Accounting')
         self._add([self._person('Roald', 'Dahl')], title='Matilda', copies='2')
-        self._add([{'kind': 'Organization', 'role': 'Author', 'name': 'Department of Education'}], title='EsP 7')
+        self._add([], unknown=True, others=True, title='Encyclopedia Vol. 1')
         reader = Patron.objects.create(first_name='Ana', last_name='Cruz', email='ana@example.invalid',
                                        account_status='Active')
         for title in ('Accounting', 'Matilda', 'Matilda'):
@@ -2652,17 +2656,29 @@ class AuthorNameTests(TestCase):
                                        transaction_type='Borrow', due_date=timezone.localdate())
         today = timezone.localdate()
         listed = build_report('authors', today, today)
-        self.assertEqual([r[0] for r in listed['rows']],
-                         ['Dahl, Roald', 'Department of Education', 'Meigs, Robert', 'Meigs, Walter'])
-        self.assertEqual(listed['rows'][0][3:], [1, 2])
+        self.assertEqual([r[0] for r in listed['rows']], ['Dahl, Roald', 'Meigs, Robert', 'Meigs, Walter'])
+        self.assertEqual(listed['rows'][0][1:], [1, 2])
+        self.assertIn(('Books, Various Authors', 1), listed['summary'])
         borrowed = build_report('author_borrowing', today - timedelta(days=1), today)
-        self.assertEqual([(r[1], r[3]) for r in borrowed['rows']],
+        self.assertEqual([(r[1], r[2]) for r in borrowed['rows']],
                          [('Dahl, Roald', 2), ('Meigs, Robert', 1), ('Meigs, Walter', 1)])
         dahl = Author.objects.get(name='Roald Dahl')
         books = build_report('author_books', today, today, {'author': str(dahl.author_id)})
         self.assertEqual(books['title'], 'Books by Roald Dahl')
-        self.assertEqual([(r[0], r[3]) for r in books['rows']], [('Matilda', 2)])
+        self.assertEqual([(r[0], r[2]) for r in books['rows']], [('Matilda', 2)])
         page = self.client.get('/admin-portal/reports/?type=author_books&generate=1&author=%d' % dahl.author_id)
         self.assertContains(page, 'Books by Roald Dahl')
         pdf = self.client.get('/admin-portal/reports/pdf/?type=author_books&author=%d' % dahl.author_id)
         self.assertEqual(pdf.status_code, 200)
+
+
+class AuthorsOnlyMigrationTests(TestCase):
+    """Moving to authors only: publishers and helpers leave, and their books still have a sensible line."""
+
+    def test_reference_works_are_by_various_authors(self):
+        import importlib
+        migration = importlib.import_module('library.migrations.0101_authors_people_only')
+        self.assertTrue(callable(migration.people_only))
+        self.assertEqual(migration._join(['A', 'B', 'C'], False), 'A, B & C')
+        self.assertTrue(migration.EDITORIAL.search('Family Circle Editorial Staff'))
+        self.assertFalse(migration.EDITORIAL.search('Department of Education'))

@@ -784,20 +784,14 @@ class Book(Archivable):
 
 
 class Author(models.Model):
-    """Someone credited on a book, recorded once and shared by every book they are on."""
-
-    KIND_CHOICES = [
-        ('Person', 'Person'),
-        ('Organization', 'Organization'),
-    ]
+    """A person who wrote a book, recorded once and shared by every book they wrote."""
 
     author_id = models.AutoField(primary_key=True)
-    kind = models.CharField(max_length=20, choices=KIND_CHOICES, default='Person')
     # A writer known by one name has only the surname.
     first_name = models.CharField(max_length=100, blank=True, default='')
     middle_name = models.CharField(max_length=100, blank=True, default='')
     last_name = models.CharField(max_length=150, blank=True, default='')
-    # Shown name: built from the parts for a person, typed in full for an organization.
+    # Shown name, built from the parts: "Walter B. Meigs".
     name = models.CharField(max_length=255)
     # Lower-case shown name, so one person is one record however the boxes were filled.
     name_key = models.CharField(max_length=255, unique=True)
@@ -814,19 +808,10 @@ class Author(models.Model):
 
 
 class BookAuthor(models.Model):
-    """One name on one book, and what they did on it."""
-
-    ROLE_CHOICES = [
-        ('Author', 'Author'),
-        ('Illustrator', 'Illustrator'),
-        ('Editor', 'Editor'),
-        ('Adapter', 'Adapter'),
-        ('Translator', 'Translator'),
-    ]
+    """One author of one book."""
 
     book = models.ForeignKey(Book, on_delete=models.CASCADE, related_name='credits')
     author = models.ForeignKey(Author, on_delete=models.PROTECT, related_name='credits')
-    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='Author')
     # The order the names are printed in; the first author is who the call number files under.
     position = models.PositiveSmallIntegerField(default=0)
 
@@ -834,11 +819,11 @@ class BookAuthor(models.Model):
         db_table = 'BookAuthors'
         ordering = ['position']
         constraints = [
-            models.UniqueConstraint(fields=['book', 'author', 'role'], name='one_credit_per_role'),
+            models.UniqueConstraint(fields=['book', 'author'], name='one_credit_per_author'),
         ]
 
     def __str__(self):
-        return '%s (%s)' % (self.author.name, self.role)
+        return self.author.name
 
 
 # Donations

@@ -995,7 +995,7 @@ def _book_search_q(term):
     if not term:
         return Q()
     from .models import BookAuthor
-    # Any name on the book, an illustrator's too, written either way round.
+    # Any of the book's authors, written either way round.
     named = BookAuthor.objects.filter(Q(author__name__icontains=term) | Q(author__sort_name__icontains=term))
     q = (Q(title__icontains=term)
          | Q(author__icontains=term)
@@ -4483,7 +4483,6 @@ def admin_book_details_ajax(request, book_id):
         'book_id': book.book_id,
         'title': book.title,
         'author': book.author,
-        'credits': [{'name': c.author.name, 'role': c.role} for c in book.credits.select_related('author')],
         'ISBN': book.ISBN or 'N/A',
         'genre': book.genre or 'General',
         'subject': book.subject or '',
@@ -4821,8 +4820,8 @@ def download_book_template(request):
     # Matched by name, so order does not matter and extra columns are ignored.
     return _template_response('book_import_template.xlsx', 'Books', [
         ('Title', True, 'The title as printed on the book.', 'Pride and Prejudice'),
-        ('Author', True, 'First Surname, or Surname, First. Join several authors with &, and add an '
-                         'illustrator as (Ill. Name). Each is saved as a name of its own.',
+        ('Author', True, 'First Surname, or Surname, First. Join several authors with &. Each is saved '
+                         'as a name of its own.',
          'Jane Austen'),
         ('Publication Year', True, 'Four digits, or "unknown" if the book does not say.', 1963),
         ('ISBN', True, 'The ISBN or accession number, or "none" if the book has neither.', 'none'),
@@ -6253,7 +6252,6 @@ def get_book_by_id(request):
         'book_id': book.book_id,
         'title': book.title,
         'author': book.author,
-        'credits': [{'name': c.author.name, 'role': c.role} for c in book.credits.select_related('author')],
         'status': book.status,
     }
     return JsonResponse(book_data)
@@ -14078,7 +14076,7 @@ def _open_library(isbn):
         return None
     year = re.search(r'\b(1[0-9]{3}|20[0-9]{2})\b', entry.get('publish_date') or '')
     from . import authors
-    # Open Library lists each author on their own, so each is one name for the boxes.
+    # Open Library lists each author on their own, so each is one name for the boxes; a publisher is left out.
     credits = [c for a in entry.get('authors') or [] if a.get('name')
                for c in authors.split(a['name'])['credits'][:1]]
     names = authors.make_entry(credits)

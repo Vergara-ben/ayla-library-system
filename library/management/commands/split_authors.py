@@ -41,8 +41,7 @@ class Command(BaseCommand):
             reading = authors.split(text)
             if reading['sure']:
                 for c in reading['credits']:
-                    if c['kind'] == 'Person':
-                        authors.learn(known, c['first'], c['last'])
+                    authors.learn(known, c['first'], c['last'])
 
         numbers = {b.pk: b.copy_number for b in books}
         with transaction.atomic():

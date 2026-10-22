@@ -1,12 +1,10 @@
-"""Authors as separate names: who wrote, illustrated, edited, adapted or translated a book."""
+"""Authors as separate names: each person who wrote a book, first, middle and surname."""
 
 import json
 import re
 
 from .names import PARTICLES as NAME_PARTICLES
 
-ROLES = ('Author', 'Illustrator', 'Editor', 'Adapter', 'Translator')
-KINDS = ('Person', 'Organization')
 
 UNKNOWN_WORDS = {'unknown', 'unknown author', 'author unknown', 'anonymous', 'anon', 'n/a', 'na', 'none',
                  'no author', 'not specified', 'not specified on spine'}
@@ -15,15 +13,19 @@ OTHERS_PART = re.compile(r'^(various(\s+authors?)?|multiple authors|et\.?\s*al\.
                          r'|contributors|educators)$', re.I)
 TRAILING_OTHERS = re.compile(r',?\s+(et\.?\s*al\.?|etc\.?|and others)$', re.I)
 
+# A publisher or other body: never an author here, so its name is left out.
 ORG_WORDS = re.compile(
     r"\b(?:press|publishing|publishers?|publications?|books|inc\.?|corp\.?|corporation|company|co\.|ltd\.?"
     r"|department|dept\.?|association|society|council|institute|university|college|school|foundation"
     r"|bureau|office|ministry|commission|committee|agency|library|editors|editorial|staff|editorial board"
     r"|academy|fund|federation|alliance|organi[sz]ation|services|surgeons|nurses|teachers"
     r"|group|center|centre|magazine|kitchen|task force|international|united nations|philippines?"
-    r"|deped|decs|nhcp|fape|diwa|grolier|macmillan|scholastic|merriam|webster|hammond|hmh|harcourt"
+    r"|deped|decs|nhcp|fape|diwa|grolier|macmillan|scholastic|merriam|hmh|harcourt"
     r"|mcgraw|pearson|vibal|abiva|disney|britannica|encyclopa?edia|parragon|usborne|ladybird|kindersley"
     r"|time-life|reader's digest|grandreams|mouse works|vatican)(?!\w)", re.I)
+# A body that stands for many writers: its book is by "Various Authors", not "Unknown".
+EDITORIAL = re.compile(r"\b(editors?|editorial|staff|kitchen|board|encyclopa?edia|dictionar(y|ies)|grolier"
+                       r"|collier|britannica|merriam|time-life|reader's digest)\b", re.I)
 
 PARTICLES = set(NAME_PARTICLES) | {'le', 'du', 'der', 'den', 'ter', 'st', 'st.', 'bin', 'ibn', 'al', 'el'}
 SUFFIX = re.compile(r'^(jr\.?|sr\.?|ii|iii|iv)$', re.I)
@@ -35,7 +37,8 @@ INITIAL = re.compile(r'^([A-Z]\.){1,3}$|^[A-Z]$')
 # Short forms that are half of a first name: Ma. Cristina.
 NAME_PREFIX = {'ma.', 'ma', 'sta.', 'sto.'}
 
-# Role notes in brackets or before a name: "(Ill. Eric Carle)", "Edited by John Hollander".
+# Who else worked on the book, in brackets or before a name: "(Ill. Eric Carle)", "Edited by John Hollander".
+# Only authors are kept; a book naming nobody else keeps its editor or illustrator as its author.
 ROLE_PHRASES = [
     ('Illustrator', r'illustrations?\s+by|illustrated\s+by|illustrator|ill(?:us)?\.|ill|pictures\s+by|drawings\s+by'),
     ('Editor', r'edited\s+by|editor|eds?\.|ed'),
@@ -70,6 +73,12 @@ def _is_particle(word):
     word = word.lower()
     return word in PARTICLES or word.rstrip('.') in PARTICLES or (
         '-' in word and word.rsplit('-', 1)[1].rstrip('.') in PARTICLES)
+
+
+def _leads_surname(word):
+    """The Spanish and Filipino particles that never stand as a first name: de, dela, san, sta."""
+    word = word.lower()
+    return any(w.rstrip('.') in NAME_PARTICLES - {'van', 'von'} for w in (word, word.rsplit('-', 1)[-1]))
 
 
 def _surname_like(chunk):
@@ -113,8 +122,9 @@ def person(text):
     if not tokens:
         return '', '', '', False
     sure = sure and not INITIAL.match(tokens[-1])     # "E. Bragado and A.": a cut-off name
-    if len(tokens) == 1:
-        return '', '', ' '.join(p for p in (tokens[0], suffix) if p), sure
+    # "De Vega" or "San Andres" alone is a surname; "Al Spicer" and "Van Morrison" are not.
+    if len(tokens) == 1 or all(_leads_surname(t) for t in tokens[:-1]):
+        return '', '', ' '.join(tokens + ([suffix] if suffix else [])), sure
     cut = len(tokens) - 1
     while cut > 1 and _is_particle(tokens[cut - 1]):
         cut -= 1
@@ -137,9 +147,9 @@ def person_reversed(surname, given):
     return first, middle, ' '.join(words), sure
 
 
-def credit(kind='Person', role='Author', first='', middle='', last='', name=''):
-    return {'kind': kind, 'role': role, 'first': _case(first), 'middle': _case(middle),
-            'last': _case(last), 'name': _case(name)}
+def credit(first='', middle='', last='', role='Author'):
+    # The role is only read while splitting a line; what is saved is the three names.
+    return {'role': role, 'first': _case(first), 'middle': _case(middle), 'last': _case(last)}
 
 
 def _role_of(phrase):
@@ -167,7 +177,7 @@ def _role_note(note):
 def split(raw, known=None):
     """The best reading of an author line, and whether it can be trusted without a look.
 
-    Returns {'credits': [...], 'unknown': bool, 'others': bool, 'sure': bool}."""
+    Returns {'credits': [{'first', 'middle', 'last'}], 'unknown': bool, 'others': bool, 'sure': bool}."""
     text = tidy(raw)
     result = {'credits': [], 'unknown': False, 'others': False, 'sure': True}
     if not text or text.lower().strip(' .()[]') in UNKNOWN_WORDS:
@@ -233,10 +243,10 @@ def split(raw, known=None):
     if any(lone) and not all(lone):
         result['sure'] = False
 
+    bodies = []
     for role, kind, chunks in chunked:
         if kind == 'org':
-            name = _HOLE.sub('', chunks[0]).strip(' ,')
-            _add(credits, credit('Organization', role, name=name), chunks[0], notes, result)
+            bodies.append(_HOLE.sub('', chunks[0]).strip(' ,'))
             continue
         cores = [_HOLE.sub('', c).strip() for c in chunks]
         names, sure = _read_people(cores, pairs_written, known)
@@ -244,25 +254,33 @@ def split(raw, known=None):
         # A bracket after a chunk belongs to the name in that chunk.
         if len(names) == len(chunks):
             for c, n in zip(chunks, names):
-                _add(credits, credit('Person', role, *n), c, notes, result)
+                _add(credits, credit(*n, role=role), c, notes, result)
         else:
             for c, n in zip(chunks[1::2], names):
-                _add(credits, credit('Person', role, *n), c, notes, result)
+                _add(credits, credit(*n, role=role), c, notes, result)
             for c in chunks[0::2]:
                 _attach_notes(c, notes, credits, result, None)
 
-    if '/' in plain and any(c['kind'] == 'Person' for c in credits):
+    if '/' in plain and credits:
         result['sure'] = False                  # "Collier / P.F. Collier": who is who is never certain
+    if bodies:
+        # A publisher or office is left out; a look makes sure it was not a person.
+        result['sure'] = False
+        if not credits and EDITORIAL.search(' '.join(bodies)):
+            result['others'] = True
+    # Only authors are kept, unless the book names no one else.
+    authors = [c for c in credits if c['role'] == 'Author']
+    if not authors and credits:
+        authors = [c for c in credits if c['role'] == credits[0]['role']]
     seen = set()
     unique = []
-    for c in credits:
-        key = (c['role'], name_key(c))
-        if key in seen or not (c['last'] or c['name']):
+    for c in authors:
+        key = name_key(c)
+        if key in seen or not c['last']:
             result['sure'] = False
             continue
         seen.add(key)
-        unique.append(c)
-    unique.sort(key=lambda c: 0 if c['role'] == 'Author' else 1)
+        unique.append({'first': c['first'], 'middle': c['middle'], 'last': c['last']})
     result['credits'] = unique
     if not unique:
         result['unknown'] = True
@@ -279,9 +297,7 @@ def _attach_notes(chunk, notes, credits, result, owner):
         note = notes[int(index)]
         roles = _role_note(note)
         if roles is None:
-            # "(FAPE)" after an organization is its short name; "(Florante at Laura)" is a note.
-            if not (owner and owner['kind'] == 'Organization' and re.fullmatch(r'[A-Z]{2,8}', note)):
-                result['sure'] = False
+            result['sure'] = False              # "(Florante at Laura)": a note, not a name
             continue
         for role, names in roles:
             if not names:
@@ -293,7 +309,7 @@ def _attach_notes(chunk, notes, credits, result, owner):
             for name in [n for n in re.split(r'\s*(?:,|&|\band\b)\s*', names) if n.strip()]:
                 first, middle, last, sure = person(name)
                 result['sure'] = result['sure'] and sure
-                credits.append(credit('Person', role, first, middle, last))
+                credits.append(credit(first, middle, last, role=role))
 
 
 def _read_people(cores, pairs_written, known):
@@ -390,20 +406,16 @@ def norm(text):
 
 def name_key(entry):
     """One record per shown name, however its boxes were filled: "p:roald dahl"."""
-    return (('o:' if entry['kind'] == 'Organization' else 'p:') + norm(shown_name(entry)))[:255]
+    return ('p:' + norm(shown_name(entry)))[:255]
 
 
 def shown_name(entry):
-    """Roald Dahl; a single-name writer is just the surname; an organization is its name."""
-    if entry['kind'] == 'Organization':
-        return entry['name']
+    """Roald Dahl; a single-name writer is just the surname."""
     return ' '.join(p for p in (entry['first'], entry['middle'], entry['last']) if p)
 
 
 def sort_name(entry):
-    """Dahl, Roald: surname first for the reports, without Jr. or a leading "The"."""
-    if entry['kind'] == 'Organization':
-        return re.sub(r'^the\s+', '', entry['name'], flags=re.I)
+    """Dahl, Roald: surname first for the reports, without Jr."""
     words = entry['last'].split()
     if len(words) > 1 and SUFFIX.match(words[-1]):
         words = words[:-1]
@@ -413,14 +425,9 @@ def sort_name(entry):
 
 def display(credits, unknown=False, others=False):
     """The author line every list, label and search uses: Walter B. Meigs & Robert F. Meigs."""
-    authors = [shown_name(c) for c in credits if c['role'] == 'Author']
-    if not authors:
-        if unknown or not credits:
-            return 'Various Authors' if others else 'Unknown'
-        role = credits[0]['role']
-        names = [shown_name(c) for c in credits if c['role'] == role]
-        return '%s (%s)' % (_join(names, others), role)
-    return _join(authors, others)
+    if not credits:
+        return 'Various Authors' if others else 'Unknown'
+    return _join([shown_name(c) for c in credits], others)
 
 
 def _join(names, others, limit=255):
@@ -443,9 +450,6 @@ def filing_surname(text):
     first = re.split(r'\s+(?:and|&)\s+|;|/', text)[0].strip(' ,')
     if not first:
         return ''
-    if ORG_WORDS.search(first):
-        words = [w for w in re.findall(r"[^\W\d_][\w'-]*", first) if w.lower() != 'the']
-        return words[0] if words else ''
     if ',' in first:
         # "Austen, Jane" files under its first part; "Harold Koontz, Cyril O'Donnell" under Koontz.
         head = first.split(',', 1)[0].strip()
@@ -463,8 +467,7 @@ def _last_of(last):
 # Reading what a form or a sheet sent
 
 def make_entry(credits, unknown=False, others=False, sure=True, original=''):
-    authors = [c for c in credits if c['role'] == 'Author']
-    unknown = bool(unknown or not credits) and not authors
+    unknown = not credits
     return {'credits': credits, 'unknown': unknown, 'others': bool(others), 'sure': bool(sure),
             'display': display(credits, unknown, others), 'original': tidy(original)[:255]}
 
@@ -481,40 +484,35 @@ def from_text(text, known=None):
 
 
 def from_boxes(data):
-    """The name boxes: each person's first, middle and surname, or an organization's name."""
+    """The name boxes: each author's first, middle and surname."""
     from .catalogue import PLACEHOLDER, UNREADABLE
     data = data if isinstance(data, dict) else {}
     credits = []
     for row in (data.get('credits') or [])[:30]:
         if not isinstance(row, dict):
             continue
-        kind = row.get('kind') if row.get('kind') in KINDS else 'Person'
-        role = row.get('role') if row.get('role') in ROLES else 'Author'
-        if kind == 'Organization':
-            entry = credit(kind, role, name=row.get('name'))
-        else:
-            entry = credit(kind, role, row.get('first'), row.get('middle'), row.get('last'))
-        parts = [p for p in (entry['first'], entry['middle'], entry['last'], entry['name']) if p]
+        entry = credit(row.get('first'), row.get('middle'), row.get('last'))
+        del entry['role']
+        parts = [p for p in (entry['first'], entry['middle'], entry['last']) if p]
         if not parts:
             continue                            # an empty row is left out
         for part in parts:
             if PLACEHOLDER.match(part) or UNREADABLE.search(part):
                 return None, '"%s" is not a name. Tick "Author unknown" if the book names none.' % part[:40]
-        if kind == 'Person' and not entry['last']:
+        if not entry['last']:
             return None, ('Type the surname of %s. A writer known by one name goes in Surname.'
                           % ' '.join(parts))
         if len(entry['first']) > 100 or len(entry['middle']) > 100 or len(entry['last']) > 150 \
                 or len(shown_name(entry)) > 255:
             return None, 'One of the names is too long. Type it as printed on the book.'
-        if any(c['role'] == role and name_key(c) == name_key(entry) for c in credits):
+        if any(name_key(c) == name_key(entry) for c in credits):
             continue
         credits.append(entry)
     unknown, others = bool(data.get('unknown')), bool(data.get('others'))
-    if unknown and any(c['role'] == 'Author' for c in credits):
+    if unknown and credits:
         return None, 'Untick "Author unknown", or clear the author names.'
     if not credits and not unknown:
         return None, 'Type the author, or tick "Author unknown" if the book names none.'
-    credits.sort(key=lambda c: 0 if c['role'] == 'Author' else 1)
     return make_entry(credits, unknown, others), None
 
 
@@ -541,7 +539,7 @@ def from_item(item, known=None):
 def find_or_create(entry):
     from .models import Author
     author, _ = Author.objects.get_or_create(name_key=name_key(entry), defaults={
-        'kind': entry['kind'], 'first_name': entry['first'][:100], 'middle_name': entry['middle'][:100],
+        'first_name': entry['first'][:100], 'middle_name': entry['middle'][:100],
         'last_name': entry['last'][:150], 'name': shown_name(entry)[:255], 'sort_name': sort_name(entry)[:255]})
     return author
 
@@ -551,8 +549,7 @@ def attach(book, entry):
     from .models import Book, BookAuthor
     BookAuthor.objects.filter(book=book).delete()
     for position, c in enumerate(entry['credits']):
-        BookAuthor.objects.get_or_create(book=book, author=find_or_create(c), role=c['role'],
-                                         defaults={'position': position})
+        BookAuthor.objects.get_or_create(book=book, author=find_or_create(c), defaults={'position': position})
     fields = {'author': entry['display'], 'author_unknown': entry['unknown'],
               'authors_and_others': entry['others'], 'authors_unsure': not entry['sure']}
     if entry['original'] and entry['original'] != entry['display']:
@@ -584,8 +581,7 @@ def copy_credits(source, book):
         backfill([source])
         source.refresh_from_db()
     for c in source.credits.all():
-        BookAuthor.objects.get_or_create(book=book, author_id=c.author_id, role=c.role,
-                                         defaults={'position': c.position})
+        BookAuthor.objects.get_or_create(book=book, author_id=c.author_id, defaults={'position': c.position})
     type(book).all_objects.filter(pk=book.pk).update(
         author_unknown=source.author_unknown, authors_and_others=source.authors_and_others,
         authors_unsure=source.authors_unsure, author_original=source.author_original)
@@ -593,9 +589,7 @@ def copy_credits(source, book):
 
 def entry_of(book):
     """A book's names as the boxes show them, split from its author line if never saved as names."""
-    credits = [{'kind': c.author.kind, 'role': c.role, 'first': c.author.first_name,
-                'middle': c.author.middle_name, 'last': c.author.last_name,
-                'name': c.author.name if c.author.kind == 'Organization' else ''}
+    credits = [{'first': c.author.first_name, 'middle': c.author.middle_name, 'last': c.author.last_name}
                for c in book.credits.select_related('author')]
     if credits or book.author_unknown:
         return make_entry(credits, book.author_unknown, book.authors_and_others, not book.authors_unsure,
@@ -605,7 +599,7 @@ def entry_of(book):
 
 
 def boxes_json(book=None):
-    """What the name boxes start with: a book's names, or one empty person."""
+    """What the name boxes start with: a book's authors, or one empty row."""
     if book is None:
         return json.dumps({'credits': [], 'unknown': False, 'others': False})
     entry = entry_of(book)
