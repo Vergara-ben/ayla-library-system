@@ -31,9 +31,16 @@ def staff_modules(request):
         # Badged on Shelving & Labels and shown on the dashboard.
         'can_shelve': may_shelve(user),
         'shelving_counts': _shelving_counts() if may_shelve(user) else (0, 0),
+        # Badged on Transactions, and shown as a banner there and on the dashboard.
+        'tx_attention': _tx_attention() if user.has_module('transactions') else None,
         # Badged on Log Management: members on hold asking at the kiosk.
         'door_waiting': _door_waiting() if user.has_module('logs') else 0,
     }
+
+
+def _tx_attention():
+    from .transaction_alerts import attention
+    return attention()
 
 
 def _door_waiting():

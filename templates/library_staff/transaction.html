@@ -144,6 +144,7 @@
         </header>
 
         <main id="main-content" tabindex="-1" class="flex-1 overflow-y-auto p-8 space-y-8">
+            {% url 'staff_transaction' as tx_url %}{% include '_tx_attention.html' %}
             
             <div data-live="tx-stats" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div class="p-5 rounded-xl border border-slate-800/80" style="background-color: var(--bg-card);">
@@ -169,7 +170,7 @@
             </div>
 
             {# Pending extension requests. #}
-            <div data-live="tx-ext" class="rounded-xl border border-amber-800/40 overflow-hidden shadow-2xl" style="background-color: var(--bg-card);">
+            <div data-live="tx-ext" id="extensions" class="scroll-mt-6 rounded-xl border border-amber-800/40 overflow-hidden shadow-2xl" style="background-color: var(--bg-card);">
                 <div class="p-5 border-b border-amber-900/30 flex items-center gap-2">
                     <i class="fa-solid fa-hourglass-half text-amber-500 text-xs"></i>
                     <h4 class="text-sm font-bold text-slate-200 tracking-wide">Extension Requests</h4>

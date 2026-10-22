@@ -102,21 +102,35 @@ def portal_alerts(request):
             'text': ('%s asked for more time with "%s"' % (
                 newest.transaction.patron.fullname if newest.transaction.patron else 'A patron',
                 newest.transaction.book.title)) if newest else '',
-            'title': 'Extension request', 'icon': 'fa-hourglass-half',
+            'title': 'Extension request', 'icon': 'fa-hourglass-half', 'urgent': True,
             'url': _portal_url(role, 'admin_transaction', 'staff_transaction'),
         })
-        overdue = (Transaction.objects.filter(transaction_type='Borrow', return_date__isnull=True,
-                                              overdue_flag=True)
-                   .select_related('book', 'patron').order_by('-transaction_id'))
+        from .transaction_alerts import attention, overdue_loans
+        need = attention()
+        overdue = overdue_loans().select_related('book', 'patron').order_by('-due_date', '-transaction_id')
         newest = overdue.first()
-        count = overdue.count()
+        count = need['overdue']
         items.append({
-            'key': 'overdue', 'count': count, 'latest': newest.transaction_id if newest else 0,
+            'key': 'overdue', 'count': count, 'latest': newest.transaction_id if newest else 0, 'urgent': True,
             'text': ('%d loan%s overdue, the newest "%s"' % (count, '' if count == 1 else 's',
                      newest.book.title)) if newest else '',
             'title': 'Overdue loans', 'icon': 'fa-triangle-exclamation',
             'url': _portal_url(role, 'admin_transaction', 'staff_transaction') + '?status=overdue',
         })
+        # The sidebar's count on Transactions: everything there that needs someone.
+        items.append({'key': 'transactions', 'count': need['total'], 'latest': 0, 'quiet': True})
+        # Once per sign-in, what is already waiting at the desk.
+        if need['total'] and not request.session.get('transactions_notice_shown'):
+            request.session['transactions_notice_shown'] = True
+            words = []
+            if need['overdue']:
+                words.append('%d overdue loan%s' % (need['overdue'], '' if need['overdue'] == 1 else 's'))
+            if need['extensions']:
+                words.append('%d extension request%s' % (need['extensions'], '' if need['extensions'] == 1 else 's'))
+            items[-2]['notice'] = ' and '.join(words) + ' need%s you.' % ('s' if need['total'] == 1 else '')
+            items[-2]['notice_title'] = 'At the circulation desk'
+            items[-2]['url'] = _portal_url(role, 'admin_transaction', 'staff_transaction') + (
+                '?status=overdue' if need['overdue'] else '#extensions')
         # A shelf count found these on the shelf while they are still recorded on loan.
         on_shelf = (StockAuditLine.objects.filter(result='Here on loan',
                                                   book__status__in=('Borrowed', 'Overdue'))
