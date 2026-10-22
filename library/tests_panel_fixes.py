@@ -2380,3 +2380,58 @@ class InventoryValidationTests(TestCase):
         for marker in ('inventory-checks.js', 'data-check="reason"', 'data-check="supplier"', 'data-check="donated"',
                        'data-check="price"', 'data-checked-form', "url 'receive_check'" if False else 'receive/check/'):
             self.assertContains(page, marker)
+
+
+class AuditTrailStateTests(TestCase):
+    """A count's follow-up agrees with the book as it is now, whatever happened to it since."""
+
+    def setUp(self):
+        from .models import FloorPlan, Room, Shelf, ShelfLevel, StockAudit
+        plan = FloorPlan.objects.create(name='Ground', floor_number=1, is_active=True)
+        room = Room.objects.create(floor_plan=plan, name='Main', map_x=0, map_y=0)
+        self.shelf_a = Shelf.objects.create(room=room, name='Shelf A', map_x=0, map_y=0)
+        self.a1 = ShelfLevel.objects.create(shelf=self.shelf_a, level_number=1)
+        self.a2 = ShelfLevel.objects.create(shelf=self.shelf_a, level_number=2)
+        self.audit = StockAudit.objects.create(shelf=self.shelf_a, shelf_name='Shelf A',
+                                               audited_at=timezone.now() - timedelta(days=5))
+
+    def _line(self, result, **book):
+        from .models import StockAuditLine
+        b = Book.objects.create(title=book.pop('title', result), author='A', shelf_level=self.a1, **book)
+        line = StockAuditLine.objects.create(audit=self.audit, book=b, title=b.title, result=result,
+                                             status_then=b.status, condition_then=b.condition or 'Good',
+                                             location_then=b.location_short)
+        return b, line
+
+    def test_a_book_gone_since_settles_any_finding_truthfully(self):
+        from .audittrail import outcome
+        damaged, d_line = self._line('Damaged', condition='Damaged')
+        stray, s_line = self._line('Stray')
+        damaged.archive('Desk', 'Deaccessioned: torn beyond use')
+        stray.status = 'Lost'
+        stray.save()
+        self.assertEqual(outcome(d_line), ('Removed from the records', False))
+        self.assertEqual(outcome(s_line), ('Reported lost', False))
+
+    def test_a_loan_reported_lost_is_not_called_checked_in(self):
+        from .audittrail import events_since, outcome
+        book, line = self._line('Here on loan', status='Borrowed')
+        reader = Patron.objects.create(first_name='Ana', last_name='Cruz', fullname='Ana Cruz')
+        tx = Transaction.objects.create(book=book, patron=reader, transaction_type='Borrow',
+                                        due_date=timezone.localdate(), marked_lost=True, fine_amount=Decimal('350'))
+        from .models import SystemLog
+        SystemLog.objects.create(action='Process', entity_type='Transaction', entity_id=str(tx.transaction_id),
+                                 detail='Marked lost')
+        book.status = 'Lost'
+        book.save()
+        self.assertEqual(outcome(line), ('Reported lost', False))
+        self.assertTrue(any('Reported lost by Ana Cruz' in text and '350.00' in text for _d, text in events_since(line)))
+
+    def test_a_move_after_the_count_is_explained(self):
+        from .audittrail import events_since
+        book, line = self._line('Found')
+        book.shelf_level = self.a2
+        book.save()
+        trail = events_since(line)
+        self.assertEqual(trail[-1][0], None)
+        self.assertIn('moved since the count', trail[-1][1])
