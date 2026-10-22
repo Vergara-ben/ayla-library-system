@@ -75,6 +75,7 @@
     <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
     <link rel="apple-touch-icon" href="{% static 'images/apple-touch-icon.png' %}">
     <script src="{% static 'js/ayla-dialog.js' %}"></script>
+    <script src="{% static 'js/picker.js' %}"></script>
 </head>
 <body class="flex h-screen overflow-hidden">
 <a href="#main-content" class="skip-link">Skip to main content</a>
@@ -136,6 +137,13 @@
                             <i class="fa-solid fa-file-pdf text-[11px]"></i> Download PDF
                         </button>
                     </div>
+                </div>
+                {# Books by an Author is run for one author. #}
+                <div id="author-field" class="mt-4 max-w-md space-y-1.5{% if selected_type != 'author_books' %} hidden{% endif %}">
+                    <label for="f_author_search" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Author</label>
+                    <input id="f_author_search" type="text" value="{{ picked_author.sort_name|default:'' }}" placeholder="Type a surname or name" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);">
+                    <input type="hidden" name="author" id="f_author" value="{{ picked_author.author_id|default:'' }}"{% if selected_type != 'author_books' %} disabled{% endif %}>
+                    {{ author_choices|json_script:"authorChoicesData" }}
                 </div>
                 <p id="snapshot-note" class="text-[11px] text-slate-500 mt-3{% if not is_snapshot %} hidden{% endif %}"><i class="fa-solid fa-circle-info mr-1"></i> This report is a real-time snapshot; the date range does not apply.</p>
             </form>
@@ -268,6 +276,25 @@
 
             typeSelect.addEventListener('change', syncDateFields);
             syncDateFields();
+
+            // The author, picked by name, for Books by an Author only.
+            const authorField = document.getElementById('author-field');
+            const authorSearch = document.getElementById('f_author_search');
+            const authorId = document.getElementById('f_author');
+            function syncAuthorField() {
+                const on = typeSelect.value === 'author_books';
+                authorField.classList.toggle('hidden', !on);
+                authorId.disabled = !on;
+            }
+            if (authorField && window.AylaPicker) {
+                AylaPicker.attach(authorSearch, {
+                    items: JSON.parse(document.getElementById('authorChoicesData').textContent || '[]'),
+                    onPick: function (it) { authorSearch.value = it.label; authorId.value = it.value; },
+                    onType: function () { authorId.value = ''; },
+                });
+                typeSelect.addEventListener('change', syncAuthorField);
+                syncAuthorField();
+            }
         })();
     </script>
 

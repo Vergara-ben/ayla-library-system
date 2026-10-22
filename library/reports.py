@@ -26,10 +26,15 @@ REPORT_TYPES = [
     ('unreturned', 'Unreturned Books Report'),
     ('penalties', 'Penalties Report'),
     ('analytics', 'Borrowing Analytics Report'),
+    ('authors', 'Authors Report'),
+    ('author_borrowing', 'Most Borrowed Authors'),
+    ('author_books', 'Books by an Author'),
 ]
 
 # Reports that represent a real-time snapshot rather than a date range.
-SNAPSHOT_REPORTS = {'books', 'patrons', 'stock_levels', 'unreturned', 'shelving'}
+SNAPSHOT_REPORTS = {'books', 'patrons', 'stock_levels', 'unreturned', 'shelving', 'authors', 'author_books'}
+# Reports run for one thing picked on the form, passed as options.
+OPTION_REPORTS = {'author_books'}
 
 LIBRARY_NAME = 'Ayla Public Library'
 LIBRARY_LOCATION = 'Brgy. Sala, Cabuyao, Laguna'
@@ -1273,10 +1278,166 @@ _BUILDERS['penalties'] = _penalties
 _BUILDERS['analytics'] = _analytics
 
 
-def build_report(report_type, start, end):
+# Authors
+def _credits_on_shelf():
+    """Every name on a book the library still holds, with its book."""
+    from .authors import backfill
+    from .models import BookAuthor
+    backfill()
+    return (BookAuthor.objects.filter(book__archived_at__isnull=True)
+            .select_related('author', 'book', 'book__shelf_level', 'book__shelf_level__shelf'))
+
+
+def _authors(start, end):
+    """Every author and organization on a book here, surname first, with their titles and copies."""
+    from collections import Counter
+    per = {}
+    for c in _credits_on_shelf():
+        a = per.setdefault(c.author_id, {'author': c.author, 'roles': Counter(), 'titles': set(), 'copies': set()})
+        a['roles'][c.role] += 1
+        a['titles'].add((c.book.title or '').strip().lower())
+        a['copies'].add(c.book_id)
+    entries = sorted(per.values(), key=lambda a: a['author'].sort_name.lower())
+    rows = [[
+        a['author'].sort_name,
+        a['author'].kind,
+        ', '.join(r for r in ('Author', 'Illustrator', 'Editor', 'Adapter', 'Translator') if a['roles'][r]),
+        len(a['titles']),
+        len(a['copies']),
+    ] for a in entries]
+    live = Book.objects.all()
+    unknown = live.filter(author_unknown=True).count()
+    several = (live.filter(credits__role='Author').annotate(n=Count('credits')).filter(n__gt=1).count())
+    top = sorted(entries, key=lambda a: (-len(a['copies']), a['author'].sort_name.lower()))[:10]
+    return {
+        'key': 'authors',
+        'title': 'Authors Report',
+        'subtitle': 'Every author and organization credited on a book in the library, sorted by surname',
+        'columns': ['Author', 'Kind', 'Credited As', 'Titles', 'Copies'],
+        'rows': rows,
+        'summary': [
+            ('Authors on Record', len(entries)),
+            ('People', sum(1 for a in entries if a['author'].kind == 'Person')),
+            ('Organizations', sum(1 for a in entries if a['author'].kind == 'Organization')),
+            ('Books With Several Authors', several),
+            ('Books, Author Unknown', unknown),
+        ],
+        'chart': _chart(
+            [(a['author'].name[:22], len(a['copies'])) for a in top], kind='bar',
+            title='Authors with the most copies in the library',
+            note='The ten authors whose books the library holds the most copies of.',
+            empty_note='No books have authors recorded yet.',
+            axis_note='Author · vertical axis is number of copies'),
+        'breakdown': {
+            'Credited as': [(role, '%d name(s)' % sum(1 for a in entries if a['roles'][role]))
+                            for role in ('Author', 'Illustrator', 'Editor', 'Adapter', 'Translator')],
+        },
+    }
+
+
+def _author_borrowing(start, end):
+    """Which authors' books were borrowed most in the period."""
+    from .models import BookAuthor
+    borrows = list(Transaction.objects.filter(transaction_type='Borrow', transaction_date__range=(start, end),
+                                              book__isnull=False).values_list('book_id', 'patron_id'))
+    by_book = {}
+    for book_id, patron_id in borrows:
+        by_book.setdefault(book_id, []).append(patron_id)
+    per = {}
+    for c in (BookAuthor.objects.filter(book_id__in=by_book, role='Author')
+              .select_related('author', 'book')):
+        a = per.setdefault(c.author_id, {'author': c.author, 'borrows': 0, 'titles': set(), 'patrons': set()})
+        a['borrows'] += len(by_book[c.book_id])
+        a['titles'].add((c.book.title or '').strip())
+        a['patrons'].update(by_book[c.book_id])
+    ranked = sorted(per.values(), key=lambda a: (-a['borrows'], a['author'].sort_name.lower()))
+    rows = [[rank, a['author'].sort_name, a['author'].kind, a['borrows'], len(a['titles']), len(a['patrons']),
+             ', '.join(sorted(a['titles'])[:3]) + (' and %d more' % (len(a['titles']) - 3) if len(a['titles']) > 3 else '')]
+            for rank, a in enumerate(ranked, start=1)]
+    unknown = sum(len(by_book[pk]) for pk in
+                  Book.all_objects.filter(pk__in=by_book, author_unknown=True).values_list('pk', flat=True))
+    return {
+        'key': 'author_borrowing',
+        'title': 'Most Borrowed Authors',
+        'subtitle': "Authors ranked by how often their books were borrowed in the period; a co-written book counts for each author",
+        'columns': ['Rank', 'Author', 'Kind', 'Times Borrowed', 'Titles Borrowed', 'Borrowers', 'Titles'],
+        'rows': rows,
+        'summary': [
+            ('Books Borrowed', len(borrows)),
+            ('Authors Borrowed', len(ranked)),
+            ('Most Borrowed', ranked[0]['author'].name if ranked else DASH),
+            ('Borrowed, Author Unknown', unknown),
+        ],
+        'chart': _chart(
+            [(a['author'].name[:22], a['borrows']) for a in ranked[:10]], kind='bar',
+            title='Most borrowed authors in the period',
+            note='The ten authors whose books were borrowed most.',
+            empty_note='Nothing was borrowed in this period.',
+            axis_note='Author · vertical axis is times borrowed'),
+    }
+
+
+def author_choices():
+    """The authors the Books by an Author report can be run for."""
+    from .models import Author
+    return [{'value': str(a.author_id), 'label': a.sort_name, 'search': a.name,
+             'sub': '%s · %d book(s)' % (a.kind, a.books)}
+            for a in (Author.objects.filter(credits__book__archived_at__isnull=True)
+                      .annotate(books=Count('credits__book', distinct=True)).order_by('sort_name'))]
+
+
+def _author_books(start, end, options=None):
+    """One author's books: each title, what they did on it, its copies and where they are."""
+    from .models import Author
+    raw = str((options or {}).get('author') or '').strip()
+    author = Author.objects.filter(author_id=int(raw)).first() if raw.isdigit() else None
+    titles = {}
+    shelves = set()
+    if author is not None:
+        for c in _credits_on_shelf().filter(author=author).order_by('book__title', 'book__copy_number'):
+            b = c.book
+            t = titles.setdefault((b.title or '').strip().lower(), {
+                'title': b.title, 'roles': set(), 'copies': 0, 'available': 0, 'out': 0, 'places': [],
+                'call_number': b.call_number, 'year': b.publication_year, 'line': b.author})
+            t['roles'].add(c.role)
+            t['copies'] += 1
+            t['available'] += b.status == 'Available'
+            t['out'] += b.status in ('Borrowed', 'Overdue', 'Being Read')
+            where = _book_location(b)
+            if where not in t['places']:
+                t['places'].append(where)
+            if b.shelf_level_id and b.shelf_level.shelf_id:
+                shelves.add(b.shelf_level.shelf.name)
+    entries = sorted(titles.values(), key=lambda t: (t['title'] or '').lower())
+    rows = [[t['title'], _text(t['line']), ', '.join(sorted(t['roles'])), t['copies'], t['available'], t['out'],
+             '; '.join(t['places']), _text(t['call_number']), t['year'] or DASH] for t in entries]
+    return {
+        'key': 'author_books',
+        'title': 'Books by %s' % author.name if author else 'Books by an Author',
+        'subtitle': ('Every title in the library credited to %s, with its copies and where they are'
+                     % author.name) if author else 'Pick an author above, then press Generate.',
+        'columns': ['Title', 'Author Line', 'Credited As', 'Copies', 'Available', 'On Loan', 'Where',
+                    'Call Number', 'Year'],
+        'rows': rows,
+        'summary': [
+            ('Titles', len(entries)),
+            ('Copies', sum(t['copies'] for t in entries)),
+            ('Available Now', sum(t['available'] for t in entries)),
+            ('On Loan', sum(t['out'] for t in entries)),
+            ('Shelves', len(shelves)),
+        ],
+    }
+
+
+_BUILDERS['authors'] = _authors
+_BUILDERS['author_borrowing'] = _author_borrowing
+_BUILDERS['author_books'] = _author_books
+
+
+def build_report(report_type, start, end, options=None):
     """Return the report data dict for the given type and date range."""
     builder = _BUILDERS.get(report_type, _transactions)
-    report = builder(start, end)
+    report = builder(start, end, options) if report_type in OPTION_REPORTS else builder(start, end)
     report['period_label'] = _period_label(report['key'], start, end)
     return report
 

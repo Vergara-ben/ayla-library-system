@@ -52,6 +52,7 @@
     <script src="{% static 'js/inventory-checks.js' %}?v=20261022"></script>
     <script src="{% static 'js/picker.js' %}"></script>
     <script src="{% static 'js/genre-picker.js' %}"></script>
+    <script src="{% static 'js/author-fields.js' %}"></script>
     <script src="{% static 'js/donor-intake.js' %}?v=20261022"></script>
     {{ donor_names|json_script:'donorNamesData' }}
     {{ donor_options|json_script:'donorOptionsData' }}
@@ -152,11 +153,8 @@
                                     <label for="rcvTitle" class="field-label">New title</label>
                                     <input type="text" id="rcvTitle" class="field-input" placeholder="As printed on the book">
                                 </div>
-                                <div class="grid grid-cols-2 gap-3">
-                                    <div>
-                                        <label for="rcvAuthor" class="field-label">Author</label>
-                                        <input type="text" id="rcvAuthor" class="field-input" placeholder="Surname, First name">
-                                    </div>
+                                {% include '_author_fields.html' with prefix='rcv' %}
+                                <div class="grid grid-cols-1 gap-3">
                                     <div>
                                         <label for="rcvIsbn" class="field-label">ISBN</label>
                                         <input type="text" id="rcvIsbn" class="field-input" placeholder="978-...">
@@ -396,9 +394,8 @@
             } else {
                 const title = document.getElementById('rcvTitle').value.trim();
                 if (!title) { rcvItemError('Enter the title, or pick one from the catalogue.'); return; }
-                if (!document.getElementById('rcvAuthor').value.trim()) {
-                    rcvItemError('Enter the author, or "Unknown" if the book names none.'); return;
-                }
+                const authorBad = AylaAuthors.get('rcvAuthors').problem();
+                if (authorBad) { rcvItemError(authorBad); AylaAuthors.get('rcvAuthors').focus(); return; }
                 const genreBad = rcvGenrePicker ? rcvGenrePicker.problem() : '';
                 if (genreBad) { rcvItemError(genreBad); document.getElementById('rcvGenre').focus(); return; }
                 const isbnText = document.getElementById('rcvIsbn').value.trim();
@@ -420,7 +417,8 @@
                     rcvItemError('Publication year must be a four-digit year up to ' + maxYear + '.'); return;
                 }
                 item.title = title;
-                item.author = document.getElementById('rcvAuthor').value.trim();
+                item.authors = AylaAuthors.get('rcvAuthors').get();
+                item.author = AylaAuthors.get('rcvAuthors').text();
                 item.isbn = document.getElementById('rcvIsbn').value.trim();
                 item.publication_year = document.getElementById('rcvYear').value.trim();
                 item.genre = document.getElementById('rcvGenre').value.trim();
@@ -440,9 +438,10 @@
         function clearIntakeInputs() {
             document.getElementById('rcvBook').value = '';
             document.getElementById('rcvBookSearch').value = '';
-            ['rcvTitle', 'rcvAuthor', 'rcvIsbn', 'rcvYear', 'rcvGenre'].forEach(function (id) {
+            ['rcvTitle', 'rcvIsbn', 'rcvYear', 'rcvGenre'].forEach(function (id) {
                 document.getElementById(id).value = '';
             });
+            AylaAuthors.get('rcvAuthors').clear();
             document.getElementById('rcvQty').value = 1;
             document.getElementById('rcvPrice').value = '';
             // Back to Good, so one damaged title does not mark the next one damaged too.
@@ -598,7 +597,7 @@
                         onPickCatalogued();
                         const title = document.getElementById('rcvTitle');
                         if (q) title.value = q;
-                        (q ? document.getElementById('rcvAuthor') : title).focus();
+                        if (q) AylaAuthors.get('rcvAuthors').focus(); else title.focus();
                     },
                     // Typing again means the earlier pick no longer stands.
                     onType: function () { if (sel.value) { sel.value = ''; onPickCatalogued(); } },

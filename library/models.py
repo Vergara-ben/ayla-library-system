@@ -609,6 +609,13 @@ class Book(Archivable):
         choices=STATUS_CHOICES,
         default='Available'
     )
+    # The author line above is built from these: no author named, and "et al." after the names.
+    author_unknown = models.BooleanField(default=False)
+    authors_and_others = models.BooleanField(default=False)
+    # The author as first typed or imported, kept when it was split into names.
+    author_original = models.CharField(max_length=255, blank=True, default='')
+    # Split by a best guess the system was not sure of; listed under Check authors.
+    authors_unsure = models.BooleanField(default=False, db_index=True)
     cover_img_url = models.CharField(max_length=255, blank=True, null=True)
     qr_code = models.CharField(max_length=255, blank=True, null=True)
     # When its QR label was last printed; empty means it still needs one.
@@ -634,15 +641,9 @@ class Book(Archivable):
 
     @staticmethod
     def _surname_of(author):
-        """Austen from "Austen, Jane" or from "Jane Austen"."""
-        # The first author named; a bracketed illustrator or editor is not who it files under.
-        author = re.sub(r'\([^)]*\)?', ' ', author or '')
-        author = re.split(r'\s+(?:and|&)\s+|;|/', author)[0].strip()
-        if not author:
-            return ''
-        if ',' in author:
-            return author.split(',', 1)[0].strip()
-        return author.split()[-1]
+        """Austen from "Austen, Jane" or "Jane Austen"; Dela Cruz from "Juan Dela Cruz Jr."."""
+        from .authors import filing_surname
+        return filing_surname(author)
 
     @staticmethod
     def _title_letter(title):
@@ -780,6 +781,64 @@ class Book(Archivable):
 
     def __str__(self):
         return self.title
+
+
+class Author(models.Model):
+    """Someone credited on a book, recorded once and shared by every book they are on."""
+
+    KIND_CHOICES = [
+        ('Person', 'Person'),
+        ('Organization', 'Organization'),
+    ]
+
+    author_id = models.AutoField(primary_key=True)
+    kind = models.CharField(max_length=20, choices=KIND_CHOICES, default='Person')
+    # A writer known by one name has only the surname.
+    first_name = models.CharField(max_length=100, blank=True, default='')
+    middle_name = models.CharField(max_length=100, blank=True, default='')
+    last_name = models.CharField(max_length=150, blank=True, default='')
+    # Shown name: built from the parts for a person, typed in full for an organization.
+    name = models.CharField(max_length=255)
+    # Lower-case shown name, so one person is one record however the boxes were filled.
+    name_key = models.CharField(max_length=255, unique=True)
+    # Surname first, for the reports: "Dahl, Roald".
+    sort_name = models.CharField(max_length=255, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'Authors'
+        ordering = ['sort_name']
+
+    def __str__(self):
+        return self.name
+
+
+class BookAuthor(models.Model):
+    """One name on one book, and what they did on it."""
+
+    ROLE_CHOICES = [
+        ('Author', 'Author'),
+        ('Illustrator', 'Illustrator'),
+        ('Editor', 'Editor'),
+        ('Adapter', 'Adapter'),
+        ('Translator', 'Translator'),
+    ]
+
+    book = models.ForeignKey(Book, on_delete=models.CASCADE, related_name='credits')
+    author = models.ForeignKey(Author, on_delete=models.PROTECT, related_name='credits')
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='Author')
+    # The order the names are printed in; the first author is who the call number files under.
+    position = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        db_table = 'BookAuthors'
+        ordering = ['position']
+        constraints = [
+            models.UniqueConstraint(fields=['book', 'author', 'role'], name='one_credit_per_role'),
+        ]
+
+    def __str__(self):
+        return '%s (%s)' % (self.author.name, self.role)
 
 
 # Donations

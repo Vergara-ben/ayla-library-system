@@ -137,6 +137,8 @@
     <script src="{% static 'js/ayla-dialog.js' %}"></script>
     <script src="{% static 'js/picker.js' %}"></script>
     <script src="{% static 'js/genre-picker.js' %}"></script>
+    <script src="{% static 'js/author-fields.js' %}"></script>
+    <script src="{% static 'js/check-authors.js' %}" defer></script>
 </head>
 <body class="flex h-screen overflow-hidden">
 <a href="#main-content" class="skip-link">Skip to main content</a>
@@ -223,6 +225,9 @@
                             <i class="fa-solid fa-upload"></i> Import Excel
                         </button>
                         <input type="file" id="excelFileInput" accept=".xlsx" style="display: none;" onchange="uploadExcelFile(this)">
+                        <button type="button" id="checkAuthorsBtn" onclick="openCheckAuthors()" title="Author lines split into names by a guess" class="hidden bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-amber-500 text-[11px] font-semibold px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors">
+                            <i class="fa-solid fa-user-pen"></i> Check authors <span data-count class="bg-amber-500/20 text-amber-400 text-[10px] px-1.5 rounded-full font-bold">0</span>
+                        </button>
                         <button onclick="openLabelPicker()" class="bg-slate-900 border border-slate-800 hover:bg-slate-800/60 text-amber-500 text-[11px] font-semibold px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors">
                             <i class="fa-solid fa-print"></i> <span id="toolbarLabelsLabel">Print QR Labels</span>
                         </button>
@@ -403,6 +408,22 @@
 
     {{ genre_options|json_script:"genreOptionsData" }}
     <!-- Add Book Modal -->
+    <!-- Author lines split by a guess, looked over and saved. -->
+    <div id="checkAuthorsModal" class="hidden absolute inset-0 bg-black/60 z-40 flex items-start justify-center p-4 overflow-y-auto">
+        <div class="w-full max-w-3xl rounded-2xl border p-6 flex flex-col gap-4 shadow-2xl relative my-6" style="background-color: var(--bg-modal); border-color: var(--border-color);">
+            <div class="flex items-start justify-between gap-3">
+                <div>
+                    <h3 class="text-base font-bold text-slate-200 tracking-wide">Check authors</h3>
+                    <p class="text-[11px] text-slate-500 mt-1 leading-relaxed">These author lines were split into names by a guess. Check each reading, fix any box, then press Save. It is saved on every book written that way.</p>
+                </div>
+                <button type="button" onclick="closeCheckAuthors()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/40 transition-colors shrink-0" aria-label="Close">
+                    <i class="fa-solid fa-xmark text-sm"></i>
+                </button>
+            </div>
+            <div id="checkAuthorsBody" class="text-xs"></div>
+        </div>
+    </div>
+
     <div id="addBookModal" class="hidden absolute inset-0 bg-black/60 z-40 flex items-center justify-center p-4 overflow-y-auto">
         <div class="w-full max-w-2xl rounded-2xl border p-6 flex flex-col gap-5 shadow-2xl relative my-auto" style="background-color: var(--bg-modal); border-color: var(--border-color);">
             <div class="flex items-center justify-between">
@@ -429,17 +450,16 @@
                     <p data-add-error="ISBN" class="hidden text-[10px] text-rose-400 leading-relaxed"></p>
                 </div>
                 <p id="addMatchNote" class="hidden rounded-lg border border-amber-900/50 bg-amber-950/20 px-3 py-2 text-[10px] text-amber-300 leading-relaxed"></p>
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div class="grid grid-cols-1 gap-4">
                     <div class="space-y-1.5">
                         <label for="addTitle" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Title</label>
                         <input type="text" name="title" id="addTitle" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);" required>
                         <p data-add-error="title" class="hidden text-[10px] text-rose-400 leading-relaxed"></p>
                     </div>
-                    <div class="space-y-1.5">
-                        <label for="addAuthor" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Author</label>
-                        <input type="text" name="author" id="addAuthor" placeholder="Unknown if the book names none" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);" required>
-                        <p data-add-error="author" class="hidden text-[10px] text-rose-400 leading-relaxed"></p>
-                    </div>
+                </div>
+                <div class="space-y-1.5">
+                    {% include '_author_fields.html' with prefix='add' %}
+                    <p data-add-error="author" class="hidden text-[10px] text-rose-400 leading-relaxed"></p>
                 </div>
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div class="space-y-1.5">
@@ -534,16 +554,13 @@
                 {% elif success %}
                     <div class="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">{{ success }}</div>
                 {% endif %}
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div class="grid grid-cols-1 gap-4">
                     <div class="space-y-1.5">
                         <label for="editTitle" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Title</label>
                         <input type="text" name="title" id="editTitle" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);" required>
                     </div>
-                    <div class="space-y-1.5">
-                        <label for="editAuthor" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Author</label>
-                        <input type="text" name="author" id="editAuthor" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-violet-700 font-medium" style="background-color: var(--bg-input);" required>
-                    </div>
                 </div>
+                {% include '_author_fields.html' with prefix='edit' initial=initial.authors_json %}
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div class="space-y-1.5">
                         <label for="editPublicationYear" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Publication Year</label>
@@ -974,6 +991,7 @@
             if (runNote) runNote.classList.add('hidden');
             document.getElementById('addBookModal').classList.remove('hidden');
             document.getElementById('addBookForm').reset();
+            AylaAuthors.get('addAuthors').clear();
             toggleNone('addIsbn', false);
             toggleNone('addPublicationYear', false);
             if (addGenrePicker) addGenrePicker.reset();
@@ -1092,7 +1110,11 @@
                     if (data.success) {
                         document.getElementById('detailTitle').textContent = data.title;
                         document.getElementById('detailTitleMain').textContent = data.title;
-                        document.getElementById('detailAuthor').textContent = data.author;
+                        // The illustrator, editor and the rest after the author line.
+                        const helpers = (data.credits || []).filter(function (c) { return c.role !== 'Author'; });
+                        document.getElementById('detailAuthor').textContent = data.author + helpers.map(function (c) {
+                            return ' · ' + c.role + ': ' + c.name;
+                        }).join('');
                         document.getElementById('detailGenre').textContent = data.genre;
                         const subjectTag = document.getElementById('detailSubject');
                         subjectTag.textContent = data.subject || '';
@@ -1335,7 +1357,8 @@
             const problems = [];
             const val = function (id) { return document.getElementById(id).value.trim(); };
             if (!val('addTitle')) problems.push({ field: 'title', error: 'Type the title.' });
-            if (!val('addAuthor')) problems.push({ field: 'author', error: 'Type the author, or "Unknown" if the book names none.' });
+            const authorBad = AylaAuthors.get('addAuthors').problem();
+            if (authorBad) problems.push({ field: 'author', error: authorBad });
             const genre = addGenrePicker ? addGenrePicker.problem() : (val('addGenre') ? '' : 'Choose a genre.');
             if (genre) problems.push({ field: 'genre', error: genre });
             missingDetails('add').forEach(function (p) { problems.push(p); });
@@ -1479,7 +1502,7 @@
             };
             const same = data.source === 'catalogue';
             fill('addTitle', b.title, true);
-            fill('addAuthor', b.author, true);
+            if (b.authors) AylaAuthors.get('addAuthors').set(b.authors);
             fill('addPublicationYear', b.publication_year, true);
             if (same && b.genre && addGenrePicker) addGenrePicker.set(b.genre);
             fill('addMaterial', b.material_type, same);
@@ -1551,10 +1574,11 @@
                     addedThisRun += copies;
                     runLabelIds = runLabelIds.concat(data.ids || []);
                     // What never repeats is cleared; what a run shares stays.
-                    ['addTitle', 'addAuthor', 'addIsbn', 'addPublicationYear', 'addPrice', 'addCallNumber'].forEach(function (id) {
+                    ['addTitle', 'addIsbn', 'addPublicationYear', 'addPrice', 'addCallNumber'].forEach(function (id) {
                         const el = document.getElementById(id);
                         if (el) el.value = '';
                     });
+                    AylaAuthors.get('addAuthors').clear();
                     document.getElementById('addCopies').value = '1';
                     ['addNoIsbn', 'addYearUnknown'].forEach(function (id) { document.getElementById(id).checked = false; });
                     toggleNone('addIsbn', false);
@@ -1600,6 +1624,12 @@
 
         document.getElementById('editBookForm').addEventListener('submit', function(e) {
             e.preventDefault();
+            const authorProblem = AylaAuthors.get('editAuthors').problem();
+            if (authorProblem) {
+                if (window.AylaDialog) AylaDialog.toast(authorProblem, 'error'); else alert(authorProblem);
+                AylaAuthors.get('editAuthors').focus();
+                return;
+            }
             const genreProblem = (editGenrePicker ? editGenrePicker.problem() : '')
                 || (missingDetails('edit')[0] || {}).error || '';
             if (genreProblem) {
@@ -1655,7 +1685,6 @@
             document.addEventListener('DOMContentLoaded', function() {
                 document.getElementById('editBookId').value = '{{ book.book_id }}';
                 document.getElementById('editTitle').value = '{{ initial.title|default:""|escapejs }}';
-                document.getElementById('editAuthor').value = '{{ initial.author|default:""|escapejs }}';
                 document.getElementById('editPublicationYear').value = '{{ initial.publication_year|default:""|escapejs }}';
                 document.getElementById('editIsbn').value = '{{ initial.ISBN|default:""|escapejs }}';
                 document.getElementById('editGenre').value = '{{ initial.genre|default:""|escapejs }}';
