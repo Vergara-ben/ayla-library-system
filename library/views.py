@@ -7368,7 +7368,8 @@ def admin_reports(request):
     generated = bool(request.GET.get('generate'))
     report = build_report(report_type, start, end, _report_options(request)) if generated else None
     from .models import Author
-    from .reports import author_choices
+    from .models import Donor
+    from .reports import DONOR_FREQUENCY, author_choices
     picked = _query_id(request, 'author')
     picked_author = Author.objects.filter(author_id=picked).first() if picked else None
 
@@ -7385,13 +7386,19 @@ def admin_reports(request):
         # Books by an Author is run for one author, picked by name.
         'author_choices': author_choices(),
         'picked_author': picked_author,
+        # The Donors report's filters.
+        'donor_types': Donor.TYPE_CHOICES,
+        'donor_frequencies': DONOR_FREQUENCY,
+        'picked_donor_type': request.GET.get('donor_type', ''),
+        'picked_frequency': request.GET.get('frequency', ''),
     }
     return render(request, 'admin/reports.html', context)
 
 
 def _report_options(request):
-    """What a report is run for, beyond its dates: the author, for Books by an Author."""
-    return {'author': request.GET.get('author', '')}
+    """What a report is run for, beyond its dates: an author, or which donors."""
+    return {'author': request.GET.get('author', ''), 'donor_type': request.GET.get('donor_type', ''),
+            'frequency': request.GET.get('frequency', '')}
 
 
 def _posted_id(request, key):

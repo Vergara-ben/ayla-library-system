@@ -34,7 +34,7 @@ REPORT_TYPES = [
 # Reports that represent a real-time snapshot rather than a date range.
 SNAPSHOT_REPORTS = {'books', 'patrons', 'stock_levels', 'unreturned', 'shelving', 'authors', 'author_books'}
 # Reports run for one thing picked on the form, passed as options.
-OPTION_REPORTS = {'author_books'}
+OPTION_REPORTS = {'author_books', 'donors'}
 
 LIBRARY_NAME = 'Ayla Public Library'
 LIBRARY_LOCATION = 'Brgy. Sala, Cabuyao, Laguna'
@@ -1091,9 +1091,15 @@ def _analytics(start, end):
 
 
 # Registered here rather than in the literal above because these three are defined below it.
-def _donors(start, end):
+DONOR_FREQUENCY = [('regular', 'Regular (gave on more than one day)'), ('once', 'One-time (gave on one day)')]
+
+
+def _donors(start, end, options=None):
     """Every donor on record, how to reach them, and what they gave in the period and overall."""
     from .models import Donor
+    options = options or {}
+    kind = options.get('donor_type') if options.get('donor_type') in dict(Donor.TYPE_CHOICES) else ''
+    often = options.get('frequency') if options.get('frequency') in dict(DONOR_FREQUENCY) else ''
 
     def tally(lines):
         per = {}
@@ -1117,6 +1123,11 @@ def _donors(start, end):
     for key, donor in entries:
         p, a = in_period.get(key), overall.get(key)
         days = sorted(a['days']) if a else []
+        # The filters: the kind of donor, and how often they have given.
+        if kind and (donor is None or donor.donor_type != kind):
+            continue
+        if (often == 'regular' and len(days) < 2) or (often == 'once' and len(days) != 1):
+            continue
         contact = ' · '.join(x for x in ((donor.contact_number, donor.email) if donor else ()) if x)
         rows.append((
             -(p['copies'] if p else 0), (donor.name if donor else a['name']).lower(), [
@@ -1129,19 +1140,24 @@ def _donors(start, end):
                 _fmt_date(days[0]) if days else DASH, _fmt_date(days[-1]) if days else DASH,
             ]))
     rows = [r for _, _, r in sorted(rows, key=lambda t: (t[0], t[1]))]
-    gave = [g for g in in_period.values()]
+    shown = {r[0] for r in rows}
+    gave = [g for g in in_period.values() if _text(g['name']) in shown]
+    everything = [g for g in overall.values() if _text(g['name']) in shown]
+    only = [('Person' if kind == 'Individual' else dict(Donor.TYPE_CHOICES)[kind]) if kind else '', dict(DONOR_FREQUENCY)[often].split(' (')[0] if often else '']
+    only = ' '.join(w for w in only if w).lower()
     return {
         'key': 'donors',
         'title': 'Donors Report',
-        'subtitle': 'Every donor on record, with contact details and what they gave in the period and overall',
+        'subtitle': ('%s donors only, with contact details and what they gave in the period and overall' % only.capitalize()
+                     if only else 'Every donor on record, with contact details and what they gave in the period and overall'),
         'columns': ['Donor', 'Type', 'Contact', 'Address', 'Gifts in Period', 'Copies in Period',
                     'Gifts (All Time)', 'Copies (All Time)', 'First Gift', 'Last Gift'],
         'rows': rows,
         'summary': [
             ('Donors on Record', len(rows)),
-            ('Regular Donors', sum(1 for g in overall.values() if len(g['days']) > 1)),
+            ('Regular Donors', sum(1 for g in everything if len(g['days']) > 1)),
             ('Copies in the Period', sum(g['copies'] for g in gave)),
-            ('Copies (All Time)', sum(g['copies'] for g in overall.values())),
+            ('Copies (All Time)', sum(g['copies'] for g in everything)),
         ],
         'chart': _chart(
             [(r[0], r[5]) for r in rows[:10] if r[5]], kind='bar',

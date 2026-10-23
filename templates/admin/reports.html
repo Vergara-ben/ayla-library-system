@@ -145,6 +145,23 @@
                     <input type="hidden" name="author" id="f_author" value="{{ picked_author.author_id|default:'' }}"{% if selected_type != 'author_books' %} disabled{% endif %}>
                     {{ author_choices|json_script:"authorChoicesData" }}
                 </div>
+                {# The Donors report's filters. #}
+                <div id="donor-filters" class="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl{% if selected_type != 'donors' %} hidden{% endif %}">
+                    <div class="space-y-1.5">
+                        <label for="f_donor_type" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Donor type</label>
+                        <select id="f_donor_type" name="donor_type" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);"{% if selected_type != 'donors' %} disabled{% endif %}>
+                            <option value="">Every type</option>
+                            {% for value, label in donor_types %}<option value="{{ value }}"{% if value == picked_donor_type %} selected{% endif %}>{% if value == 'Individual' %}Person{% else %}{{ label }}{% endif %}</option>{% endfor %}
+                        </select>
+                    </div>
+                    <div class="space-y-1.5">
+                        <label for="f_frequency" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">How often they give</label>
+                        <select id="f_frequency" name="frequency" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none focus:border-cyan-700 font-medium" style="background-color: var(--bg-input);"{% if selected_type != 'donors' %} disabled{% endif %}>
+                            <option value="">Regular and one-time</option>
+                            {% for value, label in donor_frequencies %}<option value="{{ value }}"{% if value == picked_frequency %} selected{% endif %}>{{ label }}</option>{% endfor %}
+                        </select>
+                    </div>
+                </div>
                 <p id="snapshot-note" class="text-[11px] text-slate-500 mt-3{% if not is_snapshot %} hidden{% endif %}"><i class="fa-solid fa-circle-info mr-1"></i> This report is a real-time snapshot; the date range does not apply.</p>
             </form>
 
@@ -295,6 +312,16 @@
                 typeSelect.addEventListener('change', syncAuthorField);
                 syncAuthorField();
             }
+
+            // The Donors report's filters; sent only with that report, so the exports match it.
+            const donorFilters = document.getElementById('donor-filters');
+            function syncDonorFilters() {
+                const on = typeSelect.value === 'donors';
+                donorFilters.classList.toggle('hidden', !on);
+                donorFilters.querySelectorAll('select').forEach(function (s) { s.disabled = !on; });
+            }
+            typeSelect.addEventListener('change', syncDonorFilters);
+            syncDonorFilters();
         })();
     </script>
 
