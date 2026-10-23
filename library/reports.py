@@ -1139,7 +1139,6 @@ def _donors(start, end):
         'rows': rows,
         'summary': [
             ('Donors on Record', len(rows)),
-            ('Donors Who Gave (These Dates)', len(gave)),
             ('Regular Donors', sum(1 for g in overall.values() if len(g['days']) > 1)),
             ('Copies in the Period', sum(g['copies'] for g in gave)),
             ('Copies (All Time)', sum(g['copies'] for g in overall.values())),
