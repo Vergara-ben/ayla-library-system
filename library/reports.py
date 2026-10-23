@@ -1091,7 +1091,7 @@ def _analytics(start, end):
 
 
 # Registered here rather than in the literal above because these three are defined below it.
-DONOR_FREQUENCY = [('regular', 'Regular (gave on more than one day)'), ('once', 'One-time (gave on one day)')]
+DONOR_FREQUENCY = [('regular', 'Regular'), ('once', 'One-time donors')]
 
 
 def _donors(start, end, options=None):
@@ -1143,7 +1143,7 @@ def _donors(start, end, options=None):
     shown = {r[0] for r in rows}
     gave = [g for g in in_period.values() if _text(g['name']) in shown]
     everything = [g for g in overall.values() if _text(g['name']) in shown]
-    only = [('Person' if kind == 'Individual' else dict(Donor.TYPE_CHOICES)[kind]) if kind else '', dict(DONOR_FREQUENCY)[often].split(' (')[0] if often else '']
+    only = [('Person' if kind == 'Individual' else dict(Donor.TYPE_CHOICES)[kind]) if kind else '', dict(DONOR_FREQUENCY)[often].replace(' donors', '') if often else '']
     only = ' '.join(w for w in only if w).lower()
     return {
         'key': 'donors',
