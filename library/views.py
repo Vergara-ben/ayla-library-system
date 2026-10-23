@@ -1950,7 +1950,10 @@ def _catalogue_entry(post, exclude_ids=(), editing=False):
     values['publication_year'] = take('publication_year', clean_year(post.get('publication_year')))
     values['price'] = take('price', clean_price(post.get('price')))
     if 'condition' in post:
-        values['condition'] = take('condition', clean_condition(post.get('condition')))
+        values['condition'] = take('condition', clean_condition(post.get('condition'), intake=not editing))
+    # What is wrong with a copy not in Good condition.
+    values['damage_note'] = ('' if (values.get('condition') or 'Good') == 'Good'
+                             else ' '.join((post.get('damage_note') or '').split())[:255])
     values['copies'] = take('copies', clean_copies(post.get('copies')))
     # No ISBN and no year are allowed only when ticked; the price is always needed.
     from .catalogue import missing_details
@@ -2017,6 +2020,7 @@ def admin_add_book(request):
                     shelf_level=shelf_level,
                     shelf_slot=(shelf_slot + n) if shelf_slot is not None else None,
                     condition=values.get('condition') or 'Good',
+                    damage_note=values['damage_note'],
                     call_number=values['call_number'],
                     publication_year=values['publication_year'],
                     cover_img_url=cover_img_url or None,
@@ -2873,6 +2877,7 @@ def admin_edit_book(request, book_id):
         'material_type': book.material_type or 'Book',
         'call_number': book.call_number or '',
         'price': book.price if book.price is not None else '',
+        'damage_note': book.damage_note,
         'authors_json': authors.boxes_json(book),
     }
     if request.method == 'GET' and request.headers.get('X-Requested-With') == 'XMLHttpRequest':
@@ -2928,6 +2933,7 @@ def admin_edit_book(request, book_id):
             condition_before = book.condition
             if values.get('condition'):
                 book.condition = values['condition']
+                book.damage_note = values['damage_note']
             if 'material_type' in request.POST:
                 book.material_type = values['material_type']
             if 'subject' in request.POST:
@@ -4400,6 +4406,7 @@ def admin_book_details_ajax(request, book_id):
         'status': book.status,
         'condition': book.condition,
         'condition_note': CONDITION_NOTES.get(book.condition, ''),
+        'damage_note': book.damage_note,
         'cover_img_url': book.cover_img_url,
         'qr_code': book.qr_code,
         'price': f'{book.price:.2f}' if book.price is not None else '',
@@ -4622,6 +4629,7 @@ def _book_qr_payload(book):
         'status': book.status,
         'condition': book.condition,
         'condition_note': CONDITION_NOTES.get(book.condition, ''),
+        'damage_note': book.damage_note,
         'cover_img_url': book.cover_img_url,
         'qr_code': book.qr_code,
         'price': f'{book.price:.2f}' if book.price is not None else '',
@@ -5528,9 +5536,10 @@ def _import_books_body(request):
                     isbn, isbn_none, publication_year, year_unknown, price, sheet=True))
             raw_condition = field(row, 'condition')
             condition = parse_condition(raw_condition) if raw_condition else 'Good'
-            if condition is None:
-                row_problems.append('condition "%s" is not Good, Minor Damage, Damaged or Beyond Repair'
-                                    % str(raw_condition).strip()[:30])
+            # Books already on the shelves may be damaged; past repair, they are withdrawn instead.
+            if condition not in CONDITION_NOTES:
+                row_problems.append('condition "%s" is not Good, Minor Damage or Damaged; a book past repair '
+                                    'is withdrawn, not catalogued' % str(raw_condition).strip()[:30])
             raw_material = field(row, 'material_type')
             material_type = (_sheet_choice(raw_material, Book.MATERIAL_TYPE_CHOICES, MATERIAL_TYPE_WORDS)
                              if raw_material else 'Book')
@@ -5881,8 +5890,8 @@ def download_donation_template(request):
         ('price', False, 'For a new title: what it is worth in pesos, charged if it is lost.', 250),
         ('material_type', False, 'One of: %s. Blank means Book.' % materials, 'Book'),
         ('quantity', False, 'How many copies of this title, 1 to 100. Blank means 1.', 2),
-        ('condition', False, 'How the copies arrived: Good, Minor Damage, Damaged or Beyond Repair. '
-                             'Blank means Good.', 'Good'),
+        ('condition', False, 'How the copies arrived: Good or Minor Damage; the library does not take in '
+                             'damaged books. Blank means Good.', 'Good'),
     ], text_columns=('ISBN',))
 
 
@@ -5971,8 +5980,8 @@ def _import_donation_rows(request):
         raw_condition = _cell_text(values.get('condition'))
         condition = (_sheet_choice(raw_condition, [(c, c) for c in INTAKE_CONDITIONS], CONDITION_WORDS)
                      if raw_condition else 'Good')
-        if condition is None:
-            problems.append('Row %d: condition must be Good, Minor Damage, Damaged or Beyond Repair (got "%s")'
+        if condition not in INTAKE_CONDITIONS:
+            problems.append('Row %d: the library takes in books in Good condition or with Minor Damage only (got "%s")'
                             % (row_no, raw_condition[:20]))
             continue
 
@@ -7368,7 +7377,8 @@ def admin_reports(request):
     generated = bool(request.GET.get('generate'))
     report = build_report(report_type, start, end, _report_options(request)) if generated else None
     from .models import Author
-    from .reports import author_choices
+    from .models import Donor
+    from .reports import DONOR_FREQUENCY, author_choices
     picked = _query_id(request, 'author')
     picked_author = Author.objects.filter(author_id=picked).first() if picked else None
 
@@ -7385,13 +7395,19 @@ def admin_reports(request):
         # Books by an Author is run for one author, picked by name.
         'author_choices': author_choices(),
         'picked_author': picked_author,
+        # The Donors report's filters.
+        'donor_types': Donor.TYPE_CHOICES,
+        'donor_frequencies': DONOR_FREQUENCY,
+        'picked_donor_type': request.GET.get('donor_type', ''),
+        'picked_frequency': request.GET.get('frequency', ''),
     }
     return render(request, 'admin/reports.html', context)
 
 
 def _report_options(request):
-    """What a report is run for, beyond its dates: the author, for Books by an Author."""
-    return {'author': request.GET.get('author', '')}
+    """What a report is run for, beyond its dates: an author, or which donors."""
+    return {'author': request.GET.get('author', ''), 'donor_type': request.GET.get('donor_type', ''),
+            'frequency': request.GET.get('frequency', '')}
 
 
 def _posted_id(request, key):
@@ -11878,7 +11894,6 @@ def _inventory_stats():
         'damaged_count': in_stock.filter(condition='Damaged').count(),
         # Damaged copies are out of circulation until repaired.
         'repair_count': in_stock.filter(condition='Damaged').count(),
-        'disposal_count': in_stock.filter(condition='Beyond Repair').count(),
         'lost_count': held.filter(condition='Lost').count(),
         'withdrawn_count': held.filter(condition='Withdrawn').count(),
         'gone_count': held.filter(condition__in=['Lost', 'Withdrawn']).count(),
@@ -11905,8 +11920,6 @@ def inventory_management(request):
     # Each summary card is a filter; removed copies only show when asked for.
     if state == 'repair':
         records = records.filter(status='In Stock', condition='Damaged')
-    elif state == 'disposal':
-        records = records.filter(status='In Stock', condition='Beyond Repair')
     elif state == 'gone':
         records = records.filter(condition__in=['Lost', 'Withdrawn']).exclude(status='Removed')
     elif state == 'unshelved':
@@ -12136,7 +12149,7 @@ def _ack_offer(request):
     return {'name': donor.name, 'url': reverse('donor_acknowledgement', args=[donor.donor_id, raw_day])}
 
 
-# A copy arrives on the four-step scale; Beyond Repair is recorded but never shelved or lent.
+# A copy arrives Good or with Minor Damage; the library does not take in damaged books.
 INTAKE_CONDITIONS = InventoryRecord.ARRIVAL_CONDITIONS
 INTAKE_CONDITION_OPTIONS = [(c, CONDITION_NOTES[c]) for c in INTAKE_CONDITIONS]
 # Every state a copy can be put in by hand, with what it means.
@@ -12482,8 +12495,8 @@ def receive_stock(request):
             return _receiving_redirect(request)
         condition = (item.get('condition') or 'Good').strip()
         if condition not in INTAKE_CONDITIONS:
-            messages.error(request, 'Line ' + str(index) + ': a copy arrives Good, Minor Damage, Damaged '
-                                    'or Beyond Repair.')
+            messages.error(request, 'Line ' + str(index) + ': the library takes in books in Good condition '
+                                    'or with Minor Damage only.')
             return _receiving_redirect(request)
         from .catalogue import clean_price
         price, price_error = clean_price(item.get('price'))
@@ -12529,6 +12542,11 @@ def receive_stock(request):
                     if price is not None:
                         copy_book.price = price
                         copy_book.save(update_fields=['price'])
+                    note = ('' if condition == 'Good'
+                            else ' '.join(str(item.get('damage_note') or '').split())[:255])
+                    if note != copy_book.damage_note:
+                        copy_book.damage_note = note
+                        copy_book.save(update_fields=['damage_note'])
                     received_ids.append(copy_book.book_id)
                     record = InventoryRecord.objects.create(
                         book=copy_book,

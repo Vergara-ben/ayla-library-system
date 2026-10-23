@@ -173,14 +173,19 @@ def clean_price(raw):
     return price.quantize(Decimal('0.01')), None
 
 
-def clean_condition(raw):
+def clean_condition(raw, intake=False):
+    """A new book arrives Good or with Minor Damage; a copy already here can also become Damaged."""
+    from .models import InventoryRecord
     value = tidy(raw)
     if not value:
         return 'Good', None
-    for c in CONDITION_NOTES:
+    allowed = InventoryRecord.ARRIVAL_CONDITIONS if intake else tuple(CONDITION_NOTES)
+    for c in allowed:
         if c.lower() == value.lower():
             return c, None
-    return None, 'Condition must be Good, Minor Damage, Damaged or Beyond Repair.'
+    if intake:
+        return None, 'The library takes in books in Good condition or with Minor Damage only.'
+    return None, 'Condition must be Good, Minor Damage or Damaged.'
 
 
 def clean_copies(raw):

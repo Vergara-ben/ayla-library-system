@@ -128,8 +128,10 @@ class ReceivingConditionTests(TestCase):
     def test_the_form_offers_only_arrival_conditions(self):
         page = self.client.get('/admin-portal/inventory/').content.decode()
         picker = page.split('id="rcvCondition"')[1].split('</select>')[0]
-        for value in ('Good', 'Minor Damage', 'Damaged', 'Beyond Repair'):
+        for value in ('Good', 'Minor Damage'):
             self.assertIn(value, picker)
+        # The library does not take in damaged books.
+        self.assertNotIn('"Damaged"', picker)
         self.assertNotIn('Lost', picker)
         self.assertNotIn('Withdrawn', picker)
 
@@ -151,15 +153,17 @@ class DonationImportConditionTests(TestCase):
         return self.client.post('/admin-portal/import-donations/', {'excel_file': upload, 'new_genres': '1'},
                                 HTTP_X_REQUESTED_WITH='XMLHttpRequest').json()
 
-    def test_imported_condition_is_kept(self):
-        self._import([['Barangay', 'Florante at Laura', 'Balagtas', 'Damaged']])
-        self.assertEqual(InventoryRecord.objects.get().condition, 'Damaged')
-        self.assertEqual(Book.objects.get(title='Florante at Laura').condition, 'Damaged')
+    def test_imported_condition_is_kept_and_a_damaged_gift_is_refused(self):
+        result = self._import([['Barangay', 'Florante at Laura', 'Balagtas', 'Minor Damage'],
+                               ['Barangay', 'Noli Me Tangere', 'Rizal', 'Damaged']])
+        self.assertEqual(InventoryRecord.objects.get().condition, 'Minor Damage')
+        self.assertEqual(Book.objects.get(title='Florante at Laura').condition, 'Minor Damage')
+        self.assertIn('Good condition or with Minor Damage only (got "Damaged")', result['message'])
 
     def test_a_blank_condition_is_good_and_a_wrong_one_is_reported(self):
         result = self._import([['Barangay', 'Florante at Laura', 'Balagtas', ''],
                                ['Barangay', 'Noli Me Tangere', 'Rizal', 'Lost']])
-        self.assertIn('condition must be Good, Minor Damage, Damaged or Beyond Repair (got "Lost")', result['message'])
+        self.assertIn('Good condition or with Minor Damage only (got "Lost")', result['message'])
         self.assertEqual(InventoryRecord.objects.get().condition, 'Good')
 
 
@@ -1053,7 +1057,7 @@ class DonorManagementTests(TestCase):
 
 
 class ConditionScaleTests(TestCase):
-    """Good / Minor Damage / Damaged / Beyond Repair, and what each means for lending."""
+    """Good / Minor Damage / Damaged, and what each means for lending and for taking books in."""
 
     def setUp(self):
         self.staff = _staff(role='Admin', modules='transactions,books,inventory,donations')
@@ -1077,25 +1081,33 @@ class ConditionScaleTests(TestCase):
         book.refresh_from_db()
         self.assertEqual(book.status, 'Available')
 
-    def test_beyond_repair_on_arrival_is_recorded_but_never_shelved_or_lent(self):
-        from .views import _inventory_stats
-        book = self._receive('Beyond Repair')
-        self.assertEqual(book.status, 'Beyond Repair')
-        self.assertEqual(InventoryRecord.objects.get().condition, 'Beyond Repair')
-        stats = _inventory_stats()
-        self.assertEqual((stats['disposal_count'], stats['unshelved_count']), (1, 0))
-        page = Client().get('/patron/catalog/search/', {'q': 'Ibong'})
-        self.assertNotContains(page, 'Ibong Adarna')
+    def test_a_damaged_book_is_not_taken_in(self):
+        for condition in ('Damaged', 'Beyond Repair'):
+            self.client.post('/admin-portal/inventory/receive/', {
+                'source': 'Purchase', 'supplier': 'Test Supplier', 'items': json.dumps(_with_genre_items([
+                    {'title': 'Ibong Adarna', 'author': 'Anon', 'quantity': 1, 'condition': condition}]))})
+            self.assertFalse(Book.objects.filter(title='Ibong Adarna').exists())
+        r = self.client.post('/admin-portal/add-book/', dict(COMPLETE_BOOK, title='Noli', author='Jose Rizal',
+                                                             genre='Fiction', new_genre='1', condition='Damaged'),
+                             HTTP_X_REQUESTED_WITH='XMLHttpRequest').json()
+        self.assertFalse(r['success'])
+        self.assertIn('Minor Damage only', r['error'])
 
-    def test_a_donation_that_arrives_unusable_is_not_left_waiting_for_a_shelf(self):
-        from .models import Donation
-        self._receive('Beyond Repair', source='Donation', donor_name='Rotary Club')
-        self.assertEqual(Donation.objects.get().status, 'Not usable')
+    def test_minor_damage_on_arrival_keeps_a_note_of_what_is_wrong(self):
+        self.client.post('/admin-portal/inventory/receive/', {
+            'source': 'Purchase', 'supplier': 'Test Supplier', 'items': json.dumps(_with_genre_items([
+                {'title': 'Ibong Adarna', 'author': 'Anon', 'quantity': 1, 'condition': 'Minor Damage',
+                 'damage_note': 'torn cover'}]))})
+        self.assertEqual(Book.objects.get(title='Ibong Adarna').damage_note, 'torn cover')
 
     def test_a_damaged_book_is_refused_at_the_desk(self):
         patron = Patron.objects.create(first_name='Ana', last_name='Cruz', email='ana@example.invalid',
                                        account_status='Active', identity_verified_at=timezone.now())
-        book = self._receive('Damaged')
+        # A copy already here can still become damaged.
+        book = self._receive('Good')
+        book.condition = 'Damaged'
+        book.save()
+        book.refresh_from_db()
         self.assertEqual(book.status, 'Under Repair')
         r = self.client.post('/admin-portal/process-transaction/', {
             'transaction_type': 'Borrow', 'patron_id': patron.patron_id, 'book_ids': [book.book_id]},
