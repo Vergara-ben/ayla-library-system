@@ -5338,9 +5338,8 @@ class BookConditionTests(TestCase):
     def test_a_new_copy_is_good_until_said_otherwise(self):
         self.assertEqual(Book.objects.create(title='T', author='A').condition, 'Good')
 
-    def test_the_four_step_scale_is_the_whole_list(self):
-        self.assertEqual([c[0] for c in Book.CONDITION_CHOICES],
-                         ['Good', 'Minor Damage', 'Damaged', 'Beyond Repair'])
+    def test_the_three_step_scale_is_the_whole_list(self):
+        self.assertEqual([c[0] for c in Book.CONDITION_CHOICES], ['Good', 'Minor Damage', 'Damaged'])
 
     def test_editing_accepts_a_valid_value_and_ignores_a_bad_one(self):
         book = Book.objects.create(title='T', author='A')

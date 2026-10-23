@@ -645,7 +645,7 @@ def _donations(start, end):
 
 
 # A copy's state: its condition on the library's scale, or Missing, Lost or Withdrawn.
-STATES = ('Good', 'Minor Damage', 'Damaged', 'Beyond Repair', 'Missing', 'Lost', 'Withdrawn')
+STATES = ('Good', 'Minor Damage', 'Damaged', 'Missing', 'Lost', 'Withdrawn')
 
 
 def _stock_levels(start, end):
@@ -686,7 +686,7 @@ def _stock_levels(start, end):
 
     rows = []
     for g in groups.values():
-        # Usable copies on hand; Beyond Repair is only waiting to be disposed of.
+        # Copies on hand, damaged ones included while they wait for repair.
         on_hand = g['Good'] + g['Minor Damage'] + g['Damaged']
         rows.append([
             g['title'],

@@ -355,8 +355,7 @@
                                 <td class="py-4 px-6">
                                     {# Condition badge. #}
                                     <span class="px-1.5 py-0.5 rounded text-[9px] font-bold tracking-wide uppercase border
-                                        {% if book.condition == 'Beyond Repair' %}bg-rose-950/50 text-rose-300 border-rose-800/50
-                                        {% elif book.condition == 'Damaged' %}bg-amber-950/50 text-amber-300 border-amber-800/50
+                                        {% if book.condition == 'Damaged' %}bg-amber-950/50 text-amber-300 border-amber-800/50
                                         {% elif book.condition == 'Minor Damage' %}bg-yellow-500/10 text-yellow-600 border-yellow-600/40
                                         {% else %}bg-slate-800/60 text-slate-400 border-slate-700/50{% endif %}">{{ book.condition|default:"Good" }}</span>
                                 </td>
@@ -499,6 +498,10 @@
                             {% for value, note in intake_conditions %}<option value="{{ value }}" data-note="{{ note }}">{{ value }}</option>{% endfor %}
                         </select>
                         <p id="addConditionNote" class="text-[10px] text-slate-500 leading-relaxed"></p>
+                        <div data-damage-wrap class="hidden space-y-1">
+                            <label for="addDamageNote" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">What is wrong <span class="normal-case font-normal">(optional)</span></label>
+                            <input type="text" name="damage_note" id="addDamageNote" maxlength="255" placeholder="e.g. torn cover, loose page 12" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none font-medium" style="background-color: var(--bg-input);">
+                        </div>
                     </div>
                     <div class="space-y-1.5">
                         <label for="addPrice" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Price (₱)</label>
@@ -628,9 +631,12 @@
                             <option value="Good">Good &mdash; no damage; fully functional</option>
                             <option value="Minor Damage">Minor Damage &mdash; small defects; still usable</option>
                             <option value="Damaged">Damaged &mdash; noticeable damage; functionality may be affected</option>
-                            <option value="Beyond Repair">Beyond Repair &mdash; severely damaged and no longer usable</option>
                         </select>
-                        <p class="text-[10px] text-slate-500">Damaged books are not lent until repaired; Beyond Repair books are never lent.</p>
+                        <p class="text-[10px] text-slate-500">Damaged books are not lent until repaired. One past repair is withdrawn from stock in Inventory.</p>
+                        <div data-damage-wrap class="hidden space-y-1">
+                            <label for="editDamageNote" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">What is wrong <span class="normal-case font-normal">(optional)</span></label>
+                            <input type="text" name="damage_note" id="editDamageNote" maxlength="255" placeholder="e.g. torn cover, loose page 12" class="w-full rounded-lg px-3 py-2.5 text-slate-200 border border-slate-700/60 focus:outline-none font-medium" style="background-color: var(--bg-input);">
+                        </div>
                     </div>
                     <div class="space-y-1.5">
                         <label for="editCallNumber" class="block uppercase font-bold tracking-wider text-slate-500 text-[10px]">Code label</label>
@@ -1051,6 +1057,8 @@
             set('editShelfLevel', b.shelf_level_id);
             set('editShelfSlot', b.shelf_slot);
             set('editCondition', b.condition || 'Good');
+            set('editDamageNote', b.damage_note);
+            showDamageNote(document.getElementById('editCondition'));
             set('editCallNumber', b.call_number);
             set('editPrice', b.price);
             AylaAuthors.get('editAuthors').set(b.authors);
@@ -1451,12 +1459,20 @@
             const sel = document.getElementById('addCondition');
             const note = document.getElementById('addConditionNote');
             if (!sel || !note) return;
-            const fate = { 'Damaged': ' Not lent until it is repaired.',
-                           'Beyond Repair': ' Recorded, but never lent; it is listed for disposal.' };
             const opt = sel.options[sel.selectedIndex];
-            note.textContent = (opt ? opt.dataset.note : '') + '.' + (fate[sel.value] || '');
-            note.className = 'text-[10px] leading-relaxed ' + (fate[sel.value] ? 'text-amber-400' : 'text-slate-500');
+            note.textContent = (opt ? opt.dataset.note : '') + '.';
+            showDamageNote(sel);
         }
+
+        // A copy not in Good condition can say what is wrong with it.
+        function showDamageNote(sel) {
+            const wrap = sel.closest('.space-y-1\\.5').querySelector('[data-damage-wrap]');
+            if (!wrap) return;
+            const damaged = sel.value && sel.value !== 'Good';
+            wrap.classList.toggle('hidden', !damaged);
+            if (!damaged) wrap.querySelector('input').value = '';
+        }
+        document.getElementById('editCondition').addEventListener('change', function () { showDamageNote(this); });
 
         // While the book is typed: is it here already, which shelf suits it, and its call number.
         let assistTimer = null;

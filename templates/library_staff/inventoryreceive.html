@@ -186,6 +186,7 @@
                                                                         {% for value, note in intake_conditions %}<option value="{{ value }}" data-note="{{ note }}">{{ value }}</option>{% endfor %}
                                     </select>
                                     <p id="rcvConditionNote" class="text-[10px] text-slate-500 mt-1">No damage; fully functional</p>
+                                    <input type="text" id="rcvDamageNote" class="field-input mt-1.5 hidden" maxlength="255" placeholder="What is wrong, e.g. torn cover (optional)">
                                 </div>
                                 <div>
                                     <label for="rcvQty" class="field-label">Number of copies</label>
@@ -386,7 +387,8 @@
             const priceText = document.getElementById('rcvPrice').value.trim();
             const priceBad = window.AylaChecks ? AylaChecks.rules.price(priceText) : '';
             if (priceBad) { rcvItemError(priceBad); document.getElementById('rcvPrice').focus(); return; }
-            const item = { quantity: qty, condition: condition, price: priceText };
+            const item = { quantity: qty, condition: condition, price: priceText,
+                           damage_note: condition === 'Good' ? '' : document.getElementById('rcvDamageNote').value.trim() };
             if (bookId) {
                 const opt = sel.options[sel.selectedIndex];
                 item.book_id = bookId;
@@ -448,6 +450,7 @@
             document.getElementById('rcvPrice').value = '';
             // Back to Good, so one damaged title does not mark the next one damaged too.
             document.getElementById('rcvCondition').value = 'Good';
+            document.getElementById('rcvDamageNote').value = '';
             if (rcvGenrePicker) rcvGenrePicker.reset();
             ['rcvNoIsbn', 'rcvYearUnknown'].forEach(function (id) { document.getElementById(id).checked = false; });
             rcvNone('rcvIsbn', false);
@@ -618,12 +621,15 @@
             const sel = document.getElementById('rcvCondition');
             const note = document.getElementById('rcvConditionNote');
             if (!sel || !note) return;
-            const fate = { 'Damaged': ' Not lent until it is repaired.',
-                           'Beyond Repair': ' Recorded, but never shelved or lent; it is listed for disposal.' };
+            const fate = { 'Damaged': ' Not lent until it is repaired.', };
             function show() {
                 const opt = sel.options[sel.selectedIndex];
                 note.textContent = (opt ? opt.dataset.note : '') + '.' + (fate[sel.value] || '');
                 note.className = 'text-[10px] mt-1 ' + (fate[sel.value] ? 'text-amber-400' : 'text-slate-500');
+                // Not Good: an optional line on what is wrong.
+                const damage = document.getElementById('rcvDamageNote');
+                damage.classList.toggle('hidden', sel.value === 'Good');
+                if (sel.value === 'Good') damage.value = '';
             }
             sel.addEventListener('change', show);
             show();

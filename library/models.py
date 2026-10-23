@@ -535,10 +535,9 @@ CONDITION_NOTES = {
     'Good': 'No damage; fully functional',
     'Minor Damage': 'Small defects; still usable',
     'Damaged': 'Noticeable damage; functionality may be affected',
-    'Beyond Repair': 'Severely damaged and no longer usable',
 }
-# A copy in these conditions is not lent: Damaged waits for repair, Beyond Repair for disposal.
-UNLENDABLE_STATUS = {'Damaged': 'Under Repair', 'Beyond Repair': 'Beyond Repair'}
+# A damaged copy is not lent until it is repaired; one past repair is withdrawn from stock.
+UNLENDABLE_STATUS = {'Damaged': 'Under Repair'}
 
 
 class Book(Archivable):
@@ -556,7 +555,6 @@ class Book(Archivable):
         ('Donated', 'Donated'),
         # Taken out of circulation by its condition (see UNLENDABLE_STATUS).
         ('Under Repair', 'Under repair'),
-        ('Beyond Repair', 'Beyond repair'),
     ]
 
     # What kind of material this is, as distinct from what it is about.
@@ -584,6 +582,8 @@ class Book(Archivable):
     CONDITION_CHOICES = [(c, c) for c in CONDITION_NOTES]
     condition = models.CharField(max_length=20, choices=CONDITION_CHOICES,
                                  default='Good')
+    # What is wrong with a copy that is not in Good condition, e.g. "torn cover".
+    damage_note = models.CharField(max_length=255, blank=True, default='')
 
     # The call number written on the spine, e.g.
     call_number = models.CharField(max_length=64, blank=True, null=True)
@@ -721,11 +721,9 @@ class Book(Archivable):
 
     def status_for_condition(self):
         """The status this book's condition calls for, or None to leave it as it is."""
-        if self.condition == 'Damaged' and self.status in self.ON_HAND_STATUSES + ('Beyond Repair',):
+        if self.condition == 'Damaged' and self.status in self.ON_HAND_STATUSES:
             return 'Under Repair'
-        if self.condition == 'Beyond Repair' and self.status in self.ON_HAND_STATUSES + ('Under Repair', 'Donated'):
-            return 'Beyond Repair'
-        if self.condition not in UNLENDABLE_STATUS and self.status in ('Under Repair', 'Beyond Repair'):
+        if self.condition not in UNLENDABLE_STATUS and self.status == 'Under Repair':
             return 'Available'
         return None
 
@@ -733,11 +731,9 @@ class Book(Archivable):
     def sync_condition_status(cls, queryset):
         """The same rule for books changed in bulk, which skip save()."""
         on_hand = cls.ON_HAND_STATUSES
-        queryset.filter(condition='Damaged', status__in=on_hand + ('Beyond Repair',)).update(status='Under Repair')
-        queryset.filter(condition='Beyond Repair',
-                        status__in=on_hand + ('Under Repair', 'Donated')).update(status='Beyond Repair')
+        queryset.filter(condition='Damaged', status__in=on_hand).update(status='Under Repair')
         (queryset.exclude(condition__in=list(UNLENDABLE_STATUS))
-         .filter(status__in=('Under Repair', 'Beyond Repair')).update(status='Available'))
+         .filter(status='Under Repair').update(status='Available'))
 
     def next_copy_number(self):
         """One more than the highest copy number its title has ever had, deleted copies included."""
@@ -1801,8 +1797,8 @@ class InventoryRecord(models.Model):
     ]
     # Still in the building and expected on a shelf.
     HELD_CONDITIONS = ('Good', 'Minor Damage', 'Damaged')
-    # What a copy can arrive as: Beyond Repair is recorded, then never shelved or lent.
-    ARRIVAL_CONDITIONS = tuple(CONDITION_NOTES)
+    # What a copy can arrive as: the library does not take in damaged books.
+    ARRIVAL_CONDITIONS = ('Good', 'Minor Damage')
 
     # Accessioning stage for donations only.
     STAGE_CHOICES = [
